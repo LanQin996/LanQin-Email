@@ -226,6 +226,33 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	if code := bob.do("POST", "/api/mail/messages/"+detail.ID+"/move", map[string]string{"folder": "Archive"}, &ok); code != http.StatusOK {
 		t.Fatalf("move code=%d", code)
 	}
+	var labelUpdate struct {
+		Labels []MailLabel `json:"labels"`
+	}
+	if code := bob.do("POST", "/api/mail/messages/"+detail.ID+"/labels", map[string]string{"name": "重要"}, &labelUpdate); code != http.StatusOK || len(labelUpdate.Labels) != 1 {
+		t.Fatalf("add label code=%d labels=%+v", code, labelUpdate.Labels)
+	}
+	var labels struct {
+		Items []MailLabel `json:"items"`
+	}
+	if code := bob.do("GET", "/api/mail/labels?mailboxId="+mb2.ID, nil, &labels); code != http.StatusOK || len(labels.Items) != 1 || labels.Items[0].MessageCount != 1 {
+		t.Fatalf("labels code=%d items=%+v", code, labels.Items)
+	}
+	var labeled struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := bob.do("GET", "/api/mail/messages?mailboxId="+mb2.ID+"&labelId="+labels.Items[0].ID, nil, &labeled); code != http.StatusOK || len(labeled.Items) != 1 || labeled.Items[0].ID != detail.ID {
+		t.Fatalf("labeled messages code=%d items=%+v", code, labeled.Items)
+	}
+	if code := bob.do("DELETE", "/api/mail/messages/"+detail.ID+"/labels/"+labels.Items[0].ID, nil, &labelUpdate); code != http.StatusOK || len(labelUpdate.Labels) != 0 {
+		t.Fatalf("remove label code=%d labels=%+v", code, labelUpdate.Labels)
+	}
+	var starred struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := bob.do("GET", "/api/mail/starred", nil, &starred); code != http.StatusOK || len(starred.Items) != 1 || starred.Items[0].ID != detail.ID || starred.Items[0].Folder != "Archive" {
+		t.Fatalf("starred view code=%d items=%+v", code, starred.Items)
+	}
 	if code := bob.do("DELETE", "/api/mail/messages/"+detail.ID, nil, &ok); code != http.StatusOK {
 		t.Fatalf("delete code=%d", code)
 	}

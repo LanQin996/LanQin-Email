@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -102,6 +103,14 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
+	if labelID := strings.TrimSpace(r.URL.Query().Get("labelId")); labelID != "" {
+		if !a.labelBelongsToMailbox(r.Context(), labelID, mb.ID) {
+			respondError(w, http.StatusNotFound, "label not found")
+			return
+		}
+		a.respondMailMessageList(w, r, `m.mailbox_id=? AND EXISTS (SELECT 1 FROM message_labels ml WHERE ml.message_id=m.id AND ml.label_id=?)`, []any{mb.ID, labelID})
+		return
+	}
 	folder := r.URL.Query().Get("folder")
 	if folder == "" {
 		folder = "Inbox"
@@ -111,6 +120,19 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to load folder")
 		return
 	}
+	a.respondMailMessageList(w, r, `m.mailbox_id=? AND m.folder_id=?`, []any{mb.ID, folderID})
+}
+
+func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	a.respondMailMessageList(w, r, `m.mailbox_id=? AND m.is_starred=1`, []any{mb.ID})
+}
+
+func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, where string, args []any) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
 	if offset < 0 {
@@ -118,16 +140,14 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	limit := 30
 
-	args := []any{mb.ID, folderID}
-	where := `mailbox_id=? AND folder_id=?`
 	if q != "" {
-		where += ` AND (subject LIKE ? OR from_addr LIKE ? OR snippet LIKE ? OR body_text LIKE ?)`
+		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
 		like := "%" + q + "%"
 		args = append(args, like, like, like, like)
 	}
 	args = append(args, limit+1, offset)
-	query := `SELECT id,mailbox_id,folder_id,message_uid,message_id,subject,from_addr,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,is_read,is_starred,has_attachments,size_bytes
-		FROM messages WHERE ` + where + ` ORDER BY received_at DESC LIMIT ? OFFSET ?`
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.message_id,m.subject,m.from_addr,m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`
 	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
@@ -136,7 +156,7 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	defer rows.Close()
 	items := []MailMessage{}
 	for rows.Next() {
-		msg, err := scanMessageSummary(rows, folder)
+		msg, err := scanMessageSummary(rows)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to scan messages")
 			return
@@ -148,7 +168,102 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 		items = items[:limit]
 		next = strconv.Itoa(offset + limit)
 	}
+	if err := a.attachLabelsToMessages(r.Context(), items); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load labels")
+		return
+	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+}
+
+func (a *App) handleMailLabels(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	labels, err := a.labelsForMailbox(r.Context(), mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load labels")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": labels})
+}
+
+func (a *App) handleCreateMailLabel(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	label, err := a.ensureLabel(r.Context(), mb.ID, req.Name, req.Color)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	respondJSON(w, http.StatusCreated, label)
+}
+
+func (a *App) handleAddMessageLabel(w http.ResponseWriter, r *http.Request) {
+	msg, err := a.loadMessageForRequest(r, chi.URLParam(r, "id"), false)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	var req struct {
+		Name  string `json:"name"`
+		Color string `json:"color"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	label, err := a.ensureLabel(r.Context(), msg.MailboxID, req.Name, req.Color)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	_, err = a.db.ExecContext(r.Context(), `INSERT OR IGNORE INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, msg.ID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to add label")
+		return
+	}
+	labels, err := a.labelsForMessage(r.Context(), msg.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load labels")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"labels": labels})
+}
+
+func (a *App) handleRemoveMessageLabel(w http.ResponseWriter, r *http.Request) {
+	msg, err := a.loadMessageForRequest(r, chi.URLParam(r, "id"), false)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	labelID := strings.TrimSpace(chi.URLParam(r, "labelID"))
+	if !a.labelBelongsToMailbox(r.Context(), labelID, msg.MailboxID) {
+		respondError(w, http.StatusNotFound, "label not found")
+		return
+	}
+	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM message_labels WHERE message_id=? AND label_id=?`, msg.ID, labelID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to remove label")
+		return
+	}
+	labels, err := a.labelsForMessage(r.Context(), msg.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load labels")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"labels": labels})
 }
 
 func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
@@ -509,6 +624,11 @@ func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*Ma
 		}
 		msg.Attachments = atts
 	}
+	labels, err := a.labelsForMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	msg.Labels = labels
 	return &msg, nil
 }
 
@@ -588,6 +708,138 @@ func (a *App) attachmentsForMessage(ctx context.Context, messageID string) ([]At
 	return items, nil
 }
 
+func (a *App) labelsForMailbox(ctx context.Context, mailboxID string) ([]MailLabel, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT l.id,l.mailbox_id,l.name,l.color,COUNT(ml.message_id)
+		FROM mail_labels l LEFT JOIN message_labels ml ON ml.label_id=l.id
+		WHERE l.mailbox_id=?
+		GROUP BY l.id,l.mailbox_id,l.name,l.color
+		ORDER BY lower(l.name)`, mailboxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MailLabel{}
+	for rows.Next() {
+		var item MailLabel
+		if err := rows.Scan(&item.ID, &item.MailboxID, &item.Name, &item.Color, &item.MessageCount); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (a *App) labelsForMessage(ctx context.Context, messageID string) ([]MailLabel, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT l.id,l.mailbox_id,l.name,l.color
+		FROM mail_labels l JOIN message_labels ml ON ml.label_id=l.id
+		WHERE ml.message_id=?
+		ORDER BY lower(l.name)`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MailLabel{}
+	for rows.Next() {
+		var item MailLabel
+		if err := rows.Scan(&item.ID, &item.MailboxID, &item.Name, &item.Color); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (a *App) attachLabelsToMessages(ctx context.Context, items []MailMessage) error {
+	if len(items) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(items))
+	index := make(map[string]int, len(items))
+	args := make([]any, 0, len(items))
+	for i := range items {
+		ids = append(ids, "?")
+		index[items[i].ID] = i
+		args = append(args, items[i].ID)
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT ml.message_id,l.id,l.mailbox_id,l.name,l.color
+		FROM message_labels ml JOIN mail_labels l ON l.id=ml.label_id
+		WHERE ml.message_id IN (`+strings.Join(ids, ",")+`)
+		ORDER BY lower(l.name)`, args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var messageID string
+		var label MailLabel
+		if err := rows.Scan(&messageID, &label.ID, &label.MailboxID, &label.Name, &label.Color); err != nil {
+			return err
+		}
+		if itemIndex, ok := index[messageID]; ok {
+			items[itemIndex].Labels = append(items[itemIndex].Labels, label)
+		}
+	}
+	return rows.Err()
+}
+
+func (a *App) ensureLabel(ctx context.Context, mailboxID, name, color string) (MailLabel, error) {
+	name = normalizeLabelName(name)
+	if name == "" {
+		return MailLabel{}, errors.New("label name is required")
+	}
+	color = normalizeLabelColor(color)
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	var existing MailLabel
+	row := a.db.QueryRowContext(ctx, `SELECT id,mailbox_id,name,color FROM mail_labels WHERE mailbox_id=? AND lower(name)=lower(?)`, mailboxID, name)
+	if err := row.Scan(&existing.ID, &existing.MailboxID, &existing.Name, &existing.Color); err == nil {
+		if color != "" && color != existing.Color {
+			if _, err := a.db.ExecContext(ctx, `UPDATE mail_labels SET color=?, updated_at=? WHERE id=?`, color, now, existing.ID); err != nil {
+				return MailLabel{}, err
+			}
+			existing.Color = color
+		}
+		return existing, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return MailLabel{}, err
+	}
+	id := newID("lbl")
+	if color == "" {
+		color = "#64748b"
+	}
+	_, err := a.db.ExecContext(ctx, `INSERT INTO mail_labels(id,mailbox_id,name,color,created_at,updated_at) VALUES(?,?,?,?,?,?)`, id, mailboxID, name, color, now, now)
+	if err != nil {
+		return MailLabel{}, err
+	}
+	return MailLabel{ID: id, MailboxID: mailboxID, Name: name, Color: color}, nil
+}
+
+func (a *App) labelBelongsToMailbox(ctx context.Context, labelID, mailboxID string) bool {
+	var count int
+	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM mail_labels WHERE id=? AND mailbox_id=?`, labelID, mailboxID).Scan(&count)
+	return count > 0
+}
+
+func normalizeLabelName(name string) string {
+	name = strings.Join(strings.Fields(strings.TrimSpace(name)), " ")
+	if len([]rune(name)) > 32 {
+		name = string([]rune(name)[:32])
+	}
+	return name
+}
+
+func normalizeLabelColor(color string) string {
+	color = strings.TrimSpace(color)
+	if len(color) != 7 || !strings.HasPrefix(color, "#") {
+		return ""
+	}
+	for _, r := range color[1:] {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+			return ""
+		}
+	}
+	return strings.ToLower(color)
+}
+
 func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 	rows, err := a.db.QueryContext(ctx, `SELECT storage_path FROM attachments WHERE message_id=?`, messageID)
 	if err != nil {
@@ -619,15 +871,14 @@ func scanAdminMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	return msg, nil
 }
 
-func scanMessageSummary(row messageSummaryScanner, folder string) (MailMessage, error) {
+func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
-	msg.Folder = folder
 	msg.To, msg.CC, msg.BCC = jsonDecodeSlice(toJSON), jsonDecodeSlice(ccJSON), jsonDecodeSlice(bccJSON)
 	msg.SentAt, msg.ReceivedAt = parseTime(sent), parseTime(received)
 	msg.IsRead, msg.IsStarred, msg.HasAttachments = intBool(read), intBool(starred), intBool(hasAtt)

@@ -125,7 +125,8 @@ export function ProfilePage() {
   async function copy(text: string) { await navigator.clipboard.writeText(text); toast({ title: "已复制" }) }
   function setTab(next: Tab) { setParams(next === "profile" ? {} : { tab: next }) }
   function toggleSidebar() { sidebarCollapsed ? (sidebarPanelRef.current?.expand(14), setSidebarCollapsed(false)) : (sidebarPanelRef.current?.collapse(), setSidebarCollapsed(true)) }
-  if (!user) return <div className="grid h-svh place-items-center text-muted-foreground">加载中...</div>
+  if (me.isLoading) return <div className="grid h-svh place-items-center text-muted-foreground">加载中...</div>
+  if (me.isError || !user) return <div className="grid h-svh place-items-center text-muted-foreground">登录状态已失效</div>
 
   return (
     <div className="h-svh bg-background">
@@ -134,7 +135,7 @@ export function ProfilePage() {
           <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
             <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
               <SidebarHeader className={cn("border-b py-4", sidebarCollapsed ? "px-2" : "px-4")}>
-                <AccountHeader collapsed={sidebarCollapsed} name={user.displayName || selectedMailbox?.address || "LanQin"} email={user.email || selectedMailbox?.address} darkMode={darkMode} onToggleTheme={() => setDarkMode((v) => !v)} onBack={() => navigate("/mail")} />
+                <AccountHeader collapsed={sidebarCollapsed} name={user.displayName || selectedMailbox?.address || "LanQin"} email={user.email || selectedMailbox?.address} darkMode={darkMode} onToggleTheme={() => setDarkMode((v) => !v)} onBack={() => navigate("/")} />
               </SidebarHeader>
               <SidebarContent>
                 <SidebarGroup>
@@ -169,7 +170,7 @@ export function ProfilePage() {
   )
 
   function renderTab() {
-    if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/mail") }} />
+    if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={stats.data} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
     if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={ruleMailboxId} action={ruleAction} onMailboxChange={setRuleMailboxId} onActionChange={setRuleAction} onCreate={(form) => createRule.mutate(form)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />

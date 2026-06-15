@@ -15,8 +15,9 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWind
 const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
   { path: "/", element: <ProtectedLayout />, children: [
-    { index: true, element: <Navigate to="/mail" replace /> },
-    { path: "mail", element: <MailPage /> },
+    { index: true, element: <MailPage /> },
+    { path: "mail", element: <Navigate to="/" replace /> },
+    { path: "mail/starred", element: <Navigate to="/" replace /> },
     { path: "profile", element: <ProfilePage /> },
     { path: "admin", element: <AdminOnly><AdminPage /></AdminOnly> },
   ] },
@@ -26,7 +27,7 @@ function AdminOnly({ children }: { children: React.ReactNode }) {
   const me = useMe()
   if (me.isLoading) return null
   if (!me.data?.user) return <Navigate to="/login" replace />
-  if (me.data.user.role !== "admin") return <Navigate to="/mail" replace />
+  if (me.data.user.role !== "admin") return <Navigate to="/" replace />
   return <>{children}</>
 }
 

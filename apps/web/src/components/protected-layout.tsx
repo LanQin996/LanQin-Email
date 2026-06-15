@@ -39,11 +39,12 @@ export function ProtectedLayout() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  if (me.isLoading) return <div className="grid min-h-screen place-items-center text-muted-foreground">加载中...</div>
+  if (me.isLoading) return <AuthLoading />
+  if (me.isError && me.error.message.includes("请求超时")) return <AuthError message={me.error.message} onRetry={() => me.refetch()} />
   if (me.isError || !me.data?.user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
 
   const user = me.data.user
-  const isMailRoute = location.pathname.startsWith("/mail")
+  const isMailRoute = location.pathname === "/" || location.pathname.startsWith("/mail")
   const isProfileRoute = location.pathname.startsWith("/profile")
   const isAdminRoute = location.pathname.startsWith("/admin")
   const adminSection = new URLSearchParams(location.search).get("section") || "overview"
@@ -63,9 +64,9 @@ export function ProtectedLayout() {
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" asChild>
-                <Link to="/mail">
+                <SidebarMenuItem>
+                  <SidebarMenuButton size="lg" asChild>
+                <Link to="/">
                   <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                     <Mail className="size-4" />
                   </div>
@@ -135,5 +136,21 @@ export function ProtectedLayout() {
         </div>
       </SidebarInset>
     </SidebarProvider>
+  )
+}
+
+function AuthLoading() {
+  return <div className="grid min-h-screen place-items-center text-muted-foreground">加载中...</div>
+}
+
+function AuthError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div className="grid min-h-screen place-items-center bg-background px-4">
+      <div className="w-full max-w-sm space-y-4 text-center">
+        <div className="text-sm font-medium">无法连接后端服务</div>
+        <div className="text-sm text-muted-foreground">{message}</div>
+        <Button type="button" variant="outline" onClick={onRetry}>重新加载</Button>
+      </div>
+    </div>
   )
 }

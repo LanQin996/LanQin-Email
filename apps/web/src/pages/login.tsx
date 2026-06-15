@@ -30,7 +30,7 @@ export function LoginPage() {
     onError: (e) => toast({ title: "登录失败", description: e.message }),
   })
   const turnstileRequired = !!publicSettings.data?.turnstileEnabled
-  if (me.data?.user) return <Navigate to="/mail" replace />
+  if (me.data?.user) return <Navigate to="/" replace />
   return (
     <div className="grid min-h-screen place-items-center bg-background px-4">
       <div className="w-full max-w-[360px]">

@@ -253,9 +253,26 @@ func (a *App) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL,
 			UNIQUE(user_id, mailbox_id, email)
 		)`,
+		`CREATE TABLE IF NOT EXISTS mail_labels (
+			id TEXT PRIMARY KEY,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			color TEXT NOT NULL DEFAULT '#64748b',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(mailbox_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS message_labels (
+			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+			label_id TEXT NOT NULL REFERENCES mail_labels(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(message_id, label_id)
+		)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id, email)`,
 		`CREATE INDEX IF NOT EXISTS idx_mail_rules_user_mailbox ON mail_rules(user_id, mailbox_id, enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_blocked_senders_user_mailbox ON blocked_senders(user_id, mailbox_id, email)`,
+		`CREATE INDEX IF NOT EXISTS idx_mail_labels_mailbox ON mail_labels(mailbox_id, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_message_labels_label ON message_labels(label_id, message_id)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := a.db.ExecContext(ctx, stmt); err != nil {

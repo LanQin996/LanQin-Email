@@ -59,6 +59,14 @@ type MailFolder struct {
 	TotalCount  int    `json:"totalCount"`
 }
 
+type MailLabel struct {
+	ID           string `json:"id"`
+	MailboxID    string `json:"mailboxId,omitempty"`
+	Name         string `json:"name"`
+	Color        string `json:"color"`
+	MessageCount int    `json:"messageCount,omitempty"`
+}
+
 type MailMessage struct {
 	ID             string       `json:"id"`
 	MailboxID      string       `json:"mailboxId,omitempty"`
@@ -83,6 +91,7 @@ type MailMessage struct {
 	IsStarred      bool         `json:"isStarred"`
 	HasAttachments bool         `json:"hasAttachments"`
 	SizeBytes      int64        `json:"sizeBytes"`
+	Labels         []MailLabel  `json:"labels,omitempty"`
 	Attachments    []Attachment `json:"attachments,omitempty"`
 }
 

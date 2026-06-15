@@ -6,8 +6,10 @@ export type Mailbox = { id: string; userId: string; userEmail?: string; domainId
 export type Alias = { id: string; domainId: string; source: string; destination: string; enabled: boolean; createdAt: string }
 export type MailFolder = { id: string; name: string; role: string; unreadCount: number; totalCount: number }
 export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
+export type MailLabel = { id: string; mailboxId?: string; name: string; color: string; messageCount?: number }
 export type MailMessage = {
   id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; messageId: string; subject: string; from: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
+  labels?: MailLabel[]
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
 export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }
@@ -44,14 +46,32 @@ export type PublicSettings = { turnstileEnabled: boolean; turnstileSiteKey: stri
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
 
+const REQUEST_TIMEOUT_MS = 15_000
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, { credentials: "include", headers: { "Content-Type": "application/json", ...(init.headers || {}) }, ...init })
-  if (!res.ok) {
-    let message = `${res.status} ${res.statusText}`
-    try { const body = await res.json(); message = body.error || message } catch {}
-    throw new Error(message)
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  const externalSignal = init.signal
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort()
+    else externalSignal.addEventListener("abort", () => controller.abort(), { once: true })
   }
-  return res.json() as Promise<T>
+  try {
+    const res = await fetch(path, { credentials: "include", headers: { "Content-Type": "application/json", ...(init.headers || {}) }, ...init, signal: controller.signal })
+    if (!res.ok) {
+      let message = `${res.status} ${res.statusText}`
+      try { const body = await res.json(); message = body.error || message } catch {}
+      throw new Error(message)
+    }
+    return res.json() as Promise<T>
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("请求超时，请检查后端服务是否正常")
+    }
+    throw error instanceof Error ? error : new Error("网络请求失败")
+  } finally {
+    window.clearTimeout(timeout)
+  }
 }
 
 export const api = {
@@ -113,15 +133,32 @@ export const api = {
   checkDns: (domainId: string) => request<DNSCheckResult>(`/api/admin/domains/${domainId}/check-dns`, { method: "POST" }),
   myMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes"),
   folders: (mailboxId?: string) => request<ListResponse<MailFolder>>(`/api/mail/folders${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  labels: (mailboxId?: string) => request<ListResponse<MailLabel>>(`/api/mail/labels${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  createLabel: (payload: { mailboxId?: string; name: string; color?: string }) => {
+    const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""
+    return request<MailLabel>(`/api/mail/labels${query}`, { method: "POST", body: JSON.stringify({ name: payload.name, color: payload.color || "" }) })
+  },
   messages: (folder: string, q = "", cursor = "", mailboxId?: string) => {
     const params = new URLSearchParams({ folder, q, cursor })
     if (mailboxId) params.set("mailboxId", mailboxId)
     return request<ListResponse<MailMessage>>(`/api/mail/messages?${params.toString()}`)
   },
+  labelMessages: (labelId: string, q = "", cursor = "", mailboxId?: string) => {
+    const params = new URLSearchParams({ labelId, q, cursor })
+    if (mailboxId) params.set("mailboxId", mailboxId)
+    return request<ListResponse<MailMessage>>(`/api/mail/messages?${params.toString()}`)
+  },
+  starredMessages: (q = "", cursor = "", mailboxId?: string) => {
+    const params = new URLSearchParams({ q, cursor })
+    if (mailboxId) params.set("mailboxId", mailboxId)
+    return request<ListResponse<MailMessage>>(`/api/mail/starred?${params.toString()}`)
+  },
   message: (id: string) => request<MailMessage>(`/api/mail/messages/${id}`),
   send: (payload: SendPayload) => request<MailMessage>("/api/mail/send", { method: "POST", body: JSON.stringify(payload) }),
   markRead: (id: string, read: boolean) => request<{ ok: boolean }>(`/api/mail/messages/${id}/mark-read`, { method: "POST", body: JSON.stringify({ read }) }),
   star: (id: string, starred: boolean) => request<{ ok: boolean }>(`/api/mail/messages/${id}/star`, { method: "POST", body: JSON.stringify({ starred }) }),
+  addLabel: (id: string, payload: { name: string; color?: string }) => request<{ labels: MailLabel[] }>(`/api/mail/messages/${id}/labels`, { method: "POST", body: JSON.stringify(payload) }),
+  removeLabel: (id: string, labelID: string) => request<{ labels: MailLabel[] }>(`/api/mail/messages/${id}/labels/${labelID}`, { method: "DELETE" }),
   move: (id: string, folder: string) => request<{ ok: boolean }>(`/api/mail/messages/${id}/move`, { method: "POST", body: JSON.stringify({ folder }) }),
   delete: (id: string) => request<{ ok: boolean }>(`/api/mail/messages/${id}`, { method: "DELETE" }),
 }
