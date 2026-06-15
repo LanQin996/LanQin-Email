@@ -44,9 +44,10 @@ export type SystemSettings = {
   mailRefreshSeconds: number
 }
 export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet"> & { smtpPassword: string; turnstileSecretKey: string }
-export type PublicSettings = { turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number }
+export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number }
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
+export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string }
 
 const REQUEST_TIMEOUT_MS = 15_000
 
@@ -78,6 +79,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   publicSettings: () => request<PublicSettings>("/api/public/settings"),
+  register: (payload: RegisterPayload) => request<{ user: User }>("/api/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   login: (payload: LoginPayload) => request<LoginResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(payload) }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => request<{ user: User }>("/api/me"),

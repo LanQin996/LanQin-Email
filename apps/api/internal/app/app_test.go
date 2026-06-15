@@ -268,6 +268,43 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	}
 }
 
+func TestOpenRegistrationCreatesLoginUserOnly(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+
+	var out map[string]any
+	if code := client.do("POST", "/api/auth/register", map[string]string{"email": "newuser@example.com", "displayName": "New User", "password": "Password123!"}, &out); code != http.StatusForbidden {
+		t.Fatalf("closed registration code=%d body=%v", code, out)
+	}
+
+	a.cfg.OpenRegistration = true
+	var registered struct {
+		User User `json:"user"`
+	}
+	if code := client.do("POST", "/api/auth/register", map[string]string{"email": "newuser@example.com", "displayName": "New User", "password": "Password123!"}, &registered); code != http.StatusCreated || registered.User.Email != "newuser@example.com" || registered.User.Role != "user" {
+		t.Fatalf("register code=%d user=%+v", code, registered.User)
+	}
+	var me struct {
+		User User `json:"user"`
+	}
+	if code := client.do("GET", "/api/me", nil, &me); code != http.StatusOK || me.User.Email != "newuser@example.com" {
+		t.Fatalf("me code=%d user=%+v", code, me.User)
+	}
+	var mine struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := client.do("GET", "/api/mail/mailboxes", nil, &mine); code != http.StatusOK || len(mine.Items) != 0 {
+		t.Fatalf("registered user should not get implicit mailbox: code=%d items=%+v", code, mine.Items)
+	}
+
+	another := &testClient{t: t, server: ts}
+	if code := another.do("POST", "/api/auth/login", map[string]string{"email": "newuser@example.com", "password": "Password123!"}, &out); code != http.StatusOK {
+		t.Fatalf("login registered user code=%d body=%v", code, out)
+	}
+}
+
 func TestUserCanSelectMultipleMailboxes(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())

@@ -31,6 +31,7 @@ func (a *App) Router() http.Handler {
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/public/settings", a.handlePublicSettings)
+		r.Post("/auth/register", a.handleRegister)
 		r.Post("/auth/login", a.handleLogin)
 		r.Post("/auth/logout", a.handleLogout)
 		r.With(a.requireAuth).Get("/me", a.handleMe)
@@ -191,6 +192,77 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.OpenRegistration {
+		respondError(w, http.StatusForbidden, "registration is closed")
+		return
+	}
+	var req struct {
+		Email          string `json:"email"`
+		DisplayName    string `json:"displayName"`
+		Password       string `json:"password"`
+		TurnstileToken string `json:"turnstileToken"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	if err := a.verifyTurnstile(r.Context(), req.TurnstileToken, r.RemoteAddr); err != nil {
+		respondError(w, http.StatusUnauthorized, "human verification failed")
+		return
+	}
+	email := normalizeEmail(req.Email)
+	if email == "" || !strings.Contains(email, "@") {
+		badRequest(w, errors.New("invalid email"))
+		return
+	}
+	if len(req.Password) < 8 {
+		badRequest(w, errors.New("password must be at least 8 characters"))
+		return
+	}
+	displayName := strings.TrimSpace(req.DisplayName)
+	if displayName == "" {
+		displayName = strings.Split(email, "@")[0]
+	}
+	if len([]rune(displayName)) > 80 {
+		badRequest(w, errors.New("displayName must be at most 80 characters"))
+		return
+	}
+	if _, _, err := a.userByEmail(r.Context(), email); err == nil {
+		respondError(w, http.StatusConflict, "email already registered")
+		return
+	} else if !errors.Is(err, errNotFound) {
+		respondError(w, http.StatusInternalServerError, "failed to check user")
+		return
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	userID := newID("usr")
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(passwordHash), 0, now, now); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			respondError(w, http.StatusConflict, "email already registered")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "failed to create user")
+		return
+	}
+	user, err := a.userByID(r.Context(), userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	if err := a.issueSession(w, r, user.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create session")
+		return
+	}
+	respondJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 
 func (a *App) handleLogout(w http.ResponseWriter, r *http.Request) {

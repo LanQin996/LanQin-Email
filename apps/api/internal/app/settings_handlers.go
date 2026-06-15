@@ -54,6 +54,7 @@ type systemSettingsUpdate struct {
 }
 
 type PublicSettings struct {
+	OpenRegistration bool   `json:"openRegistration"`
 	TurnstileEnabled bool   `json:"turnstileEnabled"`
 	TurnstileSiteKey string `json:"turnstileSiteKey"`
 	MailAutoRefresh  bool   `json:"mailAutoRefresh"`
@@ -74,7 +75,7 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	if refreshSeconds <= 0 {
 		refreshSeconds = 30
 	}
-	respondJSON(w, http.StatusOK, PublicSettings{TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000})
+	respondJSON(w, http.StatusOK, PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000})
 }
 
 func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request) {

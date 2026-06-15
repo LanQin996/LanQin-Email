@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Navigate } from "react-router-dom"
+import { Link, Navigate } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useMe } from "@/hooks/use-me"
@@ -42,11 +42,11 @@ export function LoginPage() {
             <>
               <div className="space-y-2">
                 <Label htmlFor="email">邮箱</Label>
-                <Input id="email" name="email" type="email" defaultValue="admin@lanqin.local" required className="h-11 text-base" />
+                <Input id="email" name="email" type="email" autoComplete="username" required className="h-11 text-base" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">密码</Label>
-                <Input id="password" name="password" type="password" defaultValue="ChangeMe123!" required className="h-11 text-base" />
+                <Input id="password" name="password" type="password" autoComplete="current-password" required className="h-11 text-base" />
               </div>
             </>
           ) : (
@@ -62,6 +62,11 @@ export function LoginPage() {
             {login.isPending ? "登录中..." : challengeToken ? "验证登录" : "登录"}
           </Button>
           {challengeToken && <Button type="button" variant="ghost" className="w-full" onClick={() => setChallengeToken("")}>返回登录</Button>}
+          {!challengeToken && publicSettings.data?.openRegistration && (
+            <Button type="button" variant="ghost" className="w-full" asChild>
+              <Link to="/register">注册账号</Link>
+            </Button>
+          )}
         </form>
       </div>
     </div>
@@ -77,7 +82,7 @@ declare global {
   }
 }
 
-function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   React.useEffect(() => {
     if (!siteKey || !ref.current) return

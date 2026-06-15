@@ -5,6 +5,7 @@ import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom"
 import { Toaster } from "@/components/ui/toaster"
 import { ProtectedLayout } from "@/components/protected-layout"
 import { LoginPage } from "@/pages/login"
+import { RegisterPage } from "@/pages/register"
 import { MailPage } from "@/pages/mail"
 import { AdminPage } from "@/pages/admin"
 import { ProfilePage } from "@/pages/profile"
@@ -14,6 +15,7 @@ import "./index.css"
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 10_000 } } })
 const router = createBrowserRouter([
   { path: "/login", element: <LoginPage /> },
+  { path: "/register", element: <RegisterPage /> },
   { path: "/", element: <ProtectedLayout />, children: [
     { index: true, element: <MailPage /> },
     { path: "mail", element: <Navigate to="/" replace /> },
