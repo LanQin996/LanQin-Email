@@ -30,6 +30,45 @@ lanqin-email
 docker compose logs -f lanqin-email
 ```
 
+## 使用 GitHub Actions 构建好的镜像
+
+仓库已添加 `.github/workflows/docker.yml`：
+
+- pull request：检查前端 shadcn 规则、前端构建、后端测试。
+- push 到 `main` / `master`：检查通过后发布 Docker 镜像到 GHCR。
+- push tag，例如 `v1.0.0`：发布对应 tag 镜像。
+
+默认发布镜像：
+
+```text
+ghcr.io/<owner>/<repo>:latest
+ghcr.io/<owner>/<repo>-api:latest
+ghcr.io/<owner>/<repo>-web:latest
+ghcr.io/<owner>/<repo>-postfix:latest
+ghcr.io/<owner>/<repo>-dovecot:latest
+ghcr.io/<owner>/<repo>-opendkim:latest
+```
+
+单容器部署时，把 `.env` 里的 `LANQIN_IMAGE` 改成你的 GHCR 镜像：
+
+```env
+LANQIN_IMAGE=ghcr.io/<owner>/<repo>:latest
+```
+
+然后在服务器执行：
+
+```bash
+cd deploy
+docker compose pull
+docker compose up -d
+```
+
+如果镜像是私有的，服务器需要先登录 GHCR：
+
+```bash
+echo "<github_token>" | docker login ghcr.io -u <github_user> --password-stdin
+```
+
 ## 可选：多容器调试部署
 
 如果需要分别查看 Postfix / Dovecot / OpenDKIM 日志，可以使用保留的 stack 编排：

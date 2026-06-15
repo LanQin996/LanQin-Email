@@ -54,6 +54,17 @@ docker compose up -d --build
 
 这个容器内部集成：API、Web、Nginx、Postfix、Dovecot、OpenDKIM。
 
+也可以直接使用 GitHub Actions 自动发布到 GHCR 的镜像：
+
+```bash
+cd deploy
+cp .env.example .env
+# 修改 .env 里的域名、管理员密码，以及 LANQIN_IMAGE
+# LANQIN_IMAGE=ghcr.io/<owner>/<repo>:latest
+docker compose pull
+docker compose up -d
+```
+
 如需多容器调试版：
 
 ```bash
