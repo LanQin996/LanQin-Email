@@ -44,32 +44,37 @@ npm run check:shadcn
 
 ## Docker 部署
 
-默认单容器部署：
+推荐单容器部署。服务器只需要 `deploy/docker-compose.yml` 和 `.env`，不需要源码构建：
 
 ```bash
 cd deploy
 cp .env.example .env
-docker compose up -d --build
+# 修改 .env 里的域名和管理员密码
+docker compose pull
+docker compose up -d
 ```
 
 这个容器内部集成：API、Web、Nginx、Postfix、Dovecot、OpenDKIM。
 
-也可以直接使用 GitHub Actions 自动发布到 GHCR 的镜像：
+如果 GHCR 镜像是私有的，先登录：
+
+```bash
+echo "<github_token>" | docker login ghcr.io -u <github_user> --password-stdin
+```
+
+本地源码构建：
 
 ```bash
 cd deploy
 cp .env.example .env
-# 修改 .env 里的域名、管理员密码，确认 LANQIN_IMAGE
-# LANQIN_IMAGE=ghcr.io/lanqin996/lanqin-email:latest
-docker compose pull
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
 如需多容器调试版：
 
 ```bash
 cd deploy
-docker compose -f docker-compose.stack.yml up -d --build
+docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up -d --build
 ```
 
 真实公网收发前需要正确配置 MX/SPF/DKIM/DMARC，并确认云厂商开放 25/587/993 端口。

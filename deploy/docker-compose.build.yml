@@ -1,0 +1,5 @@
+services:
+  lanqin-email:
+    build:
+      context: ..
+      dockerfile: deploy/all-in-one/Dockerfile

@@ -1,13 +1,25 @@
 # LanQin Email Docker 部署说明
 
-## 默认：单容器部署
+## 最简单部署：单容器镜像版
+
+服务器上不需要源码构建，只要 `docker-compose.yml` 和 `.env` 即可。
 
 ```bash
 cd deploy
 cp .env.example .env
-# 修改 LANQIN_PUBLIC_HOSTNAME / LANQIN_ADMIN_EMAIL / LANQIN_ADMIN_PASSWORD
-docker compose up -d --build
+# 修改 LANQIN_PUBLIC_HOSTNAME / LANQIN_PUBLIC_BASE_URL / LANQIN_ADMIN_EMAIL / LANQIN_ADMIN_PASSWORD
+docker compose pull
+docker compose up -d
 ```
+
+也可以使用脚本：
+
+```bash
+cd deploy
+bash install.sh
+```
+
+第一次执行会生成 `.env` 并提示你修改配置；修改完成后再次执行 `bash install.sh`。
 
 默认只启动一个业务容器：
 
@@ -24,21 +36,23 @@ lanqin-email
 - Dovecot
 - OpenDKIM
 
-常用日志：
+常用命令：
 
 ```bash
+# 查看日志
 docker compose logs -f lanqin-email
+
+# 更新镜像并重启
+docker compose pull
+docker compose up -d
+
+# 停止
+docker compose down
 ```
 
-## 使用 GitHub Actions 构建好的镜像
+## GHCR 镜像权限
 
-仓库已添加 `.github/workflows/docker.yml`：
-
-- pull request：检查前端 shadcn 规则、前端构建、后端测试。
-- push 到 `main` / `master`：检查通过后发布 Docker 镜像到 GHCR。
-- push tag，例如 `v1.0.0`：发布对应 tag 镜像。
-
-默认发布镜像：
+默认镜像：
 
 ```text
 ghcr.io/lanqin996/lanqin-email:latest
@@ -49,33 +63,49 @@ ghcr.io/lanqin996/lanqin-email-dovecot:latest
 ghcr.io/lanqin996/lanqin-email-opendkim:latest
 ```
 
-单容器部署时，确认 `.env` 里的 `LANQIN_IMAGE` 是你的 GHCR 镜像：
+如果拉取时报：
 
-```env
-LANQIN_IMAGE=ghcr.io/lanqin996/lanqin-email:latest
+```text
+unauthorized
 ```
 
-然后在服务器执行：
+说明 GHCR Package 还是私有，二选一：
 
-```bash
-cd deploy
-docker compose pull
-docker compose up -d
-```
-
-如果镜像是私有的，服务器需要先登录 GHCR：
+1. 到 GitHub Packages 把镜像改成 Public。
+2. 在服务器登录 GHCR：
 
 ```bash
 echo "<github_token>" | docker login ghcr.io -u <github_user> --password-stdin
 ```
 
-## 可选：多容器调试部署
+## 本地源码构建
 
-如果需要分别查看 Postfix / Dovecot / OpenDKIM 日志，可以使用保留的 stack 编排：
+如果你是在完整源码仓库里本机构建，使用 build override：
 
 ```bash
 cd deploy
-docker compose -f docker-compose.stack.yml up -d --build
+cp .env.example .env
+docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+这样会使用 `deploy/all-in-one/Dockerfile` 构建单容器镜像。
+
+## 可选：多容器调试部署
+
+如果需要分别查看 Postfix / Dovecot / OpenDKIM 日志，可以使用 stack 编排。
+
+拉取镜像版：
+
+```bash
+cd deploy
+docker compose -f docker-compose.stack.yml up -d
+```
+
+源码构建版：
+
+```bash
+cd deploy
+docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up -d --build
 ```
 
 ## DNS
@@ -102,4 +132,3 @@ docker compose -f docker-compose.stack.yml up -d --build
 - 建议在服务器或边缘网关配置 HTTPS。
 - 云厂商通常默认封禁 25 端口，需要单独申请解封。
 - SQLite 适合 V1 单机部署；多节点部署前迁移到 PostgreSQL，并把 Postfix/Dovecot maps 改为 PostgreSQL。
-

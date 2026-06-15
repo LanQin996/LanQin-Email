@@ -1,11 +1,6 @@
-version: "3.9"
-
 services:
   lanqin-email:
-    image: ${LANQIN_IMAGE:-lanqin-email:local}
-    build:
-      context: ..
-      dockerfile: deploy/all-in-one/Dockerfile
+    image: ${LANQIN_IMAGE:-ghcr.io/lanqin996/lanqin-email:latest}
     env_file: .env
     ports:
       - "80:80"

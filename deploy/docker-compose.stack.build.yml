@@ -1,0 +1,22 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/api.Dockerfile
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+
+  postfix:
+    build:
+      context: ./postfix
+
+  dovecot:
+    build:
+      context: ./dovecot
+
+  opendkim:
+    build:
+      context: ./opendkim

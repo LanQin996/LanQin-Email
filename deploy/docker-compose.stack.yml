@@ -1,11 +1,6 @@
-version: "3.9"
-
 services:
   api:
-    image: ${LANQIN_API_IMAGE:-lanqin-email-api:local}
-    build:
-      context: ..
-      dockerfile: deploy/api.Dockerfile
+    image: ${LANQIN_API_IMAGE:-ghcr.io/lanqin996/lanqin-email-api:latest}
     env_file: .env
     volumes:
       - lanqin-data:/data
@@ -16,10 +11,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: ${LANQIN_WEB_IMAGE:-lanqin-email-web:local}
-    build:
-      context: ..
-      dockerfile: deploy/web.Dockerfile
+    image: ${LANQIN_WEB_IMAGE:-ghcr.io/lanqin996/lanqin-email-web:latest}
     restart: unless-stopped
 
   nginx:
@@ -35,9 +27,7 @@ services:
     restart: unless-stopped
 
   postfix:
-    image: ${LANQIN_POSTFIX_IMAGE:-lanqin-email-postfix:local}
-    build:
-      context: ./postfix
+    image: ${LANQIN_POSTFIX_IMAGE:-ghcr.io/lanqin996/lanqin-email-postfix:latest}
     env_file: .env
     volumes:
       - lanqin-data:/data
@@ -51,9 +41,7 @@ services:
     restart: unless-stopped
 
   dovecot:
-    image: ${LANQIN_DOVECOT_IMAGE:-lanqin-email-dovecot:local}
-    build:
-      context: ./dovecot
+    image: ${LANQIN_DOVECOT_IMAGE:-ghcr.io/lanqin996/lanqin-email-dovecot:latest}
     env_file: .env
     volumes:
       - lanqin-data:/data
@@ -63,9 +51,7 @@ services:
     restart: unless-stopped
 
   opendkim:
-    image: ${LANQIN_OPENDKIM_IMAGE:-lanqin-email-opendkim:local}
-    build:
-      context: ./opendkim
+    image: ${LANQIN_OPENDKIM_IMAGE:-ghcr.io/lanqin996/lanqin-email-opendkim:latest}
     env_file: .env
     volumes:
       - lanqin-data:/data:ro
