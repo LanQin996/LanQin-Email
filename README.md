@@ -59,8 +59,8 @@ docker compose up -d --build
 ```bash
 cd deploy
 cp .env.example .env
-# 修改 .env 里的域名、管理员密码，以及 LANQIN_IMAGE
-# LANQIN_IMAGE=ghcr.io/<owner>/<repo>:latest
+# 修改 .env 里的域名、管理员密码，确认 LANQIN_IMAGE
+# LANQIN_IMAGE=ghcr.io/lanqin996/lanqin-email:latest
 docker compose pull
 docker compose up -d
 ```
@@ -88,3 +88,4 @@ docker compose -f docker-compose.stack.yml up -d --build
 - 服务器部署：`deploy/.env.example` 默认使用 `LANQIN_SMTP_HOST=127.0.0.1`，发件会交给同容器内 Postfix。
 - 收件同步：Postfix/Dovecot 收到的 Maildir 邮件会由 API 的 Maildir worker 同步到 SQLite 后展示在 Webmail。
 - Maildir worker 通过 `LANQIN_MAILDIR_ROOT` 和 `LANQIN_MAILDIR_SCAN_SECONDS` 控制，默认服务器路径为 `/var/mail/vhosts`。
+

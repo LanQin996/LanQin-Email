@@ -41,18 +41,18 @@ docker compose logs -f lanqin-email
 默认发布镜像：
 
 ```text
-ghcr.io/<owner>/<repo>:latest
-ghcr.io/<owner>/<repo>-api:latest
-ghcr.io/<owner>/<repo>-web:latest
-ghcr.io/<owner>/<repo>-postfix:latest
-ghcr.io/<owner>/<repo>-dovecot:latest
-ghcr.io/<owner>/<repo>-opendkim:latest
+ghcr.io/lanqin996/lanqin-email:latest
+ghcr.io/lanqin996/lanqin-email-api:latest
+ghcr.io/lanqin996/lanqin-email-web:latest
+ghcr.io/lanqin996/lanqin-email-postfix:latest
+ghcr.io/lanqin996/lanqin-email-dovecot:latest
+ghcr.io/lanqin996/lanqin-email-opendkim:latest
 ```
 
-单容器部署时，把 `.env` 里的 `LANQIN_IMAGE` 改成你的 GHCR 镜像：
+单容器部署时，确认 `.env` 里的 `LANQIN_IMAGE` 是你的 GHCR 镜像：
 
 ```env
-LANQIN_IMAGE=ghcr.io/<owner>/<repo>:latest
+LANQIN_IMAGE=ghcr.io/lanqin996/lanqin-email:latest
 ```
 
 然后在服务器执行：
@@ -102,3 +102,4 @@ docker compose -f docker-compose.stack.yml up -d --build
 - 建议在服务器或边缘网关配置 HTTPS。
 - 云厂商通常默认封禁 25 端口，需要单独申请解封。
 - SQLite 适合 V1 单机部署；多节点部署前迁移到 PostgreSQL，并把 Postfix/Dovecot maps 改为 PostgreSQL。
+
