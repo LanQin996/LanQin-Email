@@ -627,6 +627,14 @@ func defaultFolderDefs() []struct{ name, role string } {
 }
 
 func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, displayName, password string, quotaMB int, status string) (string, error) {
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return "", err
+	}
+	return a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, displayName, string(passwordHash), quotaMB, status)
+}
+
+func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
 	localPart = normalizeLocalPart(localPart)
 	if localPart == "" {
 		return "", errors.New("invalid local part")
@@ -642,10 +650,6 @@ func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, di
 		return "", err
 	}
 	address := localPart + "@" + domain
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
 	if displayName == "" {
 		displayName = address
 	}
@@ -659,7 +663,7 @@ func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, di
 	id := newID("mbx")
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, string(passwordHash), quotaMB, status, now, now)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, passwordHash, quotaMB, status, now, now)
 	if err != nil {
 		return "", err
 	}

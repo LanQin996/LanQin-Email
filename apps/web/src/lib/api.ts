@@ -22,6 +22,7 @@ export type MailRule = { id: string; mailboxId: string; name: string; matchMode:
 export type BlockedSender = { id: string; mailboxId: string; email: string; reason: string; createdAt: string }
 export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; storageBytes: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
+export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
 export type SystemSettings = {
   publicHostname: string
   publicBaseUrl: string
@@ -42,6 +43,9 @@ export type SystemSettings = {
   catchAllEnabled: boolean
   mailAutoRefresh: boolean
   mailRefreshSeconds: number
+  userMailboxApplyEnabled: boolean
+  userMailboxDomainIds: string[]
+  reservedMailboxPrefixes: string
 }
 export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet"> & { smtpPassword: string; turnstileSecretKey: string }
 export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number }
@@ -99,6 +103,8 @@ export const api = {
   deleteBlockedSender: (id: string) => request<{ ok: boolean }>(`/api/me/blocked-senders/${id}`, { method: "DELETE" }),
   mailStats: (mailboxId?: string) => request<MailStats>(`/api/me/stats${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   cleanupMail: (payload: { mailboxId: string; target: "empty-trash" | "empty-spam" | "archive-read-inbox" }) => request<{ ok: boolean; affected: number }>("/api/me/cleanup", { method: "POST", body: JSON.stringify(payload) }),
+  mailboxApplyOptions: () => request<MailboxApplyOptions>("/api/me/mailbox-apply-options"),
+  applyMailbox: (payload: { domainId: string; localPart: string; displayName: string }) => request<Mailbox>("/api/me/mailboxes/apply", { method: "POST", body: JSON.stringify(payload) }),
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
   users: () => request<ListResponse<AdminUser>>("/api/admin/users"),
   createUser: (payload: { email: string; displayName: string; role: "admin" | "user"; password: string; disabled: boolean }) => request<AdminUser>("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }),

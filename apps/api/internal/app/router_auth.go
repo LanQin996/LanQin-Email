@@ -37,6 +37,8 @@ func (a *App) Router() http.Handler {
 		r.With(a.requireAuth).Get("/me", a.handleMe)
 		r.With(a.requireAuth).Post("/me/profile", a.handleUpdateProfile)
 		r.With(a.requireAuth).Post("/me/password", a.handleChangePassword)
+		r.With(a.requireAuth).Get("/me/mailbox-apply-options", a.handleMailboxApplyOptions)
+		r.With(a.requireAuth).Post("/me/mailboxes/apply", a.handleApplyMailbox)
 		r.With(a.requireAuth).Post("/me/2fa/setup", a.handleTwoFactorSetup)
 		r.With(a.requireAuth).Post("/me/2fa/enable", a.handleTwoFactorEnable)
 		r.With(a.requireAuth).Post("/me/2fa/disable", a.handleTwoFactorDisable)

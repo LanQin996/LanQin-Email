@@ -12,6 +12,146 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type MailboxApplyOptions struct {
+	Enabled          bool     `json:"enabled"`
+	Domains          []Domain `json:"domains"`
+	ReservedPrefixes []string `json:"reservedPrefixes,omitempty"`
+}
+
+func (a *App) handleMailboxApplyOptions(w http.ResponseWriter, r *http.Request) {
+	domains, err := a.mailboxApplyDomains(r.Context())
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load domains")
+		return
+	}
+	respondJSON(w, http.StatusOK, MailboxApplyOptions{
+		Enabled:          a.cfg.UserMailboxApplyEnabled,
+		Domains:          domains,
+		ReservedPrefixes: parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes),
+	})
+}
+
+func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.UserMailboxApplyEnabled {
+		respondError(w, http.StatusForbidden, "mailbox application is disabled")
+		return
+	}
+	user := currentUser(r)
+	var req struct {
+		DomainID    string `json:"domainId"`
+		LocalPart   string `json:"localPart"`
+		DisplayName string `json:"displayName"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	domainID := strings.TrimSpace(req.DomainID)
+	if domainID == "" {
+		badRequest(w, errors.New("domainId is required"))
+		return
+	}
+	allowed, err := a.mailboxApplyDomainAllowed(r.Context(), domainID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to check domain")
+		return
+	}
+	if !allowed {
+		respondError(w, http.StatusForbidden, "domain is not available")
+		return
+	}
+
+	localPart := normalizeLocalPart(req.LocalPart)
+	if localPart == "" {
+		badRequest(w, errors.New("localPart is required"))
+		return
+	}
+	if len(localPart) > 64 {
+		badRequest(w, errors.New("localPart is too long"))
+		return
+	}
+	reserved := map[string]bool{}
+	for _, item := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
+		reserved[item] = true
+	}
+	if reserved[localPart] {
+		respondError(w, http.StatusForbidden, "localPart is reserved")
+		return
+	}
+	var exists int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mailboxes WHERE domain_id=? AND local_part=?`, domainID, localPart).Scan(&exists); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to check mailbox")
+		return
+	}
+	if exists > 0 {
+		respondError(w, http.StatusConflict, "mailbox already exists")
+		return
+	}
+
+	var passwordHash string
+	if err := a.db.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id=? AND disabled=0`, user.ID).Scan(&passwordHash); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load user")
+		return
+	}
+	displayName := strings.TrimSpace(req.DisplayName)
+	if len([]rune(displayName)) > 80 {
+		badRequest(w, errors.New("displayName must be at most 80 characters"))
+		return
+	}
+	mailboxID, err := a.createMailboxWithPasswordHash(r.Context(), user.ID, domainID, localPart, displayName, passwordHash, 1024, "active")
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			respondError(w, http.StatusConflict, "mailbox already exists")
+			return
+		}
+		badRequest(w, err)
+		return
+	}
+	mailbox, err := a.mailboxByID(r.Context(), mailboxID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load mailbox")
+		return
+	}
+	respondJSON(w, http.StatusCreated, mailbox)
+}
+
+func (a *App) mailboxApplyDomains(ctx context.Context) ([]Domain, error) {
+	if !a.cfg.UserMailboxApplyEnabled {
+		return []Domain{}, nil
+	}
+	ids := cleanIDList(strings.Split(a.cfg.UserMailboxDomainIDs, ","))
+	if len(ids) == 0 {
+		return []Domain{}, nil
+	}
+	items := make([]Domain, 0, len(ids))
+	for _, id := range ids {
+		domain, err := a.domainByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if domain.Status == "active" {
+			items = append(items, *domain)
+		}
+	}
+	return items, nil
+}
+
+func (a *App) mailboxApplyDomainAllowed(ctx context.Context, domainID string) (bool, error) {
+	domains, err := a.mailboxApplyDomains(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, domain := range domains {
+		if domain.ID == domainID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (a *App) handleListContacts(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,name,email,note,created_at FROM contacts WHERE user_id=? ORDER BY name,email`, user.ID)

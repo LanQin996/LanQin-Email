@@ -170,6 +170,33 @@ func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, dis
 	return mailbox
 }
 
+func systemSettingsPayload(settings SystemSettings) map[string]any {
+	return map[string]any{
+		"publicHostname":          settings.PublicHostname,
+		"publicBaseUrl":           settings.PublicBaseURL,
+		"smtpHost":                settings.SMTPHost,
+		"smtpPort":                settings.SMTPPort,
+		"smtpUsername":            settings.SMTPUsername,
+		"smtpPassword":            "",
+		"smtpRequireTls":          settings.SMTPRequireTLS,
+		"maildirRoot":             settings.MaildirRoot,
+		"maildirScanSeconds":      settings.MaildirScanSeconds,
+		"sessionTtlHours":         settings.SessionTTLHours,
+		"allowInsecureHttp":       settings.AllowInsecureHTTP,
+		"openRegistration":        settings.OpenRegistration,
+		"twoFactorEnabled":        settings.TwoFactorEnabled,
+		"turnstileEnabled":        settings.TurnstileEnabled,
+		"turnstileSiteKey":        settings.TurnstileSiteKey,
+		"turnstileSecretKey":      "",
+		"catchAllEnabled":         settings.CatchAllEnabled,
+		"mailAutoRefresh":         settings.MailAutoRefresh,
+		"mailRefreshSeconds":      settings.MailRefreshSeconds,
+		"userMailboxApplyEnabled": settings.UserMailboxApplyEnabled,
+		"userMailboxDomainIds":    settings.UserMailboxDomainIDs,
+		"reservedMailboxPrefixes": settings.ReservedMailboxPrefixes,
+	}
+}
+
 func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -302,6 +329,70 @@ func TestOpenRegistrationCreatesLoginUserOnly(t *testing.T) {
 	another := &testClient{t: t, server: ts}
 	if code := another.do("POST", "/api/auth/login", map[string]string{"email": "newuser@example.com", "password": "Password123!"}, &out); code != http.StatusOK {
 		t.Fatalf("login registered user code=%d body=%v", code, out)
+	}
+}
+
+func TestUserMailboxApplicationUsesAllowedDomainsAndReservedPrefixes(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	allowedDomain := createTestDomain(t, admin, "a.com")
+	blockedDomain := createTestDomain(t, admin, "b.com")
+
+	var created AdminUser
+	if code := admin.do("POST", "/api/admin/users", map[string]any{"email": "person@example.net", "displayName": "Person", "role": "user", "password": "Password123!", "disabled": false}, &created); code != http.StatusCreated {
+		t.Fatalf("create user code=%d user=%+v", code, created)
+	}
+
+	userClient := &testClient{t: t, server: ts}
+	if code := userClient.do("POST", "/api/auth/login", map[string]string{"email": "person@example.net", "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("user login code=%d", code)
+	}
+	var options MailboxApplyOptions
+	if code := userClient.do("GET", "/api/me/mailbox-apply-options", nil, &options); code != http.StatusOK || options.Enabled || len(options.Domains) != 0 {
+		t.Fatalf("disabled options code=%d options=%+v", code, options)
+	}
+
+	var settings SystemSettings
+	if code := admin.do("GET", "/api/admin/settings", nil, &settings); code != http.StatusOK {
+		t.Fatalf("get settings code=%d", code)
+	}
+	update := systemSettingsPayload(settings)
+	update["userMailboxApplyEnabled"] = true
+	update["userMailboxDomainIds"] = []string{allowedDomain.ID}
+	update["reservedMailboxPrefixes"] = "admin\nroot"
+	if code := admin.do("POST", "/api/admin/settings", update, &settings); code != http.StatusOK || !settings.UserMailboxApplyEnabled || len(settings.UserMailboxDomainIDs) != 1 {
+		t.Fatalf("enable apply code=%d settings=%+v", code, settings)
+	}
+
+	if code := userClient.do("GET", "/api/me/mailbox-apply-options", nil, &options); code != http.StatusOK || !options.Enabled || len(options.Domains) != 1 || options.Domains[0].ID != allowedDomain.ID {
+		t.Fatalf("enabled options code=%d options=%+v", code, options)
+	}
+	var errBody map[string]any
+	if code := userClient.do("POST", "/api/me/mailboxes/apply", map[string]string{"domainId": allowedDomain.ID, "localPart": "admin"}, &errBody); code != http.StatusForbidden {
+		t.Fatalf("reserved prefix code=%d body=%v", code, errBody)
+	}
+	if code := userClient.do("POST", "/api/me/mailboxes/apply", map[string]string{"domainId": blockedDomain.ID, "localPart": "alice"}, &errBody); code != http.StatusForbidden {
+		t.Fatalf("blocked domain code=%d body=%v", code, errBody)
+	}
+	var mailbox Mailbox
+	if code := userClient.do("POST", "/api/me/mailboxes/apply", map[string]string{"domainId": allowedDomain.ID, "localPart": "alice", "displayName": "Alice"}, &mailbox); code != http.StatusCreated || mailbox.Address != "alice@a.com" || mailbox.UserID != created.ID {
+		t.Fatalf("apply mailbox code=%d mailbox=%+v", code, mailbox)
+	}
+	var mine struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := userClient.do("GET", "/api/mail/mailboxes", nil, &mine); code != http.StatusOK || len(mine.Items) != 1 || mine.Items[0].Address != "alice@a.com" {
+		t.Fatalf("mine code=%d items=%+v", code, mine.Items)
+	}
+	if code := userClient.do("POST", "/api/me/mailboxes/apply", map[string]string{"domainId": allowedDomain.ID, "localPart": "alice"}, &errBody); code != http.StatusConflict {
+		t.Fatalf("duplicate apply code=%d body=%v", code, errBody)
 	}
 }
 

@@ -4,12 +4,13 @@ import { useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { CheckCircle2, Copy, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react"
 import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, SystemSettings } from "@/lib/api"
-import { formatBytes, formatDate } from "@/lib/utils"
+import { cn, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -79,7 +80,7 @@ export function AdminPage() {
         {section === "mailboxes" && <MailboxesSection mailboxes={mailboxItems} users={userItems} />}
         {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
         {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
-        {section === "settings" && <SystemSettingsSection settings={settings.data} />}
+        {section === "settings" && <SystemSettingsSection settings={settings.data} domains={domainItems} />}
       </main>
     </ScrollArea>
   )
@@ -371,7 +372,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   )
 }
 
-function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
+function SystemSettingsSection({ settings, domains }: { settings?: SystemSettings; domains: Domain[] }) {
   const qc = useQueryClient()
   const { toast } = useToast()
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates })
@@ -383,6 +384,8 @@ function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
   const [turnstileEnabled, setTurnstileEnabled] = React.useState(false)
   const [catchAllEnabled, setCatchAllEnabled] = React.useState(false)
   const [mailAutoRefresh, setMailAutoRefresh] = React.useState(true)
+  const [userMailboxApplyEnabled, setUserMailboxApplyEnabled] = React.useState(false)
+  const [userMailboxDomainIds, setUserMailboxDomainIds] = React.useState<string[]>([])
   React.useEffect(() => {
     if (!settings) return
     setSmtpRequireTls(settings.smtpRequireTls)
@@ -392,6 +395,8 @@ function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
     setTurnstileEnabled(settings.turnstileEnabled)
     setCatchAllEnabled(settings.catchAllEnabled)
     setMailAutoRefresh(settings.mailAutoRefresh)
+    setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
+    setUserMailboxDomainIds(settings.userMailboxDomainIds || [])
   }, [settings])
   const save = useMutation({
     mutationFn: (form: FormData) => api.updateSystemSettings({
@@ -414,6 +419,9 @@ function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
       catchAllEnabled,
       mailAutoRefresh,
       mailRefreshSeconds: fieldNumber(form, "mailRefreshSeconds", settings?.mailRefreshSeconds || 30),
+      userMailboxApplyEnabled,
+      userMailboxDomainIds,
+      reservedMailboxPrefixes: fieldValue(form, "reservedMailboxPrefixes", settings?.reservedMailboxPrefixes || ""),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "settings"] })
@@ -443,6 +451,9 @@ function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
     settings.catchAllEnabled,
     settings.mailAutoRefresh,
     settings.mailRefreshSeconds,
+    settings.userMailboxApplyEnabled,
+    (settings.userMailboxDomainIds || []).join(","),
+    settings.reservedMailboxPrefixes,
   ].join("|") : "loading"
   const tabs: { key: typeof settingsTab; label: string }[] = [
     { key: "base", label: "基础" },
@@ -500,6 +511,36 @@ function SystemSettingsSection({ settings }: { settings?: SystemSettings }) {
         <CardHeader><CardTitle>邮件设置</CardTitle></CardHeader>
         <CardContent className="space-y-5">
           <SwitchRow label="无人收件" checked={catchAllEnabled} onCheckedChange={setCatchAllEnabled} />
+          <Separator />
+          <SwitchRow label="用户自助申请邮箱" checked={userMailboxApplyEnabled} onCheckedChange={setUserMailboxApplyEnabled} />
+          {userMailboxApplyEnabled && (
+            <div className="space-y-5 border-t pt-5">
+              <div className="space-y-3">
+                <Label>开放域名</Label>
+                <div className="grid gap-2 md:grid-cols-2">
+                  {domains.map((domain) => {
+                    const checked = userMailboxDomainIds.includes(domain.id)
+                    const disabled = domain.status !== "active"
+                    return (
+                      <label key={domain.id} className={cn("flex min-h-11 items-center gap-3 rounded-md border px-3 py-2", disabled && "cursor-not-allowed opacity-50")}>
+                        <Checkbox
+                          checked={checked}
+                          disabled={disabled}
+                          onCheckedChange={(value) => setUserMailboxDomainIds((items) => value === true ? Array.from(new Set([...items, domain.id])) : items.filter((id) => id !== domain.id))}
+                        />
+                        <span className="text-sm font-medium">{domain.name}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+                {domains.length === 0 && <Empty text="暂无域名" />}
+              </div>
+              <div className="space-y-2">
+                <Label>禁止前缀</Label>
+                <Textarea name="reservedMailboxPrefixes" defaultValue={settings?.reservedMailboxPrefixes || ""} className="min-h-28 font-mono text-sm" />
+              </div>
+            </div>
+          )}
           <Separator />
           <SwitchRow label="自动刷新" checked={mailAutoRefresh} onCheckedChange={setMailAutoRefresh} />
           {mailAutoRefresh && (

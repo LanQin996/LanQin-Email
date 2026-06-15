@@ -4,7 +4,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailStats } from "@/lib/api"
+import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailStats } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -58,12 +58,14 @@ export function ProfilePage() {
   const tab: Tab = rawTab && tabKeys.includes(rawTab) ? rawTab : "profile"
   const user = me.data?.user
   const mailboxes = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes })
+  const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions })
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules })
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders })
-  const ruleLabels = useQuery({ queryKey: ["labels", "rules", mailboxId], queryFn: () => api.labels(mailboxId), enabled: !!mailboxId })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
-  const stats = useQuery({ queryKey: ["mail-stats", mailboxId], queryFn: () => api.mailStats(mailboxId), enabled: !!mailboxId })
+  const activeMailboxId = selectedMailbox?.id || ""
+  const ruleLabels = useQuery({ queryKey: ["labels", "rules", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId })
+  const stats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId })
 
   const profile = useMutation({
     mutationFn: (form: FormData) => api.updateProfile({ displayName: String(form.get("displayName") || "") }),
@@ -133,12 +135,28 @@ export function ProfilePage() {
     onSuccess: (res) => { qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["messages"] }); toast({ title: `已处理 ${res.affected} 封邮件` }) },
     onError: (error) => toast({ title: "清理失败", description: error.message }),
   })
+  const applyMailbox = useMutation({
+    mutationFn: api.applyMailbox,
+    onSuccess: (mailbox) => {
+      qc.invalidateQueries({ queryKey: ["mailboxes", "mine"] })
+      qc.invalidateQueries({ queryKey: ["mailbox-apply-options"] })
+      setMailboxId(mailbox.id)
+      toast({ title: "邮箱已申请" })
+    },
+    onError: (error) => toast({ title: "申请失败", description: error.message }),
+  })
 
   React.useEffect(() => {
+    if (!mailboxes.isSuccess) return
     const items = mailboxes.data?.items || []
-    if (items.length > 0 && (!mailboxId || !items.some((m) => m.id === mailboxId))) setMailboxId(items[0].id)
-  }, [mailboxId, mailboxes.data?.items])
-  React.useEffect(() => { if (mailboxId) localStorage.setItem("lanqin:selected-mailbox", mailboxId) }, [mailboxId])
+    if (items.length === 0) {
+      if (mailboxId) setMailboxId("")
+      localStorage.removeItem("lanqin:selected-mailbox")
+      return
+    }
+    if (!mailboxId || !items.some((m) => m.id === mailboxId)) setMailboxId(items[0].id)
+  }, [mailboxId, mailboxes.isSuccess, mailboxes.data?.items])
+  React.useEffect(() => { if (mailboxId) localStorage.setItem("lanqin:selected-mailbox", mailboxId); else localStorage.removeItem("lanqin:selected-mailbox") }, [mailboxId])
   React.useEffect(() => { applyTheme(darkMode, themeMountedRef.current); themeMountedRef.current = true }, [darkMode])
 
   async function logout() { await api.logout().catch(() => undefined); qc.clear(); navigate("/login", { replace: true }) }
@@ -190,7 +208,7 @@ export function ProfilePage() {
   )
 
   function renderTab() {
-    if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} />
+    if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={stats.data} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
     if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
@@ -353,8 +371,65 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, disp
   )
 }
 
-function MailboxManagement({ mailboxes, selectedMailboxId, onSelect, onCopy, onOpen }: { mailboxes: Mailbox[]; selectedMailboxId: string; onSelect: (id: string) => void; onCopy: (text: string) => void; onOpen: (id: string) => void }) {
-  return <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{mailboxes.map((m) => <Card key={m.id} className={cn(selectedMailboxId === m.id && "border-primary")}><CardHeader><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{m.address}</CardTitle></div>{selectedMailboxId === m.id && <Badge>当前</Badge>}</div></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onSelect(m.id)}>设为当前</Button><Button variant="outline" size="sm" onClick={() => onCopy(m.address)}><Copy className="h-4 w-4" />复制</Button><Button size="sm" onClick={() => onOpen(m.id)}>进入邮箱</Button></CardContent></Card>)}{mailboxes.length === 0 && <EmptyState text="暂无邮箱账号" />}</div>
+function MailboxManagement({ mailboxes, applyOptions, applyPending, selectedMailboxId, onSelect, onCopy, onOpen, onApply }: { mailboxes: Mailbox[]; applyOptions?: MailboxApplyOptions; applyPending: boolean; selectedMailboxId: string; onSelect: (id: string) => void; onCopy: (text: string) => void; onOpen: (id: string) => void; onApply: (payload: { domainId: string; localPart: string; displayName: string }) => Promise<void> }) {
+  const canApply = !!applyOptions?.enabled && (applyOptions.domains || []).length > 0
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        {canApply && <ApplyMailboxDialog options={applyOptions} pending={applyPending} onApply={onApply} />}
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {mailboxes.map((m) => <Card key={m.id} className={cn(selectedMailboxId === m.id && "border-primary")}><CardHeader><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{m.address}</CardTitle></div>{selectedMailboxId === m.id && <Badge>当前</Badge>}</div></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onSelect(m.id)}>设为当前</Button><Button variant="outline" size="sm" onClick={() => onCopy(m.address)}><Copy className="h-4 w-4" />复制</Button><Button size="sm" onClick={() => onOpen(m.id)}>进入邮箱</Button></CardContent></Card>)}
+        {mailboxes.length === 0 && <EmptyState text={canApply ? "暂无邮箱账号，点击申请邮箱创建" : "暂无邮箱账号"} />}
+      </div>
+    </div>
+  )
+}
+
+function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApplyOptions; pending: boolean; onApply: (payload: { domainId: string; localPart: string; displayName: string }) => Promise<void> }) {
+  const [open, setOpen] = React.useState(false)
+  const [domainId, setDomainId] = React.useState(options.domains[0]?.id || "")
+  React.useEffect(() => {
+    if (!open) return
+    setDomainId((current) => options.domains.some((domain) => domain.id === current) ? current : options.domains[0]?.id || "")
+  }, [open, options.domains])
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    try {
+      await onApply({
+        domainId,
+        localPart: String(form.get("localPart") || ""),
+        displayName: String(form.get("displayName") || ""),
+      })
+      event.currentTarget.reset()
+      setOpen(false)
+    } catch {}
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button type="button" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />申请邮箱</Button>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader><DialogTitle>申请邮箱</DialogTitle></DialogHeader>
+        <form className="space-y-4" onSubmit={submit}>
+          <Field label="邮箱前缀"><Input name="localPart" autoFocus required placeholder="your-name" /></Field>
+          <Field label="域名后缀">
+            <Select value={domainId} onValueChange={setDomainId}>
+              <SelectTrigger><SelectValue placeholder="选择域名" /></SelectTrigger>
+              <SelectContent>{options.domains.map((domain) => <SelectItem key={domain.id} value={domain.id}>@{domain.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          <Field label="显示名称"><Input name="displayName" placeholder="可选" /></Field>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
+            <Button disabled={pending || !domainId}>{pending ? "申请中..." : "申请"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 function ContactsSection({ items, loading, onCreate, onDelete, onCopy, pending }: { items: { id: string; name: string; email: string; note: string }[]; loading: boolean; onCreate: (form: FormData) => void; onDelete: (id: string) => void; onCopy: (text: string) => void; pending: boolean }) {

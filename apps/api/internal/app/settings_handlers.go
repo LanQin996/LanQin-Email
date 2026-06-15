@@ -10,47 +10,53 @@ import (
 )
 
 type SystemSettings struct {
-	PublicHostname     string `json:"publicHostname"`
-	PublicBaseURL      string `json:"publicBaseUrl"`
-	SMTPHost           string `json:"smtpHost"`
-	SMTPPort           string `json:"smtpPort"`
-	SMTPUsername       string `json:"smtpUsername"`
-	SMTPPasswordSet    bool   `json:"smtpPasswordSet"`
-	SMTPRequireTLS     bool   `json:"smtpRequireTls"`
-	MaildirRoot        string `json:"maildirRoot"`
-	MaildirScanSeconds int    `json:"maildirScanSeconds"`
-	SessionTTLHours    int    `json:"sessionTtlHours"`
-	AllowInsecureHTTP  bool   `json:"allowInsecureHttp"`
-	OpenRegistration   bool   `json:"openRegistration"`
-	TwoFactorEnabled   bool   `json:"twoFactorEnabled"`
-	TurnstileEnabled   bool   `json:"turnstileEnabled"`
-	TurnstileSiteKey   string `json:"turnstileSiteKey"`
-	TurnstileSecretSet bool   `json:"turnstileSecretSet"`
-	CatchAllEnabled    bool   `json:"catchAllEnabled"`
-	MailAutoRefresh    bool   `json:"mailAutoRefresh"`
-	MailRefreshSeconds int    `json:"mailRefreshSeconds"`
+	PublicHostname          string   `json:"publicHostname"`
+	PublicBaseURL           string   `json:"publicBaseUrl"`
+	SMTPHost                string   `json:"smtpHost"`
+	SMTPPort                string   `json:"smtpPort"`
+	SMTPUsername            string   `json:"smtpUsername"`
+	SMTPPasswordSet         bool     `json:"smtpPasswordSet"`
+	SMTPRequireTLS          bool     `json:"smtpRequireTls"`
+	MaildirRoot             string   `json:"maildirRoot"`
+	MaildirScanSeconds      int      `json:"maildirScanSeconds"`
+	SessionTTLHours         int      `json:"sessionTtlHours"`
+	AllowInsecureHTTP       bool     `json:"allowInsecureHttp"`
+	OpenRegistration        bool     `json:"openRegistration"`
+	TwoFactorEnabled        bool     `json:"twoFactorEnabled"`
+	TurnstileEnabled        bool     `json:"turnstileEnabled"`
+	TurnstileSiteKey        string   `json:"turnstileSiteKey"`
+	TurnstileSecretSet      bool     `json:"turnstileSecretSet"`
+	CatchAllEnabled         bool     `json:"catchAllEnabled"`
+	MailAutoRefresh         bool     `json:"mailAutoRefresh"`
+	MailRefreshSeconds      int      `json:"mailRefreshSeconds"`
+	UserMailboxApplyEnabled bool     `json:"userMailboxApplyEnabled"`
+	UserMailboxDomainIDs    []string `json:"userMailboxDomainIds"`
+	ReservedMailboxPrefixes string   `json:"reservedMailboxPrefixes"`
 }
 
 type systemSettingsUpdate struct {
-	PublicHostname     string `json:"publicHostname"`
-	PublicBaseURL      string `json:"publicBaseUrl"`
-	SMTPHost           string `json:"smtpHost"`
-	SMTPPort           string `json:"smtpPort"`
-	SMTPUsername       string `json:"smtpUsername"`
-	SMTPPassword       string `json:"smtpPassword"`
-	SMTPRequireTLS     bool   `json:"smtpRequireTls"`
-	MaildirRoot        string `json:"maildirRoot"`
-	MaildirScanSeconds int    `json:"maildirScanSeconds"`
-	SessionTTLHours    int    `json:"sessionTtlHours"`
-	AllowInsecureHTTP  bool   `json:"allowInsecureHttp"`
-	OpenRegistration   bool   `json:"openRegistration"`
-	TwoFactorEnabled   bool   `json:"twoFactorEnabled"`
-	TurnstileEnabled   bool   `json:"turnstileEnabled"`
-	TurnstileSiteKey   string `json:"turnstileSiteKey"`
-	TurnstileSecretKey string `json:"turnstileSecretKey"`
-	CatchAllEnabled    bool   `json:"catchAllEnabled"`
-	MailAutoRefresh    bool   `json:"mailAutoRefresh"`
-	MailRefreshSeconds int    `json:"mailRefreshSeconds"`
+	PublicHostname          string   `json:"publicHostname"`
+	PublicBaseURL           string   `json:"publicBaseUrl"`
+	SMTPHost                string   `json:"smtpHost"`
+	SMTPPort                string   `json:"smtpPort"`
+	SMTPUsername            string   `json:"smtpUsername"`
+	SMTPPassword            string   `json:"smtpPassword"`
+	SMTPRequireTLS          bool     `json:"smtpRequireTls"`
+	MaildirRoot             string   `json:"maildirRoot"`
+	MaildirScanSeconds      int      `json:"maildirScanSeconds"`
+	SessionTTLHours         int      `json:"sessionTtlHours"`
+	AllowInsecureHTTP       bool     `json:"allowInsecureHttp"`
+	OpenRegistration        bool     `json:"openRegistration"`
+	TwoFactorEnabled        bool     `json:"twoFactorEnabled"`
+	TurnstileEnabled        bool     `json:"turnstileEnabled"`
+	TurnstileSiteKey        string   `json:"turnstileSiteKey"`
+	TurnstileSecretKey      string   `json:"turnstileSecretKey"`
+	CatchAllEnabled         bool     `json:"catchAllEnabled"`
+	MailAutoRefresh         bool     `json:"mailAutoRefresh"`
+	MailRefreshSeconds      int      `json:"mailRefreshSeconds"`
+	UserMailboxApplyEnabled bool     `json:"userMailboxApplyEnabled"`
+	UserMailboxDomainIDs    []string `json:"userMailboxDomainIds"`
+	ReservedMailboxPrefixes string   `json:"reservedMailboxPrefixes"`
 }
 
 type PublicSettings struct {
@@ -132,6 +138,9 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 		req.MailRefreshSeconds = 30
 	}
 	next.MailRefreshSeconds = req.MailRefreshSeconds
+	next.UserMailboxApplyEnabled = req.UserMailboxApplyEnabled
+	next.UserMailboxDomainIDs = strings.Join(cleanIDList(req.UserMailboxDomainIDs), ",")
+	next.ReservedMailboxPrefixes = strings.Join(parseReservedPrefixes(req.ReservedMailboxPrefixes), ",")
 
 	if err := a.saveSystemSettings(r.Context(), next); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save settings")
@@ -215,25 +224,28 @@ func (a *App) handleTestSMTP(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) systemSettingsSnapshot() SystemSettings {
 	return SystemSettings{
-		PublicHostname:     a.cfg.PublicHostname,
-		PublicBaseURL:      a.cfg.PublicBaseURL,
-		SMTPHost:           a.cfg.SMTPHost,
-		SMTPPort:           a.cfg.SMTPPort,
-		SMTPUsername:       a.cfg.SMTPUsername,
-		SMTPPasswordSet:    strings.TrimSpace(a.cfg.SMTPPassword) != "",
-		SMTPRequireTLS:     a.cfg.SMTPRequireTLS,
-		MaildirRoot:        a.cfg.MaildirRoot,
-		MaildirScanSeconds: a.cfg.MaildirScanSeconds,
-		SessionTTLHours:    a.cfg.SessionTTLHours,
-		AllowInsecureHTTP:  a.cfg.AllowInsecureHTTP,
-		OpenRegistration:   a.cfg.OpenRegistration,
-		TwoFactorEnabled:   a.cfg.TwoFactorEnabled,
-		TurnstileEnabled:   a.cfg.TurnstileEnabled,
-		TurnstileSiteKey:   a.cfg.TurnstileSiteKey,
-		TurnstileSecretSet: strings.TrimSpace(a.cfg.TurnstileSecretKey) != "",
-		CatchAllEnabled:    a.cfg.CatchAllEnabled,
-		MailAutoRefresh:    a.cfg.MailAutoRefresh,
-		MailRefreshSeconds: a.cfg.MailRefreshSeconds,
+		PublicHostname:          a.cfg.PublicHostname,
+		PublicBaseURL:           a.cfg.PublicBaseURL,
+		SMTPHost:                a.cfg.SMTPHost,
+		SMTPPort:                a.cfg.SMTPPort,
+		SMTPUsername:            a.cfg.SMTPUsername,
+		SMTPPasswordSet:         strings.TrimSpace(a.cfg.SMTPPassword) != "",
+		SMTPRequireTLS:          a.cfg.SMTPRequireTLS,
+		MaildirRoot:             a.cfg.MaildirRoot,
+		MaildirScanSeconds:      a.cfg.MaildirScanSeconds,
+		SessionTTLHours:         a.cfg.SessionTTLHours,
+		AllowInsecureHTTP:       a.cfg.AllowInsecureHTTP,
+		OpenRegistration:        a.cfg.OpenRegistration,
+		TwoFactorEnabled:        a.cfg.TwoFactorEnabled,
+		TurnstileEnabled:        a.cfg.TurnstileEnabled,
+		TurnstileSiteKey:        a.cfg.TurnstileSiteKey,
+		TurnstileSecretSet:      strings.TrimSpace(a.cfg.TurnstileSecretKey) != "",
+		CatchAllEnabled:         a.cfg.CatchAllEnabled,
+		MailAutoRefresh:         a.cfg.MailAutoRefresh,
+		MailRefreshSeconds:      a.cfg.MailRefreshSeconds,
+		UserMailboxApplyEnabled: a.cfg.UserMailboxApplyEnabled,
+		UserMailboxDomainIDs:    cleanIDList(strings.Split(a.cfg.UserMailboxDomainIDs, ",")),
+		ReservedMailboxPrefixes: strings.Join(parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes), "\n"),
 	}
 }
 
@@ -293,6 +305,12 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			if n, err := strconv.Atoi(value); err == nil && n > 0 {
 				a.cfg.MailRefreshSeconds = n
 			}
+		case "userMailboxApplyEnabled":
+			a.cfg.UserMailboxApplyEnabled = value == "true"
+		case "userMailboxDomainIds":
+			a.cfg.UserMailboxDomainIDs = value
+		case "reservedMailboxPrefixes":
+			a.cfg.ReservedMailboxPrefixes = value
 		}
 	}
 	return rows.Err()
@@ -300,25 +318,28 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 
 func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 	values := map[string]string{
-		"publicHostname":     cfg.PublicHostname,
-		"publicBaseUrl":      cfg.PublicBaseURL,
-		"smtpHost":           cfg.SMTPHost,
-		"smtpPort":           cfg.SMTPPort,
-		"smtpUsername":       cfg.SMTPUsername,
-		"smtpPassword":       cfg.SMTPPassword,
-		"smtpRequireTls":     strconv.FormatBool(cfg.SMTPRequireTLS),
-		"maildirRoot":        cfg.MaildirRoot,
-		"maildirScanSeconds": strconv.Itoa(cfg.MaildirScanSeconds),
-		"sessionTtlHours":    strconv.Itoa(cfg.SessionTTLHours),
-		"allowInsecureHttp":  strconv.FormatBool(cfg.AllowInsecureHTTP),
-		"openRegistration":   strconv.FormatBool(cfg.OpenRegistration),
-		"twoFactorEnabled":   strconv.FormatBool(cfg.TwoFactorEnabled),
-		"turnstileEnabled":   strconv.FormatBool(cfg.TurnstileEnabled),
-		"turnstileSiteKey":   cfg.TurnstileSiteKey,
-		"turnstileSecretKey": cfg.TurnstileSecretKey,
-		"catchAllEnabled":    strconv.FormatBool(cfg.CatchAllEnabled),
-		"mailAutoRefresh":    strconv.FormatBool(cfg.MailAutoRefresh),
-		"mailRefreshSeconds": strconv.Itoa(cfg.MailRefreshSeconds),
+		"publicHostname":          cfg.PublicHostname,
+		"publicBaseUrl":           cfg.PublicBaseURL,
+		"smtpHost":                cfg.SMTPHost,
+		"smtpPort":                cfg.SMTPPort,
+		"smtpUsername":            cfg.SMTPUsername,
+		"smtpPassword":            cfg.SMTPPassword,
+		"smtpRequireTls":          strconv.FormatBool(cfg.SMTPRequireTLS),
+		"maildirRoot":             cfg.MaildirRoot,
+		"maildirScanSeconds":      strconv.Itoa(cfg.MaildirScanSeconds),
+		"sessionTtlHours":         strconv.Itoa(cfg.SessionTTLHours),
+		"allowInsecureHttp":       strconv.FormatBool(cfg.AllowInsecureHTTP),
+		"openRegistration":        strconv.FormatBool(cfg.OpenRegistration),
+		"twoFactorEnabled":        strconv.FormatBool(cfg.TwoFactorEnabled),
+		"turnstileEnabled":        strconv.FormatBool(cfg.TurnstileEnabled),
+		"turnstileSiteKey":        cfg.TurnstileSiteKey,
+		"turnstileSecretKey":      cfg.TurnstileSecretKey,
+		"catchAllEnabled":         strconv.FormatBool(cfg.CatchAllEnabled),
+		"mailAutoRefresh":         strconv.FormatBool(cfg.MailAutoRefresh),
+		"mailRefreshSeconds":      strconv.Itoa(cfg.MailRefreshSeconds),
+		"userMailboxApplyEnabled": strconv.FormatBool(cfg.UserMailboxApplyEnabled),
+		"userMailboxDomainIds":    strings.Join(cleanIDList(strings.Split(cfg.UserMailboxDomainIDs, ",")), ","),
+		"reservedMailboxPrefixes": strings.Join(parseReservedPrefixes(cfg.ReservedMailboxPrefixes), ","),
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	tx, err := a.db.BeginTx(ctx, nil)
@@ -333,6 +354,35 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		}
 	}
 	return tx.Commit()
+}
+
+func cleanIDList(items []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+func parseReservedPrefixes(value string) []string {
+	value = strings.NewReplacer("\r", "\n", ",", "\n", ";", "\n", "，", "\n", "；", "\n").Replace(value)
+	seen := map[string]bool{}
+	out := []string{}
+	for _, item := range strings.Split(value, "\n") {
+		item = normalizeLocalPart(item)
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func normalizeHostname(value string) string {

@@ -88,17 +88,18 @@ export function MailPage() {
   const mailboxList = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes })
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const selectedMailbox = React.useMemo(() => mailboxList.data?.items.find((item) => item.id === selectedMailboxId), [mailboxList.data?.items, selectedMailboxId])
-  const folders = useQuery({ queryKey: ["folders", selectedMailboxId], queryFn: () => api.folders(selectedMailboxId), enabled: !!selectedMailboxId })
-  const labels = useQuery({ queryKey: ["labels", selectedMailboxId], queryFn: () => api.labels(selectedMailboxId), enabled: !!selectedMailboxId })
-  const mailStats = useQuery({ queryKey: ["mail-stats", selectedMailboxId], queryFn: () => api.mailStats(selectedMailboxId), enabled: !!selectedMailboxId })
+  const activeMailboxId = selectedMailbox?.id || ""
+  const folders = useQuery({ queryKey: ["folders", activeMailboxId], queryFn: () => api.folders(activeMailboxId), enabled: !!activeMailboxId })
+  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId })
+  const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId })
   const messages = useQuery({
-    queryKey: ["messages", selectedMailboxId, mailView, folder, selectedLabelId, query],
+    queryKey: ["messages", activeMailboxId, mailView, folder, selectedLabelId, query],
     queryFn: () => {
-      if (mailView === "starred") return api.starredMessages(query, "", selectedMailboxId)
-      if (mailView === "label") return api.labelMessages(selectedLabelId, query, "", selectedMailboxId)
-      return api.messages(folder, query, "", selectedMailboxId)
+      if (mailView === "starred") return api.starredMessages(query, "", activeMailboxId)
+      if (mailView === "label") return api.labelMessages(selectedLabelId, query, "", activeMailboxId)
+      return api.messages(folder, query, "", activeMailboxId)
     },
-    enabled: !!selectedMailboxId && (mailView !== "label" || !!selectedLabelId),
+    enabled: !!activeMailboxId && (mailView !== "label" || !!selectedLabelId),
   })
   const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!, { markRead: false }), enabled: !!selectedId })
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
@@ -175,15 +176,24 @@ export function MailPage() {
   })
 
   React.useEffect(() => {
+    if (!mailboxList.isSuccess) return
     const items = mailboxList.data?.items || []
-    if (items.length === 0) return
+    if (items.length === 0) {
+      if (selectedMailboxId) {
+        setSelectedMailboxId("")
+        setSelectedId(null)
+      }
+      localStorage.removeItem("lanqin:selected-mailbox")
+      return
+    }
     if (!selectedMailboxId || !items.some((item) => item.id === selectedMailboxId)) {
       setSelectedMailboxId(items[0].id)
     }
-  }, [mailboxList.data?.items, selectedMailboxId])
+  }, [mailboxList.isSuccess, mailboxList.data?.items, selectedMailboxId])
 
   React.useEffect(() => {
     if (selectedMailboxId) localStorage.setItem("lanqin:selected-mailbox", selectedMailboxId)
+    else localStorage.removeItem("lanqin:selected-mailbox")
   }, [selectedMailboxId])
 
   React.useEffect(() => {
