@@ -2,11 +2,12 @@ import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, BarChart3, Ban, Contact, Copy, KeyRound, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2 } from "lucide-react"
+import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, Mailbox, MailStats } from "@/lib/api"
+import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailStats } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
+import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
 import { useMe } from "@/hooks/use-me"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -14,6 +15,8 @@ import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -46,9 +49,9 @@ export function ProfilePage() {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [mailboxId, setMailboxId] = React.useState(() => localStorage.getItem("lanqin:selected-mailbox") || "")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
-  const [ruleMailboxId, setRuleMailboxId] = React.useState("all")
-  const [ruleAction, setRuleAction] = React.useState("archive")
+  const [displayMode, setDisplayMode] = useDisplayMode()
   const [blockedMailboxId, setBlockedMailboxId] = React.useState("all")
+  const [ruleDialogOpen, setRuleDialogOpen] = React.useState(false)
   const themeMountedRef = React.useRef(false)
 
   const rawTab = params.get("tab") as Tab | null
@@ -58,6 +61,7 @@ export function ProfilePage() {
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules })
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders })
+  const ruleLabels = useQuery({ queryKey: ["labels", "rules", mailboxId], queryFn: () => api.labels(mailboxId), enabled: !!mailboxId })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
   const stats = useQuery({ queryKey: ["mail-stats", mailboxId], queryFn: () => api.mailStats(mailboxId), enabled: !!mailboxId })
 
@@ -97,8 +101,24 @@ export function ProfilePage() {
   })
   const deleteContact = useMutation({ mutationFn: api.deleteContact, onSuccess: () => { qc.invalidateQueries({ queryKey: ["contacts"] }); toast({ title: "联系人已删除" }) } })
   const createRule = useMutation({
-    mutationFn: (form: FormData) => api.createRule({ mailboxId: ruleMailboxId === "all" ? "" : ruleMailboxId, name: String(form.get("name") || ""), fromContains: String(form.get("fromContains") || ""), subjectContains: String(form.get("subjectContains") || ""), action: ruleAction, enabled: true }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); toast({ title: "收件规则已保存" }) },
+    mutationFn: (payload: {
+      mailboxId: string
+      name: string
+      matchMode: "all" | "any"
+      conditions: MailRuleCondition[]
+      actions: MailRuleAction[]
+      applyToExisting: boolean
+      stopProcessing: boolean
+      enabled: boolean
+    }) => api.createRule(payload),
+    onSuccess: (rule) => {
+      qc.invalidateQueries({ queryKey: ["rules"] })
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      qc.invalidateQueries({ queryKey: ["mail-stats"] })
+      qc.invalidateQueries({ queryKey: ["labels"] })
+      setRuleDialogOpen(false)
+      toast({ title: rule.appliedExistingCount ? `收件规则已保存，已应用 ${rule.appliedExistingCount} 封邮件` : "收件规则已保存" })
+    },
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
   const deleteRule = useMutation({ mutationFn: api.deleteRule, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); toast({ title: "规则已删除" }) } })
@@ -173,14 +193,14 @@ export function ProfilePage() {
     if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={stats.data} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
-    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={ruleMailboxId} action={ruleAction} onMailboxChange={setRuleMailboxId} onActionChange={setRuleAction} onCreate={(form) => createRule.mutate(form)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
+    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
     if (tab === "blocked") return <BlockedSection items={blocked.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={blockedMailboxId} spamCount={stats.data?.byFolder.find((f) => f.role === "spam")?.count || 0} onMailboxChange={setBlockedMailboxId} onCreate={(form) => createBlocked.mutate(form)} onDelete={(id) => deleteBlocked.mutate(id)} pending={createBlocked.isPending} />
     if (tab === "stats") return <StatsSection stats={stats.data} mailbox={selectedMailbox} onRefresh={() => stats.refetch()} />
-    return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={stats.data} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
+    return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={stats.data} displayMode={displayMode} onDisplayModeChange={setDisplayMode} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
   }
 }
 
-function ProfileOverview({ user, profile, password, passwordFormRef, stats, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
+function ProfileOverview({ user, profile, password, passwordFormRef, stats, displayMode, onDisplayModeChange, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; displayMode: DisplayMode; onDisplayModeChange: (mode: DisplayMode) => void; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
   return (
     <div className="space-y-6">
       <Card>
@@ -221,6 +241,25 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, twoF
               <span>{new Date(user.createdAt).toLocaleString()}</span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>界面设置</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Field label="显示模式">
+            <Select value={displayMode} onValueChange={(value) => onDisplayModeChange(value as DisplayMode)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="detailed">详细</SelectItem>
+                <SelectItem value="compact">简洁</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
         </CardContent>
       </Card>
 
@@ -326,8 +365,224 @@ function CleanupSection({ mailbox, stats, pending, onCleanup }: { mailbox?: Mail
   return <div className="space-y-6"><StatsSummary stats={stats} /><Card><CardHeader><CardTitle>清理当前邮箱</CardTitle></CardHeader><CardContent className="grid gap-3 md:grid-cols-3"><CleanupButton icon={<MailCheck className="h-4 w-4" />} title="归档已读收件箱" disabled={!mailbox || pending} onClick={() => onCleanup("archive-read-inbox")} /><CleanupButton icon={<MailX className="h-4 w-4" />} title="清空垃圾邮件" disabled={!mailbox || pending} onClick={() => onCleanup("empty-spam")} /><CleanupButton icon={<Trash2 className="h-4 w-4" />} title="清空回收站" disabled={!mailbox || pending} onClick={() => onCleanup("empty-trash")} /></CardContent></Card></div>
 }
 
-function RulesSection({ items, mailboxes, mailboxId, action, onMailboxChange, onActionChange, onCreate, onDelete, pending }: { items: any[]; mailboxes: Mailbox[]; mailboxId: string; action: string; onMailboxChange: (value: string) => void; onActionChange: (value: string) => void; onCreate: (form: FormData) => void; onDelete: (id: string) => void; pending: boolean }) {
-  return <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>新增收件规则</CardTitle></CardHeader><CardContent><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); onCreate(new FormData(e.currentTarget)); e.currentTarget.reset() }}><Field label="规则名称"><Input name="name" /></Field><Field label="适用邮箱"><MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={onMailboxChange} /></Field><div className="grid gap-3 md:grid-cols-2"><Field label="发件人包含"><Input name="fromContains" /></Field><Field label="主题包含"><Input name="subjectContains" /></Field></div><Field label="执行动作"><Select value={action} onValueChange={onActionChange}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="archive">移入归档</SelectItem><SelectItem value="trash">移入回收站</SelectItem><SelectItem value="star">添加星标</SelectItem><SelectItem value="mark-read">标记已读</SelectItem></SelectContent></Select></Field><Button className="w-full" disabled={pending}>{pending ? "保存中..." : "保存规则"}</Button></form></CardContent></Card><Card><CardHeader><CardTitle>规则列表</CardTitle></CardHeader><CardContent className="space-y-2">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><div className="min-w-0"><div className="truncate text-sm font-medium">{item.name}<Badge variant="outline" className="ml-2">{actionLabels[item.action]}</Badge></div><div className="truncate text-xs text-muted-foreground">{item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address : "全部邮箱"} · {item.fromContains ? `发件人包含 ${item.fromContains}` : ""} {item.subjectContains ? `主题包含 ${item.subjectContains}` : ""}</div></div><Button variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => onDelete(item.id)}><Trash2 className="h-4 w-4" /></Button></div>)}{items.length === 0 && <EmptyState text="暂无收件规则" />}</CardContent></Card></div>
+type RuleCreatePayload = {
+  mailboxId: string
+  name: string
+  matchMode: "all" | "any"
+  conditions: MailRuleCondition[]
+  actions: MailRuleAction[]
+  applyToExisting: boolean
+  stopProcessing: boolean
+  enabled: boolean
+}
+
+const conditionFieldLabels: Record<MailRuleCondition["field"], string> = { from: "发件人地址", to: "收件人地址", subject: "邮件主题", body: "邮件正文" }
+const conditionOperatorLabels: Record<MailRuleCondition["operator"], string> = { contains: "包含", "not-contains": "不包含", equals: "等于", "not-equals": "不等于", "starts-with": "开头是", "ends-with": "结尾是" }
+const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到" }
+
+function RulesSection({ items, mailboxes, labels, open, onOpenChange, onCreate, onDelete, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; pending: boolean }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button onClick={() => onOpenChange(true)}><Plus className="h-4 w-4" />新建规则</Button>
+      </div>
+      <Card>
+        <CardHeader><CardTitle>规则列表</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {items.map((item) => <RuleListItem key={item.id} item={item} mailboxes={mailboxes} onDelete={onDelete} />)}
+          {items.length === 0 && <EmptyState text="暂无收件规则" />}
+        </CardContent>
+      </Card>
+      <RuleDialog open={open} onOpenChange={onOpenChange} mailboxes={mailboxes} labels={labels} pending={pending} onCreate={onCreate} />
+    </div>
+  )
+}
+
+function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: Mailbox[]; labels: MailLabel[]; pending: boolean; onCreate: (payload: RuleCreatePayload) => void }) {
+  const [name, setName] = React.useState("我的规则")
+  const [mailboxId, setMailboxId] = React.useState("all")
+  const [matchMode, setMatchMode] = React.useState<"all" | "any">("all")
+  const [conditions, setConditions] = React.useState<MailRuleCondition[]>([{ field: "from", operator: "contains", value: "" }])
+  const [actions, setActions] = React.useState<MailRuleAction[]>([{ type: "label", value: labels[0]?.name || "" }])
+  const [enabled, setEnabled] = React.useState(true)
+  const [applyToExisting, setApplyToExisting] = React.useState(false)
+  const [stopProcessing, setStopProcessing] = React.useState(false)
+  const selectedMailboxId = mailboxId === "all" ? "" : mailboxId
+  const labelQuery = useQuery({ queryKey: ["labels", "rule-dialog", selectedMailboxId], queryFn: () => api.labels(selectedMailboxId), enabled: !!selectedMailboxId })
+  const availableLabels = selectedMailboxId ? (labelQuery.data?.items || []) : labels
+
+  React.useEffect(() => {
+    if (!open) return
+    setName("我的规则")
+    setMailboxId("all")
+    setMatchMode("all")
+    setConditions([{ field: "from", operator: "contains", value: "" }])
+    setActions([{ type: "label", value: labels[0]?.name || "" }])
+    setEnabled(true)
+    setApplyToExisting(false)
+    setStopProcessing(false)
+  }, [open, labels])
+
+  function updateCondition(index: number, patch: Partial<MailRuleCondition>) {
+    setConditions((items) => items.map((item, i) => i === index ? { ...item, ...patch } : item))
+  }
+  function updateAction(index: number, patch: Partial<MailRuleAction>) {
+    setActions((items) => items.map((item, i) => i === index ? normalizeDraftAction({ ...item, ...patch }, availableLabels) : item))
+  }
+  function addCondition() { setConditions((items) => [...items, { field: "subject", operator: "contains", value: "" }]) }
+  function addAction() { setActions((items) => [...items, { type: "star" }]) }
+  function removeCondition(index: number) { setConditions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
+  function removeAction(index: number) { setActions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
+
+  const validConditions = conditions.map((item) => ({ ...item, value: item.value.trim() })).filter((item) => item.value)
+  const validActions = actions.map((item) => normalizeDraftAction(item, availableLabels)).filter((item) => item.type !== "label" || item.value || item.labelId).filter((item) => item.type !== "move" || item.value)
+  const canCreate = validConditions.length > 0 && validActions.length > 0 && !pending
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!canCreate) return
+    onCreate({ mailboxId: selectedMailboxId, name: name.trim() || "我的规则", matchMode, conditions: validConditions, actions: validActions, applyToExisting, stopProcessing, enabled })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(94vw,84rem)] max-w-none gap-0 overflow-hidden p-0">
+        <DialogHeader className="border-b px-8 py-6">
+          <DialogTitle className="text-2xl">新建规则</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={submit}>
+          <div className="space-y-7 px-8 py-7">
+            <Field label="名称"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="我的规则" /></Field>
+            <Field label="适用邮箱"><MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={setMailboxId} /></Field>
+
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                <span>当新邮件到达时，满足以下</span>
+                <Select value={matchMode} onValueChange={(value) => setMatchMode(value as "all" | "any")}>
+                  <SelectTrigger className="h-9 w-[132px]"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="all">所有条件</SelectItem><SelectItem value="any">任一条件</SelectItem></SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-3">
+                {conditions.map((condition, index) => (
+                  <div key={index} className="grid gap-3 md:grid-cols-[220px_150px_minmax(0,1fr)_auto_auto]">
+                    <Select value={condition.field} onValueChange={(value) => updateCondition(index, { field: value as MailRuleCondition["field"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{(Object.keys(conditionFieldLabels) as MailRuleCondition["field"][]).map((value) => <SelectItem key={value} value={value}>{conditionFieldLabels[value]}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Select value={condition.operator} onValueChange={(value) => updateCondition(index, { operator: value as MailRuleCondition["operator"] })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{(Object.keys(conditionOperatorLabels) as MailRuleCondition["operator"][]).map((value) => <SelectItem key={value} value={value}>{conditionOperatorLabels[value]}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="输入值" />
+                    <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeCondition(index)} disabled={conditions.length === 1}><X className="h-4 w-4" /></Button>
+                    <Button type="button" variant="ghost" size="icon" onClick={addCondition}><Plus className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div className="text-sm">执行以下动作</div>
+              <div className="space-y-3">
+                {actions.map((action, index) => (
+                  <div key={index} className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto_auto]">
+                    <Select value={action.type} onValueChange={(value) => updateAction(index, { type: value as MailRuleAction["type"], value: "", labelId: "" })}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>{(Object.keys(ruleActionLabels) as MailRuleAction["type"][]).map((value) => <SelectItem key={value} value={value}>{ruleActionLabels[value]}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <RuleActionValue action={action} labels={availableLabels} onChange={(patch) => updateAction(index, patch)} />
+                    <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeAction(index)} disabled={actions.length === 1}><X className="h-4 w-4" /></Button>
+                    <Button type="button" variant="ghost" size="icon" onClick={addAction}><Plus className="h-4 w-4" /></Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <Separator />
+
+            <div className="space-y-4">
+              <RuleCheckbox checked={enabled} onCheckedChange={setEnabled} label="立即启用" />
+              <RuleCheckbox checked={applyToExisting} onCheckedChange={setApplyToExisting} label="应用于现有邮件" />
+              <div className="flex items-center gap-2">
+                <RuleCheckbox checked={stopProcessing} onCheckedChange={setStopProcessing} label="终止规则：命中此规则后不再应用其他规则" />
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter className="border-t px-8 py-5">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button disabled={!canCreate}>{pending ? "创建中..." : "创建"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RuleActionValue({ action, labels, onChange }: { action: MailRuleAction; labels: MailLabel[]; onChange: (patch: Partial<MailRuleAction>) => void }) {
+  if (action.type === "label") {
+    if (labels.length > 0) {
+      return (
+        <Select value={action.value || labels[0].name} onValueChange={(value) => onChange({ value, labelId: labels.find((item) => item.name === value)?.id || "" })}>
+          <SelectTrigger><SelectValue placeholder="选择标签" /></SelectTrigger>
+          <SelectContent>{labels.map((label) => <SelectItem key={label.id} value={label.name}>{label.name}</SelectItem>)}</SelectContent>
+        </Select>
+      )
+    }
+    return <Input value={action.value || ""} onChange={(event) => onChange({ value: event.target.value, labelId: "" })} placeholder="标签名称" />
+  }
+  if (action.type === "move") {
+    return (
+      <Select value={action.value || "Archive"} onValueChange={(value) => onChange({ value })}>
+        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectContent><SelectItem value="Inbox">收件箱</SelectItem><SelectItem value="Archive">归档</SelectItem><SelectItem value="Spam">垃圾邮件</SelectItem><SelectItem value="Trash">回收站</SelectItem></SelectContent>
+      </Select>
+    )
+  }
+  return <Input value="无需填写" readOnly />
+}
+
+function RuleCheckbox({ checked, onCheckedChange, label }: { checked: boolean; onCheckedChange: (checked: boolean) => void; label: string }) {
+  const id = React.useId()
+  return <div className="flex items-center gap-3"><Checkbox id={id} checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} /><Label htmlFor={id} className="text-base font-medium">{label}</Label></div>
+}
+
+function RuleListItem({ item, mailboxes, onDelete }: { item: MailRule; mailboxes: Mailbox[]; onDelete: (id: string) => void }) {
+  const mailbox = item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address : "全部邮箱"
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
+      <div className="min-w-0 space-y-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-medium">
+          <span className="truncate">{item.name}</span>
+          <Badge variant={item.enabled ? "default" : "secondary"}>{item.enabled ? "启用" : "停用"}</Badge>
+          {item.actions.map((action, index) => <Badge key={`${action.type}-${index}`} variant="outline">{actionSummary(action)}</Badge>)}
+        </div>
+        <div className="truncate text-xs text-muted-foreground">{mailbox} · {item.matchMode === "any" ? "任一条件" : "所有条件"} · {conditionSummary(item.conditions, item.fromContains, item.subjectContains)}</div>
+      </div>
+      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-destructive" onClick={() => onDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>
+    </div>
+  )
+}
+
+function normalizeDraftAction(action: MailRuleAction, labels: MailLabel[]): MailRuleAction {
+  if (action.type === "label") {
+    const value = action.value || labels[0]?.name || ""
+    return { type: "label", value, labelId: labels.find((label) => label.name === value)?.id || action.labelId || "" }
+  }
+  if (action.type === "move") return { type: "move", value: action.value || "Archive" }
+  return { type: action.type }
+}
+
+function conditionSummary(conditions: MailRuleCondition[] = [], fromContains = "", subjectContains = "") {
+  const items = conditions.length > 0 ? conditions : [fromContains ? { field: "from", operator: "contains", value: fromContains } as MailRuleCondition : undefined, subjectContains ? { field: "subject", operator: "contains", value: subjectContains } as MailRuleCondition : undefined].filter(Boolean) as MailRuleCondition[]
+  return items.map((item) => `${conditionFieldLabels[item.field]} ${conditionOperatorLabels[item.operator]} ${item.value}`).join("；") || "无条件"
+}
+
+function actionSummary(action: MailRuleAction) {
+  if (action.type === "label") return `${ruleActionLabels[action.type]}${action.value ? `：${action.value}` : ""}`
+  if (action.type === "move") return `${ruleActionLabels[action.type]}：${folderLabel(action.value || "Archive")}`
+  return ruleActionLabels[action.type]
 }
 
 function BlockedSection({ items, mailboxes, mailboxId, spamCount, onMailboxChange, onCreate, onDelete, pending }: { items: any[]; mailboxes: Mailbox[]; mailboxId: string; spamCount: number; onMailboxChange: (value: string) => void; onCreate: (form: FormData) => void; onDelete: (id: string) => void; pending: boolean }) {

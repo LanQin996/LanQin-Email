@@ -133,15 +133,33 @@ type Contact struct {
 }
 
 type MailRule struct {
-	ID              string    `json:"id"`
-	UserID          string    `json:"userId,omitempty"`
-	MailboxID       string    `json:"mailboxId"`
-	Name            string    `json:"name"`
-	FromContains    string    `json:"fromContains"`
-	SubjectContains string    `json:"subjectContains"`
-	Action          string    `json:"action"`
-	Enabled         bool      `json:"enabled"`
-	CreatedAt       time.Time `json:"createdAt"`
+	ID                   string              `json:"id"`
+	UserID               string              `json:"userId,omitempty"`
+	MailboxID            string              `json:"mailboxId"`
+	Name                 string              `json:"name"`
+	MatchMode            string              `json:"matchMode"`
+	Conditions           []MailRuleCondition `json:"conditions"`
+	Actions              []MailRuleAction    `json:"actions"`
+	ApplyToExisting      bool                `json:"applyToExisting"`
+	StopProcessing       bool                `json:"stopProcessing"`
+	FromContains         string              `json:"fromContains"`
+	SubjectContains      string              `json:"subjectContains"`
+	Action               string              `json:"action"`
+	Enabled              bool                `json:"enabled"`
+	CreatedAt            time.Time           `json:"createdAt"`
+	AppliedExistingCount int64               `json:"appliedExistingCount,omitempty"`
+}
+
+type MailRuleCondition struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
+}
+
+type MailRuleAction struct {
+	Type    string `json:"type"`
+	Value   string `json:"value,omitempty"`
+	LabelID string `json:"labelId,omitempty"`
 }
 
 type BlockedSender struct {

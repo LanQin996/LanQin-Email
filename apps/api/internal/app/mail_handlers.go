@@ -272,8 +272,10 @@ func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
-	msg.IsRead = true
+	if r.URL.Query().Get("markRead") != "0" && !msg.IsRead {
+		_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+		msg.IsRead = true
+	}
 	respondJSON(w, http.StatusOK, msg)
 }
 

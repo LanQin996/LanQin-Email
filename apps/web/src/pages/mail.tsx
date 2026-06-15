@@ -4,13 +4,15 @@ import { marked } from "marked"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { Archive, Bold, Check, ChevronsUpDown, Code2, Copy, Forward, Image, Inbox, Italic, Link, List, ListOrdered, Mail, MailCheck, Minus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, RefreshCcw, Reply, Search, Send, Settings, SlidersHorizontal, Star, Strikethrough, Sun, Tag, Trash2, WrapText, X } from "lucide-react"
+import { Archive, ArrowLeft, Bold, Check, ChevronsUpDown, Code2, Copy, Forward, Image, Inbox, Italic, Link, List, ListOrdered, Mail, MailCheck, Minus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, RefreshCcw, Reply, Search, Send, Settings, SlidersHorizontal, Star, Strikethrough, Sun, Tag, Trash2, WrapText, X } from "lucide-react"
 import { api, Mailbox, MailFolder, MailLabel, MailMessage } from "@/lib/api"
-import { cn, formatBytes, formatDate } from "@/lib/utils"
+import { cn, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
+import { useDisplayMode } from "@/lib/display-mode"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
@@ -70,12 +72,16 @@ export function MailPage() {
   const [selectedLabelId, setSelectedLabelId] = React.useState("")
   const [query, setQuery] = React.useState("")
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
+  const [compactSelectedIds, setCompactSelectedIds] = React.useState<string[]>([])
   const [composeOpen, setComposeOpen] = React.useState(false)
   const [composeDraft, setComposeDraft] = React.useState<ComposeDraft | undefined>()
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [mailFilter, setMailFilter] = React.useState<MailFilter>("all")
   const [selectedMailboxId, setSelectedMailboxId] = React.useState(() => localStorage.getItem("lanqin:selected-mailbox") || "")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
+  const [displayMode] = useDisplayMode()
+  const [refreshing, setRefreshing] = React.useState(false)
+  const [bulkPending, setBulkPending] = React.useState(false)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
   const themeMountedRef = React.useRef(false)
 
@@ -94,8 +100,36 @@ export function MailPage() {
     },
     enabled: !!selectedMailboxId && (mailView !== "label" || !!selectedLabelId),
   })
-  const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!), enabled: !!selectedId })
-  const star = useMutation({ mutationFn: ({ id, starred }: { id: string; starred: boolean }) => api.star(id, starred), onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["messages"] }); await qc.invalidateQueries({ queryKey: ["mail-stats"] }); await qc.invalidateQueries({ queryKey: ["labels"] }) } })
+  const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!, { markRead: false }), enabled: !!selectedId })
+  function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
+    qc.setQueryData(["message", id], (current: MailMessage | undefined) => current ? { ...current, ...patch } : current)
+    qc.setQueriesData({ queryKey: ["messages"] }, (current: { items?: MailMessage[] } | undefined) => {
+      if (!current?.items) return current
+      return { ...current, items: current.items.map((message) => message.id === id ? { ...message, ...patch } : message) }
+    })
+  }
+  const star = useMutation({
+    mutationFn: ({ id, starred }: { id: string; starred: boolean }) => api.star(id, starred),
+    onMutate: ({ id, starred }) => updateCachedMessage(id, { isStarred: starred }),
+    onSuccess: async (_, variables) => {
+      await qc.invalidateQueries({ queryKey: ["messages"] })
+      await qc.invalidateQueries({ queryKey: ["message", variables.id] })
+      await qc.invalidateQueries({ queryKey: ["mail-stats"] })
+      await qc.invalidateQueries({ queryKey: ["labels"] })
+    },
+    onError: (error) => toast({ title: "操作失败", description: error.message }),
+  })
+  const markRead = useMutation({
+    mutationFn: ({ id, read }: { id: string; read: boolean }) => api.markRead(id, read),
+    onMutate: ({ id, read }) => updateCachedMessage(id, { isRead: read }),
+    onSuccess: async (_, variables) => {
+      await qc.invalidateQueries({ queryKey: ["messages"] })
+      await qc.invalidateQueries({ queryKey: ["message", variables.id] })
+      await qc.invalidateQueries({ queryKey: ["folders"] })
+      await qc.invalidateQueries({ queryKey: ["mail-stats"] })
+    },
+    onError: (error) => toast({ title: "操作失败", description: error.message }),
+  })
   const addLabel = useMutation({
     mutationFn: ({ id, label }: { id: string; label: MailLabel }) => api.addLabel(id, { name: label.name, color: label.color }),
     onSuccess: async (data) => {
@@ -158,6 +192,10 @@ export function MailPage() {
   }, [mailView])
 
   React.useEffect(() => {
+    setCompactSelectedIds([])
+  }, [selectedMailboxId, mailView, folder, selectedLabelId, query, displayMode])
+
+  React.useEffect(() => {
     applyTheme(darkMode, themeMountedRef.current)
     themeMountedRef.current = true
   }, [darkMode])
@@ -199,6 +237,51 @@ export function MailPage() {
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
   const viewTitle = mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
   const emptyMessage = allMessages.length === 0 ? (mailView === "starred" ? "暂无星标邮件" : mailView === "label" ? "当前标签没有邮件" : "当前文件夹没有邮件") : "当前筛选条件下没有邮件"
+  const visibleMessageIds = visibleMessages.map((message) => message.id)
+  const selectedCountOnPage = compactSelectedIds.filter((id) => visibleMessageIds.includes(id)).length
+  const compactAllSelected = visibleMessageIds.length > 0 && selectedCountOnPage === visibleMessageIds.length
+  const compactSomeSelected = selectedCountOnPage > 0 && !compactAllSelected
+  function toggleCompactSelectAll(checked: boolean) {
+    setCompactSelectedIds(checked ? visibleMessageIds : [])
+  }
+  function toggleCompactSelect(messageId: string, checked: boolean) {
+    setCompactSelectedIds((ids) => checked ? Array.from(new Set([...ids, messageId])) : ids.filter((id) => id !== messageId))
+  }
+  async function refreshMailData() {
+    await Promise.all([
+      qc.invalidateQueries({ queryKey: ["messages"] }),
+      qc.invalidateQueries({ queryKey: ["folders"] }),
+      qc.invalidateQueries({ queryKey: ["mail-stats"] }),
+      qc.invalidateQueries({ queryKey: ["labels"] }),
+    ])
+  }
+  async function runBulkAction(action: BulkAction) {
+    const ids = compactSelectedIds.filter((id) => visibleMessageIds.includes(id))
+    if (ids.length === 0) return
+    setBulkPending(true)
+    try {
+      if (action === "read" || action === "unread") {
+        const read = action === "read"
+        await Promise.all(ids.map((id) => api.markRead(id, read)))
+      } else if (action === "star" || action === "unstar") {
+        const starred = action === "star"
+        await Promise.all(ids.map((id) => api.star(id, starred)))
+      } else if (action === "delete") {
+        await Promise.all(ids.map((id) => api.delete(id)))
+      } else {
+        const target = action === "archive" ? "Archive" : action === "trash" ? "Trash" : "Spam"
+        await Promise.all(ids.map((id) => api.move(id, target)))
+      }
+      if (selectedId && ids.includes(selectedId)) setSelectedId(null)
+      setCompactSelectedIds([])
+      await refreshMailData()
+      toast({ title: `已处理 ${ids.length} 封邮件` })
+    } catch (error) {
+      toast({ title: "批量操作失败", description: error instanceof Error ? error.message : "请稍后重试" })
+    } finally {
+      setBulkPending(false)
+    }
+  }
   function openCompose(draft?: ComposeDraft) { setComposeDraft(draft || { key: `new-${Date.now()}` }); setComposeOpen(true) }
   function openReply(message: MailMessage) { openCompose({ key: `reply-${message.id}-${Date.now()}`, to: message.from, subject: withPrefix(message.subject, "Re:"), text: quoteMessage(message) }) }
   function openForward(message: MailMessage) { openCompose({ key: `forward-${message.id}-${Date.now()}`, subject: withPrefix(message.subject, "Fwd:"), text: quoteMessage(message) }) }
@@ -227,6 +310,22 @@ export function MailPage() {
     setMailView("label")
     setSelectedId(null)
     setMailFilter("all")
+  }
+  function openMessage(messageId: string | null) {
+    setSelectedId(messageId)
+    if (!messageId) return
+    const message = allMessages.find((item) => item.id === messageId)
+    if (message && !message.isRead) {
+      markRead.mutate({ id: message.id, read: true })
+    }
+  }
+  async function refreshMail() {
+    setRefreshing(true)
+    try {
+      await refreshMailData()
+    } finally {
+      setRefreshing(false)
+    }
   }
   async function copyCurrentMailbox() {
     if (!selectedMailbox?.address) return
@@ -337,7 +436,7 @@ export function MailPage() {
               <section className="flex h-full min-h-0 flex-col">
                 <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
                   <div className="flex items-center gap-2">
-                    <Button size="icon" variant="ghost" onClick={() => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }) }}><RefreshCcw className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing} className={cn("transition-all", refreshing && "bg-primary/5 text-primary")}><RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>
                     <Button variant="outline" size="sm" disabled={markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -358,18 +457,54 @@ export function MailPage() {
                   </div>
                 </header>
 
+                {displayMode === "compact" ? (
+                  <CompactMailView
+                    title={viewTitle}
+                    icon={mailView === "label" && selectedLabel ? <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} /> : undefined}
+                    messages={visibleMessages}
+                    total={allMessages.length}
+                    selectedIds={compactSelectedIds}
+                    allSelected={compactAllSelected}
+                    someSelected={compactSomeSelected}
+                    loading={messages.isLoading}
+                    emptyMessage={emptyMessage}
+                    selectedId={selectedId}
+                    selected={selected}
+                    detailLoading={detail.isLoading}
+                    labels={labelItems}
+                    labelPending={addLabel.isPending || removeLabel.isPending}
+                    onSelect={openMessage}
+                    onSelectAll={toggleCompactSelectAll}
+                    onToggleSelected={toggleCompactSelect}
+                    onCloseReader={() => setSelectedId(null)}
+                    onStar={(message) => star.mutate({ id: message.id, starred: !message.isStarred })}
+                    onReply={openReply}
+                    onForward={openForward}
+                    onArchive={(message) => move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })}
+                    onDelete={(message) => del.mutate(message.id)}
+                    onToggleRead={(message) => markRead.mutate({ id: message.id, read: !message.isRead })}
+                    onAddLabel={(message, label) => addLabel.mutate({ id: message.id, label })}
+                    onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
+                    bulkPending={bulkPending}
+                    onBulkAction={runBulkAction}
+                  />
+                ) : (
                 <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
                   <ResizablePanel defaultSize={32} minSize={24} maxSize={44}>
                     <div className="flex h-full min-h-0 flex-col">
                       <div className="flex h-14 shrink-0 items-center justify-between border-b px-5">
-                        <div>
-                          <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} />}{viewTitle}</div>
-                          <div className="text-xs text-muted-foreground">{visibleMessages.length} / {allMessages.length} 封邮件</div>
+                        <div className="flex min-w-0 items-center gap-3">
+                          <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} />}{viewTitle}</div>
+                            <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
+                          </div>
                         </div>
+                        {selectedCountOnPage > 0 && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
                       </div>
                       <ScrollArea className="min-h-0 flex-1">
                         {messages.isLoading && <MessageSkeleton />}
-                        {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} onClick={() => setSelectedId(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} />)}
+                        {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} />)}
                         {!messages.isLoading && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
                       </ScrollArea>
                     </div>
@@ -395,7 +530,7 @@ export function MailPage() {
                               <Button variant="destructive" size="sm" onClick={() => del.mutate(selected.id)}>删除</Button>
                             </div>
                           </div>
-                          <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground">{selected.from}</span> 发给 {selected.to.join(", ")} · {formatDate(selected.receivedAt)}</div>
+                          <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground">{selected.from}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
                           <MessageLabels
                             messageLabels={selected.labels || []}
                             availableLabels={labelItems}
@@ -414,6 +549,8 @@ export function MailPage() {
                     </section>
                   </ResizablePanel>
                 </ResizablePanelGroup>
+
+                )}
               </section>
             </ResizablePanel>
           </ResizablePanelGroup>
@@ -441,6 +578,257 @@ function buildMailMenuItems(folders: MailFolder[], starredCount: number): MailMe
 
 function FolderSkeleton() { return <div className="space-y-2 p-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-4/5" /><Skeleton className="h-8 w-3/4" /></div> }
 function MessageSkeleton() { return <div className="space-y-0">{Array.from({ length: 6 }).map((_, i) => <div className="space-y-2 border-b p-4" key={i}><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-4/5" /><Skeleton className="h-3 w-full" /></div>)}</div> }
+
+type BulkAction = "read" | "unread" | "star" | "unstar" | "archive" | "trash" | "spam" | "delete"
+
+function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (action: BulkAction) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" disabled={pending}>
+          批量操作
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onAction("read")}>标为已读</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("unread")}>标为未读</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("star")}>添加星标</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("unstar")}>取消星标</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("archive")}>归档</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("trash")}>移入回收站</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("spam")}>移入垃圾邮件</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("delete")} className="text-destructive">删除</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+function CompactMailView({
+  title,
+  icon,
+  messages,
+  total,
+  selectedIds,
+  allSelected,
+  someSelected,
+  loading,
+  emptyMessage,
+  selectedId,
+  selected,
+  detailLoading,
+  labels,
+  labelPending,
+  onSelect,
+  onSelectAll,
+  onToggleSelected,
+  onCloseReader,
+  onStar,
+  onReply,
+  onForward,
+  onArchive,
+  onDelete,
+  onToggleRead,
+  onAddLabel,
+  onRemoveLabel,
+  bulkPending,
+  onBulkAction,
+}: {
+  title: string
+  icon?: React.ReactNode
+  messages: MailMessage[]
+  total: number
+  selectedIds: string[]
+  allSelected: boolean
+  someSelected: boolean
+  loading: boolean
+  emptyMessage: string
+  selectedId: string | null
+  selected?: MailMessage
+  detailLoading: boolean
+  labels: MailLabel[]
+  labelPending: boolean
+  onSelect: (id: string | null) => void
+  onSelectAll: (checked: boolean) => void
+  onToggleSelected: (id: string, checked: boolean) => void
+  onCloseReader: () => void
+  onStar: (message: MailMessage) => void
+  onReply: (message: MailMessage) => void
+  onForward: (message: MailMessage) => void
+  onArchive: (message: MailMessage) => void
+  onDelete: (message: MailMessage) => void
+  onToggleRead: (message: MailMessage) => void
+  onAddLabel: (message: MailMessage, label: MailLabel) => void
+  onRemoveLabel: (message: MailMessage, labelId: string) => void
+  bulkPending: boolean
+  onBulkAction: (action: BulkAction) => void
+}) {
+  const selectedIndex = selectedId ? messages.findIndex((message) => message.id === selectedId) : -1
+  const previousMessage = selectedIndex > 0 ? messages[selectedIndex - 1] : undefined
+  const nextMessage = selectedIndex >= 0 && selectedIndex < messages.length - 1 ? messages[selectedIndex + 1] : undefined
+
+  if (selectedId) {
+    return (
+      <CompactMessageDetail
+        selected={selected}
+        loading={detailLoading}
+        labels={labels}
+        labelPending={labelPending}
+        previousMessage={previousMessage}
+        nextMessage={nextMessage}
+        onBack={onCloseReader}
+        onSelect={onSelect}
+        onStar={onStar}
+        onReply={onReply}
+        onForward={onForward}
+        onArchive={onArchive}
+        onDelete={onDelete}
+        onToggleRead={onToggleRead}
+        onAddLabel={onAddLabel}
+        onRemoveLabel={onRemoveLabel}
+      />
+    )
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
+        <div className="flex items-center gap-3">
+          <Checkbox aria-label="选择当前页邮件" checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={(value) => onSelectAll(value === true)} />
+          <div className="flex items-center gap-2 text-base font-semibold">{icon}{title}</div>
+        </div>
+        <div className="flex items-center gap-2">
+          {selectedIds.length > 0 ? (
+            <>
+              <span className="text-sm text-muted-foreground">已选 {selectedIds.length} 封</span>
+              <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">{messages.length} / {total} 封</div>
+          )}
+        </div>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        {loading && <MessageSkeleton />}
+        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onStar={() => onStar(message)} />)}
+        {!loading && messages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
+      </ScrollArea>
+    </div>
+  )
+}
+
+function CompactMessageDetail({
+  selected,
+  loading,
+  labels,
+  labelPending,
+  previousMessage,
+  nextMessage,
+  onBack,
+  onSelect,
+  onStar,
+  onReply,
+  onForward,
+  onArchive,
+  onDelete,
+  onToggleRead,
+  onAddLabel,
+  onRemoveLabel,
+}: {
+  selected?: MailMessage
+  loading: boolean
+  labels: MailLabel[]
+  labelPending: boolean
+  previousMessage?: MailMessage
+  nextMessage?: MailMessage
+  onBack: () => void
+  onSelect: (id: string | null) => void
+  onStar: (message: MailMessage) => void
+  onReply: (message: MailMessage) => void
+  onForward: (message: MailMessage) => void
+  onArchive: (message: MailMessage) => void
+  onDelete: (message: MailMessage) => void
+  onToggleRead: (message: MailMessage) => void
+  onAddLabel: (message: MailMessage, label: MailLabel) => void
+  onRemoveLabel: (message: MailMessage, labelId: string) => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />返回</Button>
+            {selected && <Button variant="outline" size="sm" onClick={() => onReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
+            {selected && <Button variant="outline" size="sm" onClick={() => onDelete(selected)}><Trash2 className="h-4 w-4" />删除</Button>}
+            {selected && <Button variant="outline" size="sm" onClick={() => onForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
+            {selected && <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>{selected.folder === "Archive" ? "取消归档" : "归档"}</Button>}
+            {selected && <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</Button>}
+            {selected && <Button variant="outline" size="sm" onClick={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</Button>}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" disabled={!previousMessage} onClick={() => previousMessage && onSelect(previousMessage.id)}>上一封</Button>
+            <Button variant="ghost" size="sm" disabled={!nextMessage} onClick={() => nextMessage && onSelect(nextMessage.id)}>下一封</Button>
+          </div>
+        </div>
+        {loading && <div className="space-y-4 p-8"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-64 w-full" /></div>}
+        {!loading && !selected && <div className="grid flex-1 place-items-center text-sm text-muted-foreground">邮件不存在</div>}
+        {selected && (
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="w-full px-8 py-6">
+              <div className="space-y-5 border-b pb-5">
+                <div className="flex items-center gap-3">
+                  <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight">{selected.subject}</h1>
+                  <Button type="button" variant="ghost" size="icon" aria-label={selected.isStarred ? "取消星标" : "添加星标"} className="text-muted-foreground hover:text-yellow-500" onClick={() => onStar(selected)}>
+                    <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
+                  </Button>
+                </div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <Avatar className="size-10 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(selected.from)}</AvatarFallback></Avatar>
+                    <div className="min-w-0 text-sm">
+                      <div className="truncate font-medium text-foreground">{selected.from}</div>
+                      <div className="truncate text-muted-foreground">收件人 {selected.to.join(", ")}</div>
+                    </div>
+                  </div>
+                  <div className="shrink-0 text-right text-sm text-muted-foreground">{formatDateTime(selected.receivedAt)}</div>
+                </div>
+                <MessageLabels
+                  messageLabels={selected.labels || []}
+                  availableLabels={labels}
+                  onAdd={(label) => onAddLabel(selected, label)}
+                  onRemove={(labelId) => onRemoveLabel(selected, labelId)}
+                  pending={labelPending}
+                />
+              </div>
+              <div className="py-8">
+                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${selected.bodyText || ""}</pre>`) }} />
+                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
+              </div>
+            </div>
+          </ScrollArea>
+        )}
+    </div>
+  )
+}
+
+function CompactMessageRow({ message, active, checked, onCheckedChange, onClick, onStar }: { message: MailMessage; active: boolean; checked: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void }) {
+  const visibleLabels = (message.labels || []).slice(0, 2)
+  return (
+    <div onClick={onClick} className={cn("grid cursor-pointer grid-cols-[32px_28px_minmax(140px,240px)_minmax(0,1fr)_88px_36px] items-center gap-2 border-b px-4 py-2 text-sm transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
+      <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} />
+      <Mail className={cn("h-4 w-4", message.isRead ? "text-muted-foreground/70" : "fill-yellow-200 text-yellow-500")} />
+      <div className="truncate">{message.from}</div>
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate font-medium">{message.subject}</span>
+        <span className="min-w-0 truncate text-muted-foreground">{message.snippet}</span>
+        {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
+        {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+      </div>
+      <div className="shrink-0 text-right text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
+      <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
+        <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
+      </Button>
+    </div>
+  )
+}
 
 function NewLabelButton({ collapsed, pending, onCreate }: { collapsed: boolean; pending: boolean; onCreate: (name: string) => void }) {
   const [editing, setEditing] = React.useState(false)
@@ -549,13 +937,71 @@ function accountInitial(name: string, email?: string) {
   return (first || "蓝").toUpperCase()
 }
 
-function MessageRow({ message, active, onClick, onStar }: { message: MailMessage; active: boolean; onClick: () => void; onStar: () => void }) {
+function MessageRow({
+  message,
+  active,
+  checked,
+  onCheckedChange,
+  onClick,
+  onStar,
+}: {
+  message: MailMessage
+  active: boolean
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+  onClick: () => void
+  onStar: () => void
+}) {
+  const visibleLabels = (message.labels || []).slice(0, 2)
+  const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   return <div onClick={onClick} className={cn("cursor-pointer border-b p-4 transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
-    <div className="mb-1 flex items-center justify-between gap-2"><div className="truncate text-sm">{message.from}</div><div className="shrink-0 text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div></div>
-    <div className="mb-1 flex items-center gap-2"><Button type="button" variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground hover:text-yellow-500" onClick={(e) => { e.stopPropagation(); onStar() }}><Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} /></Button><span className="truncate text-sm">{message.subject}</span>{message.hasAttachments && <Paperclip className="h-3 w-3 text-muted-foreground" />}</div>
-    {message.labels && message.labels.length > 0 && <div className="mb-1 flex flex-wrap gap-1">{message.labels.map((label) => <span key={label.id} className="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium" style={{ borderColor: label.color, color: label.color }}>{label.name}</span>)}</div>}
-    <div className="line-clamp-2 text-xs text-muted-foreground">{message.snippet}</div>
+    <div className="flex gap-3">
+      <Checkbox
+        aria-label="选择邮件"
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+        onClick={(event) => event.stopPropagation()}
+        className="mt-0.5 shrink-0"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <div className="min-w-0 truncate text-sm">{message.from}</div>
+          <div className="flex shrink-0 items-center gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              aria-label={message.isStarred ? "取消星标" : "添加星标"}
+              className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
+              onClick={(e) => { e.stopPropagation(); onStar() }}
+            >
+              <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
+            </Button>
+            <div className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
+          </div>
+        </div>
+        <div className="mb-1 flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate text-sm">{message.subject}</span>
+          {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
+          {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
+          {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+        </div>
+        <div className="line-clamp-2 text-xs text-muted-foreground">{message.snippet}</div>
+      </div>
+    </div>
   </div>
+}
+
+function MailLabelBadge({ label, compact }: { label: MailLabel; compact?: boolean }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn("shrink-0 rounded-md font-normal", compact ? "h-5 px-1.5 text-[11px]" : "h-8 px-2 text-xs")}
+      style={{ borderColor: label.color, color: label.color }}
+    >
+      {label.name}
+    </Badge>
+  )
 }
 
 function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pending }: { messageLabels: MailLabel[]; availableLabels: MailLabel[]; onAdd: (label: MailLabel) => void; onRemove: (labelId: string) => void; pending: boolean }) {
@@ -565,12 +1011,12 @@ function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pendin
       <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Tag className="h-3.5 w-3.5" />标签</div>
       <div className="flex flex-wrap items-center gap-2">
         {messageLabels.map((label) => (
-          <span key={label.id} className="inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs font-medium" style={{ borderColor: label.color, color: label.color }}>
-            {label.name}
+          <Badge key={label.id} variant="outline" className="h-8 gap-1.5 rounded-md px-2 text-xs font-normal" style={{ borderColor: label.color, color: label.color }}>
+            <span>{label.name}</span>
             <Button type="button" variant="ghost" size="icon" className="h-4 w-4 rounded-full p-0 hover:bg-black/5" onClick={() => onRemove(label.id)} disabled={pending}>
               <X className="h-3 w-3" />
             </Button>
-          </span>
+          </Badge>
         ))}
         {messageLabels.length === 0 && <span className="text-xs text-muted-foreground">无标签</span>}
         <DropdownMenu>
@@ -793,7 +1239,7 @@ function withPrefix(subject: string, prefix: string) { return subject.toLowerCas
 function quoteMessage(message: MailMessage) {
   const body = message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")
   const quote = body.split("\n").map((line) => `> ${line}`).join("\n")
-  return `\n\n----- 原始邮件 -----\nFrom: ${message.from}\nTo: ${message.to.join(", ")}\nDate: ${formatDate(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
+  return `\n\n----- 原始邮件 -----\nFrom: ${message.from}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
 }
 function stripHtml(html: string) { const div = document.createElement("div"); div.innerHTML = DOMPurify.sanitize(html); return div.textContent || div.innerText || "" }
 async function fileToAttachment(file: File) {

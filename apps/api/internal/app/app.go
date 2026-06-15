@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -236,9 +237,14 @@ func (a *App) migrate(ctx context.Context) error {
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			mailbox_id TEXT NOT NULL DEFAULT '',
 			name TEXT NOT NULL,
+			match_mode TEXT NOT NULL DEFAULT 'all',
+			conditions_json TEXT NOT NULL DEFAULT '[]',
+			actions_json TEXT NOT NULL DEFAULT '[]',
 			from_contains TEXT NOT NULL DEFAULT '',
 			subject_contains TEXT NOT NULL DEFAULT '',
 			action TEXT NOT NULL,
+			apply_to_existing INTEGER NOT NULL DEFAULT 0,
+			stop_processing INTEGER NOT NULL DEFAULT 0,
 			enabled INTEGER NOT NULL DEFAULT 1,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -285,7 +291,92 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateMailRulesBuilder(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (a *App) migrateMailRulesBuilder(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(mail_rules)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	alter := []struct {
+		name string
+		sql  string
+	}{
+		{"match_mode", `ALTER TABLE mail_rules ADD COLUMN match_mode TEXT NOT NULL DEFAULT 'all'`},
+		{"conditions_json", `ALTER TABLE mail_rules ADD COLUMN conditions_json TEXT NOT NULL DEFAULT '[]'`},
+		{"actions_json", `ALTER TABLE mail_rules ADD COLUMN actions_json TEXT NOT NULL DEFAULT '[]'`},
+		{"apply_to_existing", `ALTER TABLE mail_rules ADD COLUMN apply_to_existing INTEGER NOT NULL DEFAULT 0`},
+		{"stop_processing", `ALTER TABLE mail_rules ADD COLUMN stop_processing INTEGER NOT NULL DEFAULT 0`},
+	}
+	for _, item := range alter {
+		if !columns[item.name] {
+			if _, err := a.db.ExecContext(ctx, item.sql); err != nil {
+				return err
+			}
+		}
+	}
+	existing, err := a.db.QueryContext(ctx, `SELECT id,from_contains,subject_contains,action,conditions_json,actions_json FROM mail_rules`)
+	if err != nil {
+		return err
+	}
+	defer existing.Close()
+	type update struct {
+		id         string
+		conditions string
+		actions    string
+	}
+	updates := []update{}
+	for existing.Next() {
+		var id, fromContains, subjectContains, action, conditionsJSON, actionsJSON string
+		if err := existing.Scan(&id, &fromContains, &subjectContains, &action, &conditionsJSON, &actionsJSON); err != nil {
+			return err
+		}
+		if conditionsJSON != "" && conditionsJSON != "[]" && actionsJSON != "" && actionsJSON != "[]" {
+			continue
+		}
+		conditions := []MailRuleCondition{}
+		if strings.TrimSpace(fromContains) != "" {
+			conditions = append(conditions, MailRuleCondition{Field: "from", Operator: "contains", Value: strings.TrimSpace(fromContains)})
+		}
+		if strings.TrimSpace(subjectContains) != "" {
+			conditions = append(conditions, MailRuleCondition{Field: "subject", Operator: "contains", Value: strings.TrimSpace(subjectContains)})
+		}
+		actions := []MailRuleAction{}
+		if strings.TrimSpace(action) != "" {
+			actions = append(actions, MailRuleAction{Type: strings.TrimSpace(action)})
+		}
+		condBytes, err := json.Marshal(conditions)
+		if err != nil {
+			return err
+		}
+		actionBytes, err := json.Marshal(actions)
+		if err != nil {
+			return err
+		}
+		updates = append(updates, update{id: id, conditions: string(condBytes), actions: string(actionBytes)})
+	}
+	for _, item := range updates {
+		if _, err := a.db.ExecContext(ctx, `UPDATE mail_rules SET conditions_json=?, actions_json=? WHERE id=?`, item.conditions, item.actions, item.id); err != nil {
+			return err
+		}
+	}
+	return existing.Err()
 }
 
 func (a *App) migrateUsersForTwoFactor(ctx context.Context) error {
