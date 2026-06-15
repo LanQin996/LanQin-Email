@@ -37,7 +37,7 @@ services:
       - "587:587"
     depends_on:
       - dovecot
-      - opendkim
+      - rspamd
     restart: unless-stopped
 
   dovecot:
@@ -50,15 +50,15 @@ services:
       - "993:993"
     restart: unless-stopped
 
-  opendkim:
-    image: ${LANQIN_OPENDKIM_IMAGE:-ghcr.io/lanqin996/lanqin-email-opendkim:latest}
+  rspamd:
+    image: ${LANQIN_RSPAMD_IMAGE:-ghcr.io/lanqin996/lanqin-email-rspamd:latest}
     env_file: .env
     volumes:
       - lanqin-data:/data:ro
-      - dkim-keys:/etc/opendkim/keys
+      - rspamd-dkim:/var/lib/rspamd/dkim
     restart: unless-stopped
 
 volumes:
   lanqin-data:
   maildata:
-  dkim-keys:
+  rspamd-dkim:

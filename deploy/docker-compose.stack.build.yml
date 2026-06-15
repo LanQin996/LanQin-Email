@@ -17,6 +17,6 @@ services:
     build:
       context: ./dovecot
 
-  opendkim:
+  rspamd:
     build:
-      context: ./opendkim
+      context: ./rspamd

@@ -94,10 +94,10 @@ jobs:
             suffix: -dovecot
             context: ./deploy/dovecot
             file: ./deploy/dovecot/Dockerfile
-          - name: opendkim
-            suffix: -opendkim
-            context: ./deploy/opendkim
-            file: ./deploy/opendkim/Dockerfile
+          - name: rspamd
+            suffix: -rspamd
+            context: ./deploy/rspamd
+            file: ./deploy/rspamd/Dockerfile
 
     steps:
       - name: Checkout

@@ -46,8 +46,11 @@ type storedMessage struct {
 
 func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,domain_id,local_part,address,display_name,quota_mb,status,created_at
-		FROM mailboxes WHERE user_id=? AND status='active' ORDER BY address`, user.ID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at
+		FROM mailboxes mb
+		JOIN domains d ON d.id=mb.domain_id
+		WHERE mb.user_id=? AND mb.status='active' AND d.status='active'
+		ORDER BY mb.address`, user.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load mailboxes")
 		return

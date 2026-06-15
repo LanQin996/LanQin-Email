@@ -148,6 +148,28 @@ func (c *testClient) do(method, path string, body any, out any) int {
 	return resp.StatusCode
 }
 
+func createTestDomain(t *testing.T, admin *testClient, name string) Domain {
+	t.Helper()
+	var domain Domain
+	if code := admin.do("POST", "/api/admin/domains", map[string]string{"name": name}, &domain); code != http.StatusCreated {
+		t.Fatalf("create domain %s code=%d domain=%+v", name, code, domain)
+	}
+	return domain
+}
+
+func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, displayName, password string, extra map[string]any) Mailbox {
+	t.Helper()
+	payload := map[string]any{"domainId": domainID, "localPart": localPart, "displayName": displayName, "password": password}
+	for key, value := range extra {
+		payload[key] = value
+	}
+	var mailbox Mailbox
+	if code := admin.do("POST", "/api/admin/mailboxes", payload, &mailbox); code != http.StatusCreated {
+		t.Fatalf("create mailbox %s code=%d mailbox=%+v", localPart, code, mailbox)
+	}
+	return mailbox
+}
+
 func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -159,22 +181,10 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
 
-	var domains struct {
-		Items []Domain `json:"items"`
-	}
-	if code := admin.do("GET", "/api/admin/domains", nil, &domains); code != http.StatusOK || len(domains.Items) == 0 {
-		t.Fatalf("domains code=%d items=%d", code, len(domains.Items))
-	}
-	domainID := domains.Items[0].ID
+	domainID := createTestDomain(t, admin, "lanqin.local").ID
 
-	var mb1 Mailbox
-	if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{"domainId": domainID, "localPart": "alice", "displayName": "Alice", "password": "Password123!"}, &mb1); code != http.StatusCreated {
-		t.Fatalf("create alice code=%d mailbox=%+v", code, mb1)
-	}
-	var mb2 Mailbox
-	if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{"domainId": domainID, "localPart": "bob", "displayName": "Bob", "password": "Password123!"}, &mb2); code != http.StatusCreated {
-		t.Fatalf("create bob code=%d mailbox=%+v", code, mb2)
-	}
+	mb1 := createTestMailbox(t, admin, domainID, "alice", "Alice", "Password123!", nil)
+	mb2 := createTestMailbox(t, admin, domainID, "bob", "Bob", "Password123!", nil)
 
 	var alias Alias
 	if code := admin.do("POST", "/api/admin/aliases", map[string]any{"domainId": domainID, "source": "sales", "destination": mb1.Address}, &alias); code != http.StatusCreated {
@@ -269,22 +279,11 @@ func TestUserCanSelectMultipleMailboxes(t *testing.T) {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
 
-	var domains struct {
-		Items []Domain `json:"items"`
-	}
-	if code := admin.do("GET", "/api/admin/domains", nil, &domains); code != http.StatusOK || len(domains.Items) == 0 {
-		t.Fatalf("domains code=%d items=%d", code, len(domains.Items))
-	}
-	domainID := domains.Items[0].ID
+	domainID := createTestDomain(t, admin, "lanqin.local").ID
+	createTestMailbox(t, admin, domainID, "admin", "Admin", "ChangeMe123!", map[string]any{"ownerEmail": "admin@lanqin.local", "role": "admin"})
 
-	var primary Mailbox
-	if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{"domainId": domainID, "localPart": "multi", "displayName": "Multi", "password": "Password123!"}, &primary); code != http.StatusCreated {
-		t.Fatalf("create primary code=%d mailbox=%+v", code, primary)
-	}
-	var secondary Mailbox
-	if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{"domainId": domainID, "localPart": "multi-work", "displayName": "Multi Work", "password": "Password456!", "ownerEmail": primary.Address}, &secondary); code != http.StatusCreated {
-		t.Fatalf("create secondary code=%d mailbox=%+v", code, secondary)
-	}
+	primary := createTestMailbox(t, admin, domainID, "multi", "Multi", "Password123!", nil)
+	secondary := createTestMailbox(t, admin, domainID, "multi-work", "Multi Work", "Password456!", map[string]any{"ownerEmail": primary.Address})
 	if primary.UserID != secondary.UserID {
 		t.Fatalf("mailboxes were not bound to one user: primary=%s secondary=%s", primary.UserID, secondary.UserID)
 	}
@@ -331,6 +330,8 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
+	domainID := createTestDomain(t, admin, "lanqin.local").ID
+	createTestMailbox(t, admin, domainID, "admin", "Admin", "ChangeMe123!", map[string]any{"ownerEmail": "admin@lanqin.local", "role": "admin"})
 
 	payload := map[string]any{
 		"to":      []string{"ghost@lanqin.local"},
@@ -530,7 +531,11 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 
 func TestDNSRecords(t *testing.T) {
 	a := newTestApp(t)
-	d, err := a.domainByID(context.Background(), mustDefaultDomainID(t, a))
+	domainID, err := a.createDomainTx(context.Background(), nil, "lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := a.domainByID(context.Background(), domainID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,6 +553,17 @@ func TestMaildirSyncImportsRFC822(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	a.cfg.MaildirRoot = root
+	domainID, err := a.createDomainTx(ctx, nil, "lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminUser, _, err := a.userByEmail(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.createMailbox(ctx, adminUser.ID, domainID, "admin", "Admin", "ChangeMe123!", 1024, "active"); err != nil {
+		t.Fatal(err)
+	}
 
 	mailboxes, err := a.maildirMailboxes(ctx)
 	if err != nil {

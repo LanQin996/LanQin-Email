@@ -22,7 +22,7 @@ coverage
 tmp
 data
 maildata
-dkim-keys
+rspamd-dkim
 logs
 *.log
 

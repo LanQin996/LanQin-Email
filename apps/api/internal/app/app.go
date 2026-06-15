@@ -294,7 +294,30 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateMailRulesBuilder(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateLegacyBootstrapMailbox(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (a *App) migrateLegacyBootstrapMailbox(ctx context.Context) error {
+	adminEmail := normalizeEmail(a.cfg.AdminEmail)
+	if adminEmail == "" || !strings.Contains(adminEmail, "@") {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	_, err := a.db.ExecContext(ctx, `
+		UPDATE mailboxes
+		SET status='disabled', updated_at=?
+		WHERE address=?
+		  AND display_name='LanQin Admin'
+		  AND EXISTS (
+			SELECT 1 FROM users
+			WHERE users.id=mailboxes.user_id
+			  AND users.email=?
+			  AND users.role='admin'
+		  )`, now, adminEmail, adminEmail)
+	return err
 }
 
 func (a *App) migrateMailRulesBuilder(ctx context.Context) error {
@@ -533,30 +556,19 @@ func (a *App) seed(ctx context.Context) error {
 		return nil
 	}
 
-	domainName := strings.Split(a.cfg.AdminEmail, "@")[1]
-	domainID, err := a.createDomainTx(ctx, nil, domainName)
-	if err != nil {
-		return err
-	}
-
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(a.cfg.AdminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	userID := newID("usr")
+	adminEmail := normalizeEmail(a.cfg.AdminEmail)
+	if adminEmail == "" || !strings.Contains(adminEmail, "@") {
+		return errors.New("invalid admin email")
+	}
 	_, err = a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, a.cfg.AdminEmail, "LanQin Admin", "admin", string(passwordHash), 0, now, now)
 	if err != nil {
-		return err
-	}
-
-	local := strings.Split(a.cfg.AdminEmail, "@")[0]
-	mailboxID, err := a.createMailbox(ctx, userID, domainID, local, "LanQin Admin", a.cfg.AdminPassword, 2048, "active")
-	if err != nil {
-		return err
-	}
-	if err := a.seedWelcomeMessage(ctx, mailboxID); err != nil {
 		return err
 	}
 	a.log.Warn("created default administrator; change LANQIN_ADMIN_PASSWORD in production", "email", a.cfg.AdminEmail)

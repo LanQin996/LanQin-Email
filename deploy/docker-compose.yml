@@ -11,10 +11,10 @@ services:
     volumes:
       - lanqin-data:/data
       - maildata:/var/mail/vhosts
-      - dkim-keys:/etc/opendkim/keys
+      - rspamd-dkim:/var/lib/rspamd/dkim
     restart: unless-stopped
 
 volumes:
   lanqin-data:
   maildata:
-  dkim-keys:
+  rspamd-dkim:

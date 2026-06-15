@@ -34,7 +34,7 @@ lanqin-email
 - Nginx
 - Postfix
 - Dovecot
-- OpenDKIM
+- Rspamd
 
 常用命令：
 
@@ -60,7 +60,7 @@ ghcr.io/lanqin996/lanqin-email-api:latest
 ghcr.io/lanqin996/lanqin-email-web:latest
 ghcr.io/lanqin996/lanqin-email-postfix:latest
 ghcr.io/lanqin996/lanqin-email-dovecot:latest
-ghcr.io/lanqin996/lanqin-email-opendkim:latest
+ghcr.io/lanqin996/lanqin-email-rspamd:latest
 ```
 
 如果拉取时报：
@@ -92,7 +92,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ## 可选：多容器调试部署
 
-如果需要分别查看 Postfix / Dovecot / OpenDKIM 日志，可以使用 stack 编排。
+如果需要分别查看 Postfix / Dovecot / Rspamd 日志，可以使用 stack 编排。
 
 拉取镜像版：
 
@@ -123,7 +123,8 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 
 - Postfix 读取 `/data/lanqin.db` 中的 `domains`、`mailboxes`、`aliases`。
 - Dovecot 读取同一个 SQLite 数据库进行邮箱认证，并使用 `/var/mail/vhosts` 作为 Maildir 根目录。
-- OpenDKIM 启动时从 SQLite 导出域名 DKIM 私钥到容器内 `/etc/opendkim/keys`。
+- Rspamd 通过 milter 接入 Postfix，负责 DKIM 签名和垃圾邮件标记。
+- Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
 - Go API 是 Webmail 和管理后台唯一入口；浏览器不直接连接 SMTP/IMAP。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
 
@@ -132,3 +133,4 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - 建议在服务器或边缘网关配置 HTTPS。
 - 云厂商通常默认封禁 25 端口，需要单独申请解封。
 - SQLite 适合 V1 单机部署；多节点部署前迁移到 PostgreSQL，并把 Postfix/Dovecot maps 改为 PostgreSQL。
+

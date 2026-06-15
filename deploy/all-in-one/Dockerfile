@@ -27,7 +27,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ca-certificates tzdata sqlite3 supervisor nginx \
     postfix postfix-sqlite \
     dovecot-core dovecot-imapd dovecot-lmtpd dovecot-sqlite ssl-cert \
-    opendkim opendkim-tools
+    rspamd
 
 COPY --from=api-build /out/lanqin-api /usr/local/bin/lanqin-api
 COPY --from=web-build /src/apps/web/dist /usr/share/nginx/html
@@ -41,10 +41,10 @@ COPY deploy/postfix/master.cf /etc/postfix/master.cf
 COPY deploy/postfix/sqlite-*.cf /etc/postfix/
 COPY deploy/dovecot/dovecot.conf /etc/dovecot/dovecot.conf
 COPY deploy/dovecot/dovecot-sql.conf.ext /etc/dovecot/dovecot-sql.conf.ext
-COPY deploy/opendkim/opendkim.conf /etc/opendkim.conf
-COPY deploy/opendkim/TrustedHosts /etc/opendkim/TrustedHosts
+COPY deploy/rspamd/local.d/ /etc/rspamd/local.d/
+COPY deploy/rspamd/sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
 
-RUN chmod +x /entrypoint.sh && mkdir -p /run/nginx /var/mail/vhosts /data /etc/opendkim/keys
+RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim && mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim
 
 EXPOSE 80 443 25 587 993
 CMD ["/entrypoint.sh"]
