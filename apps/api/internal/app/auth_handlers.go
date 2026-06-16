@@ -85,6 +85,8 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		DisplayName    string `json:"displayName"`
 		Password       string `json:"password"`
 		TurnstileToken string `json:"turnstileToken"`
+		DomainID       string `json:"domainId"`
+		LocalPart      string `json:"localPart"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -143,6 +145,38 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to create session")
 		return
 	}
+
+	// Create a mailbox for the registered user
+	var mailboxDomainID string
+	var mailboxLocalPart string
+	if strings.TrimSpace(req.DomainID) != "" && strings.TrimSpace(req.LocalPart) != "" {
+		// User selected a specific domain and local part
+		mailboxDomainID = strings.TrimSpace(req.DomainID)
+		mailboxLocalPart = normalizeLocalPart(req.LocalPart)
+	} else {
+		// Auto-detect: use the first active domain and email local part
+		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE status='active' ORDER BY created_at ASC LIMIT 1`).Scan(&mailboxDomainID); err != nil {
+			mailboxDomainID = ""
+		}
+		if mailboxDomainID != "" {
+			mailboxLocalPart = strings.SplitN(email, "@", 2)[0]
+		}
+	}
+	if mailboxDomainID != "" && mailboxLocalPart != "" {
+		// Check reserved prefixes
+		reserved := map[string]bool{}
+		for _, item := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
+			reserved[item] = true
+		}
+		if reserved[mailboxLocalPart] {
+			respondError(w, http.StatusForbidden, "localPart is reserved")
+			return
+		}
+		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active"); mbErr != nil {
+			a.log.Warn("failed to create mailbox for registered user", "error", mbErr, "email", email)
+		}
+	}
+
 	respondJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 

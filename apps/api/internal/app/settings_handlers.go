@@ -60,11 +60,17 @@ type systemSettingsUpdate struct {
 }
 
 type PublicSettings struct {
-	OpenRegistration bool   `json:"openRegistration"`
-	TurnstileEnabled bool   `json:"turnstileEnabled"`
-	TurnstileSiteKey string `json:"turnstileSiteKey"`
-	MailAutoRefresh  bool   `json:"mailAutoRefresh"`
-	MailRefreshMs    int    `json:"mailRefreshMs"`
+	OpenRegistration bool           `json:"openRegistration"`
+	TurnstileEnabled bool           `json:"turnstileEnabled"`
+	TurnstileSiteKey string         `json:"turnstileSiteKey"`
+	MailAutoRefresh  bool           `json:"mailAutoRefresh"`
+	MailRefreshMs    int            `json:"mailRefreshMs"`
+	MailboxDomains   []PublicDomain `json:"mailboxDomains,omitempty"`
+}
+
+type PublicDomain struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type smtpTestRequest struct {
@@ -81,7 +87,24 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	if refreshSeconds <= 0 {
 		refreshSeconds = 30
 	}
-	respondJSON(w, http.StatusOK, PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000})
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000}
+
+	// Include available domains for mailbox creation during registration
+	if a.cfg.OpenRegistration {
+		rows, err := a.db.QueryContext(r.Context(), `SELECT id, name FROM domains WHERE status='active' ORDER BY name`)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var d PublicDomain
+				if err := rows.Scan(&d.ID, &d.Name); err != nil {
+					continue
+				}
+				settings.MailboxDomains = append(settings.MailboxDomains, d)
+			}
+		}
+	}
+
+	respondJSON(w, http.StatusOK, settings)
 }
 
 func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request) {

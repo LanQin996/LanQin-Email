@@ -12,6 +12,7 @@ import { useMe } from "@/hooks/use-me"
 import { useLogout } from "@/hooks/use-logout"
 import { validatePasswordConfirm } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
+import { PasswordInput } from "@/components/ui/password-input"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
@@ -351,14 +352,14 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, disp
         <CardContent>
           <form ref={passwordFormRef} className="space-y-4" onSubmit={(e) => { e.preventDefault(); password.mutate(new FormData(e.currentTarget)) }}>
             <Field label="当前密码">
-              <Input name="currentPassword" type="password" required />
+              <PasswordInput name="currentPassword" required />
             </Field>
             <div className="grid gap-4 md:grid-cols-2">
               <Field label="新密码">
-                <Input name="newPassword" type="password" minLength={8} required />
+                <PasswordInput name="newPassword" minLength={8} required />
               </Field>
               <Field label="确认新密码">
-                <Input name="confirmPassword" type="password" minLength={8} required />
+                <PasswordInput name="confirmPassword" minLength={8} required />
               </Field>
             </div>
             <div className="flex justify-end">

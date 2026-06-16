@@ -47,7 +47,7 @@ func LoadConfig() Config {
 		CookieName:              getenv("LANQIN_COOKIE_NAME", "lanqin_session"),
 		SessionTTLHours:         getenvInt("LANQIN_SESSION_TTL_HOURS", 24*7),
 		AdminEmail:              strings.ToLower(getenv("LANQIN_ADMIN_EMAIL", "admin@lanqin.local")),
-		AdminPassword:           getenv("LANQIN_ADMIN_PASSWORD", "ChangeMe123!"),
+		AdminPassword:           getenv("LANQIN_ADMIN_PASSWORD", ""),
 		PublicHostname:          getenv("LANQIN_PUBLIC_HOSTNAME", "mail.lanqin.local"),
 		PublicBaseURL:           getenv("LANQIN_PUBLIC_BASE_URL", "http://localhost:5173"),
 		SMTPHost:                getenv("LANQIN_SMTP_HOST", ""),

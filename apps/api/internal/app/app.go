@@ -300,6 +300,10 @@ func (a *App) migrate(ctx context.Context) error {
 	return nil
 }
 
+// migrateLegacyBootstrapMailbox removes mailboxes created by an older version of seed()
+// that implicitly created an admin mailbox with display_name "LanQin Admin".
+// Current seed() creates mailboxes with display_name = admin email, so this migration
+// has no effect on fresh installs. It only cleans up after upgrades from pre-v1.0 schema.
 func (a *App) migrateLegacyBootstrapMailbox(ctx context.Context) error {
 	adminEmail := normalizeEmail(a.cfg.AdminEmail)
 	if adminEmail == "" || !strings.Contains(adminEmail, "@") {
@@ -610,7 +614,16 @@ func (a *App) seed(ctx context.Context) error {
 		return nil
 	}
 
-	passwordHash, err := bcrypt.GenerateFromPassword([]byte(a.cfg.AdminPassword), bcrypt.DefaultCost)
+	adminPassword := a.cfg.AdminPassword
+	if adminPassword == "" {
+		buf := make([]byte, 16)
+		if _, err := rand.Read(buf); err != nil {
+			return err
+		}
+		adminPassword = base64.RawURLEncoding.EncodeToString(buf)
+		a.log.Warn("LANQIN_ADMIN_PASSWORD not set; generated random password", "password", adminPassword)
+	}
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
@@ -620,12 +633,38 @@ func (a *App) seed(ctx context.Context) error {
 	if adminEmail == "" || !strings.Contains(adminEmail, "@") {
 		return errors.New("invalid admin email")
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)`, userID, a.cfg.AdminEmail, "LanQin Admin", "admin", string(passwordHash), 0, now, now)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)`, userID, adminEmail, "LanQin Admin", "admin", string(passwordHash), 0, now, now); err != nil {
+		return err
+	}
+	a.log.Warn("created default administrator; change LANQIN_ADMIN_PASSWORD in production", "email", adminEmail)
+
+	// Create domain from admin email
+	parts := strings.SplitN(adminEmail, "@", 2)
+	localPart := parts[0]
+	domainName := normalizeDomain(parts[1])
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM domains WHERE name=?`, domainName).Scan(&domainID); err != nil {
+		domainID, err = a.createDomainTx(ctx, nil, domainName)
+		if err != nil {
+			return err
+		}
+		a.log.Info("created domain for administrator", "domain", domainName)
+	} else {
+		a.log.Info("domain already exists for administrator", "domain", domainName)
+	}
+
+	// Create mailbox for admin
+	mailboxID, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, adminEmail, string(passwordHash), 1024, "active")
 	if err != nil {
 		return err
 	}
-	a.log.Warn("created default administrator; change LANQIN_ADMIN_PASSWORD in production", "email", a.cfg.AdminEmail)
+	a.log.Info("created mailbox for administrator", "address", adminEmail)
+
+	// Send welcome message
+	if err := a.seedWelcomeMessage(ctx, mailboxID); err != nil {
+		a.log.Warn("failed to create welcome message", "error", err)
+	}
 	return nil
 }
 

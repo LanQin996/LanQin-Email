@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { useMe } from "@/hooks/use-me"
 import { TurnstileBox } from "@/components/turnstile-box"
+import { PasswordInput } from "@/components/ui/password-input"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -47,7 +48,7 @@ export function LoginPage() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password">密码</Label>
-                <Input id="password" name="password" type="password" autoComplete="current-password" required className="h-11 text-base" />
+                <PasswordInput id="password" name="password" autoComplete="current-password" required className="h-11 text-base" />
               </div>
             </>
           ) : (

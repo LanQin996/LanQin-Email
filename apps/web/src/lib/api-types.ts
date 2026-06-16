@@ -48,7 +48,8 @@ export type SystemSettings = {
   reservedMailboxPrefixes: string
 }
 export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet"> & { smtpPassword: string; turnstileSecretKey: string }
-export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number }
+export type PublicDomain = { id: string; name: string }
+export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number; mailboxDomains?: PublicDomain[] }
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
-export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string }
+export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string }

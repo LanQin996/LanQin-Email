@@ -208,7 +208,13 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
 
-	domainID := createTestDomain(t, admin, "lanqin.local").ID
+	var domainList = struct {
+		Items []Domain `json:"items"`
+	}{}
+	if code := admin.do("GET", "/api/admin/domains", nil, &domainList); code != http.StatusOK || len(domainList.Items) == 0 {
+		t.Fatalf("list domains code=%d items=%+v", code, domainList.Items)
+	}
+	domainID := domainList.Items[0].ID
 
 	mb1 := createTestMailbox(t, admin, domainID, "alice", "Alice", "Password123!", nil)
 	mb2 := createTestMailbox(t, admin, domainID, "bob", "Bob", "Password123!", nil)
@@ -322,8 +328,8 @@ func TestOpenRegistrationCreatesLoginUserOnly(t *testing.T) {
 	var mine struct {
 		Items []Mailbox `json:"items"`
 	}
-	if code := client.do("GET", "/api/mail/mailboxes", nil, &mine); code != http.StatusOK || len(mine.Items) != 0 {
-		t.Fatalf("registered user should not get implicit mailbox: code=%d items=%+v", code, mine.Items)
+	if code := client.do("GET", "/api/mail/mailboxes", nil, &mine); code != http.StatusOK || len(mine.Items) != 1 {
+		t.Fatalf("registered user should get auto-created mailbox: code=%d items=%+v", code, mine.Items)
 	}
 
 	another := &testClient{t: t, server: ts}
@@ -353,17 +359,20 @@ func TestLegacyBootstrapMailboxMigrationRemovesImplicitAdminMailbox(t *testing.T
 	t.Cleanup(func() { _ = a.Close() })
 
 	ctx := context.Background()
-	var adminID string
-	if err := a.db.QueryRowContext(ctx, `SELECT id FROM users WHERE email=?`, cfg.AdminEmail).Scan(&adminID); err != nil {
+
+	// seed() now creates user + domain gmail.com + mailbox lanqinnet@gmail.com
+	// with display_name = admin email (not "LanQin Admin").
+	// Modify the mailbox to look like the old legacy pattern so the migration can find it.
+	if _, err := a.db.ExecContext(ctx, `UPDATE mailboxes SET display_name='LanQin Admin' WHERE address=?`, cfg.AdminEmail); err != nil {
 		t.Fatal(err)
 	}
-	domainID, err := a.createDomainTx(ctx, nil, "gmail.com")
-	if err != nil {
+
+	// Get the domain ID for the verification step
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM domains WHERE name=?`, "gmail.com").Scan(&domainID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.createMailbox(ctx, adminID, domainID, "lanqinnet", "LanQin Admin", "Password123!", 1024, "active"); err != nil {
-		t.Fatal(err)
-	}
+
 	if err := a.migrateLegacyBootstrapMailbox(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -455,8 +464,14 @@ func TestUserCanSelectMultipleMailboxes(t *testing.T) {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
 
-	domainID := createTestDomain(t, admin, "lanqin.local").ID
-	createTestMailbox(t, admin, domainID, "admin", "Admin", "ChangeMe123!", map[string]any{"ownerEmail": "admin@lanqin.local", "role": "admin"})
+	// seed() already created domain lanqin.local and mailbox admin@lanqin.local
+	var domainList = struct {
+		Items []Domain `json:"items"`
+	}{}
+	if code := admin.do("GET", "/api/admin/domains", nil, &domainList); code != http.StatusOK || len(domainList.Items) == 0 {
+		t.Fatalf("list domains code=%d items=%+v", code, domainList.Items)
+	}
+	domainID := domainList.Items[0].ID
 
 	primary := createTestMailbox(t, admin, domainID, "multi", "Multi", "Password123!", nil)
 	secondary := createTestMailbox(t, admin, domainID, "multi-work", "Multi Work", "Password456!", map[string]any{"ownerEmail": primary.Address})
@@ -506,9 +521,13 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
 		t.Fatalf("login code=%d body=%v", code, login)
 	}
-	domainID := createTestDomain(t, admin, "lanqin.local").ID
-	createTestMailbox(t, admin, domainID, "admin", "Admin", "ChangeMe123!", map[string]any{"ownerEmail": "admin@lanqin.local", "role": "admin"})
-
+	// seed() already created domain lanqin.local and mailbox admin@lanqin.local
+	var domainList = struct {
+		Items []Domain `json:"items"`
+	}{}
+	if code := admin.do("GET", "/api/admin/domains", nil, &domainList); code != http.StatusOK || len(domainList.Items) == 0 {
+		t.Fatalf("list domains code=%d items=%+v", code, domainList.Items)
+	}
 	payload := map[string]any{
 		"to":      []string{"ghost@lanqin.local"},
 		"subject": "should be rejected by default",
@@ -707,8 +726,8 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 
 func TestDNSRecords(t *testing.T) {
 	a := newTestApp(t)
-	domainID, err := a.createDomainTx(context.Background(), nil, "lanqin.local")
-	if err != nil {
+	var domainID string
+	if err := a.db.QueryRowContext(context.Background(), `SELECT id FROM domains WHERE name=?`, "lanqin.local").Scan(&domainID); err != nil {
 		t.Fatal(err)
 	}
 	d, err := a.domainByID(context.Background(), domainID)
@@ -729,15 +748,20 @@ func TestMaildirSyncImportsRFC822(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	a.cfg.MaildirRoot = root
-	domainID, err := a.createDomainTx(ctx, nil, "lanqin.local")
-	if err != nil {
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM domains WHERE name=?`, "lanqin.local").Scan(&domainID); err != nil {
 		t.Fatal(err)
 	}
 	adminUser, _, err := a.userByEmail(ctx, "admin@lanqin.local")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := a.createMailbox(ctx, adminUser.ID, domainID, "admin", "Admin", "ChangeMe123!", 1024, "active"); err != nil {
+	// seed() already created mailbox admin@lanqin.local
+	var mailboxID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM mailboxes WHERE user_id=? AND address=?`, adminUser.ID, "admin@lanqin.local").Scan(&mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE mailbox_id=?`, mailboxID); err != nil {
 		t.Fatal(err)
 	}
 

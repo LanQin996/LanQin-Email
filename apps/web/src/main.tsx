@@ -10,6 +10,7 @@ import { RegisterPage } from "@/pages/register"
 import { MailPage } from "@/pages/mail"
 import { AdminPage } from "@/pages/admin"
 import { ProfilePage } from "@/pages/profile"
+import { NotFoundPage } from "@/pages/not-found"
 import "./index.css"
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 10_000 } } })
@@ -23,6 +24,7 @@ const router = createBrowserRouter([
     { path: "profile", element: <ProfilePage /> },
     { path: "admin", element: <AdminOnly><AdminPage /></AdminOnly> },
   ] },
+  { path: "*", element: <NotFoundPage /> },
 ])
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
