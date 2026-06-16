@@ -4,6 +4,7 @@ myorigin = $myhostname
 mydestination = localhost
 inet_interfaces = all
 inet_protocols = all
+recipient_delimiter = +
 
 # SQLite maps read the same LanQin DB created by the Go API.
 virtual_mailbox_domains = sqlite:/etc/postfix/sqlite-domains.cf
