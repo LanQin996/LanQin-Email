@@ -330,7 +330,8 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.cfg.SMTPHost != "" {
 		if err := a.sendSMTP(mb.Address, allRecipients, mimeBytes); err != nil {
-			a.log.Warn("smtp delivery failed; keeping local sent copy", "error", err)
+			respondError(w, http.StatusBadGateway, "smtp delivery failed: "+err.Error())
+			return
 		}
 	}
 

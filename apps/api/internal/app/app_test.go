@@ -589,6 +589,32 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	}
 }
 
+func TestMailSendReturnsSMTPFailure(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	payload := map[string]any{
+		"to":      []string{"person@example.com"},
+		"subject": "smtp failure should surface",
+		"text":    "hello",
+	}
+	var errBody map[string]any
+	if code := admin.do("POST", "/api/mail/send", payload, &errBody); code != http.StatusBadGateway {
+		t.Fatalf("smtp failure code=%d body=%v", code, errBody)
+	}
+	if got, _ := errBody["error"].(string); !strings.Contains(got, "smtp delivery failed") {
+		t.Fatalf("error=%q", got)
+	}
+}
+
 func TestAdminSMTPTestEndpoint(t *testing.T) {
 	a := newTestApp(t)
 	host, port, received := startFakeSMTP(t)
