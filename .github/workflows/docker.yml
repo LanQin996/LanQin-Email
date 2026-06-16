@@ -146,5 +146,5 @@ jobs:
             type=gha,scope=lanqin-${{ matrix.name }}
             type=registry,ref=${{ steps.image.outputs.name }}:buildcache
           cache-to: |
-            type=gha,mode=max,scope=lanqin-${{ matrix.name }}
+            type=gha,mode=max,scope=lanqin-${{ matrix.name }},ignore-error=true
             type=registry,ref=${{ steps.image.outputs.name }}:buildcache,mode=max
