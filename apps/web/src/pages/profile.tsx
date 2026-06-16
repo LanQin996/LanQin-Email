@@ -9,6 +9,8 @@ import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
 import { useMe } from "@/hooks/use-me"
+import { useLogout } from "@/hooks/use-logout"
+import { validatePasswordConfirm } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -75,7 +77,7 @@ export function ProfilePage() {
   const password = useMutation({
     mutationFn: (form: FormData) => {
       const newPassword = String(form.get("newPassword") || "")
-      if (newPassword !== String(form.get("confirmPassword") || "")) throw new Error("两次输入的新密码不一致")
+      validatePasswordConfirm(newPassword, String(form.get("confirmPassword") || ""), "两次输入的新密码不一致")
       return api.changePassword({ currentPassword: String(form.get("currentPassword") || ""), newPassword })
     },
     onSuccess: () => { passwordFormRef.current?.reset(); toast({ title: "密码已更新" }) },
@@ -159,7 +161,7 @@ export function ProfilePage() {
   React.useEffect(() => { if (mailboxId) localStorage.setItem("lanqin:selected-mailbox", mailboxId); else localStorage.removeItem("lanqin:selected-mailbox") }, [mailboxId])
   React.useEffect(() => { applyTheme(darkMode, themeMountedRef.current); themeMountedRef.current = true }, [darkMode])
 
-  async function logout() { await api.logout().catch(() => undefined); qc.clear(); navigate("/login", { replace: true }) }
+  const logout = useLogout()
   async function copy(text: string) { await navigator.clipboard.writeText(text); toast({ title: "已复制" }) }
   function setTab(next: Tab) { setParams(next === "profile" ? {} : { tab: next }) }
   function toggleSidebar() { sidebarCollapsed ? (sidebarPanelRef.current?.expand(14), setSidebarCollapsed(false)) : (sidebarPanelRef.current?.collapse(), setSidebarCollapsed(true)) }

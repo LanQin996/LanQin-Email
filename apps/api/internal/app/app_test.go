@@ -332,6 +332,54 @@ func TestOpenRegistrationCreatesLoginUserOnly(t *testing.T) {
 	}
 }
 
+func TestLegacyBootstrapMailboxMigrationRemovesImplicitAdminMailbox(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Addr:              ":0",
+		DBPath:            filepath.Join(dir, "lanqin.db"),
+		DataDir:           filepath.Join(dir, "data"),
+		CookieName:        "lanqin_test",
+		SessionTTLHours:   24,
+		AdminEmail:        "lanqinnet@gmail.com",
+		AdminPassword:     "ChangeMe123!",
+		PublicHostname:    "mail.example.test",
+		PublicBaseURL:     "http://localhost:5173",
+		AllowInsecureHTTP: true,
+	}
+	a, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.Close() })
+
+	ctx := context.Background()
+	var adminID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM users WHERE email=?`, cfg.AdminEmail).Scan(&adminID); err != nil {
+		t.Fatal(err)
+	}
+	domainID, err := a.createDomainTx(ctx, nil, "gmail.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.createMailbox(ctx, adminID, domainID, "lanqinnet", "LanQin Admin", "Password123!", 1024, "active"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.migrateLegacyBootstrapMailbox(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var count int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE email=? AND role='admin'`, cfg.AdminEmail).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("admin user count=%d err=%v", count, err)
+	}
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailboxes WHERE address=?`, cfg.AdminEmail).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("legacy mailbox count=%d err=%v", count, err)
+	}
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM domains WHERE id=?`, domainID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("legacy domain count=%d err=%v", count, err)
+	}
+}
+
 func TestUserMailboxApplicationUsesAllowedDomainsAndReservedPrefixes(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())

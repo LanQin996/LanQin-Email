@@ -305,19 +305,73 @@ func (a *App) migrateLegacyBootstrapMailbox(ctx context.Context) error {
 	if adminEmail == "" || !strings.Contains(adminEmail, "@") {
 		return nil
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := a.db.ExecContext(ctx, `
-		UPDATE mailboxes
-		SET status='disabled', updated_at=?
-		WHERE address=?
-		  AND display_name='LanQin Admin'
-		  AND EXISTS (
-			SELECT 1 FROM users
-			WHERE users.id=mailboxes.user_id
-			  AND users.email=?
-			  AND users.role='admin'
-		  )`, now, adminEmail, adminEmail)
-	return err
+	rows, err := a.db.QueryContext(ctx, `
+		SELECT mb.id, mb.domain_id
+		FROM mailboxes mb
+		JOIN users u ON u.id=mb.user_id
+		WHERE mb.address=?
+		  AND mb.display_name='LanQin Admin'
+		  AND u.email=?
+		  AND u.role='admin'`, adminEmail, adminEmail)
+	if err != nil {
+		return err
+	}
+	type legacyMailbox struct {
+		id       string
+		domainID string
+	}
+	items := []legacyMailbox{}
+	for rows.Next() {
+		var item legacyMailbox
+		if err := rows.Scan(&item.id, &item.domainID); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range items {
+		messageRows, err := a.db.QueryContext(ctx, `SELECT id FROM messages WHERE mailbox_id=?`, item.id)
+		if err != nil {
+			return err
+		}
+		messageIDs := []string{}
+		for messageRows.Next() {
+			var messageID string
+			if err := messageRows.Scan(&messageID); err != nil {
+				messageRows.Close()
+				return err
+			}
+			messageIDs = append(messageIDs, messageID)
+		}
+		if err := messageRows.Err(); err != nil {
+			messageRows.Close()
+			return err
+		}
+		if err := messageRows.Close(); err != nil {
+			return err
+		}
+		for _, messageID := range messageIDs {
+			a.deleteMessageFiles(ctx, messageID)
+		}
+		if _, err := a.db.ExecContext(ctx, `DELETE FROM mailboxes WHERE id=?`, item.id); err != nil {
+			return err
+		}
+		if _, err := a.db.ExecContext(ctx, `
+			DELETE FROM domains
+			WHERE id=?
+			  AND NOT EXISTS (SELECT 1 FROM mailboxes WHERE domain_id=domains.id)
+			  AND NOT EXISTS (SELECT 1 FROM aliases WHERE domain_id=domains.id)`, item.domainID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) migrateMailRulesBuilder(ctx context.Context) error {

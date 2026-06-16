@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
-import { TurnstileBox } from "@/pages/login"
+import { TurnstileBox } from "@/components/turnstile-box"
+import { validatePasswordConfirm } from "@/lib/validation"
 
 export function RegisterPage() {
   const me = useMe()
@@ -20,7 +21,7 @@ export function RegisterPage() {
     mutationFn: (form: FormData) => {
       const password = String(form.get("password") || "")
       const confirmPassword = String(form.get("confirmPassword") || "")
-      if (password !== confirmPassword) throw new Error("两次输入的密码不一致")
+      validatePasswordConfirm(password, confirmPassword)
       return api.register({
         email: String(form.get("email") || ""),
         displayName: String(form.get("displayName") || ""),

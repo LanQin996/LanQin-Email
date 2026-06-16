@@ -1,9 +1,9 @@
 import * as React from "react"
-import { Navigate, Outlet, Link, useLocation, useNavigate } from "react-router-dom"
+import { Outlet, Link, useLocation } from "react-router-dom"
 import { BarChart3, Copy, Globe2, Inbox, LogOut, Mail, Mailbox, Settings, Users } from "lucide-react"
-import { useQueryClient } from "@tanstack/react-query"
-import { api } from "@/lib/api"
 import { useMe } from "@/hooks/use-me"
+import { useLogout } from "@/hooks/use-logout"
+import { AuthGuard } from "@/components/auth-guard"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -34,26 +34,23 @@ const adminSections = [
 ]
 
 export function ProtectedLayout() {
+  return (
+    <AuthGuard>
+      <ProtectedContent />
+    </AuthGuard>
+  )
+}
+
+function ProtectedContent() {
   const me = useMe()
   const location = useLocation()
-  const navigate = useNavigate()
-  const qc = useQueryClient()
+  const logout = useLogout()
 
-  if (me.isLoading) return <AuthLoading />
-  if (me.isError && me.error.message.includes("请求超时")) return <AuthError message={me.error.message} onRetry={() => me.refetch()} />
-  if (me.isError || !me.data?.user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
-
-  const user = me.data.user
+  const user = me.data!.user
   const isMailRoute = location.pathname === "/" || location.pathname.startsWith("/mail")
   const isProfileRoute = location.pathname.startsWith("/profile")
   const isAdminRoute = location.pathname.startsWith("/admin")
   const adminSection = new URLSearchParams(location.search).get("section") || "overview"
-
-  async function logout() {
-    await api.logout().catch(() => undefined)
-    qc.clear()
-    navigate("/login", { replace: true })
-  }
 
   if (isMailRoute || isProfileRoute) {
     return <Outlet />
@@ -136,21 +133,5 @@ export function ProtectedLayout() {
         </div>
       </SidebarInset>
     </SidebarProvider>
-  )
-}
-
-function AuthLoading() {
-  return <div className="grid min-h-screen place-items-center text-muted-foreground">加载中...</div>
-}
-
-function AuthError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div className="grid min-h-screen place-items-center bg-background px-4">
-      <div className="w-full max-w-sm space-y-4 text-center">
-        <div className="text-sm font-medium">无法连接后端服务</div>
-        <div className="text-sm text-muted-foreground">{message}</div>
-        <Button type="button" variant="outline" onClick={onRetry}>重新加载</Button>
-      </div>
-    </div>
   )
 }
