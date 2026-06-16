@@ -354,7 +354,7 @@ func (a *App) parseMaildirMessage(raw []byte, fallbackTo string) (storedMessage,
 	if strings.TrimSpace(subject) == "" {
 		subject = "(no subject)"
 	}
-	from := firstAddress(m.Header.Get("From"))
+	from, fromName := firstAddressParts(m.Header.Get("From"))
 	to := addressList(m.Header.Get("To"))
 	cc := addressList(m.Header.Get("Cc"))
 	if len(to) == 0 {
@@ -382,6 +382,7 @@ func (a *App) parseMaildirMessage(raw []byte, fallbackTo string) (storedMessage,
 		MessageID:  strings.TrimSpace(m.Header.Get("Message-Id")),
 		Subject:    subject,
 		From:       from,
+		FromName:   fromName,
 		To:         to,
 		CC:         cc,
 		SentAt:     sentAt,
@@ -480,12 +481,13 @@ func partFilename(header textproto.MIMEHeader) string {
 	return ""
 }
 
-func firstAddress(value string) string {
-	items := addressList(value)
-	if len(items) == 0 {
-		return strings.TrimSpace(value)
+func firstAddressParts(value string) (string, string) {
+	items, err := netmail.ParseAddressList(value)
+	if err != nil || len(items) == 0 {
+		return strings.TrimSpace(value), ""
 	}
-	return items[0]
+	item := items[0]
+	return normalizeEmail(item.Address), strings.TrimSpace(item.Name)
 }
 
 func addressList(value string) []string {

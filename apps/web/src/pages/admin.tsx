@@ -430,7 +430,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                   <div className="font-medium">{message.mailboxAddress || message.recipientAddress || "-"}</div>
                   {message.ownerEmail && <div className="text-xs text-muted-foreground">{message.ownerEmail}</div>}
                 </TableCell>
-                <TableCell className="max-w-[220px] truncate">{message.from}</TableCell>
+                <TableCell className="max-w-[220px] truncate" title={adminSenderTitle(message)}>{adminSenderDisplayName(message)}</TableCell>
                 <TableCell className="max-w-[220px] truncate">{message.recipientAddress || message.to.join(", ")}</TableCell>
                 <TableCell><Badge variant="secondary">{folderName(message.folder)}</Badge></TableCell>
                 <TableCell className="text-muted-foreground">{formatDate(message.receivedAt)}</TableCell>
@@ -771,7 +771,7 @@ function AdminMessageDialog({ message, loading, open, onOpenChange }: { message?
             <div className="grid gap-3 rounded-lg border p-4 text-sm md:grid-cols-2">
               <MessageMeta label="所属邮箱" value={message.mailboxAddress || message.recipientAddress || ""} />
               <MessageMeta label="所属用户" value={message.ownerEmail || ""} />
-              <MessageMeta label="发件人" value={message.from} />
+              <MessageMeta label="发件人" value={adminSenderTitle(message)} />
               <MessageMeta label="收件人" value={message.recipientAddress || message.to.join(", ")} />
               <MessageMeta label="文件夹" value={folderName(message.folder)} />
               <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
@@ -808,6 +808,22 @@ function folderName(folder: string) {
 
 function escapeHtml(value: string) {
   return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char)
+}
+
+function adminSenderDisplayName(message: MailMessage) {
+  const fromName = message.fromName?.trim()
+  if (fromName) return fromName
+  const text = message.from.trim()
+  const namedAddress = text.match(/^"?([^"<]+?)"?\s*<[^>]+>$/)
+  const name = namedAddress?.[1]?.trim()
+  if (name) return name
+  const address = text.match(/<([^>]+)>/)?.[1]?.trim() || text
+  return address.split("@")[0]?.trim() || text || "未知发件人"
+}
+
+function adminSenderTitle(message: MailMessage) {
+  const name = message.fromName?.trim()
+  return name ? `${name} <${message.from}>` : message.from
 }
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {

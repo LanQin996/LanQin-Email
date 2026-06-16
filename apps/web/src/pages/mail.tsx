@@ -272,8 +272,9 @@ export function MailPage() {
     if (newMessages.length === 0) return
 
     const first = newMessages[0]
+    const firstSender = senderDisplayName(first)
     const title = newMessages.length > 1 ? `收到 ${newMessages.length} 封新邮件` : `新邮件：${first.subject || "(无主题)"}`
-    const description = newMessages.length > 1 ? `${first.from} 等发来新邮件` : `${first.from}${first.snippet ? ` · ${first.snippet}` : ""}`
+    const description = newMessages.length > 1 ? `${firstSender} 等发来新邮件` : `${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`
     toast({ title, description })
     playIncomingMailSound(mailAudioContextRef)
     if ("Notification" in window && Notification.permission === "granted") {
@@ -671,7 +672,7 @@ export function MailPage() {
                               <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>
                             </div>
                           </div>
-                          <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground">{selected.from}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
+                          <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
                           <MessageLabels
                             messageLabels={selected.labels || []}
                             availableLabels={labelItems}
@@ -963,9 +964,9 @@ function CompactMessageDetail({
                 </div>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex min-w-0 items-start gap-3">
-                    <Avatar className="size-10 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(selected.from)}</AvatarFallback></Avatar>
+                    <Avatar className="size-10 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(senderDisplayName(selected), selected.from)}</AvatarFallback></Avatar>
                     <div className="min-w-0 text-sm">
-                      <div className="truncate font-medium text-foreground">{selected.from}</div>
+                      <div className="truncate font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</div>
                       <div className="truncate text-muted-foreground">收件人 {selected.to.join(", ")}</div>
                     </div>
                   </div>
@@ -992,11 +993,12 @@ function CompactMessageDetail({
 
 function CompactMessageRow({ message, active, checked, onCheckedChange, onClick, onStar }: { message: MailMessage; active: boolean; checked: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
+  const senderName = senderDisplayName(message)
   return (
     <div onClick={onClick} className={cn("grid cursor-pointer grid-cols-[32px_28px_minmax(140px,240px)_minmax(0,1fr)_88px_36px] items-center gap-2 border-b px-4 py-2 text-sm transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
       <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} />
       <Mail className={cn("h-4 w-4", message.isRead ? "text-muted-foreground/70" : "fill-yellow-200 text-yellow-500")} />
-      <div className="truncate">{message.from}</div>
+      <div className="truncate" title={senderTitle(message)}>{senderName}</div>
       <div className="flex min-w-0 items-center gap-2">
         <span className="truncate font-medium">{message.subject}</span>
         <span className="min-w-0 truncate text-muted-foreground">{message.snippet}</span>
@@ -1118,6 +1120,27 @@ function accountInitial(name: string, email?: string) {
   return (first || "蓝").toUpperCase()
 }
 
+function senderDisplayName(message: MailMessage) {
+  const fromName = message.fromName?.trim()
+  if (fromName) return fromName
+  return displayNameFromAddress(message.from)
+}
+
+function displayNameFromAddress(value: string) {
+  const text = value.trim()
+  const namedAddress = text.match(/^"?([^"<]+?)"?\s*<[^>]+>$/)
+  const name = namedAddress?.[1]?.trim()
+  if (name) return name
+  const address = text.match(/<([^>]+)>/)?.[1]?.trim() || text
+  const localPart = address.split("@")[0]?.trim()
+  return localPart || text || "未知发件人"
+}
+
+function senderTitle(message: MailMessage) {
+  const name = message.fromName?.trim()
+  return name ? `${name} <${message.from}>` : message.from
+}
+
 function MessageRow({
   message,
   active,
@@ -1135,6 +1158,7 @@ function MessageRow({
 }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
+  const senderName = senderDisplayName(message)
   return <div onClick={onClick} className={cn("cursor-pointer border-b p-4 transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
     <div className="flex gap-3">
       <Checkbox
@@ -1146,7 +1170,7 @@ function MessageRow({
       />
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center justify-between gap-2">
-          <div className="min-w-0 truncate text-sm">{message.from}</div>
+          <div className="min-w-0 truncate text-sm" title={senderTitle(message)}>{senderName}</div>
           <div className="flex shrink-0 items-center gap-1">
             <Button
               type="button"
@@ -1452,7 +1476,7 @@ function withPrefix(subject: string, prefix: string) { return subject.toLowerCas
 function quoteMessage(message: MailMessage) {
   const body = message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")
   const quote = body.split("\n").map((line) => `> ${line}`).join("\n")
-  return `\n\n----- 原始邮件 -----\nFrom: ${message.from}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
+  return `\n\n----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
 }
 function stripHtml(html: string) { const div = document.createElement("div"); div.innerHTML = DOMPurify.sanitize(html); return div.textContent || div.innerText || "" }
 async function fileToAttachment(file: File) {

@@ -31,6 +31,7 @@ type storedMessage struct {
 	MessageID     string
 	Subject       string
 	From          string
+	FromName      string
 	To            []string
 	CC            []string
 	BCC           []string
@@ -144,12 +145,12 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 	limit := 30
 
 	if q != "" {
-		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
+		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
 		like := "%" + q + "%"
-		args = append(args, like, like, like, like)
+		args = append(args, like, like, like, like, like)
 	}
 	args = append(args, limit+1, offset)
-	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.message_id,m.subject,m.from_addr,m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`
 	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -322,7 +323,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	now := a.now().UTC()
 	messageID := fmt.Sprintf("<%s@%s>", newID("msg"), strings.Split(mb.Address, "@")[1])
 	mimeBytes, err := BuildMIME(MIMEMessage{
-		From: mb.Address, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
+		From: mb.Address, FromName: mb.DisplayName, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
 	})
 	if err != nil {
 		badRequest(w, err)
@@ -340,7 +341,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to load sent folder")
 		return
 	}
-	base := storedMessage{MailboxID: mb.ID, FolderID: sentFolderID, MessageUID: newID("uid"), MessageID: messageID, Subject: req.Subject, From: mb.Address, To: req.To, CC: req.CC, BCC: req.BCC, SentAt: now, ReceivedAt: now, Snippet: snippetFrom(req.Text, req.HTML), BodyText: req.Text, BodyHTML: req.HTML, IsRead: true}
+	base := storedMessage{MailboxID: mb.ID, FolderID: sentFolderID, MessageUID: newID("uid"), MessageID: messageID, Subject: req.Subject, From: mb.Address, FromName: mb.DisplayName, To: req.To, CC: req.CC, BCC: req.BCC, SentAt: now, ReceivedAt: now, Snippet: snippetFrom(req.Text, req.HTML), BodyText: req.Text, BodyHTML: req.HTML, IsRead: true}
 	sentID, err := a.insertMessage(r.Context(), base, req.Attachments)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to store sent message")
@@ -617,7 +618,7 @@ func (a *App) loadMessageForRequest(r *http.Request, id string, includeBody bool
 }
 
 func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*MailMessage, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.message_id,m.subject,m.from_addr,m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.id=?`, id)
 	msg, err := scanMessageFull(row, includeBody)
 	if err != nil {
@@ -656,8 +657,8 @@ func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments 
 		folderID = msg.FolderID
 	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
-	_, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, now, now)
+	_, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, now, now)
 	if err != nil {
 		return "", err
 	}
@@ -867,7 +868,7 @@ func scanAdminMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.MailboxAddress, &msg.OwnerEmail, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.MailboxAddress, &msg.OwnerEmail, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
@@ -881,7 +882,7 @@ func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
@@ -896,7 +897,7 @@ func scanMessageFull(row messageSummaryScanner, includeBody bool) (MailMessage, 
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
 	var bodyText, bodyHTML string
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}

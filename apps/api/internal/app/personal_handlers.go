@@ -878,7 +878,7 @@ func (a *App) applyInboundControls(ctx context.Context, messageID, mailboxID, fr
 	}
 	rows.Close()
 	msg := ruleMessage{ID: messageID, MailboxID: mailboxID, From: from, Subject: subject}
-	_ = a.db.QueryRowContext(ctx, `SELECT from_addr,to_addrs,subject,snippet,body_text FROM messages WHERE id=?`, messageID).Scan(&msg.From, &msg.To, &msg.Subject, &msg.Snippet, &msg.BodyText)
+	_ = a.db.QueryRowContext(ctx, `SELECT trim(from_addr || ' ' || COALESCE(from_name,'')),to_addrs,subject,snippet,body_text FROM messages WHERE id=?`, messageID).Scan(&msg.From, &msg.To, &msg.Subject, &msg.Snippet, &msg.BodyText)
 	for _, rule := range rules {
 		if !ruleMatches(rule, msg) {
 			continue
@@ -1128,7 +1128,7 @@ func (a *App) applyRuleToExistingMessages(ctx context.Context, userID, mailboxID
 		where += ` AND m.mailbox_id=?`
 		args = append(args, mailboxID)
 	}
-	rows, err := a.db.QueryContext(ctx, `SELECT m.id,m.mailbox_id,m.from_addr,m.to_addrs,m.subject,m.snippet,m.body_text FROM messages m JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...)
+	rows, err := a.db.QueryContext(ctx, `SELECT m.id,m.mailbox_id,trim(m.from_addr || ' ' || COALESCE(m.from_name,'')),m.to_addrs,m.subject,m.snippet,m.body_text FROM messages m JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...)
 	if err != nil {
 		return 0, err
 	}

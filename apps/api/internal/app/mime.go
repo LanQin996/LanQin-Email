@@ -10,6 +10,7 @@ import (
 	"mime"
 	"mime/multipart"
 	"net"
+	netmail "net/mail"
 	"net/smtp"
 	"net/textproto"
 	"strings"
@@ -20,6 +21,7 @@ const smtpSessionTimeout = 45 * time.Second
 
 type MIMEMessage struct {
 	From        string
+	FromName    string
 	To          []string
 	CC          []string
 	BCC         []string
@@ -38,7 +40,7 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 			fmt.Fprintf(&buf, "%s: %s\r\n", k, v)
 		}
 	}
-	writeHeader("From", m.From)
+	writeHeader("From", formatAddressHeader(m.FromName, m.From))
 	writeHeader("To", strings.Join(m.To, ", "))
 	writeHeader("Cc", strings.Join(m.CC, ", "))
 	writeHeader("Subject", mime.QEncoding.Encode("utf-8", m.Subject))
@@ -102,6 +104,15 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func formatAddressHeader(name, address string) string {
+	address = strings.TrimSpace(address)
+	name = strings.TrimSpace(name)
+	if address == "" || name == "" || strings.EqualFold(name, address) {
+		return address
+	}
+	return (&netmail.Address{Name: name, Address: address}).String()
 }
 
 func textprotoMIMEHeader(values map[string]string) textproto.MIMEHeader {

@@ -79,6 +79,7 @@ type MailMessage struct {
 	MessageID      string       `json:"messageId"`
 	Subject        string       `json:"subject"`
 	From           string       `json:"from"`
+	FromName       string       `json:"fromName,omitempty"`
 	To             []string     `json:"to"`
 	CC             []string     `json:"cc"`
 	BCC            []string     `json:"bcc,omitempty"`

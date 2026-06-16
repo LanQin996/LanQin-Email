@@ -193,6 +193,7 @@ func (a *App) migrate(ctx context.Context) error {
 			message_id TEXT NOT NULL,
 			subject TEXT NOT NULL,
 			from_addr TEXT NOT NULL,
+			from_name TEXT NOT NULL DEFAULT '',
 			to_addrs TEXT NOT NULL,
 			cc_addrs TEXT NOT NULL DEFAULT '[]',
 			bcc_addrs TEXT NOT NULL DEFAULT '[]',
@@ -210,7 +211,7 @@ func (a *App) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, snippet)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
 		`CREATE TABLE IF NOT EXISTS attachments (
@@ -297,6 +298,9 @@ func (a *App) migrate(ctx context.Context) error {
 		}
 	}
 	if err := a.migrateMessagesForUnregistered(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateMessagesFromName(ctx); err != nil {
 		return err
 	}
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
@@ -568,6 +572,7 @@ func (a *App) migrateMessagesForUnregistered(ctx context.Context) error {
 		message_id TEXT NOT NULL,
 		subject TEXT NOT NULL,
 		from_addr TEXT NOT NULL,
+		from_name TEXT NOT NULL DEFAULT '',
 		to_addrs TEXT NOT NULL,
 		cc_addrs TEXT NOT NULL DEFAULT '[]',
 		bcc_addrs TEXT NOT NULL DEFAULT '[]',
@@ -586,8 +591,8 @@ func (a *App) migrateMessagesForUnregistered(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_new(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
-		SELECT id,mailbox_id,folder_id,'',message_uid,message_id,subject,from_addr,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at FROM messages`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_new(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
+		SELECT id,mailbox_id,folder_id,'',message_uid,message_id,subject,from_addr,'',to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at FROM messages`); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TABLE messages`); err != nil {
@@ -607,10 +612,47 @@ func (a *App) migrateMessagesForUnregistered(ctx context.Context) error {
 	return nil
 }
 
+func (a *App) migrateMessagesFromName(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	hasFromName := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == "from_name" {
+			hasFromName = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasFromName {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN from_name TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	if _, err := a.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_messages_search`); err != nil {
+		return err
+	}
+	if _, err := a.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`); err != nil {
+		return err
+	}
+	return nil
+}
+
 func messageIndexes() []string {
 	return []string{
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, snippet)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
 	}
@@ -809,6 +851,7 @@ func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {
 		MessageID:  fmt.Sprintf("<%s@lanqin.local>", newID("msg")),
 		Subject:    subject,
 		From:       "system@lanqin.local",
+		FromName:   "LanQin Email",
 		To:         []string{a.cfg.AdminEmail},
 		SentAt:     now,
 		ReceivedAt: now,
