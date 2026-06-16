@@ -14,4 +14,8 @@ services:
       - ./data:/data
       - ./mail:/var/mail/vhosts
       - ./dkim:/var/lib/rspamd/dkim
+      # 生产环境如需第三方客户端校验证书，请取消下面挂载，并在 .env 配置：
+      # LANQIN_TLS_CERT_FILE=/etc/letsencrypt/live/mail.example.com/fullchain.pem
+      # LANQIN_TLS_KEY_FILE=/etc/letsencrypt/live/mail.example.com/privkey.pem
+      # - /etc/letsencrypt:/etc/letsencrypt:ro
     restart: unless-stopped

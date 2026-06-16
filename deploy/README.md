@@ -129,6 +129,36 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
 
+## 邮件客户端 TLS 证书
+
+Web 站点可以由宿主机 Nginx / 宝塔反代到容器 `80`，但 SMTP/IMAP/POP3 端口不会使用 Web 反代的证书。
+如果第三方客户端连接 `465/587/993/995` 时提示证书是 `localhost`，说明 Postfix/Dovecot 仍在使用容器自带的测试证书。
+
+生产环境请把域名证书挂载进容器，并在 `.env` 指向证书文件：
+
+```env
+LANQIN_TLS_CERT_FILE=/certs/fullchain.pem
+LANQIN_TLS_KEY_FILE=/certs/privkey.pem
+```
+
+单容器示例：
+
+```yaml
+services:
+  lanqin-email:
+    volumes:
+      - ./data:/data
+      - ./mail:/var/mail/vhosts
+      - ./dkim:/var/lib/rspamd/dkim
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+```
+
+证书域名必须覆盖 `LANQIN_PUBLIC_HOSTNAME`。更新后执行：
+
+```bash
+docker compose up -d --force-recreate
+```
+
 ## SMTP 发信排查
 
 单容器部署时，Webmail 发信默认提交给同容器内的 Postfix：
