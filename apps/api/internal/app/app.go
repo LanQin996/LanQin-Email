@@ -695,7 +695,7 @@ func (a *App) createDomainTx(ctx context.Context, tx *sql.Tx, name string) (stri
 }
 
 func generateDKIMMaterial() (string, string, error) {
-	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return "", "", err
 	}

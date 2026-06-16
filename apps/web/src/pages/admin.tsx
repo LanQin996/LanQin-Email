@@ -1,8 +1,8 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { CheckCircle2, Copy, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react"
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { ArrowRight, CheckCircle2, Circle, Copy, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react"
 import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, SystemSettings } from "@/lib/api"
 import { cn, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -19,9 +19,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 
 type Section = "overview" | "users" | "domains" | "mailboxes" | "aliases" | "messages" | "settings"
+type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 
 const sectionLabels: Record<Section, string> = {
   overview: "概览",
@@ -74,10 +76,10 @@ export function AdminPage() {
           </div>
         )}
 
-        {section === "overview" && <OverviewSection overview={overview.data} domains={domainItems} />}
+        {section === "overview" && <OverviewSection overview={overview.data} domains={domainItems} settings={settings.data} onSectionChange={(next) => setParams(next === "overview" ? {} : { section: next })} />}
         {section === "users" && <UsersSection users={userItems} />}
         {section === "domains" && <DomainsSection domains={domainItems} />}
-        {section === "mailboxes" && <MailboxesSection mailboxes={mailboxItems} users={userItems} />}
+        {section === "mailboxes" && <MailboxesSection mailboxes={mailboxItems} users={userItems} domains={domainItems} />}
         {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
         {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
         {section === "settings" && <SystemSettingsSection settings={settings.data} domains={domainItems} />}
@@ -85,7 +87,8 @@ export function AdminPage() {
     </ScrollArea>
   )
 }
-function OverviewSection({ overview, domains }: { overview?: { activeUsers: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number }; domains: Domain[] }) {
+function OverviewSection({ overview, domains, settings, onSectionChange }: { overview?: { activeUsers: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number }; domains: Domain[]; settings?: SystemSettings; onSectionChange: (section: Section) => void }) {
+  const checklist = setupChecklist(overview, domains, settings)
   return (
     <div className="space-y-6">
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
@@ -99,15 +102,59 @@ function OverviewSection({ overview, domains }: { overview?: { activeUsers: numb
           </CardContent>
         </Card>
         <Card>
+          <CardHeader><CardTitle>首次配置</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {checklist.map((item) => (
+              <Button key={item.key} type="button" variant="outline" className="h-auto w-full justify-start gap-3 px-3 py-2 text-left font-normal" onClick={() => onSectionChange(item.section)}>
+                {item.done ? <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" /> : <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                <span className="min-w-0 flex-1">
+                  <span className="block font-medium">{item.title}</span>
+                  <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
+                </span>
+                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
+        <Card>
           <CardHeader><CardTitle>DNS 状态</CardTitle></CardHeader>
           <CardContent className="space-y-2">
             {domains.map((domain) => <DomainBadgeRow key={domain.id} domain={domain} />)}
             {domains.length === 0 && <Empty text="暂无域名" />}
           </CardContent>
         </Card>
+        <Card>
+          <CardHeader><CardTitle>运行提示</CardTitle></CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <InfoLine label="公网地址" value={settings?.publicBaseUrl || "-"} />
+            <InfoLine label="SMTP" value={settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "-"} />
+            <InfoLine label="注册" value={settings?.openRegistration ? "已开放" : "关闭"} />
+            <InfoLine label="用户自助申请" value={settings?.userMailboxApplyEnabled ? "已启用" : "关闭"} />
+          </CardContent>
+        </Card>
       </div>
     </div>
   )
+}
+
+function setupChecklist(overview: { activeUsers: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number } | undefined, domains: Domain[], settings?: SystemSettings) {
+  const hasDomain = domains.length > 0
+  const dnsReady = domains.some((domain) => domain.dnsStatus === "ok")
+  const hasMailbox = (overview?.activeMailboxes || 0) > 0
+  const hasMail = (overview?.messages || 0) > 0
+  return [
+    { key: "domain", title: "添加邮件域名", detail: hasDomain ? `${domains.length} 个域名已添加` : "先添加 example.com 这样的邮件域名", done: hasDomain, section: "domains" as Section },
+    { key: "dns", title: "完成 DNS 检测", detail: dnsReady ? "至少一个域名 DNS 正常" : "配置 MX、SPF、DKIM、DMARC 后执行检测", done: dnsReady, section: "domains" as Section },
+    { key: "mailbox", title: "创建邮箱账号", detail: hasMailbox ? `${overview?.activeMailboxes || 0} 个活跃邮箱` : "给管理员或用户创建第一个邮箱", done: hasMailbox, section: "mailboxes" as Section },
+    { key: "smtp", title: "确认发信配置", detail: settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "配置本机 Postfix 或外部 SMTP", done: !!settings?.smtpHost, section: "settings" as Section },
+    { key: "mail", title: "完成收发测试", detail: hasMail ? `${overview?.messages || 0} 封邮件已入库` : "发送或接收一封测试邮件", done: hasMail, section: "messages" as Section },
+  ]
+}
+
+function InfoLine({ label, value }: { label: string; value: React.ReactNode }) {
+  return <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2"><span>{label}</span><span className="min-w-0 truncate font-medium text-foreground">{value}</span></div>
 }
 
 function UsersSection({ users }: { users: AdminUser[] }) {
@@ -116,6 +163,7 @@ function UsersSection({ users }: { users: AdminUser[] }) {
   const [query, setQuery] = React.useState("")
   const [roleFilter, setRoleFilter] = React.useState("all")
   const [statusFilter, setStatusFilter] = React.useState("all")
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const filteredUsers = users.filter((user) => {
     const keyword = query.trim().toLowerCase()
     const matchesKeyword = !keyword || [user.email, user.displayName, ...(user.mailboxes || [])].some((value) => value.toLowerCase().includes(keyword))
@@ -123,7 +171,7 @@ function UsersSection({ users }: { users: AdminUser[] }) {
     const matchesStatus = statusFilter === "all" || (statusFilter === "active" ? !user.disabled : user.disabled)
     return matchesKeyword && matchesRole && matchesStatus
   })
-  const remove = useMutation({ mutationFn: api.deleteUser, onSuccess: () => { invalidateAdmin(qc); toast({ title: "用户已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
+  const remove = useMutation({ mutationFn: api.deleteUser, onSuccess: () => { setPendingConfirm(null); invalidateAdmin(qc); toast({ title: "用户已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
   return (
     <Card>
       <CardHeader>
@@ -168,13 +216,14 @@ function UsersSection({ users }: { users: AdminUser[] }) {
                 <TableCell><UserMailboxCell user={user} /></TableCell>
                 <TableCell><Badge variant={user.disabled ? "secondary" : "default"}>{user.disabled ? "停用" : "正常"}</Badge></TableCell>
                 <TableCell className="text-muted-foreground">{new Date(user.createdAt).toLocaleDateString()}</TableCell>
-                <TableCell><UserActions user={user} onDelete={() => remove.mutate(user.id)} /></TableCell>
+                <TableCell><UserActions user={user} onDelete={() => setPendingConfirm({ title: "删除用户？", description: `将删除 ${user.email} 及其关联数据。`, confirmText: "删除用户", onConfirm: () => remove.mutate(user.id) })} /></TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
         {filteredUsers.length === 0 && <Empty text="没有匹配的用户" />}
       </CardContent>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </Card>
   )
 }
@@ -182,11 +231,17 @@ function UsersSection({ users }: { users: AdminUser[] }) {
 function DomainsSection({ domains }: { domains: Domain[] }) {
   const qc = useQueryClient()
   const { toast } = useToast()
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const update = useMutation({ mutationFn: ({ id, status }: { id: string; status: string }) => api.updateDomain(id, { status }), onSuccess: () => { invalidateAdmin(qc); toast({ title: "域名已更新" }) }, onError: (e) => toast({ title: "更新失败", description: e.message }) })
-  const remove = useMutation({ mutationFn: api.deleteDomain, onSuccess: () => { invalidateAdmin(qc); toast({ title: "域名已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
+  const remove = useMutation({ mutationFn: api.deleteDomain, onSuccess: () => { setPendingConfirm(null); invalidateAdmin(qc); toast({ title: "域名已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
   return (
     <Card>
-      <CardHeader><CardTitle>域名管理</CardTitle></CardHeader>
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <CardTitle>域名管理</CardTitle>
+          <CreateDomainDialog />
+        </div>
+      </CardHeader>
       <CardContent className="space-y-3">
         {domains.map((domain) => (
           <div key={domain.id} className="flex flex-col gap-3 rounded-lg border p-4 md:flex-row md:items-center md:justify-between">
@@ -199,12 +254,13 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
               <Badge variant={domain.dnsStatus === "ok" ? "default" : "secondary"}>{domain.dnsStatus === "ok" ? "DNS 正常" : domain.dnsStatus}</Badge>
               <DomainDNSDialog domain={domain} />
               <Button variant="outline" size="sm" onClick={() => update.mutate({ id: domain.id, status: domain.status === "active" ? "disabled" : "active" })}>{domain.status === "active" ? "停用" : "启用"}</Button>
-              <Button variant="outline" size="sm" onClick={() => remove.mutate(domain.id)}><Trash2 className="h-4 w-4" />删除</Button>
+              <Button variant="outline" size="sm" onClick={() => setPendingConfirm({ title: "删除域名？", description: `将删除 ${domain.name}，相关邮箱、别名和邮件也可能受影响。`, confirmText: "删除域名", onConfirm: () => remove.mutate(domain.id) })}><Trash2 className="h-4 w-4" />删除</Button>
             </div>
           </div>
         ))}
         {domains.length === 0 && <Empty text="暂无域名" />}
       </CardContent>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </Card>
   )
 }
@@ -223,13 +279,19 @@ function DomainDNSDialog({ domain }: { domain: Domain }) {
   )
 }
 
-function MailboxesSection({ mailboxes, users }: { mailboxes: MailboxType[]; users: AdminUser[] }) {
+function MailboxesSection({ mailboxes, users, domains }: { mailboxes: MailboxType[]; users: AdminUser[]; domains: Domain[] }) {
   const qc = useQueryClient()
   const { toast } = useToast()
-  const remove = useMutation({ mutationFn: api.deleteMailbox, onSuccess: () => { invalidateAdmin(qc); toast({ title: "邮箱已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  const remove = useMutation({ mutationFn: api.deleteMailbox, onSuccess: () => { setPendingConfirm(null); invalidateAdmin(qc); toast({ title: "邮箱已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
   return (
     <Card>
-      <CardHeader><CardTitle>邮箱账号管理</CardTitle></CardHeader>
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <CardTitle>邮箱账号管理</CardTitle>
+          <CreateMailboxDialog domains={domains} users={users} />
+        </div>
+      </CardHeader>
       <CardContent>
         <Table>
           <TableHeader><TableRow><TableHead>地址</TableHead><TableHead>归属用户</TableHead><TableHead>名称</TableHead><TableHead>配额</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
@@ -241,12 +303,14 @@ function MailboxesSection({ mailboxes, users }: { mailboxes: MailboxType[]; user
                 <TableCell>{mailbox.displayName}</TableCell>
                 <TableCell>{mailbox.quotaMb} MB</TableCell>
                 <TableCell><Badge variant={mailbox.status === "active" ? "default" : "secondary"}>{mailbox.status === "active" ? "启用" : "停用"}</Badge></TableCell>
-                <TableCell><MailboxActions mailbox={mailbox} users={users} onDelete={() => remove.mutate(mailbox.id)} /></TableCell>
+                <TableCell><MailboxActions mailbox={mailbox} users={users} onDelete={() => setPendingConfirm({ title: "删除邮箱？", description: `将删除 ${mailbox.address} 和其中邮件。`, confirmText: "删除邮箱", onConfirm: () => remove.mutate(mailbox.id) })} /></TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+        {mailboxes.length === 0 && <Empty text="暂无邮箱账号" />}
       </CardContent>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </Card>
   )
 }
@@ -254,11 +318,17 @@ function MailboxesSection({ mailboxes, users }: { mailboxes: MailboxType[]; user
 function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domain[] }) {
   const qc = useQueryClient()
   const { toast } = useToast()
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const update = useMutation({ mutationFn: ({ id, payload }: { id: string; payload: { source: string; destination: string; enabled: boolean } }) => api.updateAlias(id, payload), onSuccess: () => { invalidateAdmin(qc); toast({ title: "别名已更新" }) }, onError: (e) => toast({ title: "更新失败", description: e.message }) })
-  const remove = useMutation({ mutationFn: api.deleteAlias, onSuccess: () => { invalidateAdmin(qc); toast({ title: "别名已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
+  const remove = useMutation({ mutationFn: api.deleteAlias, onSuccess: () => { setPendingConfirm(null); invalidateAdmin(qc); toast({ title: "别名已删除" }) }, onError: (e) => toast({ title: "删除失败", description: e.message }) })
   return (
     <Card>
-      <CardHeader><CardTitle>别名/转发管理</CardTitle></CardHeader>
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <CardTitle>别名/转发管理</CardTitle>
+          <CreateAliasDialog domains={domains} />
+        </div>
+      </CardHeader>
       <CardContent>
         <Table>
           <TableHeader><TableRow><TableHead>来源</TableHead><TableHead>目标</TableHead><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
@@ -269,12 +339,14 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
                 <TableCell>{alias.destination}</TableCell>
                 <TableCell className="text-muted-foreground">{domains.find((d) => d.id === alias.domainId)?.name || alias.domainId}</TableCell>
                 <TableCell><Badge variant={alias.enabled ? "default" : "secondary"}>{alias.enabled ? "启用" : "停用"}</Badge></TableCell>
-                <TableCell><AliasActions alias={alias} onToggle={() => update.mutate({ id: alias.id, payload: { source: alias.source, destination: alias.destination, enabled: !alias.enabled } })} onDelete={() => remove.mutate(alias.id)} /></TableCell>
+                <TableCell><AliasActions alias={alias} onToggle={() => update.mutate({ id: alias.id, payload: { source: alias.source, destination: alias.destination, enabled: !alias.enabled } })} onDelete={() => setPendingConfirm({ title: "删除别名？", description: `${alias.source} 将不再转发到 ${alias.destination}。`, confirmText: "删除别名", onConfirm: () => remove.mutate(alias.id) })} /></TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
+        {aliases.length === 0 && <Empty text="暂无别名转发" />}
       </CardContent>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </Card>
   )
 }
@@ -285,16 +357,19 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   const [mailboxId, setMailboxId] = React.useState("all")
   const [folder, setFolder] = React.useState("all")
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
-  const messages = useQuery({
+  const messages = useInfiniteQuery({
     queryKey: ["admin", "messages", mailboxId, folder, query],
-    queryFn: () => api.adminMessages({
+    queryFn: ({ pageParam }) => api.adminMessages({
       mailboxId: mailboxId === "all" ? "" : mailboxId,
       folder: folder === "all" ? "" : folder,
       q: query,
+      cursor: typeof pageParam === "string" ? pageParam : "",
     }),
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
   })
   const detail = useQuery({ queryKey: ["admin", "message", selectedId], queryFn: () => api.adminMessage(selectedId!), enabled: !!selectedId })
-  const items = messages.data?.items || []
+  const items = messages.data?.pages.flatMap((page) => page.items || []) || []
   return (
     <Card>
       <CardHeader>
@@ -366,6 +441,13 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
         </Table>
         {messages.isLoading && <Empty text="加载中..." />}
         {!messages.isLoading && items.length === 0 && <Empty text="暂无邮件" />}
+        {!messages.isLoading && messages.hasNextPage && (
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" disabled={messages.isFetchingNextPage} onClick={() => messages.fetchNextPage()}>
+              {messages.isFetchingNextPage ? "加载中..." : "加载更多"}
+            </Button>
+          </div>
+        )}
       </CardContent>
       <AdminMessageDialog message={detail.data} loading={detail.isLoading} open={!!selectedId} onOpenChange={(open) => { if (!open) setSelectedId(null) }} />
     </Card>

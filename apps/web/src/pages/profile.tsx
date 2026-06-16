@@ -25,9 +25,11 @@ import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider } from "@/components/ui/sidebar"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 
 type Tab = "profile" | "mailboxes" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
+type PendingConfirm = { title: string; description?: string; confirmText: string; destructive?: boolean; onConfirm: () => void }
 const tabs: Record<Tab, { label: string; icon: React.ReactNode }> = {
   profile: { label: "账户资料", icon: <Settings className="h-4 w-4" /> },
   mailboxes: { label: "邮箱管理", icon: <Mail className="h-4 w-4" /> },
@@ -436,11 +438,68 @@ function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApp
 }
 
 function ContactsSection({ items, loading, onCreate, onDelete, onCopy, pending }: { items: { id: string; name: string; email: string; note: string }[]; loading: boolean; onCreate: (form: FormData) => void; onDelete: (id: string) => void; onCopy: (text: string) => void; pending: boolean }) {
-  return <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>新增联系人</CardTitle></CardHeader><CardContent><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); onCreate(new FormData(e.currentTarget)); e.currentTarget.reset() }}><Field label="姓名"><Input name="name" placeholder="张三" /></Field><Field label="邮箱"><Input name="email" type="email" required /></Field><Field label="备注"><Input name="note" /></Field><Button className="w-full" disabled={pending}>{pending ? "保存中..." : "保存联系人"}</Button></form></CardContent></Card><Card><CardHeader><CardTitle>联系人列表</CardTitle></CardHeader><CardContent className="space-y-2">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><div className="min-w-0"><div className="truncate text-sm font-medium">{item.name}</div><div className="truncate text-xs text-muted-foreground">{item.email}{item.note ? ` · ${item.note}` : ""}</div></div><div className="flex shrink-0 gap-1"><Button variant="ghost" size="icon" className="size-8" onClick={() => onCopy(item.email)}><Copy className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => onDelete(item.id)}><Trash2 className="h-4 w-4" /></Button></div></div>)}{!loading && items.length === 0 && <EmptyState text="暂无联系人" />}</CardContent></Card></div>
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  return (
+    <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
+      <Card>
+        <CardHeader><CardTitle>新增联系人</CardTitle></CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); onCreate(new FormData(e.currentTarget)); e.currentTarget.reset() }}>
+            <Field label="姓名"><Input name="name" placeholder="张三" /></Field>
+            <Field label="邮箱"><Input name="email" type="email" required /></Field>
+            <Field label="备注"><Input name="note" /></Field>
+            <Button className="w-full" disabled={pending}>{pending ? "保存中..." : "保存联系人"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>联系人列表</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{item.name}</div>
+                <div className="truncate text-xs text-muted-foreground">{item.email}{item.note ? ` · ${item.note}` : ""}</div>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <Button variant="ghost" size="icon" className="size-8" onClick={() => onCopy(item.email)}><Copy className="h-4 w-4" /></Button>
+                <Button variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => setPendingConfirm({ title: "删除联系人？", description: `${item.email} 将从联系人列表中移除。`, confirmText: "删除联系人", onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}><Trash2 className="h-4 w-4" /></Button>
+              </div>
+            </div>
+          ))}
+          {!loading && items.length === 0 && <EmptyState text="暂无联系人" />}
+        </CardContent>
+      </Card>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
+    </div>
+  )
 }
 
 function CleanupSection({ mailbox, stats, pending, onCleanup }: { mailbox?: Mailbox; stats?: MailStats; pending: boolean; onCleanup: (target: "empty-trash" | "empty-spam" | "archive-read-inbox") => void }) {
-  return <div className="space-y-6"><StatsSummary stats={stats} /><Card><CardHeader><CardTitle>清理当前邮箱</CardTitle></CardHeader><CardContent className="grid gap-3 md:grid-cols-3"><CleanupButton icon={<MailCheck className="h-4 w-4" />} title="归档已读收件箱" disabled={!mailbox || pending} onClick={() => onCleanup("archive-read-inbox")} /><CleanupButton icon={<MailX className="h-4 w-4" />} title="清空垃圾邮件" disabled={!mailbox || pending} onClick={() => onCleanup("empty-spam")} /><CleanupButton icon={<Trash2 className="h-4 w-4" />} title="清空回收站" disabled={!mailbox || pending} onClick={() => onCleanup("empty-trash")} /></CardContent></Card></div>
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  function confirmCleanup(target: "empty-trash" | "empty-spam" | "archive-read-inbox", title: string, destructive = false) {
+    setPendingConfirm({
+      title,
+      description: mailbox ? `将对 ${mailbox.address} 执行此清理操作。` : "请先选择邮箱。",
+      confirmText: destructive ? "确认清空" : "确认处理",
+      destructive,
+      onConfirm: () => { onCleanup(target); setPendingConfirm(null) },
+    })
+  }
+  return (
+    <div className="space-y-6">
+      <StatsSummary stats={stats} />
+      <Card>
+        <CardHeader><CardTitle>清理当前邮箱</CardTitle></CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-3">
+          <CleanupButton icon={<MailCheck className="h-4 w-4" />} title="归档已读收件箱" disabled={!mailbox || pending} onClick={() => confirmCleanup("archive-read-inbox", "归档已读收件箱？")} />
+          <CleanupButton icon={<MailX className="h-4 w-4" />} title="清空垃圾邮件" disabled={!mailbox || pending} onClick={() => confirmCleanup("empty-spam", "清空垃圾邮件？", true)} />
+          <CleanupButton icon={<Trash2 className="h-4 w-4" />} title="清空回收站" disabled={!mailbox || pending} onClick={() => confirmCleanup("empty-trash", "清空回收站？", true)} />
+        </CardContent>
+      </Card>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "确认"} destructive={!!pendingConfirm?.destructive} pending={pending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
+    </div>
+  )
 }
 
 type RuleCreatePayload = {
@@ -628,6 +687,7 @@ function RuleCheckbox({ checked, onCheckedChange, label }: { checked: boolean; o
 
 function RuleListItem({ item, mailboxes, onDelete }: { item: MailRule; mailboxes: Mailbox[]; onDelete: (id: string) => void }) {
   const mailbox = item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address : "全部邮箱"
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg border p-3">
       <div className="min-w-0 space-y-1">
@@ -638,7 +698,8 @@ function RuleListItem({ item, mailboxes, onDelete }: { item: MailRule; mailboxes
         </div>
         <div className="truncate text-xs text-muted-foreground">{mailbox} · {item.matchMode === "any" ? "任一条件" : "所有条件"} · {conditionSummary(item.conditions, item.fromContains, item.subjectContains)}</div>
       </div>
-      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-destructive" onClick={() => onDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>
+      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-destructive" onClick={() => setConfirmOpen(true)}><Trash2 className="h-4 w-4" /></Button>
+      <ConfirmDialog open={confirmOpen} title="删除收件规则？" description={`规则“${item.name}”将不再处理后续邮件。`} confirmText="删除规则" destructive onOpenChange={setConfirmOpen} onConfirm={() => { onDelete(item.id); setConfirmOpen(false) }} />
     </div>
   )
 }
@@ -664,7 +725,38 @@ function actionSummary(action: MailRuleAction) {
 }
 
 function BlockedSection({ items, mailboxes, mailboxId, spamCount, onMailboxChange, onCreate, onDelete, pending }: { items: any[]; mailboxes: Mailbox[]; mailboxId: string; spamCount: number; onMailboxChange: (value: string) => void; onCreate: (form: FormData) => void; onDelete: (id: string) => void; pending: boolean }) {
-  return <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]"><Card><CardHeader><CardTitle>新增拦截发件人</CardTitle></CardHeader><CardContent><form className="space-y-4" onSubmit={(e) => { e.preventDefault(); onCreate(new FormData(e.currentTarget)); e.currentTarget.reset() }}><Field label="适用邮箱"><MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={onMailboxChange} /></Field><Field label="发件人邮箱"><Input name="email" type="email" required /></Field><Field label="原因"><Input name="reason" /></Field><Button className="w-full" disabled={pending}>{pending ? "保存中..." : "加入拦截"}</Button></form></CardContent></Card><Card><CardHeader><CardTitle>被拦截邮件</CardTitle></CardHeader><CardContent className="space-y-2">{items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3"><div className="min-w-0"><div className="truncate text-sm font-medium">{item.email}</div><div className="truncate text-xs text-muted-foreground">{item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address : "全部邮箱"}{item.reason ? ` · ${item.reason}` : ""}</div></div><Button variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => onDelete(item.id)}><Trash2 className="h-4 w-4" /></Button></div>)}{items.length === 0 && <EmptyState text="暂无拦截发件人" />}</CardContent></Card></div>
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  return (
+    <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+      <Card>
+        <CardHeader><CardTitle>新增拦截发件人</CardTitle></CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); onCreate(new FormData(e.currentTarget)); e.currentTarget.reset() }}>
+            <Field label="适用邮箱"><MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={onMailboxChange} /></Field>
+            <Field label="发件人邮箱"><Input name="email" type="email" required /></Field>
+            <Field label="原因"><Input name="reason" /></Field>
+            <Button className="w-full" disabled={pending}>{pending ? "保存中..." : "加入拦截"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle>被拦截邮件</CardTitle></CardHeader>
+        <CardContent className="space-y-2">
+          {items.map((item) => (
+            <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+              <div className="min-w-0">
+                <div className="truncate text-sm font-medium">{item.email}</div>
+                <div className="truncate text-xs text-muted-foreground">{item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address : "全部邮箱"}{item.reason ? ` · ${item.reason}` : ""}</div>
+              </div>
+              <Button variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => setPendingConfirm({ title: "移除拦截规则？", description: `${item.email} 之后将不再被此规则拦截。`, confirmText: "移除规则", onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}><Trash2 className="h-4 w-4" /></Button>
+            </div>
+          ))}
+          {items.length === 0 && <EmptyState text="暂无拦截发件人" />}
+        </CardContent>
+      </Card>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "移除"} destructive onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
+    </div>
+  )
 }
 
 function StatsSection({ stats, mailbox, onRefresh }: { stats?: MailStats; mailbox?: Mailbox; onRefresh: () => void }) {
