@@ -11,5 +11,5 @@ COPY master.cf /etc/postfix/master.cf
 COPY sqlite-*.cf /etc/postfix/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
-EXPOSE 25 587
+EXPOSE 25 465 587
 CMD ["/entrypoint.sh"]

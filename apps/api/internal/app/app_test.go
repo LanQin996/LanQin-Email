@@ -692,6 +692,57 @@ func TestProfileAndPasswordUpdate(t *testing.T) {
 	}
 }
 
+func TestUserMailSignaturesDefaultResolution(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	mb1 := createTestMailbox(t, admin, domainID, "signer", "Signer", "Password123!", nil)
+	mb2 := createTestMailbox(t, admin, domainID, "second", "Second", "Password123!", map[string]any{"ownerEmail": mb1.Address})
+
+	user := &testClient{t: t, server: ts}
+	if code := user.do("POST", "/api/auth/login", map[string]string{"email": mb1.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("user login code=%d", code)
+	}
+	var global MailSignature
+	if code := user.do("POST", "/api/me/signatures", map[string]any{"name": "全局签名", "content": "Global Sig", "isDefault": true}, &global); code != http.StatusCreated || !global.IsDefault || global.MailboxID != "" {
+		t.Fatalf("create global signature code=%d sig=%+v", code, global)
+	}
+	var bound MailSignature
+	if code := user.do("POST", "/api/me/signatures", map[string]any{"mailboxId": mb1.ID, "name": "邮箱签名", "content": "Mailbox Sig", "isDefault": true}, &bound); code != http.StatusCreated || !bound.IsDefault || bound.MailboxID != mb1.ID {
+		t.Fatalf("create bound signature code=%d sig=%+v", code, bound)
+	}
+	var defaultResp struct {
+		Signature *MailSignature `json:"signature"`
+	}
+	if code := user.do("GET", "/api/me/signatures/default?mailboxId="+mb1.ID, nil, &defaultResp); code != http.StatusOK || defaultResp.Signature == nil || defaultResp.Signature.ID != bound.ID {
+		t.Fatalf("bound default code=%d resp=%+v", code, defaultResp)
+	}
+	if code := user.do("GET", "/api/me/signatures/default?mailboxId="+mb2.ID, nil, &defaultResp); code != http.StatusOK || defaultResp.Signature == nil || defaultResp.Signature.ID != global.ID {
+		t.Fatalf("global fallback code=%d resp=%+v", code, defaultResp)
+	}
+	var updated MailSignature
+	if code := user.do("POST", "/api/me/signatures/"+bound.ID, map[string]any{"mailboxId": mb1.ID, "name": "更新签名", "content": "Updated Sig", "isDefault": false}, &updated); code != http.StatusOK || updated.IsDefault || updated.Content != "Updated Sig" {
+		t.Fatalf("update signature code=%d sig=%+v", code, updated)
+	}
+	if code := user.do("GET", "/api/me/signatures/default?mailboxId="+mb1.ID, nil, &defaultResp); code != http.StatusOK || defaultResp.Signature == nil || defaultResp.Signature.ID != global.ID {
+		t.Fatalf("fallback after update code=%d resp=%+v", code, defaultResp)
+	}
+	var ok map[string]any
+	if code := user.do("DELETE", "/api/me/signatures/"+global.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete signature code=%d body=%v", code, ok)
+	}
+	if code := user.do("GET", "/api/me/signatures/default?mailboxId="+mb2.ID, nil, &defaultResp); code != http.StatusOK || defaultResp.Signature != nil {
+		t.Fatalf("empty default code=%d resp=%+v", code, defaultResp)
+	}
+}
+
 func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 	a := newTestApp(t)
 	a.cfg.TwoFactorEnabled = true

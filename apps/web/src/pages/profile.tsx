@@ -2,9 +2,9 @@ import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
+import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, Laptop, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailStats } from "@/lib/api"
+import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -28,11 +29,13 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 
-type Tab = "profile" | "mailboxes" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
+type Tab = "profile" | "mailboxes" | "clients" | "signatures" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
 type PendingConfirm = { title: string; description?: string; confirmText: string; destructive?: boolean; onConfirm: () => void }
 const tabs: Record<Tab, { label: string; icon: React.ReactNode }> = {
   profile: { label: "账户资料", icon: <Settings className="h-4 w-4" /> },
   mailboxes: { label: "邮箱管理", icon: <Mail className="h-4 w-4" /> },
+  clients: { label: "第三方客户端", icon: <Laptop className="h-4 w-4" /> },
+  signatures: { label: "签名管理", icon: <KeyRound className="h-4 w-4" /> },
   contacts: { label: "联系人管理", icon: <Contact className="h-4 w-4" /> },
   cleanup: { label: "邮件清理", icon: <Trash2 className="h-4 w-4" /> },
   rules: { label: "收件规则", icon: <SlidersHorizontal className="h-4 w-4" /> },
@@ -64,7 +67,9 @@ export function ProfilePage() {
   const user = me.data?.user
   const mailboxes = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes })
   const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions })
+  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts })
+  const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules })
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
@@ -107,6 +112,22 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
   const deleteContact = useMutation({ mutationFn: api.deleteContact, onSuccess: () => { qc.invalidateQueries({ queryKey: ["contacts"] }); toast({ title: "联系人已删除" }) } })
+  const createSignature = useMutation({
+    mutationFn: (form: FormData) => api.createSignature({ mailboxId: String(form.get("mailboxId") || ""), name: String(form.get("name") || ""), content: String(form.get("content") || ""), isDefault: form.get("isDefault") === "on" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["signatures"] }); qc.invalidateQueries({ queryKey: ["signature"] }); toast({ title: "签名已保存" }) },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const updateSignature = useMutation({
+    mutationFn: ({ id, form }: { id: string; form: FormData }) => api.updateSignature(id, { mailboxId: String(form.get("mailboxId") || ""), name: String(form.get("name") || ""), content: String(form.get("content") || ""), isDefault: form.get("isDefault") === "on" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["signatures"] }); qc.invalidateQueries({ queryKey: ["signature"] }); toast({ title: "签名已更新" }) },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const setDefaultSignature = useMutation({
+    mutationFn: api.setDefaultSignature,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["signatures"] }); qc.invalidateQueries({ queryKey: ["signature"] }); toast({ title: "默认签名已更新" }) },
+    onError: (error) => toast({ title: "设置失败", description: error.message }),
+  })
+  const deleteSignature = useMutation({ mutationFn: api.deleteSignature, onSuccess: () => { qc.invalidateQueries({ queryKey: ["signatures"] }); qc.invalidateQueries({ queryKey: ["signature"] }); toast({ title: "签名已删除" }) } })
   const createRule = useMutation({
     mutationFn: (payload: {
       mailboxId: string
@@ -214,6 +235,8 @@ export function ProfilePage() {
 
   function renderTab() {
     if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} />
+    if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
+    if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={stats.data} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
     if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
@@ -434,6 +457,196 @@ function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApp
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ClientSettingsSection({ mailboxes, selectedMailboxId, hostname, onSelectMailbox, onCopy }: { mailboxes: Mailbox[]; selectedMailboxId: string; hostname?: string; onSelectMailbox: (id: string) => void; onCopy: (text: string) => void }) {
+  const selected = mailboxes.find((item) => item.id === selectedMailboxId) || mailboxes[0]
+  const server = clientServerHost(hostname, selected?.address)
+  const rows = [
+    { label: "IMAP 服务器", value: `${server}:993`, security: "SSL" },
+    { label: "POP3 服务器", value: `${server}:995`, security: "SSL" },
+    { label: "SMTP 服务器", value: `${server}:465`, security: "SSL" },
+  ]
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>第三方客户端</CardTitle>
+              <div className="mt-1 text-sm text-muted-foreground">IMAP / POP3 / SMTP 配置用于 Thunderbird、Apple Mail、手机邮件客户端等。</div>
+            </div>
+            {!!selected && <Badge variant="secondary">{selected.address}</Badge>}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <Field label="选择邮箱">
+            <Select value={selected?.id || ""} onValueChange={onSelectMailbox}>
+              <SelectTrigger><SelectValue placeholder="选择邮箱" /></SelectTrigger>
+              <SelectContent>{mailboxes.map((mailbox) => <SelectItem key={mailbox.id} value={mailbox.id}>{mailbox.address}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+
+          {selected ? (
+            <>
+              <div className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{selected.address}</div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">● IMAP</Badge>
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">● POP3</Badge>
+                      <Badge variant="secondary" className="bg-emerald-100 text-emerald-700">● SMTP</Badge>
+                    </div>
+                  </div>
+                  <Badge variant="outline">已启用</Badge>
+                </div>
+              </div>
+
+              <div className="rounded-lg bg-muted p-5">
+                <div className="mb-4 font-medium">客户端配置</div>
+                <div className="space-y-3">
+                  {rows.map((row) => (
+                    <ClientConfigRow key={row.label} label={row.label} value={row.value} security={row.security} onCopy={onCopy} />
+                  ))}
+                </div>
+                <Separator className="my-4" />
+                <div className="grid gap-3 text-sm sm:grid-cols-[120px_minmax(0,1fr)]">
+                  <div className="text-muted-foreground">用户名</div>
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <span className="truncate text-right sm:text-left">{selected.address}</span>
+                    <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => onCopy(selected.address)}><Copy className="h-4 w-4" /></Button>
+                  </div>
+                  <div className="text-muted-foreground">密码</div>
+                  <div>邮箱登录密码</div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <EmptyState text="暂无邮箱账号，创建邮箱后可查看客户端配置" />
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function ClientConfigRow({ label, value, security, onCopy }: { label: string; value: string; security: string; onCopy: (text: string) => void }) {
+  return (
+    <div className="grid items-center gap-2 text-sm sm:grid-cols-[120px_minmax(0,1fr)]">
+      <div className="text-muted-foreground">{label}</div>
+      <div className="flex min-w-0 items-center justify-between gap-2">
+        <code className="truncate rounded border bg-background px-2 py-1 text-xs">{value}</code>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-xs font-medium text-emerald-600">{security}</span>
+          <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => onCopy(value)}><Copy className="h-4 w-4" /></Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SignaturesSection({ items, mailboxes, loading, pending, onCreate, onUpdate, onSetDefault, onDelete }: { items: MailSignature[]; mailboxes: Mailbox[]; loading: boolean; pending: boolean; onCreate: (form: FormData) => void; onUpdate: (id: string, form: FormData) => void; onSetDefault: (id: string) => void; onDelete: (id: string) => void }) {
+  const [mailboxId, setMailboxId] = React.useState("all")
+  const [isDefault, setIsDefault] = React.useState(false)
+  const [editing, setEditing] = React.useState<MailSignature | null>(null)
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  const editingMailboxId = editing?.mailboxId || "all"
+  const editingIsDefault = editing?.isDefault || false
+  function resetCreateForm(form: HTMLFormElement) {
+    form.reset()
+    setMailboxId("all")
+    setIsDefault(false)
+  }
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <CardTitle>签名管理</CardTitle>
+              <div className="mt-1 text-sm text-muted-foreground">支持全局签名和按发件邮箱绑定的默认签名。</div>
+            </div>
+            <div className="text-sm text-muted-foreground">共 {items.length} 个签名</div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4 rounded-lg border p-4" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); form.set("mailboxId", mailboxId === "all" ? "" : mailboxId); form.set("isDefault", isDefault ? "on" : ""); onCreate(form); resetCreateForm(e.currentTarget) }}>
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field label="签名名称"><Input name="name" required placeholder="例如：默认签名" /></Field>
+              <Field label="绑定邮箱">
+                <MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={setMailboxId} />
+              </Field>
+            </div>
+            <Field label="签名内容">
+              <Textarea name="content" required className="min-h-40" placeholder="支持多行文本，写信时会自动转为 HTML" />
+            </Field>
+            <label className="flex items-center gap-3 text-sm font-medium">
+              <Checkbox checked={isDefault} onCheckedChange={(value) => setIsDefault(value === true)} />
+              <span>设为当前范围默认签名</span>
+            </label>
+            <Button disabled={pending}>{pending ? "保存中..." : "创建签名"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>签名列表</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {items.map((item) => {
+            const mailbox = item.mailboxId ? mailboxes.find((m) => m.id === item.mailboxId)?.address || "未知邮箱" : "全局签名"
+            return (
+              <div key={item.id} className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium">{item.name}</div>
+                      {item.isDefault && <Badge>默认</Badge>}
+                      <Badge variant="outline">{mailbox}</Badge>
+                    </div>
+                    <div className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{item.content}</div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    {!item.isDefault && <Button variant="outline" size="sm" disabled={pending} onClick={() => onSetDefault(item.id)}>设为默认</Button>}
+                    <Button variant="ghost" size="icon" className="size-8" disabled={pending} onClick={() => setEditing(item)}><PencilLine className="h-4 w-4" /></Button>
+                    <Button variant="ghost" size="icon" className="size-8 text-destructive" disabled={pending} onClick={() => setPendingConfirm({ title: "删除签名？", description: `签名“${item.name}”将被删除。`, confirmText: "删除签名", onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}><Trash2 className="h-4 w-4" /></Button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          {!loading && items.length === 0 && <EmptyState text="暂无签名" />}
+        </CardContent>
+      </Card>
+      <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null) }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader><DialogTitle>编辑签名</DialogTitle></DialogHeader>
+          {editing && (
+            <form key={editing.id} className="space-y-4" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); form.set("mailboxId", editingMailboxId === "all" ? "" : editingMailboxId); form.set("isDefault", editingIsDefault ? "on" : ""); onUpdate(editing.id, form); setEditing(null) }}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field label="签名名称"><Input name="name" defaultValue={editing.name} required /></Field>
+                <Field label="绑定邮箱">
+                  <MailboxSelect value={editingMailboxId} mailboxes={mailboxes} onChange={(value) => setEditing((current) => current ? { ...current, mailboxId: value === "all" ? "" : value } : current)} />
+                </Field>
+              </div>
+              <Field label="签名内容">
+                <Textarea name="content" required className="min-h-44" defaultValue={editing.content} />
+              </Field>
+              <label className="flex items-center gap-3 text-sm font-medium">
+                <Checkbox checked={editingIsDefault} onCheckedChange={(value) => setEditing((current) => current ? { ...current, isDefault: value === true } : current)} />
+                <span>设为当前范围默认签名</span>
+              </label>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setEditing(null)}>取消</Button>
+                <Button disabled={pending}>{pending ? "保存中..." : "保存修改"}</Button>
+              </DialogFooter>
+            </form>
+          )}
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={pending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
+    </div>
   )
 }
 
@@ -773,6 +986,7 @@ function MailboxSelect({ value, mailboxes, onChange }: { value: string; mailboxe
 function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div> }
 function EmptyState({ text }: { text: string }) { return <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</div> }
 function folderLabel(folder: string) { return ({ Inbox: "收件箱", Sent: "已发送", Drafts: "草稿箱", Archive: "归档", Spam: "垃圾邮件", Trash: "回收站" } as Record<string, string>)[folder] || folder }
+function clientServerHost(hostname?: string, address?: string) { const value = (hostname || "").trim(); if (value) return value; const domain = (address || "").split("@")[1]; return domain ? `mail.${domain}` : "mail.example.com" }
 function AccountHeader({ collapsed, name, email, darkMode, onToggleTheme, onBack }: { collapsed: boolean; name: string; email?: string; darkMode: boolean; onToggleTheme: () => void; onBack: () => void }) {
   const displayName = cleanAccountName(name, email)
   if (collapsed) return <div className="flex justify-center"><Avatar className="size-9 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(displayName, email)}</AvatarFallback></Avatar></div>

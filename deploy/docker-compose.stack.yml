@@ -34,6 +34,7 @@ services:
       - ./mail:/var/mail/vhosts
     ports:
       - "25:25"
+      - "465:465"
       - "587:587"
     depends_on:
       - dovecot
@@ -48,6 +49,7 @@ services:
       - ./mail:/var/mail/vhosts
     ports:
       - "993:993"
+      - "995:995"
     restart: unless-stopped
 
   rspamd:

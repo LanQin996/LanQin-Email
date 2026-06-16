@@ -26,7 +26,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates tzdata sqlite3 supervisor nginx \
     postfix postfix-sqlite \
-    dovecot-core dovecot-imapd dovecot-lmtpd dovecot-sqlite ssl-cert \
+    dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite ssl-cert \
     rspamd
 
 COPY --from=api-build /out/lanqin-api /usr/local/bin/lanqin-api
@@ -46,5 +46,5 @@ COPY deploy/rspamd/sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
 
 RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim && mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim
 
-EXPOSE 80 443 25 587 993
+EXPOSE 80 443 25 465 587 993 995
 CMD ["/entrypoint.sh"]

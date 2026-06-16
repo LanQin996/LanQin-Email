@@ -232,6 +232,16 @@ func (a *App) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL,
 			UNIQUE(user_id, email)
 		)`,
+		`CREATE TABLE IF NOT EXISTS mail_signatures (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL DEFAULT '',
+			name TEXT NOT NULL,
+			content TEXT NOT NULL,
+			is_default INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS mail_rules (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -275,6 +285,7 @@ func (a *App) migrate(ctx context.Context) error {
 			PRIMARY KEY(message_id, label_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id, email)`,
+		`CREATE INDEX IF NOT EXISTS idx_mail_signatures_user_mailbox ON mail_signatures(user_id, mailbox_id, is_default)`,
 		`CREATE INDEX IF NOT EXISTS idx_mail_rules_user_mailbox ON mail_rules(user_id, mailbox_id, enabled)`,
 		`CREATE INDEX IF NOT EXISTS idx_blocked_senders_user_mailbox ON blocked_senders(user_id, mailbox_id, email)`,
 		`CREATE INDEX IF NOT EXISTS idx_mail_labels_mailbox ON mail_labels(mailbox_id, name)`,

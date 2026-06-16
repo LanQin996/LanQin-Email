@@ -225,6 +225,203 @@ func (a *App) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (a *App) handleListSignatures(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,content,is_default,created_at,updated_at FROM mail_signatures WHERE user_id=? ORDER BY is_default DESC, updated_at DESC, created_at DESC`, user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signatures")
+		return
+	}
+	defer rows.Close()
+	items := []MailSignature{}
+	for rows.Next() {
+		item, err := scanSignature(rows)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to scan signatures")
+			return
+		}
+		items = append(items, item)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *App) handleCreateSignature(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	var req struct {
+		MailboxID string `json:"mailboxId"`
+		Name      string `json:"name"`
+		Content   string `json:"content"`
+		IsDefault bool   `json:"isDefault"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	mailboxID, name, content, ok := a.normalizeSignatureInput(w, r, user.ID, req.MailboxID, req.Name, req.Content)
+	if !ok {
+		return
+	}
+	id := newID("sig")
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save signature")
+		return
+	}
+	defer tx.Rollback()
+	if req.IsDefault {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE mail_signatures SET is_default=0, updated_at=? WHERE user_id=? AND mailbox_id=?`, now, user.ID, mailboxID); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update default signature")
+			return
+		}
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO mail_signatures(id,user_id,mailbox_id,name,content,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`,
+		id, user.ID, mailboxID, name, content, boolInt(req.IsDefault), now, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save signature")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save signature")
+		return
+	}
+	item, err := a.signatureByID(r.Context(), user.ID, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	respondJSON(w, http.StatusCreated, item)
+}
+
+func (a *App) handleUpdateSignature(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	id := chi.URLParam(r, "id")
+	_, err := a.signatureByID(r.Context(), user.ID, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusNotFound, "signature not found")
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	var req struct {
+		MailboxID string `json:"mailboxId"`
+		Name      string `json:"name"`
+		Content   string `json:"content"`
+		IsDefault bool   `json:"isDefault"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	mailboxID, name, content, ok := a.normalizeSignatureInput(w, r, user.ID, req.MailboxID, req.Name, req.Content)
+	if !ok {
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	defer tx.Rollback()
+	if req.IsDefault {
+		if _, err := tx.ExecContext(r.Context(), `UPDATE mail_signatures SET is_default=0, updated_at=? WHERE user_id=? AND mailbox_id=?`, now, user.ID, mailboxID); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update default signature")
+			return
+		}
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE mail_signatures SET mailbox_id=?, name=?, content=?, is_default=?, updated_at=? WHERE id=? AND user_id=?`,
+		mailboxID, name, content, boolInt(req.IsDefault), now, id, user.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	item, err := a.signatureByID(r.Context(), user.ID, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	respondJSON(w, http.StatusOK, item)
+}
+
+func (a *App) handleDeleteSignature(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	res, err := a.db.ExecContext(r.Context(), `DELETE FROM mail_signatures WHERE id=? AND user_id=?`, chi.URLParam(r, "id"), user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to delete signature")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		respondError(w, http.StatusNotFound, "signature not found")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *App) handleSetDefaultSignature(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	id := chi.URLParam(r, "id")
+	item, err := a.signatureByID(r.Context(), user.ID, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondError(w, http.StatusNotFound, "signature not found")
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE mail_signatures SET is_default=0, updated_at=? WHERE user_id=? AND mailbox_id=?`, now, user.ID, item.MailboxID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE mail_signatures SET is_default=1, updated_at=? WHERE id=? AND user_id=?`, now, id, user.ID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update signature")
+		return
+	}
+	item, err = a.signatureByID(r.Context(), user.ID, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	respondJSON(w, http.StatusOK, item)
+}
+
+func (a *App) handleDefaultSignature(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
+	if mailboxID != "" {
+		if _, err := a.mailboxForUserByID(r.Context(), user.ID, mailboxID); err != nil {
+			respondError(w, http.StatusForbidden, "mailbox not found")
+			return
+		}
+	}
+	item, err := a.defaultSignatureForMailbox(r.Context(), user.ID, mailboxID)
+	if errors.Is(err, sql.ErrNoRows) {
+		respondJSON(w, http.StatusOK, map[string]any{"signature": nil})
+		return
+	}
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load signature")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"signature": item})
+}
+
 func (a *App) handleListRules(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,match_mode,conditions_json,actions_json,from_contains,subject_contains,action,apply_to_existing,stop_processing,enabled,created_at FROM mail_rules WHERE user_id=? ORDER BY created_at DESC`, user.ID)
@@ -559,6 +756,71 @@ func scanContact(row messageSummaryScanner) (Contact, error) {
 	err := row.Scan(&item.ID, &item.UserID, &item.Name, &item.Email, &item.Note, &created)
 	item.CreatedAt = parseTime(created)
 	return item, err
+}
+
+func scanSignature(row messageSummaryScanner) (MailSignature, error) {
+	var item MailSignature
+	var isDefault int
+	var created, updated string
+	err := row.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.Name, &item.Content, &isDefault, &created, &updated)
+	item.IsDefault = intBool(isDefault)
+	item.CreatedAt = parseTime(created)
+	item.UpdatedAt = parseTime(updated)
+	return item, err
+}
+
+func (a *App) normalizeSignatureInput(w http.ResponseWriter, r *http.Request, userID, rawMailboxID, rawName, rawContent string) (string, string, string, bool) {
+	mailboxID := strings.TrimSpace(rawMailboxID)
+	if mailboxID != "" {
+		if _, err := a.mailboxForUserByID(r.Context(), userID, mailboxID); err != nil {
+			respondError(w, http.StatusForbidden, "mailbox not found")
+			return "", "", "", false
+		}
+	}
+	name := strings.TrimSpace(rawName)
+	if name == "" {
+		badRequest(w, errors.New("signature name is required"))
+		return "", "", "", false
+	}
+	if len([]rune(name)) > 80 {
+		badRequest(w, errors.New("signature name is too long"))
+		return "", "", "", false
+	}
+	content := strings.TrimSpace(rawContent)
+	if content == "" {
+		badRequest(w, errors.New("signature content is required"))
+		return "", "", "", false
+	}
+	if len([]rune(content)) > 5000 {
+		badRequest(w, errors.New("signature content is too long"))
+		return "", "", "", false
+	}
+	return mailboxID, name, content, true
+}
+
+func (a *App) signatureByID(ctx context.Context, userID, id string) (MailSignature, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,content,is_default,created_at,updated_at FROM mail_signatures WHERE id=? AND user_id=?`, id, userID)
+	return scanSignature(row)
+}
+
+func (a *App) mailboxForUserByID(ctx context.Context, userID, mailboxID string) (*Mailbox, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,domain_id,local_part,address,display_name,quota_mb,status,created_at FROM mailboxes WHERE id=? AND user_id=? AND status='active'`, mailboxID, userID)
+	var m Mailbox
+	var created string
+	if err := row.Scan(&m.ID, &m.UserID, &m.DomainID, &m.LocalPart, &m.Address, &m.DisplayName, &m.QuotaMB, &m.Status, &created); err != nil {
+		return nil, err
+	}
+	m.CreatedAt = parseTime(created)
+	return &m, nil
+}
+
+func (a *App) defaultSignatureForMailbox(ctx context.Context, userID, mailboxID string) (MailSignature, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,content,is_default,created_at,updated_at
+		FROM mail_signatures
+		WHERE user_id=? AND is_default=1 AND (mailbox_id=? OR mailbox_id='')
+		ORDER BY CASE WHEN mailbox_id=? THEN 0 ELSE 1 END, updated_at DESC
+		LIMIT 1`, userID, mailboxID, mailboxID)
+	return scanSignature(row)
 }
 
 func scanRule(row messageSummaryScanner) (MailRule, error) {

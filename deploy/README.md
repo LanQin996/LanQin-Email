@@ -123,9 +123,10 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 
 - Postfix 读取 `/data/lanqin.db` 中的 `domains`、`mailboxes`、`aliases`。
 - Dovecot 读取同一个 SQLite 数据库进行邮箱认证，并使用 `/var/mail/vhosts` 作为 Maildir 根目录。
+- 第三方客户端可使用 IMAP SSL `993`、POP3 SSL `995`、SMTP SSL `465` 或 Submission `587`。
 - Rspamd 通过 milter 接入 Postfix，负责 DKIM 签名和垃圾邮件标记。
 - Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
-- Go API 是 Webmail 和管理后台唯一入口；浏览器不直接连接 SMTP/IMAP。
+- Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
 
 ## SMTP 发信排查

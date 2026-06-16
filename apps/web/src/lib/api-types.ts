@@ -16,6 +16,7 @@ export type DNSCheckResult = { domain: string; status: string; checks: Record<st
 export type ListResponse<T> = { items: T[]; nextCursor?: string }
 export type SendPayload = { mailboxId?: string; to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html: string; attachments: { filename: string; contentType: string; contentBase64: string }[] }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
+export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
 export type MailRuleCondition = { field: "from" | "to" | "subject" | "body"; operator: "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with"; value: string }
 export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; value?: string; labelId?: string }
 export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; enabled: boolean; createdAt: string; appliedExistingCount?: number }
@@ -49,7 +50,7 @@ export type SystemSettings = {
 }
 export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet"> & { smtpPassword: string; turnstileSecretKey: string }
 export type PublicDomain = { id: string; name: string }
-export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; mailAutoRefresh: boolean; mailRefreshMs: number; mailboxDomains?: PublicDomain[] }
+export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; publicHostname: string; mailAutoRefresh: boolean; mailRefreshMs: number; mailboxDomains?: PublicDomain[] }
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
 export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string }

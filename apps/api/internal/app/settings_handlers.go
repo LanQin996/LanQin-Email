@@ -63,6 +63,7 @@ type PublicSettings struct {
 	OpenRegistration bool           `json:"openRegistration"`
 	TurnstileEnabled bool           `json:"turnstileEnabled"`
 	TurnstileSiteKey string         `json:"turnstileSiteKey"`
+	PublicHostname   string         `json:"publicHostname"`
 	MailAutoRefresh  bool           `json:"mailAutoRefresh"`
 	MailRefreshMs    int            `json:"mailRefreshMs"`
 	MailboxDomains   []PublicDomain `json:"mailboxDomains,omitempty"`
@@ -87,7 +88,7 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	if refreshSeconds <= 0 {
 		refreshSeconds = 30
 	}
-	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000}
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000}
 
 	// Include available domains for mailbox creation during registration
 	if a.cfg.OpenRegistration {

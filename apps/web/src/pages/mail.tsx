@@ -85,6 +85,8 @@ export function MailPage() {
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
   const [displayMode] = useDisplayMode()
   const [refreshing, setRefreshing] = React.useState(false)
+  const [autoRefreshing, setAutoRefreshing] = React.useState(false)
+  const [lastAutoRefreshAt, setLastAutoRefreshAt] = React.useState<Date | null>(null)
   const [bulkPending, setBulkPending] = React.useState(false)
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
@@ -303,11 +305,17 @@ export function MailPage() {
   React.useEffect(() => {
     if (!publicSettings.data?.mailAutoRefresh) return
     const timer = window.setInterval(() => {
-      qc.invalidateQueries({ queryKey: ["messages"] })
-      qc.invalidateQueries({ queryKey: ["folders"] })
-      qc.invalidateQueries({ queryKey: ["mail-stats"] })
-      qc.invalidateQueries({ queryKey: ["labels"] })
-      qc.invalidateQueries({ queryKey: ["mail-notifications"] })
+      setAutoRefreshing(true)
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ["messages"] }),
+        qc.invalidateQueries({ queryKey: ["folders"] }),
+        qc.invalidateQueries({ queryKey: ["mail-stats"] }),
+        qc.invalidateQueries({ queryKey: ["labels"] }),
+        qc.invalidateQueries({ queryKey: ["mail-notifications"] }),
+      ]).finally(() => {
+        setLastAutoRefreshAt(new Date())
+        window.setTimeout(() => setAutoRefreshing(false), 600)
+      })
     }, mailRefreshInterval || 30000)
     return () => window.clearInterval(timer)
   }, [mailRefreshInterval, publicSettings.data?.mailAutoRefresh, qc])
@@ -436,6 +444,7 @@ export function MailPage() {
     setRefreshing(true)
     try {
       await refreshMailData()
+      setLastAutoRefreshAt(new Date())
     } finally {
       setRefreshing(false)
     }
@@ -549,7 +558,14 @@ export function MailPage() {
               <section className="flex h-full min-h-0 flex-col">
                 <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
                   <div className="flex items-center gap-2">
-                    <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing} className={cn("transition-all", refreshing && "bg-primary/5 text-primary")}><RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>
+                    <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing || autoRefreshing} className={cn("transition-all", (refreshing || autoRefreshing) && "bg-primary/5 text-primary")} title={autoRefreshing ? "自动刷新中" : "刷新邮件"}>
+                      <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
+                    </Button>
+                    {(publicSettings.data?.mailAutoRefresh || autoRefreshing) && (
+                      <div className="hidden min-w-[118px] text-xs text-muted-foreground sm:block">
+                        {autoRefreshing ? "自动刷新中..." : lastAutoRefreshAt ? `已刷新 ${lastAutoRefreshAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "自动刷新已开启"}
+                      </div>
+                    )}
                     <Button variant="outline" size="sm" disabled={!activeMailboxId || markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -1215,6 +1231,9 @@ function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pendin
 function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; onOpenChange: (v: boolean) => void; onSent: () => void }) {
   const { toast } = useToast()
   const [files, setFiles] = React.useState<File[]>([])
+  const defaultSignature = useQuery({ queryKey: ["signature", "default", mailbox?.id], queryFn: () => api.defaultSignature(mailbox?.id), enabled: open && !!mailbox?.id })
+  const signatureText = defaultSignature.data?.signature?.content || ""
+  const composerText = draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : ""
   const send = useMutation({ mutationFn: api.send, onSuccess: () => { toast({ title: "发送成功" }); setFiles([]); onSent() }, onError: (e) => toast({ title: "发送失败", description: e.message }) })
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -1239,7 +1258,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
             <div className="space-y-2"><Label>收件人</Label><Input name="to" placeholder="user@example.com, other@example.com" defaultValue={draft?.to || ""} required /></div>
             <div className="grid grid-cols-2 gap-3"><div className="space-y-2"><Label>抄送</Label><Input name="cc" placeholder="cc1@example.com, cc2@example.com" defaultValue={draft?.cc || ""} /></div><div className="space-y-2"><Label>密送</Label><Input name="bcc" placeholder="bcc1@example.com, bcc2@example.com" defaultValue={draft?.bcc || ""} /></div></div>
             <div className="space-y-2"><Label>主题</Label><Input name="subject" defaultValue={draft?.subject || ""} /></div>
-            <MarkdownComposer defaultValue={draft?.text || ""} />
+            <MarkdownComposer defaultValue={composerText} />
             <div className="space-y-2"><Label>附件</Label><Input type="file" multiple onChange={(e) => setFiles(Array.from(e.currentTarget.files || []))} />{files.length > 0 && <div className="text-xs text-muted-foreground">{files.map((f) => `${f.name} (${formatBytes(f.size)})`).join("，")}</div>}</div>
           </div>
           <DialogFooter className="border-t bg-background px-6 py-4">
@@ -1259,14 +1278,21 @@ function MarkdownComposer({ defaultValue }: { defaultValue: string }) {
   const [value, setValue] = React.useState(defaultValue)
   const [mode, setMode] = React.useState<MarkdownMode>("edit")
   const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+  const dirtyRef = React.useRef(false)
+  const lastDefaultRef = React.useRef(defaultValue)
   const previewHtml = React.useMemo(() => markdownToHtml(value), [value])
 
-  React.useEffect(() => setValue(defaultValue), [defaultValue])
+  React.useEffect(() => {
+    if (defaultValue === lastDefaultRef.current) return
+    lastDefaultRef.current = defaultValue
+    if (!dirtyRef.current) setValue(defaultValue)
+  }, [defaultValue])
 
   function focusEditor() {
     window.requestAnimationFrame(() => textareaRef.current?.focus())
   }
   function updateSelection(next: string, start: number, end: number) {
+    dirtyRef.current = true
     setValue(next)
     window.requestAnimationFrame(() => {
       const textarea = textareaRef.current
@@ -1380,7 +1406,7 @@ function MarkdownComposer({ defaultValue }: { defaultValue: string }) {
             <Textarea
               ref={textareaRef}
               value={value}
-              onChange={(event) => setValue(event.target.value)}
+              onChange={(event) => { dirtyRef.current = true; setValue(event.target.value) }}
               placeholder="在此输入邮件内容..."
               className={cn("min-h-[280px] resize-y rounded-none border-0 shadow-none focus-visible:ring-0", mode === "split" && "md:border-r")}
             />

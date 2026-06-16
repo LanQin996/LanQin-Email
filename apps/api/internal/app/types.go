@@ -132,6 +132,17 @@ type Contact struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
+type MailSignature struct {
+	ID        string    `json:"id"`
+	UserID    string    `json:"userId,omitempty"`
+	MailboxID string    `json:"mailboxId"`
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	IsDefault bool      `json:"isDefault"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 type MailRule struct {
 	ID                   string              `json:"id"`
 	UserID               string              `json:"userId,omitempty"`

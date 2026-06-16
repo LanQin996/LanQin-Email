@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, Contact, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -45,6 +45,12 @@ export const api = {
   contacts: () => request<ListResponse<Contact>>("/api/me/contacts"),
   createContact: (payload: { name: string; email: string; note: string }) => request<Contact>("/api/me/contacts", { method: "POST", body: JSON.stringify(payload) }),
   deleteContact: (id: string) => request<{ ok: boolean }>(`/api/me/contacts/${id}`, { method: "DELETE" }),
+  signatures: () => request<ListResponse<MailSignature>>("/api/me/signatures"),
+  createSignature: (payload: { mailboxId: string; name: string; content: string; isDefault: boolean }) => request<MailSignature>("/api/me/signatures", { method: "POST", body: JSON.stringify(payload) }),
+  updateSignature: (id: string, payload: { mailboxId: string; name: string; content: string; isDefault: boolean }) => request<MailSignature>(`/api/me/signatures/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  setDefaultSignature: (id: string) => request<MailSignature>(`/api/me/signatures/${id}/default`, { method: "POST" }),
+  deleteSignature: (id: string) => request<{ ok: boolean }>(`/api/me/signatures/${id}`, { method: "DELETE" }),
+  defaultSignature: (mailboxId?: string) => request<{ signature: MailSignature | null }>(`/api/me/signatures/default${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   rules: () => request<ListResponse<MailRule>>("/api/me/rules"),
   createRule: (payload: { mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; enabled: boolean }) => request<MailRule>("/api/me/rules", { method: "POST", body: JSON.stringify(payload) }),
   deleteRule: (id: string) => request<{ ok: boolean }>(`/api/me/rules/${id}`, { method: "DELETE" }),
