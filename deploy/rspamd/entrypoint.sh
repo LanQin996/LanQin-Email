@@ -10,4 +10,9 @@ fi
 
 /usr/local/bin/lanqin-rspamd-sync-dkim --once || true
 /usr/local/bin/lanqin-rspamd-sync-dkim &
-exec rspamd -f
+if id _rspamd >/dev/null 2>&1; then
+  exec rspamd -f -u _rspamd -g _rspamd
+elif id rspamd >/dev/null 2>&1; then
+  exec rspamd -f -u rspamd -g rspamd
+fi
+exec rspamd -f --insecure
