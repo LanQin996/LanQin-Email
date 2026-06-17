@@ -967,6 +967,80 @@ func TestMaildirSyncImportsRFC822(t *testing.T) {
 	}
 }
 
+func TestMaildirSyncImportsSentFolder(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	a.cfg.MaildirRoot = root
+	adminUser, _, err := a.userByEmail(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mailboxID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM mailboxes WHERE user_id=? AND address=?`, adminUser.ID, "admin@lanqin.local").Scan(&mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE mailbox_id=?`, mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	sentFolderID, err := a.ensureFolder(ctx, mailboxID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mailboxes, err := a.maildirMailboxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin maildirMailbox
+	for _, mb := range mailboxes {
+		if mb.Address == "admin@lanqin.local" {
+			admin = mb
+			break
+		}
+	}
+	if admin.ID == "" {
+		t.Fatal("admin mailbox not found")
+	}
+
+	dir := filepath.Join(root, admin.Domain, admin.LocalPart, "Maildir", ".Sent", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: admin@lanqin.local",
+		"To: recipient@example.test",
+		"Subject: SMTP sent archive",
+		"Message-Id: <smtp-sent-archive@example.test>",
+		"Date: Sat, 13 Jun 2026 14:00:00 +0000",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"archived from smtp client",
+	}, "\r\n")
+	if err := os.WriteFile(filepath.Join(dir, "1749823200.M1P1.sent"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := a.syncMaildirOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("imported=%d, want 1", count)
+	}
+
+	var folderID, subject string
+	var read int
+	err = a.db.QueryRow(`SELECT folder_id, subject, is_read FROM messages WHERE mailbox_id=? AND message_id='<smtp-sent-archive@example.test>'`, admin.ID).Scan(&folderID, &subject, &read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if folderID != sentFolderID || subject != "SMTP sent archive" || read != 1 {
+		t.Fatalf("unexpected sent import folder=%q want=%q subject=%q read=%d", folderID, sentFolderID, subject, read)
+	}
+}
+
 func mustDefaultDomainID(t *testing.T, a *App) string {
 	t.Helper()
 	var id string

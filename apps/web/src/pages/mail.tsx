@@ -1757,6 +1757,16 @@ type EditorToolbarState = {
   fontName: string
   fontSize: string
 }
+type EditorCommand =
+  | "bold"
+  | "italic"
+  | "underline"
+  | "strikeThrough"
+  | "insertUnorderedList"
+  | "insertOrderedList"
+  | "justifyLeft"
+  | "justifyCenter"
+  | "justifyRight"
 
 const defaultToolbarState: EditorToolbarState = {
   bold: false,
@@ -1779,6 +1789,7 @@ const composerFontSizeOptions = [
   ["5", "大号"],
 ] as const
 const composerEmojiOptions = ["😀", "😄", "😊", "🙂", "😉", "😍", "😘", "😎", "🤔", "👍", "👏", "🙏", "💪", "🎉", "🔥", "✨", "❤️", "✅", "📌", "📅", "☕", "💡", "🚀", "⭐"]
+const composerMenuItemClass = "min-h-9 rounded-md px-3 text-sm transition-colors data-[highlighted]:bg-primary/10 data-[highlighted]:font-semibold data-[highlighted]:text-foreground hover:bg-primary/10 hover:font-semibold hover:text-foreground"
 
 function queryCommandState(command: string) {
   try {
@@ -1930,6 +1941,33 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
     updateToolbarState()
   }
 
+  function optimisticToggle(command: EditorCommand) {
+    const keyByCommand: Record<EditorCommand, keyof EditorToolbarState> = {
+      bold: "bold",
+      italic: "italic",
+      underline: "underline",
+      strikeThrough: "strikeThrough",
+      insertUnorderedList: "unorderedList",
+      insertOrderedList: "orderedList",
+      justifyLeft: "justifyLeft",
+      justifyCenter: "justifyCenter",
+      justifyRight: "justifyRight",
+    }
+    const key = keyByCommand[command]
+    setToolbarState((current) => {
+      const next = { ...current, [key]: !current[key] }
+      if (command === "justifyLeft" || command === "justifyCenter" || command === "justifyRight") {
+        next.justifyLeft = command === "justifyLeft"
+        next.justifyCenter = command === "justifyCenter"
+        next.justifyRight = command === "justifyRight"
+      }
+      if (command === "insertUnorderedList" && next.unorderedList) next.orderedList = false
+      if (command === "insertOrderedList" && next.orderedList) next.unorderedList = false
+      return next
+    })
+    runCommand(command)
+  }
+
   function updateToolbarState() {
     const currentElement = selectionElementInside(editorRef.current)
     const computedStyle = currentElement ? window.getComputedStyle(currentElement) : null
@@ -2001,29 +2039,29 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
   return (
     <div className="min-h-[420px]">
       <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
-      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2" onPointerDownCapture={saveSelection}>
+      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2" onMouseDown={saveSelection} onPointerDownCapture={saveSelection}>
         <ToolbarButton label="撤销" onClick={() => runCommand("undo")}><Undo2 className="h-4 w-4" /></ToolbarButton>
         <ToolbarButton label="重做" onClick={() => runCommand("redo")}><Redo2 className="h-4 w-4" /></ToolbarButton>
         <Separator orientation="vertical" className="mx-2 h-6" />
         <ToolbarTextButton label="图片" icon={<Image className="h-4 w-4" />} onClick={() => openInsertDialog("image")} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal">
+            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm" onMouseDown={(event) => event.preventDefault()}>
               <Plus className="h-4 w-4" />插入<ChevronDown className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => openInsertDialog("image")}><Image className="h-4 w-4" />图片链接</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => runCommand("insertHorizontalRule")}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
+            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
+            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
+            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("image")}><Image className="h-4 w-4" />图片链接</DropdownMenuItem>
+            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => runCommand("insertHorizontalRule")}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <ToolbarTextButton label="导入文档" icon={<FileText className="h-4 w-4" />} onClick={() => fileInputRef.current?.click()} />
         <ToolbarTextButton label="日程" icon={<Calendar className="h-4 w-4" />} onClick={() => setScheduleOpen(true)} />
         <DropdownMenu open={emojiOpen} onOpenChange={setEmojiOpen}>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant={emojiOpen ? "secondary" : "ghost"} size="sm" className="h-8 gap-1.5 rounded-md px-2 font-normal">
+            <Button type="button" variant={emojiOpen ? "secondary" : "ghost"} size="sm" className={cn("h-8 gap-1.5 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm", emojiOpen && "border border-primary/30 bg-primary/10 text-primary")} onMouseDown={(event) => event.preventDefault()}>
               <Smile className="h-4 w-4" />表情
             </Button>
           </DropdownMenuTrigger>
@@ -2044,18 +2082,18 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
         </div>
       </div>
       {formatOpen && (
-        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2" onPointerDownCapture={saveSelection}>
+        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2" onMouseDown={saveSelection} onPointerDownCapture={saveSelection}>
           <ToolbarButton label="清除格式" onClick={() => runCommand("removeFormat")}><Eraser className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant={normalizeFontName(toolbarState.fontName) ? "secondary" : "ghost"} size="sm" className="h-8 min-w-[112px] justify-between rounded-md px-2 font-normal">
+              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[112px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", normalizeFontName(toolbarState.fontName) && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()}>
                 <span className="truncate">{fontLabel(toolbarState.fontName)}</span><ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontOptions.map((font) => (
-                <DropdownMenuItem key={font} onSelect={() => applyFont(font)}>
+                <DropdownMenuItem key={font} className={composerMenuItemClass} onSelect={() => applyFont(font)}>
                   <Check className={cn("h-4 w-4", normalizeFontName(toolbarState.fontName) === font ? "opacity-100" : "opacity-0")} />
                   <span style={{ fontFamily: font }}>{font}</span>
                 </DropdownMenuItem>
@@ -2064,13 +2102,13 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant={toolbarState.fontSize !== "3" ? "secondary" : "ghost"} size="sm" className="h-8 min-w-[84px] justify-between rounded-md px-2 font-normal">
+              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[84px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", toolbarState.fontSize !== "3" && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()}>
                 {fontSizeLabel(toolbarState.fontSize)}<ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontSizeOptions.map(([size, label]) => (
-                <DropdownMenuItem key={size} onSelect={() => applyFontSize(size)}>
+                <DropdownMenuItem key={size} className={composerMenuItemClass} onSelect={() => applyFontSize(size)}>
                   <Check className={cn("h-4 w-4", toolbarState.fontSize === size ? "opacity-100" : "opacity-0")} />
                   {label}
                 </DropdownMenuItem>
@@ -2078,19 +2116,19 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="加粗" active={toolbarState.bold} onClick={() => runCommand("bold")}><Bold className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="斜体" active={toolbarState.italic} onClick={() => runCommand("italic")}><Italic className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="下划线" active={toolbarState.underline} onClick={() => runCommand("underline")}><Underline className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="删除线" active={toolbarState.strikeThrough} onClick={() => runCommand("strikeThrough")}><Strikethrough className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="加粗" active={toolbarState.bold} onClick={() => optimisticToggle("bold")}><Bold className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="斜体" active={toolbarState.italic} onClick={() => optimisticToggle("italic")}><Italic className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="下划线" active={toolbarState.underline} onClick={() => optimisticToggle("underline")}><Underline className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="删除线" active={toolbarState.strikeThrough} onClick={() => optimisticToggle("strikeThrough")}><Strikethrough className="h-4 w-4" /></ToolbarButton>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground" title="文字颜色" aria-label="文字颜色">
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm" title="文字颜色" aria-label="文字颜色" onMouseDown={(event) => event.preventDefault()}>
                 <Type className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-36">
               {[["#111827", "默认"], ["#dc2626", "红色"], ["#2563eb", "蓝色"], ["#16a34a", "绿色"]].map(([color, label]) => (
-                <DropdownMenuItem key={color} onSelect={() => runCommand("foreColor", color)}>
+                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => runCommand("foreColor", color)}>
                   <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: color }} />{label}
                 </DropdownMenuItem>
               ))}
@@ -2098,27 +2136,27 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground" title="高亮" aria-label="高亮">
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm" title="高亮" aria-label="高亮" onMouseDown={(event) => event.preventDefault()}>
                 <Highlighter className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {[["transparent", "无高亮"], ["#fef3c7", "黄色"], ["#dcfce7", "绿色"], ["#dbeafe", "蓝色"]].map(([color, label]) => (
-                <DropdownMenuItem key={color} onSelect={() => runCommand("backColor", color)}>
+                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => runCommand("backColor", color)}>
                   <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />{label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="无序列表" active={toolbarState.unorderedList} onClick={() => runCommand("insertUnorderedList")}><List className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="有序列表" active={toolbarState.orderedList} onClick={() => runCommand("insertOrderedList")}><ListOrdered className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="无序列表" active={toolbarState.unorderedList} onClick={() => optimisticToggle("insertUnorderedList")}><List className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="有序列表" active={toolbarState.orderedList} onClick={() => optimisticToggle("insertOrderedList")}><ListOrdered className="h-4 w-4" /></ToolbarButton>
           <ToolbarButton label="减少缩进" onClick={() => runCommand("outdent")}><IndentDecrease className="h-4 w-4" /></ToolbarButton>
           <ToolbarButton label="增加缩进" onClick={() => runCommand("indent")}><IndentIncrease className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="左对齐" active={toolbarState.justifyLeft} onClick={() => runCommand("justifyLeft")}><AlignLeft className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="居中" active={toolbarState.justifyCenter} onClick={() => runCommand("justifyCenter")}><AlignCenter className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="右对齐" active={toolbarState.justifyRight} onClick={() => runCommand("justifyRight")}><AlignRight className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="左对齐" active={toolbarState.justifyLeft} onClick={() => optimisticToggle("justifyLeft")}><AlignLeft className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="居中" active={toolbarState.justifyCenter} onClick={() => optimisticToggle("justifyCenter")}><AlignCenter className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="右对齐" active={toolbarState.justifyRight} onClick={() => optimisticToggle("justifyRight")}><AlignRight className="h-4 w-4" /></ToolbarButton>
           <ToolbarButton label="引用" onClick={() => runCommand("formatBlock", "blockquote")}><Quote className="h-4 w-4" /></ToolbarButton>
           <ToolbarButton label="代码块" onClick={() => runCommand("formatBlock", "pre")}><Code2 className="h-4 w-4" /></ToolbarButton>
         </div>
@@ -2164,7 +2202,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
 
 function ToolbarTextButton({ label, icon, active, disabled, onClick }: { label: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick?: () => void }) {
   return (
-    <Button type="button" variant={active ? "secondary" : "ghost"} size="sm" className="h-8 gap-1.5 rounded-md px-2 font-normal" title={label} aria-label={label} aria-pressed={active || undefined} onClick={onClick} disabled={disabled}>
+    <Button type="button" variant={active ? "secondary" : "ghost"} size="sm" className={cn("h-8 gap-1.5 rounded-md px-2 font-normal transition-all hover:bg-accent hover:text-foreground hover:shadow-sm", active && "border border-primary/30 bg-primary/10 text-primary shadow-sm")} title={label} aria-label={label} aria-pressed={active || undefined} onMouseDown={(event) => event.preventDefault()} onClick={onClick} disabled={disabled}>
       {icon}{label}
     </Button>
   )
@@ -2384,12 +2422,16 @@ function ToolbarButton({ label, children, active, onClick, disabled }: { label: 
   return (
     <Button
       type="button"
-      variant={active ? "secondary" : "ghost"}
+      variant="ghost"
       size="icon"
-      className={cn("h-8 w-8 rounded-md", active ? "text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+      className={cn(
+        "h-8 w-8 rounded-md border border-transparent text-muted-foreground transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
+        active && "border-primary/35 bg-primary/10 text-primary shadow-sm hover:bg-primary/15 hover:text-primary"
+      )}
       title={label}
       aria-label={label}
       aria-pressed={active || undefined}
+      onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       disabled={disabled}
     >

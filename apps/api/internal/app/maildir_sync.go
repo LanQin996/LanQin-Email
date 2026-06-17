@@ -287,6 +287,7 @@ func (a *App) syncMaildirFile(ctx context.Context, mb maildirMailbox, folder mai
 	}
 	msg.MailboxID = mb.ID
 	msg.FolderID = folder.ID
+	msg.IsRead = !strings.EqualFold(folder.Name, "Inbox")
 	msg.RawPath = path
 	if msg.MessageUID == "" {
 		msg.MessageUID = newID("uid")
