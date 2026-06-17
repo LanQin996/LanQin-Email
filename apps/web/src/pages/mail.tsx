@@ -1,11 +1,10 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
-import { marked } from "marked"
 import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { Archive, ArrowLeft, Bold, Check, ChevronsUpDown, Code2, Copy, Forward, Image, Inbox, Italic, Link, List, ListOrdered, Mail, MailCheck, Minus, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, RefreshCcw, Reply, Search, Send, Settings, SlidersHorizontal, Star, Strikethrough, Sun, Tag, Trash2, WrapText, X } from "lucide-react"
-import { api, Mailbox, MailFolder, MailLabel, MailMessage } from "@/lib/api"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Code2, Copy, Ellipsis, Eraser, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { api, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload } from "@/lib/api"
 import { cn, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
@@ -15,9 +14,7 @@ import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -1255,10 +1252,35 @@ function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pendin
 function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; onOpenChange: (v: boolean) => void; onSent: () => void }) {
   const { toast } = useToast()
   const [files, setFiles] = React.useState<File[]>([])
+  const [showCc, setShowCc] = React.useState(Boolean(draft?.cc))
+  const [showBcc, setShowBcc] = React.useState(Boolean(draft?.bcc))
+  const [sendSeparately, setSendSeparately] = React.useState(false)
   const defaultSignature = useQuery({ queryKey: ["signature", "default", mailbox?.id], queryFn: () => api.defaultSignature(mailbox?.id), enabled: open && !!mailbox?.id })
   const signatureText = defaultSignature.data?.signature?.content || ""
   const composerText = draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : ""
-  const send = useMutation({ mutationFn: api.send, onSuccess: () => { toast({ title: "发送成功" }); setFiles([]); onSent() }, onError: (e) => toast({ title: "发送失败", description: e.message }) })
+  const [body, setBody] = React.useState<ComposerValue>(() => plainTextComposerValue(composerText))
+  const send = useMutation({
+    mutationFn: async (payloads: SendPayload[]) => {
+      const sent: MailMessage[] = []
+      for (const payload of payloads) sent.push(await api.send(payload))
+      return sent
+    },
+    onSuccess: (_, payloads) => {
+      toast({ title: payloads.length > 1 ? `已分别发送 ${payloads.length} 封邮件` : "发送成功" })
+      setFiles([])
+      onSent()
+    },
+    onError: (e) => toast({ title: "发送失败", description: e.message }),
+  })
+
+  React.useEffect(() => {
+    if (!open) return
+    setShowCc(Boolean(draft?.cc))
+    setShowBcc(Boolean(draft?.bcc))
+    setSendSeparately(false)
+    setFiles([])
+  }, [open, draft?.key, draft?.cc, draft?.bcc])
+
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     if (!mailbox) {
@@ -1267,27 +1289,69 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
     }
     const form = new FormData(e.currentTarget)
     const attachments = await Promise.all(files.map(fileToAttachment))
-    const text = String(form.get("text") || "")
-    send.mutate({ mailboxId: mailbox.id, to: splitEmails(String(form.get("to") || "")), cc: splitEmails(String(form.get("cc") || "")), bcc: splitEmails(String(form.get("bcc") || "")), subject: String(form.get("subject") || ""), text, html: markdownToHtml(text), attachments })
+    const to = splitEmails(String(form.get("to") || ""))
+    const cc = showCc ? splitEmails(String(form.get("cc") || "")) : []
+    const bcc = showBcc ? splitEmails(String(form.get("bcc") || "")) : []
+    const text = body.text
+    const html = body.html || plainTextToHtml(text)
+    const payload: SendPayload = { mailboxId: mailbox.id, to, cc, bcc, subject: String(form.get("subject") || ""), text, html, attachments }
+    const separateRecipients = Array.from(new Set([...to, ...cc, ...bcc]))
+    const payloads = sendSeparately && separateRecipients.length > 0
+      ? separateRecipients.map((recipient): SendPayload => ({ ...payload, to: [recipient], cc: [], bcc: [] }))
+      : [payload]
+    send.mutate(payloads)
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(92vw,64rem)] max-w-none overflow-hidden p-0">
+      <DialogContent className="w-[min(96vw,82rem)] max-w-none overflow-hidden p-0">
         <form key={draft?.key || "new"} className="flex max-h-[90vh] flex-col" onSubmit={submit}>
-          <DialogHeader className="border-b px-6 py-5 text-left">
+          <DialogHeader className="border-b px-6 py-4 text-left">
             <DialogTitle>写信</DialogTitle>
           </DialogHeader>
-          <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-            <div className="space-y-2"><Label>发件邮箱</Label><Input value={mailbox?.address || "未选择"} readOnly /></div>
-            <div className="space-y-2"><Label>收件人</Label><Input name="to" placeholder="user@example.com, other@example.com" defaultValue={draft?.to || ""} required /></div>
-            <div className="grid grid-cols-2 gap-3"><div className="space-y-2"><Label>抄送</Label><Input name="cc" placeholder="cc1@example.com, cc2@example.com" defaultValue={draft?.cc || ""} /></div><div className="space-y-2"><Label>密送</Label><Input name="bcc" placeholder="bcc1@example.com, bcc2@example.com" defaultValue={draft?.bcc || ""} /></div></div>
-            <div className="space-y-2"><Label>主题</Label><Input name="subject" defaultValue={draft?.subject || ""} /></div>
-            <MarkdownComposer defaultValue={composerText} />
-            <div className="space-y-2"><Label>附件</Label><Input type="file" multiple onChange={(e) => setFiles(Array.from(e.currentTarget.files || []))} />{files.length > 0 && <div className="text-xs text-muted-foreground">{files.map((f) => `${f.name} (${formatBytes(f.size)})`).join("，")}</div>}</div>
+          <div className="flex-1 overflow-y-auto">
+            <ComposeField label="发件邮箱">
+              <Input value={mailbox?.address || "未选择"} readOnly className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+            </ComposeField>
+            <ComposeField
+              label="收件人"
+              action={
+                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
+                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowCc((value) => !value)}>抄送</Button>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowBcc((value) => !value)}>密送</Button>
+                  <div className="flex items-center gap-2 rounded-md px-2 py-1">
+                    <Checkbox id="compose-send-separately" checked={sendSeparately} onCheckedChange={(value) => setSendSeparately(value === true)} />
+                    <Label htmlFor="compose-send-separately" className="cursor-pointer text-sm font-normal">分别发送</Label>
+                  </div>
+                </div>
+              }
+            >
+              <Input name="to" placeholder="name@example.com，多个地址用逗号或空格分隔" defaultValue={draft?.to || ""} required className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+            </ComposeField>
+            {showCc && (
+              <ComposeField label="抄送">
+                <Input name="cc" placeholder="cc@example.com" defaultValue={draft?.cc || ""} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+              </ComposeField>
+            )}
+            {showBcc && (
+              <ComposeField label="密送">
+                <Input name="bcc" placeholder="bcc@example.com" defaultValue={draft?.bcc || ""} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+              </ComposeField>
+            )}
+            <ComposeField label="主　题">
+              <Input name="subject" placeholder="输入主题" defaultValue={draft?.subject || ""} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+            </ComposeField>
+            <MailBodyComposer
+              defaultValue={composerText}
+              files={files}
+              signatureText={signatureText}
+              onChange={setBody}
+              onPickFiles={(nextFiles) => setFiles((current) => [...current, ...nextFiles])}
+              onRemoveFile={(index) => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+            />
           </div>
           <DialogFooter className="border-t bg-background px-6 py-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button disabled={send.isPending || !mailbox}>{send.isPending ? "发送中..." : "发送"}</Button>
+            <Button disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -1295,152 +1359,231 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   )
 }
 
-type MarkdownAction = "bold" | "italic" | "strike" | "ul" | "ol" | "quote" | "code" | "link" | "image" | "hr"
-type MarkdownMode = "edit" | "split" | "preview"
+function ComposeField({ label, children, action }: { label: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="flex min-h-14 flex-col gap-2 border-b px-6 py-2 sm:flex-row sm:items-center">
+      <Label className="w-20 shrink-0 text-base font-normal text-foreground">{label}</Label>
+      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+        {children}
+        {action}
+      </div>
+    </div>
+  )
+}
 
-function MarkdownComposer({ defaultValue }: { defaultValue: string }) {
-  const [value, setValue] = React.useState(defaultValue)
-  const [mode, setMode] = React.useState<MarkdownMode>("edit")
-  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
+type ComposerValue = { text: string; html: string }
+
+function MailBodyComposer({ defaultValue, files, signatureText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; files: File[]; signatureText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
+  const editorRef = React.useRef<HTMLDivElement>(null)
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
+  const initialHtmlRef = React.useRef(plainTextToHtml(defaultValue))
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(defaultValue)
-  const previewHtml = React.useMemo(() => markdownToHtml(value), [value])
+  const [formatOpen, setFormatOpen] = React.useState(true)
+  const [empty, setEmpty] = React.useState(!defaultValue.trim())
+
+  React.useEffect(() => {
+    const next = plainTextComposerValue(defaultValue)
+    onChange(next)
+    setEmpty(!next.text.trim())
+  }, [])
 
   React.useEffect(() => {
     if (defaultValue === lastDefaultRef.current) return
     lastDefaultRef.current = defaultValue
-    if (!dirtyRef.current) setValue(defaultValue)
-  }, [defaultValue])
+    if (!dirtyRef.current) {
+      const next = plainTextComposerValue(defaultValue)
+      if (editorRef.current) editorRef.current.innerHTML = next.html
+      setEmpty(!next.text.trim())
+      onChange(next)
+    }
+  }, [defaultValue, onChange])
 
   function focusEditor() {
-    window.requestAnimationFrame(() => textareaRef.current?.focus())
+    window.requestAnimationFrame(() => editorRef.current?.focus())
   }
-  function updateSelection(next: string, start: number, end: number) {
+
+  function syncEditor() {
+    const next = composerValueFromElement(editorRef.current)
+    setEmpty(!next.text.trim())
+    onChange(next)
+  }
+
+  function runCommand(command: string, value?: string) {
     dirtyRef.current = true
-    setValue(next)
-    window.requestAnimationFrame(() => {
-      const textarea = textareaRef.current
-      if (!textarea) return
-      textarea.focus()
-      textarea.setSelectionRange(start, end)
-    })
+    editorRef.current?.focus()
+    document.execCommand(command, false, value)
+    syncEditor()
   }
-  function wrap(prefix: string, suffix = prefix, placeholder = "文本") {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const selected = value.slice(start, end) || placeholder
-    const next = value.slice(0, start) + prefix + selected + suffix + value.slice(end)
-    updateSelection(next, start + prefix.length, start + prefix.length + selected.length)
+
+  function insertLink() {
+    const url = window.prompt("链接地址")
+    if (!url) return
+    const selected = window.getSelection()?.toString()
+    if (selected) runCommand("createLink", url)
+    else runCommand("insertHTML", `<a href="${escapeHtml(url)}">${escapeHtml(url)}</a>`)
   }
-  function prefixLines(prefix: string, ordered = false) {
-    const textarea = textareaRef.current
-    if (!textarea) return
-    const start = textarea.selectionStart
-    const end = textarea.selectionEnd
-    const lineStart = value.lastIndexOf("\n", start - 1) + 1
-    const lineEndIndex = value.indexOf("\n", end)
-    const lineEnd = lineEndIndex === -1 ? value.length : lineEndIndex
-    const block = value.slice(lineStart, lineEnd) || "列表项"
-    const lines = block.split("\n")
-    const formatted = lines.map((line, index) => `${ordered ? `${index + 1}. ` : prefix}${line || "列表项"}`).join("\n")
-    updateSelection(value.slice(0, lineStart) + formatted + value.slice(lineEnd), lineStart, lineStart + formatted.length)
+
+  function insertImage() {
+    const url = window.prompt("图片链接")
+    if (url) runCommand("insertImage", url)
   }
-  function insertMarkdown(action: MarkdownAction) {
-    if (mode === "preview") setMode("edit")
-    const textarea = textareaRef.current
-    if (!textarea) {
-      focusEditor()
-      return
-    }
-    switch (action) {
-      case "bold": wrap("**", "**", "加粗文本"); break
-      case "italic": wrap("_", "_", "斜体文本"); break
-      case "strike": wrap("~~", "~~", "删除线文本"); break
-      case "ul": prefixLines("- "); break
-      case "ol": prefixLines("", true); break
-      case "quote": prefixLines("> "); break
-      case "code": wrap("`", "`", "code"); break
-      case "link": wrap("[", "](https://example.com)", "链接文本"); break
-      case "image": wrap("![", "](https://example.com/image.png)", "图片描述"); break
-      case "hr": {
-        const start = textarea.selectionStart
-        const before = value.slice(0, start)
-        const after = value.slice(textarea.selectionEnd)
-        const prefix = before.endsWith("\n") || before === "" ? "" : "\n"
-        const suffix = after.startsWith("\n") || after === "" ? "" : "\n"
-        const insert = `${prefix}---${suffix}`
-        updateSelection(before + insert + after, before.length + insert.length, before.length + insert.length)
-        break
-      }
-    }
+
+  function insertSignature() {
+    if (!signatureText.trim()) return
+    runCommand("insertHTML", `<br><br>-- <br>${plainTextToHtmlFragment(signatureText)}`)
   }
-  function setBlock(type: string) {
-    if (type === "p") return focusEditor()
-    const mark = type === "h2" ? "## " : "### "
-    prefixLines(mark)
+
+  function handlePickedFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const nextFiles = Array.from(event.currentTarget.files || [])
+    if (nextFiles.length > 0) onPickFiles(nextFiles)
+    event.currentTarget.value = ""
   }
 
   return (
-    <div className="space-y-2">
-      <Label>正文</Label>
-      <Input type="hidden" name="text" value={value} readOnly className="hidden" />
-      <div className="overflow-hidden rounded-md border border-input bg-background focus-within:ring-1 focus-within:ring-ring">
-        <div className="flex min-h-12 flex-wrap items-center gap-1 border-b bg-muted/30 px-3 py-2">
-          <ToolbarButton label="加粗" onClick={() => insertMarkdown("bold")}><Bold className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="斜体" onClick={() => insertMarkdown("italic")}><Italic className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="下划线" disabled><span className="text-base leading-none underline">U</span></ToolbarButton>
-          <ToolbarButton label="删除线" onClick={() => insertMarkdown("strike")}><Strikethrough className="h-4 w-4" /></ToolbarButton>
-          <Separator orientation="vertical" className="mx-2 h-6" />
-          <Select defaultValue="p" onValueChange={setBlock}>
-            <SelectTrigger className="h-8 w-[96px] border-0 bg-transparent px-2 shadow-none focus:ring-0">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="p">正文</SelectItem>
-              <SelectItem value="h2">标题 2</SelectItem>
-              <SelectItem value="h3">标题 3</SelectItem>
-            </SelectContent>
-          </Select>
-          <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="无序列表" onClick={() => insertMarkdown("ul")}><List className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="有序列表" onClick={() => insertMarkdown("ol")}><ListOrdered className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="引用" onClick={() => insertMarkdown("quote")}><Quote className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="代码" onClick={() => insertMarkdown("code")}><Code2 className="h-4 w-4" /></ToolbarButton>
-          <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="链接" onClick={() => insertMarkdown("link")}><Link className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="图片" onClick={() => insertMarkdown("image")}><Image className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="分隔线" onClick={() => insertMarkdown("hr")}><Minus className="h-4 w-4" /></ToolbarButton>
-          <div className="ml-auto flex items-center gap-2">
-            <Badge variant="secondary" className="h-8 gap-1.5 rounded-md bg-foreground px-2 text-xs text-background hover:bg-foreground">
-              <WrapText className="h-4 w-4" /> Markdown
-            </Badge>
-            <div className="flex rounded-md border bg-background p-0.5">
-              {(["edit", "split", "preview"] as MarkdownMode[]).map((item) => (
-                <Button key={item} type="button" variant={mode === item ? "secondary" : "ghost"} size="sm" className="h-7 rounded px-2 text-xs" onClick={() => setMode(item)}>
-                  {item === "edit" ? "编辑" : item === "split" ? "分屏" : "预览"}
-                </Button>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className={cn(mode === "split" && "grid md:grid-cols-2")}>
-          {mode !== "preview" && (
-            <Textarea
-              ref={textareaRef}
-              value={value}
-              onChange={(event) => { dirtyRef.current = true; setValue(event.target.value) }}
-              placeholder="在此输入邮件内容..."
-              className={cn("min-h-[280px] resize-y rounded-none border-0 shadow-none focus-visible:ring-0", mode === "split" && "md:border-r")}
-            />
-          )}
-          {mode !== "edit" && (
-            <div className="mail-html min-h-[280px] overflow-y-auto p-4 text-sm leading-7" dangerouslySetInnerHTML={{ __html: previewHtml || "<p></p>" }} />
-          )}
+    <div className="min-h-[420px]">
+      <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
+      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2">
+        <ToolbarButton label="撤销" onClick={() => runCommand("undo")}><Undo2 className="h-4 w-4" /></ToolbarButton>
+        <ToolbarButton label="重做" onClick={() => runCommand("redo")}><Redo2 className="h-4 w-4" /></ToolbarButton>
+        <Separator orientation="vertical" className="mx-2 h-6" />
+        <ToolbarTextButton label="图片" icon={<Image className="h-4 w-4" />} onClick={insertImage} />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal">
+              <Plus className="h-4 w-4" />插入<ChevronDown className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
+            <DropdownMenuItem onSelect={insertLink}><Link className="h-4 w-4" />链接</DropdownMenuItem>
+            <DropdownMenuItem onSelect={insertImage}><Image className="h-4 w-4" />图片链接</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => runCommand("insertHorizontalRule")}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <ToolbarTextButton label="导入文档" icon={<FileText className="h-4 w-4" />} onClick={() => fileInputRef.current?.click()} />
+        <ToolbarTextButton label="日程" icon={<Calendar className="h-4 w-4" />} onClick={() => runCommand("insertText", "\n[日程]\n")} />
+        <ToolbarTextButton label="表情" icon={<Smile className="h-4 w-4" />} onClick={() => runCommand("insertText", "🙂")} />
+        <ToolbarTextButton label="格式" icon={<Type className="h-4 w-4" />} active={formatOpen} onClick={() => setFormatOpen((value) => !value)} />
+        <div className="ml-auto flex items-center gap-1">
+          <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
+          <ToolbarButton label="更多"><Ellipsis className="h-4 w-4" /></ToolbarButton>
         </div>
       </div>
+      {formatOpen && (
+        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2">
+          <ToolbarButton label="清除格式" onClick={() => runCommand("removeFormat")}><Eraser className="h-4 w-4" /></ToolbarButton>
+          <Separator orientation="vertical" className="mx-2 h-6" />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-8 min-w-[112px] justify-between rounded-md px-2 font-normal">
+                默认字体<ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {["Arial", "Georgia", "Times New Roman", "Courier New"].map((font) => (
+                <DropdownMenuItem key={font} onSelect={() => runCommand("fontName", font)}>{font}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="sm" className="h-8 min-w-[84px] justify-between rounded-md px-2 font-normal">
+                字号<ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {[["2", "小号"], ["3", "正文"], ["4", "中号"], ["5", "大号"]].map(([size, label]) => (
+                <DropdownMenuItem key={size} onSelect={() => runCommand("fontSize", size)}>{label}</DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Separator orientation="vertical" className="mx-2 h-6" />
+          <ToolbarButton label="加粗" onClick={() => runCommand("bold")}><Bold className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="斜体" onClick={() => runCommand("italic")}><Italic className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="下划线" onClick={() => runCommand("underline")}><Underline className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="删除线" onClick={() => runCommand("strikeThrough")}><Strikethrough className="h-4 w-4" /></ToolbarButton>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground" title="文字颜色" aria-label="文字颜色">
+                <Type className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-36">
+              {[["#111827", "默认"], ["#dc2626", "红色"], ["#2563eb", "蓝色"], ["#16a34a", "绿色"]].map(([color, label]) => (
+                <DropdownMenuItem key={color} onSelect={() => runCommand("foreColor", color)}>
+                  <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: color }} />{label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md text-muted-foreground hover:text-foreground" title="高亮" aria-label="高亮">
+                <Highlighter className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              {[["transparent", "无高亮"], ["#fef3c7", "黄色"], ["#dcfce7", "绿色"], ["#dbeafe", "蓝色"]].map(([color, label]) => (
+                <DropdownMenuItem key={color} onSelect={() => runCommand("backColor", color)}>
+                  <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />{label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Separator orientation="vertical" className="mx-2 h-6" />
+          <ToolbarButton label="无序列表" onClick={() => runCommand("insertUnorderedList")}><List className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="有序列表" onClick={() => runCommand("insertOrderedList")}><ListOrdered className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="减少缩进" onClick={() => runCommand("outdent")}><IndentDecrease className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="增加缩进" onClick={() => runCommand("indent")}><IndentIncrease className="h-4 w-4" /></ToolbarButton>
+          <Separator orientation="vertical" className="mx-2 h-6" />
+          <ToolbarButton label="左对齐" onClick={() => runCommand("justifyLeft")}><AlignLeft className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="居中" onClick={() => runCommand("justifyCenter")}><AlignCenter className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="右对齐" onClick={() => runCommand("justifyRight")}><AlignRight className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="引用" onClick={() => runCommand("formatBlock", "blockquote")}><Quote className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="代码块" onClick={() => runCommand("formatBlock", "pre")}><Code2 className="h-4 w-4" /></ToolbarButton>
+        </div>
+      )}
+      <div className="relative">
+        {empty && <div className="pointer-events-none absolute left-6 top-6 text-base text-muted-foreground">输入正文</div>}
+        <div
+          ref={editorRef}
+          role="textbox"
+          aria-label="正文"
+          contentEditable
+          suppressContentEditableWarning
+          className="mail-html min-h-[280px] overflow-y-auto px-6 py-5 text-base leading-7 outline-none"
+          onFocus={focusEditor}
+          onInput={() => { dirtyRef.current = true; syncEditor() }}
+          onBlur={syncEditor}
+          dangerouslySetInnerHTML={{ __html: initialHtmlRef.current }}
+        />
+      </div>
+      {files.length > 0 && (
+        <div className="border-t px-6 py-3">
+          <div className="flex flex-wrap gap-2">
+            {files.map((file, index) => (
+              <Badge key={`${file.name}-${file.size}-${index}`} variant="outline" className="h-8 gap-2 rounded-md px-2 font-normal">
+                <Paperclip className="h-3.5 w-3.5" />
+                <span className="max-w-48 truncate">{file.name}</span>
+                <span className="text-muted-foreground">{formatBytes(file.size)}</span>
+                <Button type="button" variant="ghost" size="icon" className="h-5 w-5 rounded-md" onClick={() => onRemoveFile(index)}>
+                  <X className="h-3.5 w-3.5" />
+                </Button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function ToolbarTextButton({ label, icon, active, disabled, onClick }: { label: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick?: () => void }) {
+  return (
+    <Button type="button" variant={active ? "secondary" : "ghost"} size="sm" className="h-8 gap-1.5 rounded-md px-2 font-normal" title={label} aria-label={label} onClick={onClick} disabled={disabled}>
+      {icon}{label}
+    </Button>
   )
 }
 
@@ -1449,7 +1592,22 @@ function ToolbarButton({ label, children, onClick, disabled }: { label: string; 
 }
 
 function splitEmails(s: string) { return s.split(/[;,，\s]+/).map((v) => v.trim()).filter(Boolean) }
-function markdownToHtml(value: string) { return DOMPurify.sanitize(marked.parse(value, { async: false, breaks: true })) }
+function plainTextComposerValue(value: string): ComposerValue { return { text: value, html: plainTextToHtml(value) } }
+function composerValueFromElement(element: HTMLElement | null): ComposerValue {
+  const text = (element?.innerText || "").replace(/\u00a0/g, " ").trimEnd()
+  if (!text.trim()) return { text: "", html: "" }
+  const html = DOMPurify.sanitize(element?.innerHTML || "")
+  return { text, html: html || plainTextToHtml(text) }
+}
+function plainTextToHtml(value: string) {
+  const normalized = value.replace(/\r\n/g, "\n")
+  if (!normalized.trim()) return ""
+  return DOMPurify.sanitize(normalized.split(/\n{2,}/).map((paragraph) => `<p>${plainTextToHtmlFragment(paragraph) || "<br>"}</p>`).join(""))
+}
+function plainTextToHtmlFragment(value: string) { return value.split("\n").map((line) => escapeHtml(line)).join("<br>") }
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
+}
 function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>) {
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
   if (!AudioContextCtor) return

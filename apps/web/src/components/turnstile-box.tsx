@@ -46,5 +46,5 @@ export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId)
     }
   }, [siteKey, onToken])
-  return <div className="flex justify-center rounded-md border p-2"><div ref={ref} /></div>
+  return <div className="flex justify-center"><div ref={ref} /></div>
 }
