@@ -3,7 +3,7 @@ import * as React from "react"
 declare global {
   interface Window {
     turnstile?: {
-      render: (container: HTMLElement, options: { sitekey: string; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string
+      render: (container: HTMLElement, options: { sitekey: string; size?: "normal" | "compact" | "flexible"; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string
       remove: (widgetId: string) => void
     }
   }
@@ -20,6 +20,7 @@ export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (
       ref.current.innerHTML = ""
       widgetId = window.turnstile.render(ref.current, {
         sitekey: siteKey,
+        size: "flexible",
         callback: onToken,
         "expired-callback": () => onToken(""),
         "error-callback": () => onToken(""),
@@ -46,5 +47,5 @@ export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId)
     }
   }, [siteKey, onToken])
-  return <div className="flex justify-center"><div ref={ref} /></div>
+  return <div className="w-full"><div ref={ref} className="w-full" /></div>
 }
