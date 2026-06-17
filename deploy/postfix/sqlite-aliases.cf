@@ -1,2 +1,2 @@
 dbpath = /data/lanqin.db
-query = SELECT destination FROM aliases WHERE source='%s' AND enabled=1 UNION SELECT address FROM mailboxes WHERE address='%s' AND status='active'
+query = SELECT destination FROM aliases WHERE lower(source)=lower('%s') AND enabled=1 UNION SELECT address FROM mailboxes WHERE lower(address)=lower('%s') AND status='active'
