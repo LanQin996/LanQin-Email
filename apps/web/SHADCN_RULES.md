@@ -18,6 +18,6 @@
 
 ```bash
 cd apps/web
-npm run check:shadcn
-npm run build
+pnpm run check:shadcn
+pnpm run build
 ```

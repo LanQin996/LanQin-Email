@@ -11,12 +11,14 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/lanqin-api ./cmd/server
 
 FROM node:20-bookworm-slim AS web-build
-WORKDIR /src/apps/web
-COPY apps/web/package.json apps/web/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefer-offline --no-audit || npm install --prefer-offline --no-audit
-COPY apps/web ./
-RUN npm run build
+WORKDIR /src
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --filter lanqin-email-web...
+COPY apps/web apps/web
+RUN pnpm --dir apps/web run build
 
 FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive

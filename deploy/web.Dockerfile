@@ -1,12 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
 FROM node:20-bookworm-slim AS build
-WORKDIR /src/apps/web
-COPY apps/web/package.json apps/web/package-lock.json* ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --prefer-offline --no-audit || npm install --prefer-offline --no-audit
-COPY apps/web ./
-RUN npm run build
+WORKDIR /src
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --filter lanqin-email-web...
+COPY apps/web apps/web
+RUN pnpm --dir apps/web run build
 
 FROM nginx:1.27-alpine
 COPY --from=build /src/apps/web/dist /usr/share/nginx/html

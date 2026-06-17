@@ -1,9 +1,18 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
 import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { Node, mergeAttributes, type Editor } from "@tiptap/core"
+import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model"
+import { EditorContent, useEditor } from "@tiptap/react"
+import StarterKit from "@tiptap/starter-kit"
+import LinkExtension from "@tiptap/extension-link"
+import ImageExtension from "@tiptap/extension-image"
+import TextAlign from "@tiptap/extension-text-align"
+import Placeholder from "@tiptap/extension-placeholder"
+import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
 import { api, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend } from "@/lib/api"
 import { cn, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
@@ -53,6 +62,7 @@ type MailView = "folder" | "starred" | "label" | "scheduled"
 type MailListResponse = { items?: MailMessage[]; nextCursor?: string }
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
+type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
 type MailMenuItem =
   | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number }
   | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number }
@@ -1444,6 +1454,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   const [draftStatus, setDraftStatus] = React.useState<"idle" | "saving" | "saved" | "error">("idle")
   const [lastSavedAt, setLastSavedAt] = React.useState<Date | null>(null)
   const [scheduleDialogOpen, setScheduleDialogOpen] = React.useState(false)
+  const [sendIntent, setSendIntent] = React.useState<ComposeSendIntent | null>(null)
   const sendStartedRef = React.useRef(false)
   const lastSavedPayloadRef = React.useRef("")
   const [showCc, setShowCc] = React.useState(Boolean(draft?.cc))
@@ -1566,13 +1577,30 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
     return () => window.clearTimeout(timer)
   }, [open, hasDraftContent, composePayload, draftId, qc])
 
-  async function submit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    if (!mailbox) {
-      toast({ title: "请选择发件邮箱" })
+  function buildSendWarnings(attachmentsCount: number) {
+    const warnings: string[] = []
+    const normalizedBody = `${body.text}\n${stripHtml(body.html)}`.toLowerCase()
+    if (!subjectValue.trim()) warnings.push("这封邮件还没有主题。")
+    if (!body.text.trim() && !htmlContainsMeaningfulContent(body.html)) warnings.push("正文还是空的。")
+    if (/(附件|附上|见附件|attached|attachment)/i.test(normalizedBody) && attachmentsCount === 0) warnings.push("正文提到了附件，但还没有添加附件。")
+    return warnings
+  }
+
+  function confirmOrRun(intent: Omit<ComposeSendIntent, "description"> & { warnings: string[]; defaultDescription?: string }) {
+    if (intent.warnings.length === 0) {
+      intent.onConfirm()
       return
     }
-    sendStartedRef.current = true
+    setSendIntent({
+      title: intent.title,
+      description: intent.defaultDescription ? `${intent.defaultDescription}\n${intent.warnings.join("\n")}` : intent.warnings.join("\n"),
+      confirmText: intent.confirmText,
+      onConfirm: intent.onConfirm,
+    })
+  }
+
+  async function prepareSend() {
+    if (!mailbox) return
     const attachments = await Promise.all(files.map(fileToAttachment))
     const to = splitEmails(toValue)
     const cc = showCc ? splitEmails(ccValue) : []
@@ -1584,7 +1612,25 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
     const payloads = sendSeparately && separateRecipients.length > 0
       ? separateRecipients.map((recipient): SendPayload => ({ ...payload, to: [recipient], cc: [], bcc: [] }))
       : [payload]
-    send.mutate(payloads)
+    confirmOrRun({
+      title: "确认发送这封邮件？",
+      confirmText: sendSeparately && payloads.length > 1 ? "继续分别发送" : "继续发送",
+      warnings: buildSendWarnings(attachments.length),
+      onConfirm: () => {
+        sendStartedRef.current = true
+        setSendIntent(null)
+        send.mutate(payloads)
+      },
+    })
+  }
+
+  async function submit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    if (!mailbox) {
+      toast({ title: "请选择发件邮箱" })
+      return
+    }
+    await prepareSend()
   }
   async function scheduleAt(sendAt: string) {
     if (!mailbox) {
@@ -1604,7 +1650,17 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
       draftId: draftId || undefined,
       sendAt,
     }
-    scheduleSend.mutate(payload)
+    confirmOrRun({
+      title: "确认定时发送？",
+      confirmText: "继续定时发送",
+      defaultDescription: `发送时间：${formatDateTime(sendAt)}`,
+      warnings: buildSendWarnings(attachments.length),
+      onConfirm: () => {
+        sendStartedRef.current = true
+        setSendIntent(null)
+        scheduleSend.mutate(payload)
+      },
+    })
   }
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -1667,6 +1723,15 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
           </DialogFooter>
         </form>
         <ScheduleSendDialog open={scheduleDialogOpen} pending={scheduleSend.isPending} onOpenChange={setScheduleDialogOpen} onConfirm={scheduleAt} />
+        <ConfirmDialog
+          open={!!sendIntent}
+          title={sendIntent?.title || ""}
+          description={sendIntent?.description}
+          confirmText={sendIntent?.confirmText || "继续"}
+          pending={send.isPending || scheduleSend.isPending}
+          onOpenChange={(nextOpen) => { if (!nextOpen) setSendIntent(null) }}
+          onConfirm={() => sendIntent?.onConfirm()}
+        />
       </DialogContent>
     </Dialog>
   )
@@ -1742,45 +1807,8 @@ function ScheduleSendDialog({ open, pending, onOpenChange, onConfirm }: { open: 
 }
 
 type ComposerValue = { text: string; html: string }
-type InsertDialogState = { kind: "link" | "image"; selectedText: string }
+type InsertDialogState = { kind: "link" | "image"; selectedText: string; url?: string; alt?: string; editing?: boolean }
 type InsertDialogValue = { url: string; text: string; alt: string }
-type EditorToolbarState = {
-  bold: boolean
-  italic: boolean
-  underline: boolean
-  strikeThrough: boolean
-  unorderedList: boolean
-  orderedList: boolean
-  justifyLeft: boolean
-  justifyCenter: boolean
-  justifyRight: boolean
-  fontName: string
-  fontSize: string
-}
-type EditorCommand =
-  | "bold"
-  | "italic"
-  | "underline"
-  | "strikeThrough"
-  | "insertUnorderedList"
-  | "insertOrderedList"
-  | "justifyLeft"
-  | "justifyCenter"
-  | "justifyRight"
-
-const defaultToolbarState: EditorToolbarState = {
-  bold: false,
-  italic: false,
-  underline: false,
-  strikeThrough: false,
-  unorderedList: false,
-  orderedList: false,
-  justifyLeft: false,
-  justifyCenter: false,
-  justifyRight: false,
-  fontName: "",
-  fontSize: "3",
-}
 const composerFontOptions = ["Arial", "Georgia", "Times New Roman", "Courier New", "Microsoft YaHei"]
 const composerFontSizeOptions = [
   ["2", "小号"],
@@ -1788,24 +1816,11 @@ const composerFontSizeOptions = [
   ["4", "中号"],
   ["5", "大号"],
 ] as const
+const composerFontSizeValueByKey: Record<string, string> = { "2": "13px", "3": "16px", "4": "20px", "5": "24px" }
+const composerTextColors = [["#111827", "默认"], ["#dc2626", "红色"], ["#2563eb", "蓝色"], ["#16a34a", "绿色"], ["#9333ea", "紫色"]] as const
+const composerHighlightColors = [["transparent", "无高亮"], ["#fef3c7", "黄色"], ["#dcfce7", "绿色"], ["#dbeafe", "蓝色"], ["#fce7f3", "粉色"]] as const
 const composerEmojiOptions = ["😀", "😄", "😊", "🙂", "😉", "😍", "😘", "😎", "🤔", "👍", "👏", "🙏", "💪", "🎉", "🔥", "✨", "❤️", "✅", "📌", "📅", "☕", "💡", "🚀", "⭐"]
 const composerMenuItemClass = "min-h-9 rounded-md px-3 text-sm transition-colors data-[highlighted]:bg-primary/10 data-[highlighted]:font-semibold data-[highlighted]:text-foreground hover:bg-primary/10 hover:font-semibold hover:text-foreground"
-
-function queryCommandState(command: string) {
-  try {
-    return document.queryCommandState(command)
-  } catch {
-    return false
-  }
-}
-
-function queryCommandValue(command: string) {
-  try {
-    return String(document.queryCommandValue(command) || "")
-  } catch {
-    return ""
-  }
-}
 
 function normalizeFontName(value: string) {
   const cleaned = value.replace(/["']/g, "").split(",")[0]?.trim() || ""
@@ -1846,13 +1861,6 @@ function fontSizeLabel(value: string) {
   return composerFontSizeOptions.find(([size]) => size === normalized)?.[1] || "正文"
 }
 
-function selectionElementInside(root: HTMLElement | null) {
-  const selection = window.getSelection()
-  const node = selection?.anchorNode
-  if (!root || !node || !root.contains(node)) return null
-  return node instanceof HTMLElement ? node : node.parentElement
-}
-
 function normalizeInsertUrl(value: string, kind: InsertDialogState["kind"]) {
   const trimmed = value.trim()
   if (!trimmed) return ""
@@ -1860,173 +1868,228 @@ function normalizeInsertUrl(value: string, kind: InsertDialogState["kind"]) {
   return allowed.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
+const ScheduleCardNode = Node.create({
+  name: "scheduleCard",
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      title: { default: "" },
+      time: { default: "" },
+      duration: { default: "" },
+      reminder: { default: "" },
+      repeat: { default: "" },
+      location: { default: "" },
+      description: { default: "" },
+    }
+  },
+  parseHTML() {
+    return [{ tag: "div[data-schedule-card]" }]
+  },
+  renderHTML({ HTMLAttributes }) {
+    const { title, time, duration, reminder, repeat, location, description } = HTMLAttributes
+    const rows = [
+      ["时间", time],
+      ["持续", duration],
+      ["提醒", reminder],
+      ["重复", repeat],
+      location ? ["位置", location] : undefined,
+      description ? ["描述", description] : undefined,
+    ].filter(Boolean) as string[][]
+    return [
+      "div",
+      mergeAttributes(HTMLAttributes, {
+        "data-schedule-card": "true",
+        style: "border:1px solid #d4d4d8;border-radius:8px;padding:14px 16px;margin:16px 0;background:#fafafa;",
+      }),
+      ["div", { style: "font-weight:600;font-size:16px;margin-bottom:10px;" }, title || "日程"],
+      ...rows.map(([label, value]) => ["div", { style: "margin:6px 0;" }, ["span", { style: "color:#71717a;" }, `${label}：`], value]),
+    ]
+  },
+})
+
+function composerInitialHtml(defaultValue: string, defaultHtml?: string) {
+  return sanitizeComposerHtml(defaultHtml !== undefined ? defaultHtml : plainTextToHtml(defaultValue)) || "<p></p>"
+}
+
+function composerValueFromEditor(editor: Editor): ComposerValue {
+  const text = editor.getText({ blockSeparator: "\n" }).replace(/\u00a0/g, " ").trimEnd()
+  const html = sanitizeComposerHtml(editor.getHTML())
+  if (!text.trim() && !htmlContainsMeaningfulContent(html)) return { text: "", html: "" }
+  return { text, html: html || plainTextToHtml(text) }
+}
+
+function editorTextSelection(editor: Editor) {
+  const { from, to, empty } = editor.state.selection
+  if (empty) return ""
+  return editor.state.doc.textBetween(from, to, " ").trim()
+}
+
+function selectedImageAttributes(editor: Editor) {
+  const attrs = editor.getAttributes("image") as { src?: string; alt?: string }
+  return attrs.src ? attrs : null
+}
+
+function scheduleToNodeAttributes(schedule: ScheduleDraft) {
+  const start = parseScheduleStart(schedule)
+  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
+  return {
+    title: schedule.title,
+    time: schedule.allDay ? formatDate(start.toISOString()) : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
+    duration: schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes),
+    reminder: reminderLabel(schedule.reminderMinutes),
+    repeat: repeatLabel(schedule.repeat),
+    location: schedule.location,
+    description: schedule.description,
+  }
+}
+
 function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; files: File[]; signatureText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
-  const editorRef = React.useRef<HTMLDivElement>(null)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
-  const selectionRef = React.useRef<Range | null>(null)
-  const initialHtmlRef = React.useRef(defaultHtml !== undefined ? DOMPurify.sanitize(defaultHtml) : plainTextToHtml(defaultValue))
   const dirtyRef = React.useRef(false)
-  const lastDefaultRef = React.useRef(defaultValue)
+  const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
   const [formatOpen, setFormatOpen] = React.useState(true)
   const [scheduleOpen, setScheduleOpen] = React.useState(false)
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [insertDialog, setInsertDialog] = React.useState<InsertDialogState | null>(null)
-  const [toolbarState, setToolbarState] = React.useState<EditorToolbarState>(defaultToolbarState)
+  const [previewOpen, setPreviewOpen] = React.useState(false)
   const [empty, setEmpty] = React.useState(!defaultValue.trim())
-
-  React.useEffect(() => {
-    const next = defaultHtml !== undefined ? htmlComposerValue(defaultHtml) : plainTextComposerValue(defaultValue)
-    onChange(next)
-    setEmpty(!next.text.trim())
-  }, [])
-
-  React.useEffect(() => {
-    if (defaultValue === lastDefaultRef.current) return
-    lastDefaultRef.current = defaultValue
-    if (!dirtyRef.current) {
-      const next = defaultHtml !== undefined ? htmlComposerValue(defaultHtml) : plainTextComposerValue(defaultValue)
-      if (editorRef.current) editorRef.current.innerHTML = next.html
-      setEmpty(!next.text.trim())
+  const [selectionVersion, setSelectionVersion] = React.useState(0)
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ link: false }),
+      TextStyle,
+      Color,
+      BackgroundColor,
+      FontFamily,
+      FontSize,
+      LinkExtension.configure({
+        openOnClick: false,
+        enableClickSelection: true,
+        HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" },
+      }),
+      ImageExtension.configure({ allowBase64: true, HTMLAttributes: { style: "max-width:100%;height:auto;border-radius:8px;margin:12px 0;" } }),
+      TextAlign.configure({ types: ["heading", "paragraph"] }),
+      Placeholder.configure({ placeholder: "输入正文" }),
+      ScheduleCardNode,
+    ],
+    content: composerInitialHtml(defaultValue, defaultHtml),
+    editorProps: {
+      attributes: {
+        class: "mail-html min-h-[280px] overflow-y-auto px-6 py-5 text-base leading-7 outline-none",
+        "aria-label": "正文",
+      },
+      handlePaste(view, event) {
+        const clipboard = event.clipboardData
+        if (!clipboard) return false
+        const html = clipboard.getData("text/html")
+        const text = clipboard.getData("text/plain")
+        if (!html && !text) return false
+        event.preventDefault()
+        const content = html ? sanitizeComposerHtml(html) : plainTextToHtml(text)
+        const container = document.createElement("div")
+        container.innerHTML = content || plainTextToHtml(text)
+        const slice = ProseMirrorDOMParser.fromSchema(view.state.schema).parseSlice(container)
+        view.dispatch(view.state.tr.replaceSelection(slice).scrollIntoView())
+        return true
+      },
+    },
+    onCreate({ editor }) {
+      const next = composerValueFromEditor(editor)
       onChange(next)
-    }
-  }, [defaultValue, defaultHtml, onChange])
+      setEmpty(!next.text.trim() && !htmlContainsMeaningfulContent(next.html))
+    },
+    onUpdate({ editor }) {
+      dirtyRef.current = true
+      const next = composerValueFromEditor(editor)
+      onChange(next)
+      setEmpty(!next.text.trim() && !htmlContainsMeaningfulContent(next.html))
+    },
+    onSelectionUpdate() {
+      setSelectionVersion((value) => value + 1)
+    },
+    onTransaction() {
+      setSelectionVersion((value) => value + 1)
+    },
+  })
 
   React.useEffect(() => {
-    function handleSelectionChange() {
-      const selection = window.getSelection()
-      const anchorNode = selection?.anchorNode
-      if (!anchorNode || !editorRef.current?.contains(anchorNode)) return
-      saveSelection()
-      updateToolbarState()
+    if (!editor) return
+    const defaultKey = `${defaultValue}\n${defaultHtml || ""}`
+    if (defaultKey === lastDefaultRef.current) return
+    lastDefaultRef.current = defaultKey
+    if (!dirtyRef.current || editor.isEmpty) {
+      const next = defaultHtml !== undefined ? htmlComposerValue(defaultHtml) : plainTextComposerValue(defaultValue)
+      editor.commands.setContent(next.html || "<p></p>", { emitUpdate: false })
+      onChange(next)
+      setEmpty(!next.text.trim() && !htmlContainsMeaningfulContent(next.html))
     }
-    document.addEventListener("selectionchange", handleSelectionChange)
-    return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [])
+  }, [editor, defaultValue, defaultHtml, onChange])
 
-  function focusEditor() {
-    window.requestAnimationFrame(() => editorRef.current?.focus())
-  }
-
-  function saveSelection() {
-    const selection = window.getSelection()
-    const anchorNode = selection?.anchorNode
-    if (!selection || selection.rangeCount === 0 || !anchorNode || !editorRef.current?.contains(anchorNode)) return
-    selectionRef.current = selection.getRangeAt(0).cloneRange()
-  }
-
-  function restoreSelection() {
-    if (!selectionRef.current) return
-    try {
-      const selection = window.getSelection()
-      selection?.removeAllRanges()
-      selection?.addRange(selectionRef.current)
-    } catch {
-      selectionRef.current = null
-    }
-  }
-
-  function syncEditor() {
-    const next = composerValueFromElement(editorRef.current)
-    setEmpty(!next.text.trim())
-    onChange(next)
-  }
-
-  function runCommand(command: string, value?: string) {
-    dirtyRef.current = true
-    editorRef.current?.focus()
-    restoreSelection()
-    document.execCommand(command, false, value)
-    saveSelection()
-    syncEditor()
-    updateToolbarState()
-  }
-
-  function optimisticToggle(command: EditorCommand) {
-    const keyByCommand: Record<EditorCommand, keyof EditorToolbarState> = {
-      bold: "bold",
-      italic: "italic",
-      underline: "underline",
-      strikeThrough: "strikeThrough",
-      insertUnorderedList: "unorderedList",
-      insertOrderedList: "orderedList",
-      justifyLeft: "justifyLeft",
-      justifyCenter: "justifyCenter",
-      justifyRight: "justifyRight",
-    }
-    const key = keyByCommand[command]
-    setToolbarState((current) => {
-      const next = { ...current, [key]: !current[key] }
-      if (command === "justifyLeft" || command === "justifyCenter" || command === "justifyRight") {
-        next.justifyLeft = command === "justifyLeft"
-        next.justifyCenter = command === "justifyCenter"
-        next.justifyRight = command === "justifyRight"
-      }
-      if (command === "insertUnorderedList" && next.unorderedList) next.orderedList = false
-      if (command === "insertOrderedList" && next.orderedList) next.unorderedList = false
-      return next
-    })
-    runCommand(command)
-  }
-
-  function updateToolbarState() {
-    const currentElement = selectionElementInside(editorRef.current)
-    const computedStyle = currentElement ? window.getComputedStyle(currentElement) : null
-    setToolbarState((current) => ({
-      ...current,
-      bold: queryCommandState("bold"),
-      italic: queryCommandState("italic"),
-      underline: queryCommandState("underline"),
-      strikeThrough: queryCommandState("strikeThrough"),
-      unorderedList: queryCommandState("insertUnorderedList"),
-      orderedList: queryCommandState("insertOrderedList"),
-      justifyLeft: queryCommandState("justifyLeft"),
-      justifyCenter: queryCommandState("justifyCenter"),
-      justifyRight: queryCommandState("justifyRight"),
-      fontName: normalizeFontName(queryCommandValue("fontName")) || normalizeFontName(computedStyle?.fontFamily || "") || current.fontName,
-      fontSize: normalizeFontSize(queryCommandValue("fontSize")) || normalizeFontSize(computedStyle?.fontSize || "") || current.fontSize,
-    }))
-  }
+  const textStyleAttributes = editor?.getAttributes("textStyle") as { fontFamily?: string; fontSize?: string; color?: string; backgroundColor?: string } | undefined
+  const activeFont = normalizeFontName(textStyleAttributes?.fontFamily || "")
+  const activeFontSize = normalizeFontSize(textStyleAttributes?.fontSize || "") || "3"
+  const activeColor = textStyleAttributes?.color || ""
+  const activeHighlight = textStyleAttributes?.backgroundColor || ""
+  void selectionVersion
 
   function applyFont(font: string) {
-    runCommand("fontName", font)
-    setToolbarState((current) => ({ ...current, fontName: font }))
+    editor?.chain().focus().setFontFamily(font).run()
   }
 
   function applyFontSize(size: string) {
-    runCommand("fontSize", size)
-    setToolbarState((current) => ({ ...current, fontSize: size }))
+    const value = composerFontSizeValueByKey[size]
+    if (value) editor?.chain().focus().setFontSize(value).run()
   }
 
   function openInsertDialog(kind: InsertDialogState["kind"]) {
-    saveSelection()
-    setInsertDialog({ kind, selectedText: selectionRef.current?.toString().trim() || "" })
+    if (!editor) return
+    if (kind === "link") {
+      const attrs = editor.getAttributes("link") as { href?: string }
+      setInsertDialog({ kind, selectedText: editorTextSelection(editor), url: attrs.href || "", editing: Boolean(attrs.href) })
+      return
+    }
+    const imageAttrs = selectedImageAttributes(editor)
+    setInsertDialog({ kind, selectedText: "", url: imageAttrs?.src || "", alt: imageAttrs?.alt || "", editing: Boolean(imageAttrs?.src) })
   }
 
   function confirmInsert(value: InsertDialogValue) {
-    if (!insertDialog) return
+    if (!editor || !insertDialog) return
     const url = normalizeInsertUrl(value.url, insertDialog.kind)
     if (!url) return
     if (insertDialog.kind === "link") {
       const text = value.text.trim() || insertDialog.selectedText || value.url.trim()
-      runCommand("insertHTML", `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`)
+      if (editor.state.selection.empty && !insertDialog.editing) {
+        editor.chain().focus().insertContent(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`).run()
+      } else {
+        if (value.text.trim() && value.text.trim() !== insertDialog.selectedText) editor.chain().focus().insertContent(escapeHtml(text)).run()
+        editor.chain().focus().extendMarkRange("link").setLink({ href: url, target: "_blank", rel: "noopener noreferrer" }).run()
+      }
       return
     }
-    runCommand("insertHTML", `<img src="${escapeHtml(url)}" alt="${escapeHtml(value.alt.trim())}" />`)
+    if (insertDialog.editing) {
+      editor.chain().focus().updateAttributes("image", { src: url, alt: value.alt.trim() }).run()
+      return
+    }
+    editor.chain().focus().setImage({ src: url, alt: value.alt.trim() }).run()
   }
 
   function insertSignature() {
-    if (!signatureText.trim()) return
-    runCommand("insertHTML", `<br><br>-- <br>${plainTextToHtmlFragment(signatureText)}`)
+    if (!editor || !signatureText.trim()) return
+    editor.chain().focus().insertContent(`<p><br></p><p>-- <br>${plainTextToHtmlFragment(signatureText)}</p>`).run()
   }
 
   function insertSchedule(schedule: ScheduleDraft) {
+    if (!editor) return
     const normalized = normalizeSchedule(schedule)
-    runCommand("insertHTML", scheduleToHtml(normalized))
+    editor.chain().focus().insertContent({ type: "scheduleCard", attrs: scheduleToNodeAttributes(normalized) }).run()
     onPickFiles([scheduleToFile(normalized)])
   }
 
   function insertEmoji(emoji: string) {
-    runCommand("insertText", emoji)
+    editor?.chain().focus().insertContent(emoji).run()
     setEmojiOpen(false)
   }
 
@@ -2039,11 +2102,11 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
   return (
     <div className="min-h-[420px]">
       <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
-      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2" onMouseDown={saveSelection} onPointerDownCapture={saveSelection}>
-        <ToolbarButton label="撤销" onClick={() => runCommand("undo")}><Undo2 className="h-4 w-4" /></ToolbarButton>
-        <ToolbarButton label="重做" onClick={() => runCommand("redo")}><Redo2 className="h-4 w-4" /></ToolbarButton>
+      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2">
+        <ToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 className="h-4 w-4" /></ToolbarButton>
+        <ToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 className="h-4 w-4" /></ToolbarButton>
         <Separator orientation="vertical" className="mx-2 h-6" />
-        <ToolbarTextButton label="图片" icon={<Image className="h-4 w-4" />} onClick={() => openInsertDialog("image")} />
+        <ToolbarTextButton label="图片" icon={<Image className="h-4 w-4" />} active={editor?.isActive("image")} disabled={!editor} onClick={() => openInsertDialog("image")} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm" onMouseDown={(event) => event.preventDefault()}>
@@ -2054,7 +2117,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
             <DropdownMenuItem className={composerMenuItemClass} onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
             <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
             <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("image")}><Image className="h-4 w-4" />图片链接</DropdownMenuItem>
-            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => runCommand("insertHorizontalRule")}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
+            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <ToolbarTextButton label="导入文档" icon={<FileText className="h-4 w-4" />} onClick={() => fileInputRef.current?.click()} />
@@ -2077,24 +2140,25 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
         </DropdownMenu>
         <ToolbarTextButton label="格式" icon={<Type className="h-4 w-4" />} active={formatOpen} onClick={() => setFormatOpen((value) => !value)} />
         <div className="ml-auto flex items-center gap-1">
+          <ToolbarTextButton label="预览" icon={<Eye className="h-4 w-4" />} active={previewOpen} onClick={() => setPreviewOpen(true)} />
           <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
           <ToolbarButton label="更多"><Ellipsis className="h-4 w-4" /></ToolbarButton>
         </div>
       </div>
       {formatOpen && (
-        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2" onMouseDown={saveSelection} onPointerDownCapture={saveSelection}>
-          <ToolbarButton label="清除格式" onClick={() => runCommand("removeFormat")}><Eraser className="h-4 w-4" /></ToolbarButton>
+        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2">
+          <ToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[112px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", normalizeFontName(toolbarState.fontName) && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()}>
-                <span className="truncate">{fontLabel(toolbarState.fontName)}</span><ChevronDown className="h-3.5 w-3.5" />
+              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[112px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", activeFont && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
+                <span className="truncate">{fontLabel(activeFont)}</span><ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontOptions.map((font) => (
                 <DropdownMenuItem key={font} className={composerMenuItemClass} onSelect={() => applyFont(font)}>
-                  <Check className={cn("h-4 w-4", normalizeFontName(toolbarState.fontName) === font ? "opacity-100" : "opacity-0")} />
+                  <Check className={cn("h-4 w-4", activeFont === font ? "opacity-100" : "opacity-0")} />
                   <span style={{ fontFamily: font }}>{font}</span>
                 </DropdownMenuItem>
               ))}
@@ -2102,33 +2166,34 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[84px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", toolbarState.fontSize !== "3" && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()}>
-                {fontSizeLabel(toolbarState.fontSize)}<ChevronDown className="h-3.5 w-3.5" />
+              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[84px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", activeFontSize !== "3" && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
+                {fontSizeLabel(activeFontSize)}<ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontSizeOptions.map(([size, label]) => (
                 <DropdownMenuItem key={size} className={composerMenuItemClass} onSelect={() => applyFontSize(size)}>
-                  <Check className={cn("h-4 w-4", toolbarState.fontSize === size ? "opacity-100" : "opacity-0")} />
+                  <Check className={cn("h-4 w-4", activeFontSize === size ? "opacity-100" : "opacity-0")} />
                   {label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="加粗" active={toolbarState.bold} onClick={() => optimisticToggle("bold")}><Bold className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="斜体" active={toolbarState.italic} onClick={() => optimisticToggle("italic")}><Italic className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="下划线" active={toolbarState.underline} onClick={() => optimisticToggle("underline")}><Underline className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="删除线" active={toolbarState.strikeThrough} onClick={() => optimisticToggle("strikeThrough")}><Strikethrough className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough className="h-4 w-4" /></ToolbarButton>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm" title="文字颜色" aria-label="文字颜色" onMouseDown={(event) => event.preventDefault()}>
+              <Button type="button" variant="ghost" size="icon" className={cn("h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm", activeColor && "border-primary/35 bg-primary/10 text-primary shadow-sm")} title="文字颜色" aria-label="文字颜色" onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
                 <Type className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-36">
-              {[["#111827", "默认"], ["#dc2626", "红色"], ["#2563eb", "蓝色"], ["#16a34a", "绿色"]].map(([color, label]) => (
-                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => runCommand("foreColor", color)}>
+              {composerTextColors.map(([color, label]) => (
+                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => color === "#111827" ? editor?.chain().focus().unsetColor().run() : editor?.chain().focus().setColor(color).run()}>
+                  <Check className={cn("h-4 w-4", activeColor === color || (!activeColor && color === "#111827") ? "opacity-100" : "opacity-0")} />
                   <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: color }} />{label}
                 </DropdownMenuItem>
               ))}
@@ -2136,47 +2201,40 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm" title="高亮" aria-label="高亮" onMouseDown={(event) => event.preventDefault()}>
+              <Button type="button" variant="ghost" size="icon" className={cn("h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm", activeHighlight && "border-primary/35 bg-primary/10 text-primary shadow-sm")} title="高亮" aria-label="高亮" onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
                 <Highlighter className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
-              {[["transparent", "无高亮"], ["#fef3c7", "黄色"], ["#dcfce7", "绿色"], ["#dbeafe", "蓝色"]].map(([color, label]) => (
-                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => runCommand("backColor", color)}>
+              {composerHighlightColors.map(([color, label]) => (
+                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => color === "transparent" ? editor?.chain().focus().unsetBackgroundColor().run() : editor?.chain().focus().setBackgroundColor(color).run()}>
+                  <Check className={cn("h-4 w-4", activeHighlight === color || (!activeHighlight && color === "transparent") ? "opacity-100" : "opacity-0")} />
                   <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />{label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="无序列表" active={toolbarState.unorderedList} onClick={() => optimisticToggle("insertUnorderedList")}><List className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="有序列表" active={toolbarState.orderedList} onClick={() => optimisticToggle("insertOrderedList")}><ListOrdered className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="减少缩进" onClick={() => runCommand("outdent")}><IndentDecrease className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="增加缩进" onClick={() => runCommand("indent")}><IndentIncrease className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="减少缩进" disabled={!editor?.can().liftListItem("listItem")} onClick={() => editor?.chain().focus().liftListItem("listItem").run()}><IndentDecrease className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="增加缩进" disabled={!editor?.can().sinkListItem("listItem")} onClick={() => editor?.chain().focus().sinkListItem("listItem").run()}><IndentIncrease className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="左对齐" active={toolbarState.justifyLeft} onClick={() => optimisticToggle("justifyLeft")}><AlignLeft className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="居中" active={toolbarState.justifyCenter} onClick={() => optimisticToggle("justifyCenter")}><AlignCenter className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="右对齐" active={toolbarState.justifyRight} onClick={() => optimisticToggle("justifyRight")}><AlignRight className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="引用" onClick={() => runCommand("formatBlock", "blockquote")}><Quote className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="代码块" onClick={() => runCommand("formatBlock", "pre")}><Code2 className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="引用" active={editor?.isActive("blockquote")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton label="代码块" active={editor?.isActive("codeBlock")} disabled={!editor} onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><Code2 className="h-4 w-4" /></ToolbarButton>
         </div>
       )}
-      <div className="relative">
-        {empty && <div className="pointer-events-none absolute left-6 top-6 text-base text-muted-foreground">输入正文</div>}
-        <div
-          ref={editorRef}
-          role="textbox"
-          aria-label="正文"
-          contentEditable
-          suppressContentEditableWarning
-          className="mail-html min-h-[280px] overflow-y-auto px-6 py-5 text-base leading-7 outline-none"
-          onFocus={() => { saveSelection(); updateToolbarState() }}
-          onMouseUp={() => { saveSelection(); updateToolbarState() }}
-          onKeyUp={() => { saveSelection(); updateToolbarState() }}
-          onInput={() => { dirtyRef.current = true; saveSelection(); syncEditor(); updateToolbarState() }}
-          onBlur={syncEditor}
-          dangerouslySetInnerHTML={{ __html: initialHtmlRef.current }}
-        />
+      <div className={cn(
+        "composer-editor relative",
+        "[&_.ProseMirror]:min-h-[280px] [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-6 [&_.ProseMirror]:py-5 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none",
+        "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
+        "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
+        empty && "bg-background"
+      )}>
+        <EditorContent editor={editor} />
       </div>
       {files.length > 0 && (
         <div className="border-t px-6 py-3">
@@ -2196,6 +2254,14 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
       )}
       <InsertContentDialog state={insertDialog} onOpenChange={(open) => { if (!open) setInsertDialog(null) }} onConfirm={confirmInsert} />
       <ScheduleDialog open={scheduleOpen} onOpenChange={setScheduleOpen} onConfirm={(schedule) => { insertSchedule(schedule); setScheduleOpen(false) }} />
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="w-[min(92vw,44rem)] max-w-none">
+          <DialogHeader>
+            <DialogTitle>邮件预览</DialogTitle>
+          </DialogHeader>
+          <div className="mail-html max-h-[60vh] overflow-y-auto rounded-md border bg-background p-5 text-sm leading-7" dangerouslySetInnerHTML={{ __html: sanitizeComposerHtml(editor?.getHTML() || "") || "<p></p>" }} />
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -2216,9 +2282,9 @@ function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: Insert
 
   React.useEffect(() => {
     if (!state) return
-    setUrl("")
+    setUrl(state.url || "")
     setText(state.kind === "link" ? state.selectedText : "")
-    setAlt("")
+    setAlt(state.alt || "")
   }, [state])
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -2233,7 +2299,7 @@ function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: Insert
       <DialogContent className="sm:max-w-md">
         <form className="grid gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{kind === "link" ? "插入链接" : "插入图片"}</DialogTitle>
+            <DialogTitle>{kind === "link" ? (state?.editing ? "编辑链接" : "插入链接") : (state?.editing ? "编辑图片" : "插入图片")}</DialogTitle>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="composer-insert-url">{kind === "link" ? "链接地址" : "图片地址"}</Label>
@@ -2252,7 +2318,7 @@ function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: Insert
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button type="submit">插入</Button>
+            <Button type="submit">{state?.editing ? "更新" : "插入"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -2566,24 +2632,24 @@ function escapeIcs(value: string) {
 }
 function plainTextComposerValue(value: string): ComposerValue { return { text: value, html: plainTextToHtml(value) } }
 function htmlComposerValue(value: string): ComposerValue {
-  const html = DOMPurify.sanitize(value || "")
+  const html = sanitizeComposerHtml(value || "")
   const text = stripHtml(html)
-  return { text, html: html || plainTextToHtml(text) }
-}
-function composerValueFromElement(element: HTMLElement | null): ComposerValue {
-  const text = (element?.innerText || "").replace(/\u00a0/g, " ").trimEnd()
-  if (!text.trim()) return { text: "", html: "" }
-  const html = DOMPurify.sanitize(element?.innerHTML || "")
   return { text, html: html || plainTextToHtml(text) }
 }
 function plainTextToHtml(value: string) {
   const normalized = value.replace(/\r\n/g, "\n")
   if (!normalized.trim()) return ""
-  return DOMPurify.sanitize(normalized.split(/\n{2,}/).map((paragraph) => `<p>${plainTextToHtmlFragment(paragraph) || "<br>"}</p>`).join(""))
+  return sanitizeComposerHtml(normalized.split(/\n{2,}/).map((paragraph) => `<p>${plainTextToHtmlFragment(paragraph) || "<br>"}</p>`).join(""))
 }
 function plainTextToHtmlFragment(value: string) { return value.split("\n").map((line) => escapeHtml(line)).join("<br>") }
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
+}
+function sanitizeComposerHtml(value: string) {
+  return DOMPurify.sanitize(value || "")
+}
+function htmlContainsMeaningfulContent(html: string) {
+  return /<(img|hr|table|ul|ol|li|blockquote|pre|div)[\s>]/i.test(html) || stripHtml(html).trim().length > 0
 }
 function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>) {
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext

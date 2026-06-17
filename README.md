@@ -32,8 +32,8 @@ go run ./cmd/server
 
 # 前端（新终端）
 cd apps/web
-npm install
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 默认管理员：`admin@lanqin.local`，密码通过 `LANQIN_ADMIN_PASSWORD` 设置（不设置则启动时随机生成并输出到日志）。
