@@ -15,6 +15,7 @@ import (
 	"net/textproto"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -476,38 +477,53 @@ func partFilename(header textproto.MIMEHeader) string {
 }
 
 func firstAddressParts(value string) (string, string) {
-	// Proactively decode RFC 2047 encoded words before parsing, so that
-	// non-UTF-8 charsets (e.g. GBK, Shift_JIS) are handled by our
-	// CharsetReader instead of Go's default WordDecoder which only
-	// supports UTF-8 and ISO-8859-1.
-	decoded := decodeMIMEHeader(value)
-	items, err := netmail.ParseAddressList(decoded)
+	items, err := netmail.ParseAddressList(value)
 	if err != nil || len(items) == 0 {
-		// Still unparseable: return the decoded value and try to extract
-		// a display name from the decoded string.
-		email, name := splitNameAndEmail(decoded)
-		return normalizeEmail(email), strings.TrimSpace(name)
+		// ParseAddressList failed — attempt RFC 2047 decode on the raw header,
+		// then retry parsing. This handles non-standard From headers where
+		// encoded words (e.g. =?UTF-8?B?…?=) cause the initial parse to fail.
+		decoded := decodeMIMEHeader(value)
+		items, err = netmail.ParseAddressList(decoded)
+		if err != nil || len(items) == 0 {
+			// Still unparseable: return the decoded value and try to extract
+			// a display name from the decoded string.
+			email, name := splitNameAndEmail(decoded)
+			return normalizeEmail(email), strings.TrimSpace(name)
+		}
 	}
 	item := items[0]
-	return normalizeEmail(item.Address), strings.TrimSpace(item.Name)
+	// Decode item.Name individually so that non-UTF-8 charsets (e.g. GBK,
+	// Shift_JIS) are handled by our CharsetReader, while the address list
+	// structure is parsed from the raw header (avoiding commas/semicolons
+	// inside decoded display names breaking the parser).
+	return normalizeEmail(item.Address), strings.TrimSpace(decodeMIMEHeader(item.Name))
 }
 
 // decodeMIMEHeader decodes all RFC 2047 encoded words (=?charset?encoding?data?=)
 // in the given header value. Falls back to the original value on any error.
 // Supports non-UTF-8 charsets (e.g. GBK, GB2312, Shift_JIS) via x/text.
+// Per RFC 2047 §6.2, linear whitespace between adjacent encoded words is
+// stripped before decoding.
 func decodeMIMEHeader(value string) string {
 	if !strings.Contains(value, "=?") {
 		return value
 	}
+	// RFC 2047 §6.2: ignore whitespace between adjacent encoded words.
+	collapsed := adjacentEncodedWordSpaceRe.ReplaceAllString(value, "$1$2")
 	decoder := &mime.WordDecoder{
 		CharsetReader: charsetReader,
 	}
-	decoded, err := decoder.DecodeHeader(value)
+	decoded, err := decoder.DecodeHeader(collapsed)
 	if err != nil {
 		return value
 	}
 	return decoded
 }
+
+// adjacentEncodedWordSpaceRe matches whitespace between two adjacent RFC 2047
+// encoded words. Per RFC 2047 §6.2, this whitespace must be ignored when
+// displaying the header.
+var adjacentEncodedWordSpaceRe = regexp.MustCompile(`(\?=)\s+(=\?)`)
 
 // charsetReader converts a non-UTF-8 charset stream into UTF-8 using x/text encodings.
 func charsetReader(charset string, input io.Reader) (io.Reader, error) {
@@ -519,7 +535,7 @@ func charsetReader(charset string, input io.Reader) (io.Reader, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unsupported charset %q: %w", charset, err)
 	}
-	if enc == encoding.Nop || enc == encoding.Replacement {
+	if enc == nil || enc == encoding.Nop || enc == encoding.Replacement {
 		return nil, fmt.Errorf("unsupported charset %q", charset)
 	}
 	return enc.NewDecoder().Reader(input), nil
@@ -534,7 +550,7 @@ func splitNameAndEmail(value string) (string, string) {
 	}
 	// Try "Name <email>" pattern
 	if idx := strings.LastIndex(value, "<"); idx >= 0 {
-		email := strings.TrimRight(value[idx+1:], ">")
+		email := strings.TrimSpace(strings.Trim(value[idx+1:], "> "))
 		name := strings.TrimSpace(strings.Trim(value[:idx], `" `))
 		if strings.Contains(email, "@") {
 			return email, name
