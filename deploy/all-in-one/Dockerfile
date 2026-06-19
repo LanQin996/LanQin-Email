@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.22-bookworm AS api-build
+FROM golang:1.25-bookworm AS api-build
 WORKDIR /src/apps/api
 COPY apps/api/go.mod apps/api/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
