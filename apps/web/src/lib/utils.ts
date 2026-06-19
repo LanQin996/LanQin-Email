@@ -57,11 +57,14 @@ function normalizeCharset(charset: string): string {
  * Decode RFC 2047 encoded words in mail headers (e.g. =?UTF-8?B?5byA5ZSu?=).
  * Handles Base64 (B) and Quoted-Printable (Q) encoding.
  * Supports non-UTF-8 charsets (e.g. GBK, GB2312, Shift_JIS) via charset alias normalization.
+ * Per RFC 2047 §6.2, linear whitespace between adjacent encoded words is stripped.
  * Returns the original string unchanged if no encoded words are found or on error.
  */
 export function decodeMimeHeader(value: string): string {
   if (!value || !value.includes("=?")) return value
-  return value.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_match, charset, encoding, encoded) => {
+  // RFC 2047 §6.2: ignore whitespace between adjacent encoded words.
+  const collapsed = value.replace(/(\?=)\s+(=\?)/g, "$1$2")
+  return collapsed.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_match, charset, encoding, encoded) => {
     try {
       const lowerEncoding = String(encoding).toLowerCase()
       let decoded: string
