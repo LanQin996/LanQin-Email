@@ -485,10 +485,56 @@ func partFilename(header textproto.MIMEHeader) string {
 func firstAddressParts(value string) (string, string) {
 	items, err := netmail.ParseAddressList(value)
 	if err != nil || len(items) == 0 {
-		return strings.TrimSpace(value), ""
+		// ParseAddressList failed — attempt RFC 2047 decode on the raw header,
+		// then retry parsing. This handles non-standard From headers where
+		// encoded words (e.g. =?UTF-8?B?…?=) cause the initial parse to fail.
+		decoded := decodeMIMEHeader(value)
+		items, err = netmail.ParseAddressList(decoded)
+		if err != nil || len(items) == 0 {
+			// Still unparseable: return the decoded value as the email and
+			// try to extract a display name from the decoded string.
+			email, name := splitNameAndEmail(decoded)
+			return normalizeEmail(email), strings.TrimSpace(name)
+		}
 	}
 	item := items[0]
 	return normalizeEmail(item.Address), strings.TrimSpace(item.Name)
+}
+
+// decodeMIMEHeader decodes all RFC 2047 encoded words (=?charset?encoding?data?=)
+// in the given header value. Falls back to the original value on any error.
+func decodeMIMEHeader(value string) string {
+	if !strings.Contains(value, "=?") {
+		return value
+	}
+	decoder := new(mime.WordDecoder)
+	decoded, err := decoder.DecodeHeader(value)
+	if err != nil {
+		return value
+	}
+	return decoded
+}
+
+// splitNameAndEmail attempts to extract a display name and email address from
+// a string like "Display Name <user@example.com>" or plain "user@example.com".
+func splitNameAndEmail(value string) (string, string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", ""
+	}
+	// Try "Name <email>" pattern
+	if idx := strings.LastIndex(value, "<"); idx > 0 {
+		email := strings.TrimRight(value[idx+1:], ">")
+		name := strings.TrimSpace(strings.Trim(value[:idx], `" `))
+		if strings.Contains(email, "@") {
+			return email, name
+		}
+	}
+	// Plain email or unknown format
+	if strings.Contains(value, "@") {
+		return value, ""
+	}
+	return value, ""
 }
 
 func addressList(value string) []string {

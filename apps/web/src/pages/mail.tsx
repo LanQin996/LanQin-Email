@@ -1293,6 +1293,31 @@ function MailboxSwitcher({ collapsed, mailboxes, selectedMailbox, onSelect }: { 
   )
 }
 
+/**
+ * Decode RFC 2047 encoded words in mail headers (e.g. =?UTF-8?B?5byA5ZSu?=).
+ * Handles Base64 (B) and Quoted-Printable (Q) encoding.
+ * Returns the original string unchanged if no encoded words are found or on error.
+ */
+function decodeMimeHeader(value: string): string {
+  if (!value || !value.includes("=?")) return value
+  return value.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_match, charset, encoding, encoded) => {
+    try {
+      const lowerEncoding = String(encoding).toLowerCase()
+      let decoded: string
+      if (lowerEncoding === "b") {
+        decoded = atob(encoded)
+      } else {
+        decoded = encoded.replace(/_/g, " ").replace(/=([0-9a-fA-F]{2})/g, (_m: string, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+      }
+      const bytes = new Uint8Array(Array.from(decoded, (ch) => ch.charCodeAt(0)))
+      const decoder = new TextDecoder(String(charset).toLowerCase() || "utf-8")
+      return decoder.decode(bytes)
+    } catch {
+      return _match
+    }
+  })
+}
+
 function cleanAccountName(name: string, email?: string) {
   const value = name.trim()
   if (!value || (email && value.toLowerCase() === email.toLowerCase())) return email?.split("@")[0] || "用户"
@@ -1306,13 +1331,13 @@ function accountInitial(name: string, email?: string) {
 }
 
 function senderDisplayName(message: MailMessage) {
-  const fromName = message.fromName?.trim()
+  const fromName = decodeMimeHeader(message.fromName?.trim() || "")
   if (fromName) return fromName
   return displayNameFromAddress(message.from)
 }
 
 function displayNameFromAddress(value: string) {
-  const text = value.trim()
+  const text = decodeMimeHeader(value.trim())
   const namedAddress = text.match(/^"?([^"<]+?)"?\s*<[^>]+>$/)
   const name = namedAddress?.[1]?.trim()
   if (name) return name
@@ -1322,8 +1347,9 @@ function displayNameFromAddress(value: string) {
 }
 
 function senderTitle(message: MailMessage) {
-  const name = message.fromName?.trim()
-  return name ? `${name} <${message.from}>` : message.from
+  const name = decodeMimeHeader(message.fromName?.trim() || "")
+  const from = decodeMimeHeader(message.from)
+  return name ? `${name} <${from}>` : from
 }
 
 function MessageRow({
