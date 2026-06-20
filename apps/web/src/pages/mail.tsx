@@ -726,7 +726,7 @@ export function MailPage() {
                   <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>
                 </div>
               </div>
-              <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
+              <MessageMetaPanel message={selected} />
               <MessageLabels
                 messageLabels={selected.labels || []}
                 availableLabels={labelItems}
@@ -1228,16 +1228,7 @@ function CompactMessageDetail({
                     <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
                   </Button>
                 </div>
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="flex min-w-0 items-start gap-3">
-                    <Avatar className="size-10 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(senderDisplayName(selected), selected.from)}</AvatarFallback></Avatar>
-                    <div className="min-w-0 text-sm">
-                      <div className="truncate font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</div>
-                      <div className="truncate text-muted-foreground">收件人 {selected.to.join(", ")}</div>
-                    </div>
-                  </div>
-                  <div className="shrink-0 text-left text-sm text-muted-foreground sm:text-right">{formatDateTime(selected.receivedAt)}</div>
-                </div>
+                <MessageMetaPanel message={selected} />
                 <MessageLabels
                   messageLabels={selected.labels || []}
                   availableLabels={labels}
@@ -1426,6 +1417,104 @@ function senderTitle(message: MailMessage) {
   const name = decodeMimeHeader(message.fromName?.trim() || "")
   const from = decodeMimeHeader(message.from)
   return name ? `${name} <${from}>` : from
+}
+
+function senderAddress(message: MailMessage) {
+  return extractAddress(message.from) || decodeMimeHeader(message.fromName?.trim() || "") || "未知发件人地址"
+}
+
+function extractAddress(value?: string) {
+  const text = decodeMimeHeader((value || "").trim())
+  if (!text) return ""
+  const bracketAddress = text.match(/<([^>]+)>/)?.[1]?.trim()
+  return bracketAddress || text
+}
+
+function cleanAddressList(items?: string[]) {
+  return (items || []).map((item) => extractAddress(item)).filter(Boolean)
+}
+
+function sameMailTime(a?: string, b?: string) {
+  if (!a || !b) return false
+  const left = new Date(a).getTime()
+  const right = new Date(b).getTime()
+  return !Number.isNaN(left) && !Number.isNaN(right) && left === right
+}
+
+function MessageMetaPanel({ message }: { message: MailMessage }) {
+  const fromName = senderDisplayName(message)
+  const fromAddress = senderAddress(message)
+  const to = cleanAddressList(message.to)
+  const cc = cleanAddressList(message.cc)
+  const bcc = cleanAddressList(message.bcc)
+  const deliveredTo = extractAddress(message.recipientAddress || message.mailboxAddress || "")
+  const showSentAt = Boolean(message.sentAt) && !sameMailTime(message.sentAt, message.receivedAt)
+
+  return (
+    <div className="space-y-3 rounded-xl border bg-muted/20 p-3 text-sm">
+      <div className="flex min-w-0 items-start gap-3">
+        <Avatar className="size-10 shrink-0 rounded-full">
+          <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(fromName, fromAddress)}</AvatarFallback>
+        </Avatar>
+        <div className="min-w-0 flex-1 space-y-2">
+          <MessageMetaRow label="发件人">
+            <span className="break-words font-medium text-foreground" title={senderTitle(message)}>{fromName}</span>
+          </MessageMetaRow>
+          <MessageMetaRow label="发件人地址">
+            <span className="break-all">{fromAddress}</span>
+          </MessageMetaRow>
+          <MessageMetaRow label="收件人">
+            <AddressList values={to} empty="未填写收件人" />
+          </MessageMetaRow>
+          {cc.length > 0 && (
+            <MessageMetaRow label="抄送">
+              <AddressList values={cc} />
+            </MessageMetaRow>
+          )}
+          {bcc.length > 0 && (
+            <MessageMetaRow label="密送">
+              <AddressList values={bcc} />
+            </MessageMetaRow>
+          )}
+          {deliveredTo && (
+            <MessageMetaRow label="投递邮箱">
+              <span className="break-all">{deliveredTo}</span>
+            </MessageMetaRow>
+          )}
+          {showSentAt && (
+            <MessageMetaRow label="发送时间">
+              <span>{formatDateTime(message.sentAt)}</span>
+            </MessageMetaRow>
+          )}
+          <MessageMetaRow label="接收时间">
+            <span>{formatDateTime(message.receivedAt)}</span>
+          </MessageMetaRow>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MessageMetaRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)]">
+      <div className="shrink-0 text-xs font-medium text-muted-foreground sm:pt-0.5">{label}</div>
+      <div className="min-w-0 text-foreground">{children}</div>
+    </div>
+  )
+}
+
+function AddressList({ values, empty = "无" }: { values: string[]; empty?: string }) {
+  if (values.length === 0) return <span className="text-muted-foreground">{empty}</span>
+  return (
+    <div className="flex min-w-0 flex-wrap gap-1.5">
+      {values.map((value, index) => (
+        <span key={`${value}-${index}`} className="inline-flex max-w-full rounded-md bg-background px-2 py-0.5 text-xs text-foreground ring-1 ring-border">
+          <span className="truncate" title={value}>{value}</span>
+        </span>
+      ))}
+    </div>
+  )
 }
 
 function MessageRow({
