@@ -208,6 +208,7 @@ const Sidebar = React.forwardRef<
               } as React.CSSProperties
             }
             side={side}
+            aria-describedby={undefined}
           >
             <SheetHeader className="sr-only">
               <SheetTitle>导航</SheetTitle>

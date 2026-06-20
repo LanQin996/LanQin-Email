@@ -133,6 +133,16 @@ function ProtectedContent() {
 
 function AdminSectionItems({ activeSection }: { activeSection: string }) {
   const { isMobile, setOpenMobile } = useSidebar()
+  const location = useLocation()
+  const locationKey = `${location.pathname}${location.search}`
+  const previousLocationKey = React.useRef(locationKey)
+
+  React.useEffect(() => {
+    const previous = previousLocationKey.current
+    previousLocationKey.current = locationKey
+    if (isMobile && previous !== locationKey) setOpenMobile(false)
+  }, [isMobile, locationKey, setOpenMobile])
+
   function closeMobile() {
     if (isMobile) setOpenMobile(false)
   }

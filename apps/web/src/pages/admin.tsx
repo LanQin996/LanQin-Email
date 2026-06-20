@@ -472,7 +472,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               <div className="mt-3 space-y-2 text-sm">
                 <div className="truncate text-muted-foreground">邮箱：{message.mailboxAddress || message.recipientAddress || "-"}</div>
                 <div className="truncate text-muted-foreground">发件人：{adminSenderDisplayName(message)}</div>
-                <div className="truncate text-muted-foreground">收件人：{message.recipientAddress || message.to.join(", ")}</div>
+                <div className="truncate text-muted-foreground">收件人：{message.recipientAddress || message.to?.join(", ") || ""}</div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Badge variant="secondary">{folderName(message.folder)}</Badge>
@@ -506,7 +506,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                     {message.ownerEmail && <div className="text-xs text-muted-foreground">{message.ownerEmail}</div>}
                   </TableCell>
                   <TableCell className="max-w-[220px] truncate" title={adminSenderTitle(message)}>{adminSenderDisplayName(message)}</TableCell>
-                  <TableCell className="max-w-[220px] truncate">{message.recipientAddress || message.to.join(", ")}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{message.recipientAddress || message.to?.join(", ") || ""}</TableCell>
                   <TableCell><Badge variant="secondary">{folderName(message.folder)}</Badge></TableCell>
                   <TableCell className="text-muted-foreground">{formatDate(message.receivedAt)}</TableCell>
                   <TableCell><Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>查看</Button></TableCell>
@@ -848,7 +848,7 @@ function AdminMessageDialog({ message, loading, open, onOpenChange }: { message?
               <MessageMeta label="所属邮箱" value={message.mailboxAddress || message.recipientAddress || ""} />
               <MessageMeta label="所属用户" value={message.ownerEmail || ""} />
               <MessageMeta label="发件人" value={adminSenderTitle(message)} />
-              <MessageMeta label="收件人" value={message.recipientAddress || message.to.join(", ")} />
+              <MessageMeta label="收件人" value={message.recipientAddress || message.to?.join(", ") || ""} />
               <MessageMeta label="文件夹" value={folderName(message.folder)} />
               <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
             </div>

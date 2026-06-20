@@ -234,7 +234,7 @@ export function ProfilePage() {
                 <SheetTrigger asChild>
                   <Button size="icon" variant="ghost" aria-label="打开导航"><PanelLeftOpen className="h-4 w-4" /></Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden">
+                <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden" aria-describedby={undefined}>
                   <SheetTitle className="sr-only">个人中心导航</SheetTitle>
                   <div className="h-[100dvh]">{sidebarContent}</div>
                 </SheetContent>

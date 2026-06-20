@@ -737,7 +737,7 @@ export function MailPage() {
             </div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-6">
-                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${selected.bodyText || ""}</pre>`) }} />
+                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
               </div>
             </ScrollArea>
@@ -758,7 +758,7 @@ export function MailPage() {
                   <SheetTrigger asChild>
                     <Button size="icon" variant="ghost" aria-label="打开导航"><PanelLeftOpen className="h-4 w-4" /></Button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden">
+                  <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden" aria-describedby={undefined}>
                     <SheetTitle className="sr-only">邮箱导航</SheetTitle>
                     <div className="h-[100dvh]">{sidebarContent}</div>
                   </SheetContent>
