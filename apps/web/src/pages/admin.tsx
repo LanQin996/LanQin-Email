@@ -2,7 +2,7 @@ import * as React from "react"
 import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, CheckCircle2, Circle, Copy, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Search, ShieldCheck, Trash2, Users } from "lucide-react"
+import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
 import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -35,6 +35,9 @@ const sectionLabels: Record<Section, string> = {
   settings: "系统设置",
 }
 const sectionKeys = Object.keys(sectionLabels) as Section[]
+const projectRepositoryUrl = "https://github.com/LanQin996/LanQin-Email"
+const projectTag = import.meta.env.VITE_APP_VERSION || ""
+const projectReleaseUrl = import.meta.env.VITE_RELEASE_URL || (projectTag ? `${projectRepositoryUrl}/releases/tag/${projectTag}` : "")
 
 export function AdminPage() {
   const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: api.adminOverview })
@@ -534,7 +537,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const qc = useQueryClient()
   const { toast } = useToast()
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates })
-  const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "templates" | "security">("base")
+  const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "templates" | "security" | "about">("base")
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
   const [openRegistration, setOpenRegistration] = React.useState(false)
@@ -620,6 +623,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     { key: "mail", label: "邮件" },
     { key: "templates", label: "模板" },
     { key: "security", label: "安全" },
+    { key: "about", label: "关于" },
   ]
   return (
     <form key={formKey} onSubmit={(event) => { event.preventDefault(); save.mutate(new FormData(event.currentTarget)) }} className="space-y-6">
@@ -736,10 +740,88 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
         </CardContent>
       </Card>}
 
-      <div className="flex justify-end">
+      {settingsTab === "about" && <AboutProjectCard />}
+
+      {settingsTab !== "about" && <div className="flex justify-end">
         <Button disabled={save.isPending || !settings}>{save.isPending ? "保存中..." : "保存设置"}</Button>
-      </div>
+      </div>}
     </form>
+  )
+}
+
+function AboutProjectCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>关于</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <AboutRow label="版本">
+          {projectTag ? (
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={projectReleaseUrl} target="_blank" rel="noreferrer">
+                <GitBranch className="h-5 w-5 text-primary" />
+                {projectTag}
+              </a>
+            </Button>
+          ) : (
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" disabled>
+              <GitBranch className="h-5 w-5 text-muted-foreground" />
+              未发布版本
+            </Button>
+          )}
+        </AboutRow>
+        <AboutRow label="交流">
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={projectRepositoryUrl} target="_blank" rel="noreferrer">
+                <Github className="h-5 w-5" />
+                GitHub
+              </a>
+            </Button>
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={`${projectRepositoryUrl}/issues`} target="_blank" rel="noreferrer">
+                <Circle className="h-5 w-5 text-blue-500" />
+                Issues
+              </a>
+            </Button>
+          </div>
+        </AboutRow>
+        <AboutRow label="支持">
+          <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+            <a href={projectRepositoryUrl} target="_blank" rel="noreferrer">
+              <Star className="h-5 w-5 text-yellow-500" />
+              给项目点 Star
+            </a>
+          </Button>
+        </AboutRow>
+        <AboutRow label="帮助">
+          <div className="flex flex-wrap gap-3">
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={`${projectRepositoryUrl}#readme`} target="_blank" rel="noreferrer">
+                <BookOpen className="h-5 w-5 text-sky-500" />
+                项目文档
+              </a>
+            </Button>
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={`${projectRepositoryUrl}/blob/main/LICENSE`} target="_blank" rel="noreferrer">
+                <Scale className="h-5 w-5 text-emerald-500" />
+                开源协议
+              </a>
+            </Button>
+          </div>
+        </AboutRow>
+      </CardContent>
+    </Card>
+  )
+}
+
+function AboutRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:items-center">
+      <div className="font-medium text-muted-foreground">{label}：</div>
+      <div className="min-w-0">{children}</div>
+    </div>
   )
 }
 

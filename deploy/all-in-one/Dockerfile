@@ -18,6 +18,8 @@ RUN corepack enable && corepack prepare pnpm@10.28.2 --activate
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile --filter lanqin-email-web...
 COPY apps/web apps/web
+ARG VITE_APP_VERSION=""
+ARG VITE_RELEASE_URL=""
 RUN pnpm --dir apps/web run build
 
 FROM debian:bookworm-slim
