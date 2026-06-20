@@ -100,3 +100,8 @@ docker compose up -d
 - Go 1.22+
 - Node.js 20+
 - Docker & Docker Compose（部署）
+
+## License
+
+[MIT](./LICENSE)
+
