@@ -6,8 +6,10 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
+  pull-requests: read
+  issues: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -161,3 +163,94 @@ jobs:
             VITE_RELEASE_URL=${{ needs.release.outputs.release_url }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    needs:
+      - release
+      - docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ needs.release.outputs.tag }}"
+          version="${{ needs.release.outputs.version }}"
+          repo="${GITHUB_REPOSITORY}"
+          repo_url="https://github.com/${repo}"
+          image_base="${REGISTRY}/${repo}"
+          image_base="${image_base,,}"
+          current_commit="$(git rev-list -n 1 "${tag}")"
+          previous_tag="$(git describe --tags --abbrev=0 "${current_commit}^" 2>/dev/null || true)"
+          generate_args=(-f "tag_name=${tag}")
+          if [[ -n "${previous_tag}" ]]; then
+            generate_args+=(-f "previous_tag_name=${previous_tag}")
+          fi
+
+          if ! gh api -X POST "repos/${repo}/releases/generate-notes" "${generate_args[@]}" --jq '.body' > generated-release-notes.md; then
+            echo "GitHub 自动生成更新日志失败，已回退到提交列表。" > generated-release-notes.md
+            echo >> generated-release-notes.md
+            if [[ -n "${previous_tag}" ]]; then
+              git log --reverse --pretty=format:"- %s ([%h](${repo_url}/commit/%H))" "${previous_tag}..${tag}" >> generated-release-notes.md
+              echo >> generated-release-notes.md
+              echo >> generated-release-notes.md
+              echo "完整更新日志: [${previous_tag}...${tag}](${repo_url}/compare/${previous_tag}...${tag})" >> generated-release-notes.md
+            else
+              echo "- 首个公开版本。" >> generated-release-notes.md
+              echo >> generated-release-notes.md
+              echo "当前提交: [${GITHUB_SHA:0:7}](${repo_url}/commit/${GITHUB_SHA})" >> generated-release-notes.md
+            fi
+          fi
+
+          cat > release-notes.md <<EOF
+          # LanQin Email ${tag}
+
+          自建邮箱 Webmail 全栈方案，包含 Web、API、Postfix、Dovecot、Rspamd 等组件。
+
+          ## 注意
+
+          如果需要公网正常收发邮件，请确保已正确配置 MX、SPF、DKIM、DMARC 以及 25 / 587 / 993 等端口。
+
+          ## 使用文档
+
+          - [项目文档](${repo_url}#readme)
+          - [开源协议](${repo_url}/blob/main/LICENSE)
+
+          ## Docker 镜像
+
+          | 组件 | 镜像 |
+          |------|------|
+          | All-in-one | \`${image_base}:${tag}\` |
+          | API | \`${image_base}-api:${tag}\` |
+          | Web | \`${image_base}-web:${tag}\` |
+          | Postfix | \`${image_base}-postfix:${tag}\` |
+          | Dovecot | \`${image_base}-dovecot:${tag}\` |
+          | Rspamd | \`${image_base}-rspamd:${tag}\` |
+
+          同时也会发布 \`${version}\`、\`latest\` 和 \`sha-*\` 标签。
+          EOF
+
+          {
+            echo
+            cat generated-release-notes.md
+          } >> release-notes.md
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ needs.release.outputs.tag }}"
+          title="LanQin Email ${tag}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release edit "${tag}" --title "${title}" --notes-file release-notes.md --latest
+          else
+            gh release create "${tag}" --verify-tag --title "${title}" --notes-file release-notes.md --latest
+          fi

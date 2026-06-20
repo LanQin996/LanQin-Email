@@ -1,0 +1,34 @@
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+      - ignore-for-release
+  categories:
+    - title: 🚨 破坏性变更
+      labels:
+        - breaking-change
+        - breaking change
+    - title: 🔒 安全更新
+      labels:
+        - security
+    - title: ✨ 新功能
+      labels:
+        - feature
+        - enhancement
+    - title: 🐛 问题修复
+      labels:
+        - bug
+        - fix
+    - title: 📚 文档
+      labels:
+        - documentation
+        - docs
+    - title: 🧰 工程维护
+      labels:
+        - chore
+        - ci
+        - dependencies
+        - refactor
+    - title: 其他更新
+      labels:
+        - "*"
