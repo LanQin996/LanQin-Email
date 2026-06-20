@@ -41,6 +41,10 @@ jobs:
           OPENAI_API_KEY: ${{ env.OPENAI_API_KEY }}
           OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5.5' }}
           OPENAI_API_MODE: ${{ vars.OPENAI_API_MODE || 'responses' }}
+          # 可选：reasoning 模型推理强度，例如 minimal / low / medium / high / xhigh；留空使用模型默认
+          OPENAI_REASONING_EFFORT: ${{ vars.OPENAI_REASONING_EFFORT }}
+          # 可选：Responses API reasoning summary，例如 auto / concise / detailed
+          OPENAI_REASONING_SUMMARY: ${{ vars.OPENAI_REASONING_SUMMARY }}
           OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.openai.com/v1' }}
           OPENAI_TIMEOUT_MS: ${{ vars.OPENAI_TIMEOUT_MS || '120000' }}
           OPENAI_RETRIES: ${{ vars.OPENAI_RETRIES || '2' }}
