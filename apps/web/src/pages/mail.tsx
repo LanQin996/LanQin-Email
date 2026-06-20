@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -44,6 +45,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 import { useMe } from "@/hooks/use-me"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
 
 const folderIcons: Record<string, React.ReactNode> = { inbox: <Inbox className="h-4 w-4" />, sent: <Send className="h-4 w-4" />, drafts: <FileText className="h-4 w-4" />, archive: <Archive className="h-4 w-4" />, spam: <Trash2 className="h-4 w-4" />, trash: <Trash2 className="h-4 w-4" /> }
@@ -93,12 +95,14 @@ export function MailPage() {
   const [selectedMailboxId, setSelectedMailboxId] = React.useState(() => localStorage.getItem("lanqin:selected-mailbox") || "")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
   const [displayMode] = useDisplayMode()
+  const isMobile = useIsMobile()
   const [refreshing, setRefreshing] = React.useState(false)
   const [autoRefreshing, setAutoRefreshing] = React.useState(false)
   const [lastAutoRefreshAt, setLastAutoRefreshAt] = React.useState<Date | null>(null)
   const [bulkPending, setBulkPending] = React.useState(false)
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const [cancelingScheduledId, setCancelingScheduledId] = React.useState("")
+  const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
   const themeMountedRef = React.useRef(false)
   const mailNotifyStateRef = React.useRef<Record<string, MailNotificationState>>({})
@@ -470,30 +474,36 @@ export function MailPage() {
     setSelectedLabelId("")
     setSelectedId(null)
     setMailFilter("all")
+    setMobileSidebarOpen(false)
   }
   function openFolder(nextFolder: string) {
     setFolder(nextFolder)
     setMailView("folder")
     setSelectedLabelId("")
     setSelectedId(null)
+    setMailFilter("all")
+    setMobileSidebarOpen(false)
   }
   function openStarred() {
     setMailView("starred")
     setSelectedLabelId("")
     setSelectedId(null)
     setMailFilter("all")
+    setMobileSidebarOpen(false)
   }
   function openScheduled() {
     setMailView("scheduled")
     setSelectedLabelId("")
     setSelectedId(null)
     setMailFilter("all")
+    setMobileSidebarOpen(false)
   }
   function openLabel(labelId: string) {
     setSelectedLabelId(labelId)
     setMailView("label")
     setSelectedId(null)
     setMailFilter("all")
+    setMobileSidebarOpen(false)
   }
   function openMessage(messageId: string | null) {
     if (!messageId) {
@@ -527,6 +537,89 @@ export function MailPage() {
   function openSettings() {
     navigate("/profile")
   }
+  const sidebarContent = (
+    <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
+      <SidebarHeader className={cn("border-b py-3", sidebarCollapsed ? "px-2" : "px-3")}>
+        <AccountHeader
+          collapsed={sidebarCollapsed}
+          name={me.data?.user.displayName || selectedMailbox?.address || "LanQin"}
+          email={me.data?.user.email || selectedMailbox?.address}
+          darkMode={darkMode}
+          onToggleTheme={() => setDarkMode((value) => !value)}
+          onSettings={openSettings}
+        />
+        <div className={cn("mt-2 flex gap-2", sidebarCollapsed && "justify-center")}>
+          <MailboxSwitcher
+            collapsed={sidebarCollapsed}
+            mailboxes={mailboxList.data?.items || []}
+            selectedMailbox={selectedMailbox}
+            onSelect={switchMailbox}
+          />
+          {!sidebarCollapsed && (
+            <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0 rounded-md" onClick={copyCurrentMailbox} disabled={!selectedMailbox}>
+              <Copy className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        <Button className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => openCompose()} disabled={!selectedMailbox}>
+          <PencilLine className="h-4 w-4" />
+          {!sidebarCollapsed && <span>写邮件</span>}
+        </Button>
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          {!sidebarCollapsed && <SidebarGroupLabel>邮件夹</SidebarGroupLabel>}
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {mailMenuItems.map((item) => (
+                <SidebarMenuItem key={item.key}>
+                  <SidebarMenuButton
+                    isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : mailView === "folder" && folder === item.folderName}
+                    className={cn(sidebarCollapsed && "justify-center px-0")}
+                    onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : openFolder(item.folderName)}
+                  >
+                    {item.icon}
+                    {!sidebarCollapsed && <span>{item.label}</span>}
+                    {!sidebarCollapsed && item.count > 0 && <Badge variant="secondary" className="ml-auto">{item.count}</Badge>}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+            {folders.isLoading && <FolderSkeleton />}
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          {!sidebarCollapsed && <SidebarGroupLabel>标签</SidebarGroupLabel>}
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {labelItems.map((label) => (
+                <SidebarMenuItem key={label.id}>
+                  <SidebarMenuButton isActive={mailView === "label" && selectedLabelId === label.id} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => openLabel(label.id)}>
+                    <Tag className="h-4 w-4" style={{ color: label.color }} />
+                    {!sidebarCollapsed && <span>{label.name}</span>}
+                    {!sidebarCollapsed && !!label.messageCount && <Badge variant="secondary" className="ml-auto">{label.messageCount}</Badge>}
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+              {!sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
+              <SidebarMenuItem>
+                <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => createLabel.mutate(name)} />
+              </SidebarMenuItem>
+            </SidebarMenu>
+            {labels.isLoading && <FolderSkeleton />}
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      {!isMobile && (
+        <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex justify-center" : "")}>
+          <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn(!sidebarCollapsed && "w-full justify-start")} onClick={toggleSidebar}>
+            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+            {!sidebarCollapsed && <span>收起侧栏</span>}
+          </Button>
+        </div>
+      )}
+    </Sidebar>
+  )
   function toggleSidebar() {
     if (sidebarCollapsed) {
       sidebarPanelRef.current?.expand(14)
@@ -537,93 +630,158 @@ export function MailPage() {
     }
   }
 
-  return (
-    <div className="h-svh bg-background">
-      <SidebarProvider className="h-full min-h-0 w-full">
-        <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
-            <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
-                <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
-                  <SidebarHeader className={cn("border-b py-3", sidebarCollapsed ? "px-2" : "px-3")}>
-                  <AccountHeader
-                    collapsed={sidebarCollapsed}
-                    name={me.data?.user.displayName || selectedMailbox?.address || "LanQin"}
-                    email={me.data?.user.email || selectedMailbox?.address}
-                    darkMode={darkMode}
-                    onToggleTheme={() => setDarkMode((value) => !value)}
-                    onSettings={openSettings}
-                  />
-                  <div className={cn("mt-2 flex gap-2", sidebarCollapsed && "justify-center")}>
-                    <MailboxSwitcher
-                      collapsed={sidebarCollapsed}
-                      mailboxes={mailboxList.data?.items || []}
-                      selectedMailbox={selectedMailbox}
-                      onSelect={switchMailbox}
-                    />
-                    {!sidebarCollapsed && (
-                      <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0 rounded-md" onClick={copyCurrentMailbox} disabled={!selectedMailbox}>
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  <Button className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => openCompose()} disabled={!selectedMailbox}>
-                    <PencilLine className="h-4 w-4" />
-                    {!sidebarCollapsed && <span>写邮件</span>}
-                  </Button>
-                </SidebarHeader>
-                <SidebarContent>
-                  <SidebarGroup>
-                    {!sidebarCollapsed && <SidebarGroupLabel>邮件夹</SidebarGroupLabel>}
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {mailMenuItems.map((item) => (
-                          <SidebarMenuItem key={item.key}>
-                            <SidebarMenuButton
-                              isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : mailView === "folder" && folder === item.folderName}
-                              className={cn(sidebarCollapsed && "justify-center px-0")}
-                              onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : openFolder(item.folderName)}
-                            >
-                              {item.icon}
-                              {!sidebarCollapsed && <span>{item.label}</span>}
-                              {!sidebarCollapsed && item.count > 0 && <Badge variant="secondary" className="ml-auto">{item.count}</Badge>}
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        ))}
-                      </SidebarMenu>
-                      {folders.isLoading && <FolderSkeleton />}
-                    </SidebarGroupContent>
-                  </SidebarGroup>
-                  <SidebarGroup>
-                    {!sidebarCollapsed && <SidebarGroupLabel>标签</SidebarGroupLabel>}
-                    <SidebarGroupContent>
-                      <SidebarMenu>
-                        {labelItems.map((label) => (
-                          <SidebarMenuItem key={label.id}>
-                            <SidebarMenuButton isActive={mailView === "label" && selectedLabelId === label.id} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => openLabel(label.id)}>
-                              <Tag className="h-4 w-4" style={{ color: label.color }} />
-                              {!sidebarCollapsed && <span>{label.name}</span>}
-                              {!sidebarCollapsed && !!label.messageCount && <Badge variant="secondary" className="ml-auto">{label.messageCount}</Badge>}
-                            </SidebarMenuButton>
-                          </SidebarMenuItem>
-                        ))}
-                        {!sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
-                        <SidebarMenuItem>
-                          <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => createLabel.mutate(name)} />
-                        </SidebarMenuItem>
-                      </SidebarMenu>
-                      {labels.isLoading && <FolderSkeleton />}
-                    </SidebarGroupContent>
-                  </SidebarGroup>
-                </SidebarContent>
-                <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex justify-center" : "")}>
-                  <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn(!sidebarCollapsed && "w-full justify-start")} onClick={toggleSidebar}>
-                    {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-                    {!sidebarCollapsed && <span>收起侧栏</span>}
-                  </Button>
+  const contentView = !mailboxList.isLoading && !hasMailboxes ? (
+    <NoMailboxState onOpenSettings={openSettings} />
+  ) : mailView === "scheduled" ? (
+    <ScheduledSendView
+      compact={isMobile || displayMode === "compact"}
+      items={visibleScheduledItems}
+      total={scheduledItems.length}
+      loading={scheduledSends.isLoading}
+      query={query}
+      cancelingId={cancelingScheduledId}
+      onCancel={(item) => cancelScheduledSend.mutate(item)}
+    />
+  ) : isMobile || displayMode === "compact" ? (
+    <CompactMailView
+      title={viewTitle}
+      icon={mailView === "label" && selectedLabel ? <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} /> : undefined}
+      messages={visibleMessages}
+      total={allMessages.length}
+      selectedIds={compactSelectedIds}
+      allSelected={compactAllSelected}
+      someSelected={compactSomeSelected}
+      loading={messages.isLoading}
+      hasMore={hasMoreMessages}
+      loadingMore={messages.isFetchingNextPage}
+      onLoadMore={() => messages.fetchNextPage()}
+      emptyMessage={emptyMessage}
+      selectedId={selectedId}
+      selected={selected}
+      detailLoading={detail.isLoading}
+      labels={labelItems}
+      labelPending={addLabel.isPending || removeLabel.isPending}
+      onSelect={openMessage}
+      onSelectAll={toggleCompactSelectAll}
+      onToggleSelected={toggleCompactSelect}
+      scheduledDraftIds={scheduledDraftIds}
+      onCloseReader={() => setSelectedId(null)}
+      onStar={(message) => star.mutate({ id: message.id, starred: !message.isStarred })}
+      onReply={openReply}
+      onForward={openForward}
+      onArchive={(message) => move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })}
+      onDelete={confirmDeleteMessage}
+      onToggleRead={(message) => markRead.mutate({ id: message.id, read: !message.isRead })}
+      onAddLabel={(message, label) => addLabel.mutate({ id: message.id, label })}
+      onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
+      bulkPending={bulkPending}
+      onBulkAction={runBulkAction}
+    />
+  ) : (
+    <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
+      <ResizablePanel defaultSize={32} minSize={24} maxSize={44}>
+        <div className="flex h-full min-h-0 flex-col">
+          <div className="flex h-14 shrink-0 items-center justify-between border-b px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} />}{viewTitle}</div>
+                <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
+              </div>
+            </div>
+            {selectedCountOnPage > 0 && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
+          </div>
+          <ScrollArea className="min-h-0 flex-1">
+            {messages.isLoading && <MessageSkeleton />}
+            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} />)}
+            {!messages.isLoading && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
+            {!messages.isLoading && hasMoreMessages && (
+              <div className="border-b p-4 text-center">
+                <Button variant="outline" size="sm" disabled={!canLoadMore} onClick={() => messages.fetchNextPage()}>
+                  {messages.isFetchingNextPage ? "加载中..." : "加载更多"}
+                </Button>
+              </div>
+            )}
+          </ScrollArea>
+        </div>
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+
+      <ResizablePanel defaultSize={68} minSize={44}>
+        <section className="h-full min-h-0">
+          {!selectedId && <div className="grid h-full place-items-center text-muted-foreground">选择一封邮件阅读</div>}
+          {detail.isLoading && <div className="space-y-4 p-6"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-40 w-full" /></div>}
+          {selected && <div className="flex h-full min-h-0 flex-col">
+            <div className="border-b p-5">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="text-xl font-semibold">{selected.subject}</h2>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>
+                  <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>
+                  {selected.folder === "Archive" ? (
+                    <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}>取消归档</Button>
+                  ) : (
+                    <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}>归档</Button>
+                  )}
+                  <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>
                 </div>
-              </Sidebar>
+              </div>
+              <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
+              <MessageLabels
+                messageLabels={selected.labels || []}
+                availableLabels={labelItems}
+                onAdd={(label) => addLabel.mutate({ id: selected.id, label })}
+                onRemove={(labelId) => removeLabel.mutate({ id: selected.id, labelId })}
+                pending={addLabel.isPending || removeLabel.isPending}
+              />
+            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="p-6">
+                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
+                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
+              </div>
+            </ScrollArea>
+          </div>}
+        </section>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  )
+
+  return (
+    <div className="h-svh overflow-hidden bg-background">
+      <SidebarProvider className="h-full min-h-0 w-full">
+        {isMobile ? (
+          <div className="flex h-full min-h-0 flex-col">
+            {!selectedId && (
+              <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
+                <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+                  <SheetTrigger asChild>
+                    <Button size="icon" variant="ghost" aria-label="打开导航"><PanelLeftOpen className="h-4 w-4" /></Button>
+                  </SheetTrigger>
+                  <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden" aria-describedby={undefined}>
+                    <SheetTitle className="sr-only">邮箱导航</SheetTitle>
+                    <div className="h-svh">{sidebarContent}</div>
+                  </SheetContent>
+                </Sheet>
+                <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing || autoRefreshing} className={cn("transition-all", (refreshing || autoRefreshing) && "bg-primary/5 text-primary")} title={autoRefreshing ? "自动刷新中" : "刷新邮件"}>
+                  <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
+                </Button>
+                <div className="min-w-0 flex-1 text-sm font-semibold">{viewTitle}</div>
+                <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>
+                <div className="relative basis-full">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
+                </div>
+              </header>
+            )}
+            <section className="min-h-0 flex-1">{contentView}</section>
+          </div>
+        ) : (
+          <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
+            <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
+              {sidebarContent}
             </ResizablePanel>
             <ResizableHandle withHandle />
-
             <ResizablePanel defaultSize={85} minSize={60}>
               <section className="flex h-full min-h-0 flex-col">
                 <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
@@ -659,127 +817,11 @@ export function MailPage() {
                     <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
                   </div>
                 </header>
-
-                {!mailboxList.isLoading && !hasMailboxes ? (
-                  <NoMailboxState onOpenSettings={openSettings} />
-                ) : mailView === "scheduled" ? (
-                  <ScheduledSendView
-                    compact={displayMode === "compact"}
-                    items={visibleScheduledItems}
-                    total={scheduledItems.length}
-                    loading={scheduledSends.isLoading}
-                    query={query}
-                    cancelingId={cancelingScheduledId}
-                    onCancel={(item) => cancelScheduledSend.mutate(item)}
-                  />
-                ) : displayMode === "compact" ? (
-                  <CompactMailView
-                    title={viewTitle}
-                    icon={mailView === "label" && selectedLabel ? <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} /> : undefined}
-                    messages={visibleMessages}
-                    total={allMessages.length}
-                    selectedIds={compactSelectedIds}
-                    allSelected={compactAllSelected}
-                    someSelected={compactSomeSelected}
-                    loading={messages.isLoading}
-                    hasMore={hasMoreMessages}
-                    loadingMore={messages.isFetchingNextPage}
-                    onLoadMore={() => messages.fetchNextPage()}
-                    emptyMessage={emptyMessage}
-                    selectedId={selectedId}
-                    selected={selected}
-                    detailLoading={detail.isLoading}
-                    labels={labelItems}
-                    labelPending={addLabel.isPending || removeLabel.isPending}
-                    onSelect={openMessage}
-                    onSelectAll={toggleCompactSelectAll}
-                    onToggleSelected={toggleCompactSelect}
-                    scheduledDraftIds={scheduledDraftIds}
-                    onCloseReader={() => setSelectedId(null)}
-                    onStar={(message) => star.mutate({ id: message.id, starred: !message.isStarred })}
-                    onReply={openReply}
-                    onForward={openForward}
-                    onArchive={(message) => move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })}
-                    onDelete={confirmDeleteMessage}
-                    onToggleRead={(message) => markRead.mutate({ id: message.id, read: !message.isRead })}
-                    onAddLabel={(message, label) => addLabel.mutate({ id: message.id, label })}
-                    onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
-                    bulkPending={bulkPending}
-                    onBulkAction={runBulkAction}
-                  />
-                ) : (
-                <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
-                  <ResizablePanel defaultSize={32} minSize={24} maxSize={44}>
-                    <div className="flex h-full min-h-0 flex-col">
-                      <div className="flex h-14 shrink-0 items-center justify-between border-b px-5">
-                        <div className="flex min-w-0 items-center gap-3">
-                          <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} />}{viewTitle}</div>
-                            <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
-                          </div>
-                        </div>
-                        {selectedCountOnPage > 0 && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
-                      </div>
-                      <ScrollArea className="min-h-0 flex-1">
-                        {messages.isLoading && <MessageSkeleton />}
-                        {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} />)}
-                        {!messages.isLoading && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
-                        {!messages.isLoading && hasMoreMessages && (
-                          <div className="border-b p-4 text-center">
-                            <Button variant="outline" size="sm" disabled={!canLoadMore} onClick={() => messages.fetchNextPage()}>
-                              {messages.isFetchingNextPage ? "加载中..." : "加载更多"}
-                            </Button>
-                          </div>
-                        )}
-                      </ScrollArea>
-                    </div>
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-
-                  <ResizablePanel defaultSize={68} minSize={44}>
-                    <section className="h-full min-h-0">
-                      {!selectedId && <div className="grid h-full place-items-center text-muted-foreground">选择一封邮件阅读</div>}
-                      {detail.isLoading && <div className="space-y-4 p-6"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-40 w-full" /></div>}
-                      {selected && <div className="flex h-full min-h-0 flex-col">
-                        <div className="border-b p-5">
-                          <div className="mb-4 flex items-center justify-between gap-3">
-                            <h2 className="text-xl font-semibold">{selected.subject}</h2>
-                            <div className="flex flex-wrap justify-end gap-2">
-                              <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>
-                              <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>
-                              {selected.folder === "Archive" ? (
-                                <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}>取消归档</Button>
-                              ) : (
-                                <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}>归档</Button>
-                              )}
-                              <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>
-                            </div>
-                          </div>
-                          <div className="text-sm text-muted-foreground"><span className="font-medium text-foreground" title={senderTitle(selected)}>{senderDisplayName(selected)}</span> 发给 {selected.to.join(", ")} · {formatDateTime(selected.receivedAt)}</div>
-                          <MessageLabels
-                            messageLabels={selected.labels || []}
-                            availableLabels={labelItems}
-                            onAdd={(label) => addLabel.mutate({ id: selected.id, label })}
-                            onRemove={(labelId) => removeLabel.mutate({ id: selected.id, labelId })}
-                            pending={addLabel.isPending || removeLabel.isPending}
-                          />
-                        </div>
-                        <ScrollArea className="min-h-0 flex-1">
-                          <div className="p-6">
-                            <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${selected.bodyText || ""}</pre>`) }} />
-                            {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
-                          </div>
-                        </ScrollArea>
-                      </div>}
-                    </section>
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-
-                )}
+                {contentView}
               </section>
             </ResizablePanel>
           </ResizablePanelGroup>
+        )}
       </SidebarProvider>
 
       <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
@@ -1044,15 +1086,18 @@ function CompactMailView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-12 shrink-0 items-center justify-between border-b px-4">
-        <div className="flex items-center gap-3">
+      <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
+        <div className="flex min-w-0 flex-1 items-center gap-3">
           <Checkbox aria-label="选择当前页邮件" checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={(value) => onSelectAll(value === true)} />
-          <div className="flex items-center gap-2 text-base font-semibold">{icon}{title}</div>
+          <div className="flex min-w-0 items-center gap-2 text-base font-semibold">
+            {icon}
+            <span className="truncate">{title}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {selectedIds.length > 0 ? (
             <>
-              <span className="text-sm text-muted-foreground">已选 {selectedIds.length} 封</span>
+              <span className="hidden text-sm text-muted-foreground min-[380px]:inline">已选 {selectedIds.length} 封</span>
               <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />
             </>
           ) : (
@@ -1113,7 +1158,43 @@ function CompactMessageDetail({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className="flex h-14 shrink-0 items-center justify-between gap-3 border-b px-4">
+      <div className="shrink-0 border-b px-3 py-2 sm:px-4">
+        <div className="flex min-h-10 items-center gap-2 sm:hidden">
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold">{selected?.subject || "邮件详情"}</div>
+          <Button variant="ghost" size="icon" disabled={!previousMessage} onClick={() => previousMessage && onSelect(previousMessage.id)} aria-label="上一封">
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" disabled={!nextMessage} onClick={() => nextMessage && onSelect(nextMessage.id)} aria-label="下一封">
+            <ArrowLeft className="h-4 w-4 rotate-180" />
+          </Button>
+          {selected && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" aria-label="更多操作">
+                  <Ellipsis className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {selected.folder === "Drafts" ? (
+                  <DropdownMenuItem onSelect={() => onSelect(selected.id)}><PencilLine className="h-4 w-4" />编辑草稿</DropdownMenuItem>
+                ) : (
+                  <>
+                    <DropdownMenuItem onSelect={() => onReply(selected)}><Reply className="h-4 w-4" />回复</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onForward(selected)}><Forward className="h-4 w-4" />转发</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onArchive(selected)}><Archive className="h-4 w-4" />{selected.folder === "Archive" ? "取消归档" : "归档"}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</DropdownMenuItem>
+                  </>
+                )}
+                <DropdownMenuItem onSelect={() => onDelete(selected)} className="text-destructive"><Trash2 className="h-4 w-4" />删除</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
+        <div className="hidden min-h-10 items-center justify-between gap-3 sm:flex">
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />返回</Button>
             {selected?.folder === "Drafts" ? (
@@ -1134,19 +1215,20 @@ function CompactMessageDetail({
             <Button variant="ghost" size="sm" disabled={!nextMessage} onClick={() => nextMessage && onSelect(nextMessage.id)}>下一封</Button>
           </div>
         </div>
+      </div>
         {loading && <div className="space-y-4 p-8"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-64 w-full" /></div>}
         {!loading && !selected && <div className="grid flex-1 place-items-center text-sm text-muted-foreground">邮件不存在</div>}
         {selected && (
           <ScrollArea className="min-h-0 flex-1">
-            <div className="w-full px-8 py-6">
+            <div className="w-full px-4 py-4 sm:px-8 sm:py-6">
               <div className="space-y-5 border-b pb-5">
-                <div className="flex items-center gap-3">
-                  <h1 className="min-w-0 flex-1 truncate text-2xl font-semibold tracking-tight">{selected.subject}</h1>
+                <div className="flex items-start gap-3">
+                  <h1 className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight sm:text-2xl">{selected.subject}</h1>
                   <Button type="button" variant="ghost" size="icon" aria-label={selected.isStarred ? "取消星标" : "添加星标"} className="text-muted-foreground hover:text-yellow-500" onClick={() => onStar(selected)}>
                     <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
                   </Button>
                 </div>
-                <div className="flex items-start justify-between gap-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                   <div className="flex min-w-0 items-start gap-3">
                     <Avatar className="size-10 rounded-full"><AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(senderDisplayName(selected), selected.from)}</AvatarFallback></Avatar>
                     <div className="min-w-0 text-sm">
@@ -1154,7 +1236,7 @@ function CompactMessageDetail({
                       <div className="truncate text-muted-foreground">收件人 {selected.to.join(", ")}</div>
                     </div>
                   </div>
-                  <div className="shrink-0 text-right text-sm text-muted-foreground">{formatDateTime(selected.receivedAt)}</div>
+                  <div className="shrink-0 text-left text-sm text-muted-foreground sm:text-right">{formatDateTime(selected.receivedAt)}</div>
                 </div>
                 <MessageLabels
                   messageLabels={selected.labels || []}
@@ -1164,9 +1246,9 @@ function CompactMessageDetail({
                   pending={labelPending}
                 />
               </div>
-              <div className="py-8">
-                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${selected.bodyText || ""}</pre>`) }} />
-                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
+              <div className="py-6 sm:py-8">
+                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
+                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
               </div>
             </div>
           </ScrollArea>
@@ -1177,21 +1259,40 @@ function CompactMessageDetail({
 
 function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onStar }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
+  const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
   return (
-    <div onClick={onClick} className={cn("grid cursor-pointer grid-cols-[32px_28px_minmax(140px,240px)_minmax(0,1fr)_88px_36px] items-center gap-2 border-b px-4 py-2 text-sm transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
-      <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} />
-      <Mail className={cn("h-4 w-4", message.isRead ? "text-muted-foreground/70" : "fill-yellow-200 text-yellow-500")} />
-      <div className="truncate" title={senderTitle(message)}>{senderName}</div>
-      <div className="flex min-w-0 items-center gap-2">
-        <span className="truncate font-medium">{message.subject}</span>
-        <span className="min-w-0 truncate text-muted-foreground">{message.snippet}</span>
-        {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
-        {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
-        {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+    <div onClick={onClick} className={cn("cursor-pointer border-b px-3 py-3 text-sm transition-colors hover:bg-accent/50 sm:grid sm:grid-cols-[32px_28px_minmax(140px,220px)_minmax(0,1fr)_104px_36px] sm:items-center sm:gap-2 sm:px-4 sm:py-2", active && "bg-accent", !message.isRead && "font-semibold")}>
+      <div className="flex gap-3 sm:contents">
+        <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} className="mt-0.5 shrink-0 sm:mt-0" />
+        {message.isRead ? (
+          <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70 sm:mt-0" />
+        ) : (
+          <Mail className="mt-0.5 h-4 w-4 shrink-0 fill-yellow-200 text-yellow-500 sm:mt-0" />
+        )}
+        <div className="min-w-0 flex-1 sm:contents">
+          <div className="flex min-w-0 items-center justify-between gap-2 sm:block">
+            <div className="min-w-0 truncate" title={senderTitle(message)}>{senderName}</div>
+            <div className="flex shrink-0 items-center gap-1 sm:hidden">
+              <span className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</span>
+              <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
+                <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
+              </Button>
+            </div>
+          </div>
+          <div className="mt-1 flex min-w-0 items-center gap-2 sm:mt-0">
+            <span className="truncate font-medium">{message.subject}</span>
+            <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{message.snippet}</span>
+            {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
+            {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
+            {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
+            {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+          </div>
+          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:hidden">{message.snippet}</div>
+        </div>
       </div>
-      <div className="shrink-0 text-right text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
-      <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
+      <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">{formatDate(message.receivedAt)}</div>
+      <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex" onClick={(event) => { event.stopPropagation(); onStar() }}>
         <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
       </Button>
     </div>
@@ -1666,27 +1767,27 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="w-[min(96vw,82rem)] max-w-none overflow-hidden p-0"
+        className="flex h-svh w-screen max-w-none overflow-hidden p-0 sm:h-auto sm:max-h-[92vh] sm:w-[min(96vw,82rem)]"
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
-        <form key={draft?.key || "new"} className="flex max-h-[90vh] flex-col" onSubmit={submit}>
-          <DialogHeader className="border-b px-6 py-4 text-left">
-            <DialogTitle className="flex items-center justify-between gap-4">
+        <form key={draft?.key || "new"} className="flex min-h-0 flex-1 flex-col sm:max-h-[90vh]" onSubmit={submit}>
+          <DialogHeader className="border-b px-4 py-3 text-left sm:px-6 sm:py-4">
+            <DialogTitle className="flex min-w-0 flex-col gap-1 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pr-6">
               <span>{draftId ? "编辑草稿" : "写信"}</span>
               <span className={cn("text-xs font-normal", draftStatus === "error" ? "text-destructive" : "text-muted-foreground")}>
                 {draftStatus === "saving" ? "正在保存草稿..." : draftStatus === "saved" && lastSavedAt ? `草稿已保存 ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : draftStatus === "error" ? "草稿保存失败" : ""}
               </span>
             </DialogTitle>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <ComposeField label="发件邮箱">
               <Input value={mailbox?.address || "未选择"} readOnly className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
             </ComposeField>
             <ComposeField
               label="收件人"
               action={
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-sm">
+                <div className="flex shrink-0 flex-wrap items-center justify-start gap-1 text-sm sm:justify-end sm:gap-2">
                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowCc((value) => !value)}>抄送</Button>
                   <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowBcc((value) => !value)}>密送</Button>
                   <div className="flex items-center gap-2 rounded-md px-2 py-1">
@@ -1721,10 +1822,10 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
               onRemoveFile={(index) => { setAttachmentsTouched(true); setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}
             />
           </div>
-          <DialogFooter className="border-t bg-background px-6 py-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button type="button" variant="outline" disabled={send.isPending || scheduleSend.isPending || !mailbox} onClick={() => setScheduleDialogOpen(true)}><Calendar className="h-4 w-4" />定时发送</Button>
-            <Button disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>
+          <DialogFooter className="grid grid-cols-3 gap-2 border-t bg-background px-4 py-3 sm:flex sm:flex-row sm:justify-end sm:px-6 sm:py-4">
+            <Button type="button" variant="outline" className="min-h-10 px-3" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" className="min-h-10 px-3" disabled={send.isPending || scheduleSend.isPending || !mailbox} onClick={() => setScheduleDialogOpen(true)}><Calendar className="h-4 w-4" />定时</Button>
+            <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>
           </DialogFooter>
         </form>
         <ScheduleSendDialog open={scheduleDialogOpen} pending={scheduleSend.isPending} onOpenChange={setScheduleDialogOpen} onConfirm={scheduleAt} />
@@ -1744,8 +1845,8 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
 
 function ComposeField({ label, children, action }: { label: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="flex min-h-14 flex-col gap-2 border-b px-6 py-2 sm:flex-row sm:items-center">
-      <Label className="w-20 shrink-0 text-base font-normal text-foreground">{label}</Label>
+    <div className="flex min-h-14 flex-col gap-2 border-b px-4 py-2 sm:flex-row sm:items-center sm:px-6">
+      <Label className="shrink-0 text-base font-normal text-foreground sm:w-20">{label}</Label>
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         {children}
         {action}
@@ -1955,13 +2056,19 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
-  const [formatOpen, setFormatOpen] = React.useState(true)
+  const isMobile = useIsMobile()
+  const [formatOpen, setFormatOpen] = React.useState(() => typeof window === "undefined" ? true : window.innerWidth >= 768)
   const [scheduleOpen, setScheduleOpen] = React.useState(false)
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [insertDialog, setInsertDialog] = React.useState<InsertDialogState | null>(null)
   const [previewOpen, setPreviewOpen] = React.useState(false)
   const [empty, setEmpty] = React.useState(!defaultValue.trim())
   const [selectionVersion, setSelectionVersion] = React.useState(0)
+
+  React.useEffect(() => {
+    setFormatOpen(!isMobile)
+  }, [isMobile])
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ link: false }),
@@ -1983,7 +2090,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
     content: composerInitialHtml(defaultValue, defaultHtml),
     editorProps: {
       attributes: {
-        class: "mail-html min-h-[280px] overflow-y-auto px-6 py-5 text-base leading-7 outline-none",
+        class: "mail-html min-h-[240px] min-w-0 flex-1 overflow-y-auto px-4 py-4 text-base leading-7 outline-none sm:min-h-[280px] sm:px-6 sm:py-5",
         "aria-label": "正文",
       },
       handlePaste(view, event) {
@@ -2105,13 +2212,12 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
   }
 
   return (
-    <div className="min-h-[420px]">
+    <div className="flex min-h-[330px] flex-1 flex-col bg-background sm:min-h-[420px]">
       <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
-      <div className="flex min-h-11 flex-wrap items-center gap-1 border-b px-6 py-2">
+      <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-6">
         <ToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 className="h-4 w-4" /></ToolbarButton>
         <ToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 className="h-4 w-4" /></ToolbarButton>
         <Separator orientation="vertical" className="mx-2 h-6" />
-        <ToolbarTextButton label="图片" icon={<Image className="h-4 w-4" />} active={editor?.isActive("image")} disabled={!editor} onClick={() => openInsertDialog("image")} />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm" onMouseDown={(event) => event.preventDefault()}>
@@ -2125,7 +2231,6 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
             <DropdownMenuItem className={composerMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <ToolbarTextButton label="导入文档" icon={<FileText className="h-4 w-4" />} onClick={() => fileInputRef.current?.click()} />
         <ToolbarTextButton label="日程" icon={<Calendar className="h-4 w-4" />} onClick={() => setScheduleOpen(true)} />
         <DropdownMenu open={emojiOpen} onOpenChange={setEmojiOpen}>
           <DropdownMenuTrigger asChild>
@@ -2144,14 +2249,13 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
           </DropdownMenuContent>
         </DropdownMenu>
         <ToolbarTextButton label="格式" icon={<Type className="h-4 w-4" />} active={formatOpen} onClick={() => setFormatOpen((value) => !value)} />
-        <div className="ml-auto flex items-center gap-1">
+        <div className="flex items-center gap-1">
           <ToolbarTextButton label="预览" icon={<Eye className="h-4 w-4" />} active={previewOpen} onClick={() => setPreviewOpen(true)} />
           <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
-          <ToolbarButton label="更多"><Ellipsis className="h-4 w-4" /></ToolbarButton>
         </div>
       </div>
       {formatOpen && (
-        <div className="flex min-h-14 flex-wrap items-center gap-1 border-b bg-muted/40 px-6 py-2">
+        <div className="flex min-h-14 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-6">
           <ToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser className="h-4 w-4" /></ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <DropdownMenu>
@@ -2233,16 +2337,16 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
         </div>
       )}
       <div className={cn(
-        "composer-editor relative",
-        "[&_.ProseMirror]:min-h-[280px] [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-6 [&_.ProseMirror]:py-5 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none",
+        "composer-editor relative flex min-h-[240px] flex-1 border-b focus-within:bg-card/40 sm:min-h-[280px]",
+        "[&_.ProseMirror]:min-h-[240px] [&_.ProseMirror]:w-full [&_.ProseMirror]:flex-1 [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-4 [&_.ProseMirror]:py-4 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none sm:[&_.ProseMirror]:min-h-[280px] sm:[&_.ProseMirror]:px-6 sm:[&_.ProseMirror]:py-5",
         "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
         "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
         empty && "bg-background"
       )}>
-        <EditorContent editor={editor} />
+        <EditorContent editor={editor} className="flex min-h-0 flex-1" />
       </div>
       {files.length > 0 && (
-        <div className="border-t px-6 py-3">
+        <div className="border-t px-4 py-3 sm:px-6">
           <div className="flex flex-wrap gap-2">
             {files.map((file, index) => (
               <Badge key={`${file.name}-${file.size}-${index}`} variant="outline" className="h-8 gap-2 rounded-md px-2 font-normal">

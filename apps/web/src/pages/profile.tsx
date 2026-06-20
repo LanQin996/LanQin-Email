@@ -10,6 +10,7 @@ import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
 import { useMe } from "@/hooks/use-me"
 import { useLogout } from "@/hooks/use-logout"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { validatePasswordConfirm } from "@/lib/validation"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
@@ -21,6 +22,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
@@ -60,6 +62,8 @@ export function ProfilePage() {
   const [displayMode, setDisplayMode] = useDisplayMode()
   const [blockedMailboxId, setBlockedMailboxId] = React.useState("all")
   const [ruleDialogOpen, setRuleDialogOpen] = React.useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
+  const isMobile = useIsMobile()
   const themeMountedRef = React.useRef(false)
 
   const rawTab = params.get("tab") as Tab | null
@@ -187,52 +191,78 @@ export function ProfilePage() {
 
   const logout = useLogout()
   async function copy(text: string) { await navigator.clipboard.writeText(text); toast({ title: "已复制" }) }
-  function setTab(next: Tab) { setParams(next === "profile" ? {} : { tab: next }) }
+  function setTab(next: Tab) { setParams(next === "profile" ? {} : { tab: next }); setMobileSidebarOpen(false) }
   function toggleSidebar() { sidebarCollapsed ? (sidebarPanelRef.current?.expand(14), setSidebarCollapsed(false)) : (sidebarPanelRef.current?.collapse(), setSidebarCollapsed(true)) }
   if (me.isLoading) return <div className="grid h-svh place-items-center text-muted-foreground">加载中...</div>
   if (me.isError || !user) return <div className="grid h-svh place-items-center text-muted-foreground">登录状态已失效</div>
 
+  const sidebarContent = (
+    <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
+      <SidebarHeader className={cn("border-b py-4", sidebarCollapsed ? "px-2" : "px-4")}>
+        <AccountHeader collapsed={sidebarCollapsed} name={user.displayName || selectedMailbox?.address || "LanQin"} email={user.email || selectedMailbox?.address} darkMode={darkMode} onToggleTheme={() => setDarkMode((v) => !v)} onBack={() => navigate("/")} />
+      </SidebarHeader>
+      <SidebarContent>
+        <SidebarGroup>
+          {!sidebarCollapsed && <SidebarGroupLabel>个人中心</SidebarGroupLabel>}
+          <SidebarGroupContent>
+            <SidebarMenu>{tabKeys.map((key) => <SidebarMenuItem key={key}><SidebarMenuButton isActive={tab === key} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => setTab(key)}>{tabs[key].icon}{!sidebarCollapsed && <span>{tabs[key].label}</span>}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      </SidebarContent>
+      <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex flex-col items-center" : "")}>
+        <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn("text-muted-foreground", !sidebarCollapsed && "w-full justify-start")} onClick={logout}>
+          <LogOut className="h-4 w-4" />
+          {!sidebarCollapsed && <span>退出登录</span>}
+        </Button>
+        {!isMobile && (
+          <>
+            <Separator className="my-2" />
+            <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn(!sidebarCollapsed && "w-full justify-start")} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}{!sidebarCollapsed && <span>收起侧栏</span>}</Button>
+          </>
+        )}
+      </div>
+    </Sidebar>
+  )
+
   return (
-    <div className="h-svh bg-background">
+    <div className="h-svh overflow-hidden bg-background">
       <SidebarProvider className="h-full min-h-0 w-full">
-        <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
-          <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
-            <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
-              <SidebarHeader className={cn("border-b py-4", sidebarCollapsed ? "px-2" : "px-4")}>
-                <AccountHeader collapsed={sidebarCollapsed} name={user.displayName || selectedMailbox?.address || "LanQin"} email={user.email || selectedMailbox?.address} darkMode={darkMode} onToggleTheme={() => setDarkMode((v) => !v)} onBack={() => navigate("/")} />
-              </SidebarHeader>
-              <SidebarContent>
-                <SidebarGroup>
-                  {!sidebarCollapsed && <SidebarGroupLabel>个人中心</SidebarGroupLabel>}
-                  <SidebarGroupContent>
-                    <SidebarMenu>{tabKeys.map((key) => <SidebarMenuItem key={key}><SidebarMenuButton isActive={tab === key} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => setTab(key)}>{tabs[key].icon}{!sidebarCollapsed && <span>{tabs[key].label}</span>}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
-              </SidebarContent>
-              <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex flex-col items-center" : "")}>
-                <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn("text-muted-foreground", !sidebarCollapsed && "w-full justify-start")} onClick={logout}>
-                  <LogOut className="h-4 w-4" />
-                  {!sidebarCollapsed && <span>退出登录</span>}
-                </Button>
-                <Separator className="my-2" />
-                <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn(!sidebarCollapsed && "w-full justify-start")} onClick={toggleSidebar}>{sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}{!sidebarCollapsed && <span>收起侧栏</span>}</Button>
-              </div>
-            </Sidebar>
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={85} minSize={60}>
-            <section className="flex h-full min-h-0 flex-col">
-              <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
-                <div className="text-sm font-semibold">{tabs[tab].label}</div>
-              </header>
-              <ScrollArea className="min-h-0 flex-1"><main className="mx-auto w-full max-w-6xl p-6">{renderTab()}</main></ScrollArea>
-            </section>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+        {isMobile ? (
+          <div className="flex h-full min-h-0 flex-col">
+            <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
+              <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
+                <SheetTrigger asChild>
+                  <Button size="icon" variant="ghost" aria-label="打开导航"><PanelLeftOpen className="h-4 w-4" /></Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden" aria-describedby={undefined}>
+                  <SheetTitle className="sr-only">个人中心导航</SheetTitle>
+                  <div className="h-svh">{sidebarContent}</div>
+                </SheetContent>
+              </Sheet>
+              <div className="min-w-0 flex-1 text-sm font-semibold">{tabs[tab].label}</div>
+              <Button type="button" variant="ghost" size="icon" onClick={() => navigate("/")} aria-label="返回邮箱"><ArrowLeft className="h-4 w-4" /></Button>
+            </header>
+            <ScrollArea className="min-h-0 flex-1"><main className="w-full p-4">{renderTab()}</main></ScrollArea>
+          </div>
+        ) : (
+          <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
+            <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
+              {sidebarContent}
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={85} minSize={60}>
+              <section className="flex h-full min-h-0 flex-col">
+                <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
+                  <div className="text-sm font-semibold">{tabs[tab].label}</div>
+                </header>
+                <ScrollArea className="min-h-0 flex-1"><main className="mx-auto w-full max-w-6xl p-6">{renderTab()}</main></ScrollArea>
+              </section>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        )}
       </SidebarProvider>
     </div>
   )
-
   function renderTab() {
     if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} />
     if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
@@ -439,7 +469,7 @@ function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApp
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <Button type="button" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />申请邮箱</Button>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-lg">
         <DialogHeader><DialogTitle>申请邮箱</DialogTitle></DialogHeader>
         <form className="space-y-4" onSubmit={submit}>
           <Field label="邮箱前缀"><Input name="localPart" autoFocus required placeholder="your-name" /></Field>
@@ -450,7 +480,7 @@ function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApp
             </Select>
           </Field>
           <Field label="显示名称"><Input name="displayName" placeholder="可选" /></Field>
-          <DialogFooter>
+          <DialogFooter className="gap-2 [&>button]:w-full sm:[&>button]:w-auto">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
             <Button disabled={pending || !domainId}>{pending ? "申请中..." : "申请"}</Button>
           </DialogFooter>
@@ -620,7 +650,7 @@ function SignaturesSection({ items, mailboxes, loading, pending, onCreate, onUpd
         </CardContent>
       </Card>
       <Dialog open={!!editing} onOpenChange={(open) => { if (!open) setEditing(null) }}>
-        <DialogContent className="sm:max-w-2xl">
+        <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>编辑签名</DialogTitle></DialogHeader>
           {editing && (
             <form key={editing.id} className="space-y-4" onSubmit={(e) => { e.preventDefault(); const form = new FormData(e.currentTarget); form.set("mailboxId", editingMailboxId === "all" ? "" : editingMailboxId); form.set("isDefault", editingIsDefault ? "on" : ""); onUpdate(editing.id, form); setEditing(null) }}>
@@ -637,7 +667,7 @@ function SignaturesSection({ items, mailboxes, loading, pending, onCreate, onUpd
                 <Checkbox checked={editingIsDefault} onCheckedChange={(value) => setEditing((current) => current ? { ...current, isDefault: value === true } : current)} />
                 <span>设为当前范围默认签名</span>
               </label>
-              <DialogFooter>
+              <DialogFooter className="gap-2 [&>button]:w-full sm:[&>button]:w-auto">
                 <Button type="button" variant="outline" onClick={() => setEditing(null)}>取消</Button>
                 <Button disabled={pending}>{pending ? "保存中..." : "保存修改"}</Button>
               </DialogFooter>
@@ -796,12 +826,12 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[min(94vw,84rem)] max-w-none gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b px-8 py-6">
-          <DialogTitle className="text-2xl">新建规则</DialogTitle>
+      <DialogContent className="flex h-svh w-screen max-w-none gap-0 overflow-hidden p-0 sm:h-auto sm:max-h-[92vh] sm:w-[min(94vw,84rem)]">
+        <DialogHeader className="border-b px-4 py-4 text-left sm:px-8 sm:py-6">
+          <DialogTitle className="text-xl sm:text-2xl">新建规则</DialogTitle>
         </DialogHeader>
-        <form onSubmit={submit}>
-          <div className="space-y-7 px-8 py-7">
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={submit}>
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-5 sm:space-y-7 sm:px-8 sm:py-7">
             <Field label="名称"><Input value={name} onChange={(event) => setName(event.target.value)} placeholder="我的规则" /></Field>
             <Field label="适用邮箱"><MailboxSelect value={mailboxId} mailboxes={mailboxes} onChange={setMailboxId} /></Field>
 
@@ -860,7 +890,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
               </div>
             </div>
           </div>
-          <DialogFooter className="border-t px-8 py-5">
+          <DialogFooter className="gap-2 border-t px-4 py-4 sm:px-8 sm:py-5 [&>button]:w-full sm:[&>button]:w-auto">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
             <Button disabled={!canCreate}>{pending ? "创建中..." : "创建"}</Button>
           </DialogFooter>

@@ -53,18 +53,10 @@ export function AdminPage() {
   const section: Section = rawSection && sectionKeys.includes(rawSection) ? rawSection : "overview"
 
   return (
-    <ScrollArea className="h-svh">
-      <main className="p-6">
+    <ScrollArea className="h-[calc(100svh-3rem)] md:h-svh">
+      <main className="p-4 sm:p-6">
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <h1 className="text-2xl font-semibold tracking-tight">{sectionLabels[section]}</h1>
-        </div>
-
-        <div className="mb-6 flex flex-wrap gap-2 lg:hidden">
-          {sectionKeys.map((key) => (
-            <Button key={key} variant={section === key ? "default" : "outline"} size="sm" onClick={() => setParams(key === "overview" ? {} : { section: key })}>
-              {sectionLabels[key]}
-            </Button>
-          ))}
         </div>
 
         {section === "overview" && (
@@ -203,24 +195,45 @@ function UsersSection({ users }: { users: AdminUser[] }) {
             </SelectContent>
           </Select>
         </div>
-        <Table>
-          <TableHeader><TableRow><TableHead>用户</TableHead><TableHead>角色</TableHead><TableHead>邮箱</TableHead><TableHead>状态</TableHead><TableHead>创建时间</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
-          <TableBody>
-            {filteredUsers.map((user) => (
-              <TableRow key={user.id}>
-                <TableCell>
-                  <div className="font-medium">{user.displayName}</div>
-                  <div className="text-xs text-muted-foreground">{user.email}</div>
-                </TableCell>
-                <TableCell><Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role === "admin" ? "管理员" : "普通用户"}</Badge></TableCell>
-                <TableCell><UserMailboxCell user={user} /></TableCell>
-                <TableCell><Badge variant={user.disabled ? "secondary" : "default"}>{user.disabled ? "停用" : "正常"}</Badge></TableCell>
-                <TableCell className="text-muted-foreground">{new Date(user.createdAt).toLocaleDateString()}</TableCell>
-                <TableCell><UserActions user={user} onDelete={() => setPendingConfirm({ title: "删除用户？", description: `将删除 ${user.email} 及其关联数据。`, confirmText: "删除用户", onConfirm: () => remove.mutate(user.id) })} /></TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="space-y-3 md:hidden">
+          {filteredUsers.map((user) => (
+            <div key={user.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{user.displayName}</div>
+                  <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+                </div>
+                <UserActions user={user} onDelete={() => setPendingConfirm({ title: "删除用户？", description: `将删除 ${user.email} 及其关联数据。`, confirmText: "删除用户", onConfirm: () => remove.mutate(user.id) })} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role === "admin" ? "管理员" : "普通用户"}</Badge>
+                <Badge variant={user.disabled ? "secondary" : "default"}>{user.disabled ? "停用" : "正常"}</Badge>
+                <Badge variant="outline">{new Date(user.createdAt).toLocaleDateString()}</Badge>
+              </div>
+              <div className="mt-3"><UserMailboxCell user={user} /></div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader><TableRow><TableHead>用户</TableHead><TableHead>角色</TableHead><TableHead>邮箱</TableHead><TableHead>状态</TableHead><TableHead>创建时间</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
+            <TableBody>
+              {filteredUsers.map((user) => (
+                <TableRow key={user.id}>
+                  <TableCell>
+                    <div className="font-medium">{user.displayName}</div>
+                    <div className="text-xs text-muted-foreground">{user.email}</div>
+                  </TableCell>
+                  <TableCell><Badge variant={user.role === "admin" ? "default" : "secondary"}>{user.role === "admin" ? "管理员" : "普通用户"}</Badge></TableCell>
+                  <TableCell><UserMailboxCell user={user} /></TableCell>
+                  <TableCell><Badge variant={user.disabled ? "secondary" : "default"}>{user.disabled ? "停用" : "正常"}</Badge></TableCell>
+                  <TableCell className="text-muted-foreground">{new Date(user.createdAt).toLocaleDateString()}</TableCell>
+                  <TableCell><UserActions user={user} onDelete={() => setPendingConfirm({ title: "删除用户？", description: `将删除 ${user.email} 及其关联数据。`, confirmText: "删除用户", onConfirm: () => remove.mutate(user.id) })} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         {filteredUsers.length === 0 && <Empty text="没有匹配的用户" />}
       </CardContent>
       <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
@@ -293,21 +306,41 @@ function MailboxesSection({ mailboxes, users, domains }: { mailboxes: MailboxTyp
         </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow><TableHead>地址</TableHead><TableHead>归属用户</TableHead><TableHead>名称</TableHead><TableHead>配额</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
-          <TableBody>
-            {mailboxes.map((mailbox) => (
-              <TableRow key={mailbox.id}>
-                <TableCell className="font-medium">{mailbox.address}</TableCell>
-                <TableCell className="text-muted-foreground">{mailbox.userEmail || mailbox.userId}</TableCell>
-                <TableCell>{mailbox.displayName}</TableCell>
-                <TableCell>{mailbox.quotaMb} MB</TableCell>
-                <TableCell><Badge variant={mailbox.status === "active" ? "default" : "secondary"}>{mailbox.status === "active" ? "启用" : "停用"}</Badge></TableCell>
-                <TableCell><MailboxActions mailbox={mailbox} users={users} onDelete={() => setPendingConfirm({ title: "删除邮箱？", description: `将删除 ${mailbox.address} 和其中邮件。`, confirmText: "删除邮箱", onConfirm: () => remove.mutate(mailbox.id) })} /></TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="space-y-3 md:hidden">
+          {mailboxes.map((mailbox) => (
+            <div key={mailbox.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{mailbox.address}</div>
+                  <div className="truncate text-xs text-muted-foreground">{mailbox.userEmail || mailbox.userId}</div>
+                </div>
+                <MailboxActions mailbox={mailbox} users={users} onDelete={() => setPendingConfirm({ title: "删除邮箱？", description: `将删除 ${mailbox.address} 和其中邮件。`, confirmText: "删除邮箱", onConfirm: () => remove.mutate(mailbox.id) })} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant={mailbox.status === "active" ? "default" : "secondary"}>{mailbox.status === "active" ? "启用" : "停用"}</Badge>
+                <Badge variant="outline">{mailbox.quotaMb} MB</Badge>
+                <Badge variant="outline">{mailbox.displayName || "未命名"}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader><TableRow><TableHead>地址</TableHead><TableHead>归属用户</TableHead><TableHead>名称</TableHead><TableHead>配额</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
+            <TableBody>
+              {mailboxes.map((mailbox) => (
+                <TableRow key={mailbox.id}>
+                  <TableCell className="font-medium">{mailbox.address}</TableCell>
+                  <TableCell className="text-muted-foreground">{mailbox.userEmail || mailbox.userId}</TableCell>
+                  <TableCell>{mailbox.displayName}</TableCell>
+                  <TableCell>{mailbox.quotaMb} MB</TableCell>
+                  <TableCell><Badge variant={mailbox.status === "active" ? "default" : "secondary"}>{mailbox.status === "active" ? "启用" : "停用"}</Badge></TableCell>
+                  <TableCell><MailboxActions mailbox={mailbox} users={users} onDelete={() => setPendingConfirm({ title: "删除邮箱？", description: `将删除 ${mailbox.address} 和其中邮件。`, confirmText: "删除邮箱", onConfirm: () => remove.mutate(mailbox.id) })} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         {mailboxes.length === 0 && <Empty text="暂无邮箱账号" />}
       </CardContent>
       <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
@@ -330,20 +363,39 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
         </div>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader><TableRow><TableHead>来源</TableHead><TableHead>目标</TableHead><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
-          <TableBody>
-            {aliases.map((alias) => (
-              <TableRow key={alias.id}>
-                <TableCell className="font-medium">{alias.source}</TableCell>
-                <TableCell>{alias.destination}</TableCell>
-                <TableCell className="text-muted-foreground">{domains.find((d) => d.id === alias.domainId)?.name || alias.domainId}</TableCell>
-                <TableCell><Badge variant={alias.enabled ? "default" : "secondary"}>{alias.enabled ? "启用" : "停用"}</Badge></TableCell>
-                <TableCell><AliasActions alias={alias} onToggle={() => update.mutate({ id: alias.id, payload: { source: alias.source, destination: alias.destination, enabled: !alias.enabled } })} onDelete={() => setPendingConfirm({ title: "删除别名？", description: `${alias.source} 将不再转发到 ${alias.destination}。`, confirmText: "删除别名", onConfirm: () => remove.mutate(alias.id) })} /></TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <div className="space-y-3 md:hidden">
+          {aliases.map((alias) => (
+            <div key={alias.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate font-medium">{alias.source}</div>
+                  <div className="truncate text-xs text-muted-foreground">{alias.destination}</div>
+                </div>
+                <AliasActions alias={alias} onToggle={() => update.mutate({ id: alias.id, payload: { source: alias.source, destination: alias.destination, enabled: !alias.enabled } })} onDelete={() => setPendingConfirm({ title: "删除别名？", description: `${alias.source} 将不再转发到 ${alias.destination}。`, confirmText: "删除别名", onConfirm: () => remove.mutate(alias.id) })} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant={alias.enabled ? "default" : "secondary"}>{alias.enabled ? "启用" : "停用"}</Badge>
+                <Badge variant="outline">{domains.find((d) => d.id === alias.domainId)?.name || alias.domainId}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader><TableRow><TableHead>来源</TableHead><TableHead>目标</TableHead><TableHead>域名</TableHead><TableHead>状态</TableHead><TableHead className="w-16"></TableHead></TableRow></TableHeader>
+            <TableBody>
+              {aliases.map((alias) => (
+                <TableRow key={alias.id}>
+                  <TableCell className="font-medium">{alias.source}</TableCell>
+                  <TableCell>{alias.destination}</TableCell>
+                  <TableCell className="text-muted-foreground">{domains.find((d) => d.id === alias.domainId)?.name || alias.domainId}</TableCell>
+                  <TableCell><Badge variant={alias.enabled ? "default" : "secondary"}>{alias.enabled ? "启用" : "停用"}</Badge></TableCell>
+                  <TableCell><AliasActions alias={alias} onToggle={() => update.mutate({ id: alias.id, payload: { source: alias.source, destination: alias.destination, enabled: !alias.enabled } })} onDelete={() => setPendingConfirm({ title: "删除别名？", description: `${alias.source} 将不再转发到 ${alias.destination}。`, confirmText: "删除别名", onConfirm: () => remove.mutate(alias.id) })} /></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         {aliases.length === 0 && <Empty text="暂无别名转发" />}
       </CardContent>
       <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "删除"} destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
@@ -407,38 +459,62 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             </SelectContent>
           </Select>
         </div>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>邮件</TableHead>
-              <TableHead>邮箱</TableHead>
-              <TableHead>发件人</TableHead>
-              <TableHead>收件人</TableHead>
-              <TableHead>文件夹</TableHead>
-              <TableHead>时间</TableHead>
-              <TableHead className="w-20"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((message) => (
-              <TableRow key={message.id}>
-                <TableCell className="max-w-[360px]">
+        <div className="space-y-3 md:hidden">
+          {items.map((message) => (
+            <div key={message.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <div className="truncate font-medium">{message.subject}</div>
-                  <div className="truncate text-xs text-muted-foreground">{message.snippet}</div>
-                </TableCell>
-                <TableCell>
-                  <div className="font-medium">{message.mailboxAddress || message.recipientAddress || "-"}</div>
-                  {message.ownerEmail && <div className="text-xs text-muted-foreground">{message.ownerEmail}</div>}
-                </TableCell>
-                <TableCell className="max-w-[220px] truncate" title={adminSenderTitle(message)}>{adminSenderDisplayName(message)}</TableCell>
-                <TableCell className="max-w-[220px] truncate">{message.recipientAddress || message.to.join(", ")}</TableCell>
-                <TableCell><Badge variant="secondary">{folderName(message.folder)}</Badge></TableCell>
-                <TableCell className="text-muted-foreground">{formatDate(message.receivedAt)}</TableCell>
-                <TableCell><Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>查看</Button></TableCell>
+                  <div className="mt-1 line-clamp-2 text-xs text-muted-foreground">{message.snippet}</div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>查看</Button>
+              </div>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="truncate text-muted-foreground">邮箱：{message.mailboxAddress || message.recipientAddress || "-"}</div>
+                <div className="truncate text-muted-foreground">发件人：{adminSenderDisplayName(message)}</div>
+                <div className="truncate text-muted-foreground">收件人：{message.recipientAddress || message.to?.join(", ") || ""}</div>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Badge variant="secondary">{folderName(message.folder)}</Badge>
+                <Badge variant="outline">{formatDate(message.receivedAt)}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>邮件</TableHead>
+                <TableHead>邮箱</TableHead>
+                <TableHead>发件人</TableHead>
+                <TableHead>收件人</TableHead>
+                <TableHead>文件夹</TableHead>
+                <TableHead>时间</TableHead>
+                <TableHead className="w-20"></TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {items.map((message) => (
+                <TableRow key={message.id}>
+                  <TableCell className="max-w-[360px]">
+                    <div className="truncate font-medium">{message.subject}</div>
+                    <div className="truncate text-xs text-muted-foreground">{message.snippet}</div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="font-medium">{message.mailboxAddress || message.recipientAddress || "-"}</div>
+                    {message.ownerEmail && <div className="text-xs text-muted-foreground">{message.ownerEmail}</div>}
+                  </TableCell>
+                  <TableCell className="max-w-[220px] truncate" title={adminSenderTitle(message)}>{adminSenderDisplayName(message)}</TableCell>
+                  <TableCell className="max-w-[220px] truncate">{message.recipientAddress || message.to?.join(", ") || ""}</TableCell>
+                  <TableCell><Badge variant="secondary">{folderName(message.folder)}</Badge></TableCell>
+                  <TableCell className="text-muted-foreground">{formatDate(message.receivedAt)}</TableCell>
+                  <TableCell><Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>查看</Button></TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
         {messages.isLoading && <Empty text="加载中..." />}
         {!messages.isLoading && items.length === 0 && <Empty text="暂无邮件" />}
         {!messages.isLoading && messages.hasNextPage && (
@@ -772,7 +848,7 @@ function AdminMessageDialog({ message, loading, open, onOpenChange }: { message?
               <MessageMeta label="所属邮箱" value={message.mailboxAddress || message.recipientAddress || ""} />
               <MessageMeta label="所属用户" value={message.ownerEmail || ""} />
               <MessageMeta label="发件人" value={adminSenderTitle(message)} />
-              <MessageMeta label="收件人" value={message.recipientAddress || message.to.join(", ")} />
+              <MessageMeta label="收件人" value={message.recipientAddress || message.to?.join(", ") || ""} />
               <MessageMeta label="文件夹" value={folderName(message.folder)} />
               <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
             </div>
@@ -828,9 +904,9 @@ function adminSenderTitle(message: MailMessage) {
 }
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {
-  return <Card><CardContent className="flex items-center gap-4 p-5"><div className="grid h-10 w-10 place-items-center rounded-lg bg-muted text-foreground">{icon}</div><div><div className="text-2xl font-semibold tracking-tight">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div></CardContent></Card>
+  return <Card><CardContent className="flex items-center gap-3 p-4 sm:gap-4 sm:p-5"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted text-foreground sm:h-10 sm:w-10">{icon}</div><div className="min-w-0"><div className="truncate text-xl font-semibold tracking-tight sm:text-2xl">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div></CardContent></Card>
 }
-function InfoBox({ label, value }: { label: string; value: React.ReactNode }) { return <div className="rounded-lg border p-4"><div className="text-2xl font-semibold tracking-tight">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div> }
+function InfoBox({ label, value }: { label: string; value: React.ReactNode }) { return <div className="rounded-lg border p-4"><div className="text-xl font-semibold tracking-tight sm:text-2xl">{value}</div><div className="text-xs text-muted-foreground">{label}</div></div> }
 function Empty({ text }: { text: string }) { return <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">{text}</div> }
 function DomainBadgeRow({ domain }: { domain: Domain }) { return <div className="flex items-center justify-between rounded-lg border p-3"><span className="font-medium">{domain.name}</span><Badge variant={domain.dnsStatus === "ok" ? "default" : "secondary"}>{domain.dnsStatus === "ok" ? "正常" : domain.dnsStatus}</Badge></div> }
 function invalidateAdmin(qc: ReturnType<typeof useQueryClient>) { qc.invalidateQueries({ queryKey: ["admin"] }); qc.invalidateQueries({ queryKey: ["mailboxes"] }); qc.invalidateQueries({ queryKey: ["me"] }) }

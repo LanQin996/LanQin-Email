@@ -11,7 +11,6 @@ import { Separator } from "@/components/ui/separator"
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
@@ -209,10 +208,10 @@ const Sidebar = React.forwardRef<
               } as React.CSSProperties
             }
             side={side}
+            aria-describedby={undefined}
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>Sidebar</SheetTitle>
-              <SheetDescription>Displays the mobile sidebar.</SheetDescription>
+              <SheetTitle>导航</SheetTitle>
             </SheetHeader>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>

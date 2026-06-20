@@ -21,6 +21,7 @@ import {
   SidebarProvider,
   SidebarRail,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 const adminSections = [
@@ -80,16 +81,7 @@ function ProtectedContent() {
             <SidebarGroup>
               <SidebarGroupContent>
                 <SidebarMenu>
-                  {adminSections.map((item) => (
-                    <SidebarMenuItem key={item.key}>
-                      <SidebarMenuButton asChild isActive={adminSection === item.key} tooltip={item.label}>
-                        <Link to={`/admin?section=${item.key}`}>
-                          {item.icon}
-                          <span>{item.label}</span>
-                        </Link>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
+                  <AdminSectionItems activeSection={adminSection} />
                 </SidebarMenu>
               </SidebarGroupContent>
             </SidebarGroup>
@@ -126,12 +118,33 @@ function ProtectedContent() {
       </Sidebar>
       <SidebarInset>
         <div className="flex min-h-svh flex-col bg-muted/20">
-          <div className="flex h-12 items-center border-b bg-white px-3 md:hidden">
-            <SidebarTrigger />
+          <div className="flex h-12 items-center gap-3 border-b bg-background px-3 md:hidden">
+            <SidebarTrigger aria-label="打开导航" />
+            <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+              {isAdminRoute ? adminSections.find((item) => item.key === adminSection)?.label || "系统管理" : "LanQin Email"}
+            </div>
           </div>
           <Outlet />
         </div>
       </SidebarInset>
     </SidebarProvider>
   )
+}
+
+function AdminSectionItems({ activeSection }: { activeSection: string }) {
+  const { isMobile, setOpenMobile } = useSidebar()
+
+  function closeMobile() {
+    if (isMobile) setOpenMobile(false)
+  }
+  return adminSections.map((item) => (
+    <SidebarMenuItem key={item.key}>
+      <SidebarMenuButton asChild isActive={activeSection === item.key} tooltip={item.label}>
+        <Link to={`/admin?section=${item.key}`} onClick={closeMobile}>
+          {item.icon}
+          <span>{item.label}</span>
+        </Link>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  ))
 }
