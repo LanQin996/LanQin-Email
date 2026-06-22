@@ -236,7 +236,7 @@ export function MailPage() {
     onSettled: () => qc.invalidateQueries({ queryKey: ["labels"] }),
   })
   const deleteLabel = useMutation({
-    mutationFn: (id: string) => api.deleteLabel(id),
+    mutationFn: (id: string) => api.deleteLabel(id, activeMailboxId),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["labels"] })
       await qc.cancelQueries({ queryKey: ["messages"] })
