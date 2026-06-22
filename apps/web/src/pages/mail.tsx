@@ -239,9 +239,14 @@ export function MailPage() {
     mutationFn: (id: string) => api.deleteLabel(id),
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["labels"] })
+      await qc.cancelQueries({ queryKey: ["messages"] })
+      if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
+      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
       qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: (current.items || []).filter((l) => l.id !== id) } : current)
-      return { prevLabels }
+      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: (current.labels || []).filter((l) => l.id !== id) } : current)
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => ({ ...m, labels: (m.labels || []).filter((l) => l.id !== id) })) })) } : current)
+      return { prevLabels, prevMessage }
     },
     onSuccess: (_data, id) => {
       if (mailView === "label" && selectedLabelId === id) {
@@ -253,6 +258,8 @@ export function MailPage() {
     },
     onError: (_error, _id, context) => {
       if (context?.prevLabels) qc.setQueryData(["labels", activeMailboxId], context.prevLabels)
+      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      qc.invalidateQueries({ queryKey: ["messages"] })
       toast({ title: "删除标签失败" })
     },
     onSettled: () => { qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["messages"] }) },
@@ -667,16 +674,14 @@ export function MailPage() {
               <SidebarGroupLabel className="m-0 p-0">标签</SidebarGroupLabel>
               {canManageLabels && (
                 <div className="flex items-center gap-0.5">
-                  {labelEditMode && (
-                    <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setNewLabelEditing(true)}>
-                      <Plus className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  {labelItems.length > 0 && (
-                    <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setLabelEditMode((v) => !v)}>
-                      {labelEditMode ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                    </Button>
-                  )}
+                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => { setNewLabelEditing(true); setLabelEditMode(true) }}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+                {labelItems.length > 0 && (
+                  <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setLabelEditMode((v) => !v)}>
+                    {labelEditMode ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                  </Button>
+                )}
                 </div>
               )}
             </div>
