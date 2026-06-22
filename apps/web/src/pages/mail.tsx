@@ -226,7 +226,7 @@ export function MailPage() {
       await qc.cancelQueries({ queryKey: ["labels"] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
       const tempLabel: MailLabel = { id: `temp-${Date.now()}`, name, color: "" }
-      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: [...current.items, tempLabel] } : { items: [tempLabel] })
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: [...(current.items || []), tempLabel] } : { items: [tempLabel] })
       return { prevLabels }
     },
     onError: (_error, _name, context) => {
@@ -240,7 +240,7 @@ export function MailPage() {
     onMutate: async (id) => {
       await qc.cancelQueries({ queryKey: ["labels"] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
-      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: current.items.filter((l) => l.id !== id) } : current)
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: (current.items || []).filter((l) => l.id !== id) } : current)
       return { prevLabels }
     },
     onSuccess: (_data, id) => {
