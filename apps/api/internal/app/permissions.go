@@ -78,6 +78,17 @@ const (
 	PermissionGroupSystemAdmin     = "pg_system_admin"
 )
 
+var legacyDefaultPermissionGroupIDs = []string{
+	PermissionGroupUserAdmin,
+	PermissionGroupPermissionAdmin,
+	PermissionGroupDomainAdmin,
+	PermissionGroupDNSAdmin,
+	PermissionGroupMailboxAdmin,
+	PermissionGroupAliasAdmin,
+	PermissionGroupMessageAudit,
+	PermissionGroupSystemAdmin,
+}
+
 type PermissionInfo struct {
 	Key         string `json:"key"`
 	Label       string `json:"label"`
@@ -257,117 +268,6 @@ func defaultPermissionGroups() []PermissionGroup {
 			Permissions: []string{},
 			System:      true,
 		},
-		{
-			ID:          PermissionGroupUserAdmin,
-			Name:        "用户管理员",
-			Description: "查看并管理用户账号、状态、密码和用户权限组分配。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionUsersView,
-				PermissionUsersCreate,
-				PermissionUsersUpdate,
-				PermissionUsersDelete,
-				PermissionUsersResetPassword,
-				PermissionGroupsView,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupPermissionAdmin,
-			Name:        "权限组管理员",
-			Description: "管理自定义权限组和权限目录。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionGroupsView,
-				PermissionGroupsCreate,
-				PermissionGroupsUpdate,
-				PermissionGroupsDelete,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupDomainAdmin,
-			Name:        "域名管理员",
-			Description: "查看、添加、启停和删除邮件域名。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionDomainsView,
-				PermissionDomainsCreate,
-				PermissionDomainsUpdate,
-				PermissionDomainsDelete,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupDNSAdmin,
-			Name:        "DNS 检测员",
-			Description: "查看 DNS 记录并执行 DNS 检测。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionDomainsView,
-				PermissionDNSView,
-				PermissionDNSCheck,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupMailboxAdmin,
-			Name:        "邮箱账号管理员",
-			Description: "查看用户和域名，创建、编辑和删除邮箱账号。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionUsersView,
-				PermissionDomainsView,
-				PermissionMailboxesView,
-				PermissionMailboxesCreate,
-				PermissionMailboxesUpdate,
-				PermissionMailboxesDelete,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupAliasAdmin,
-			Name:        "别名转发管理员",
-			Description: "查看域名，创建、编辑和删除别名转发。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionDomainsView,
-				PermissionAliasesView,
-				PermissionAliasesCreate,
-				PermissionAliasesUpdate,
-				PermissionAliasesDelete,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupMessageAudit,
-			Name:        "邮件审计员",
-			Description: "查看全局邮件列表、正文和附件。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionMailboxesView,
-				PermissionMessagesView,
-				PermissionMessagesRead,
-				PermissionMessagesAttachment,
-			},
-			System: true,
-		},
-		{
-			ID:          PermissionGroupSystemAdmin,
-			Name:        "系统设置管理员",
-			Description: "查看并修改系统设置、SMTP 测试和邮件模板。",
-			Permissions: []string{
-				PermissionAdminOverview,
-				PermissionDomainsView,
-				PermissionSettingsView,
-				PermissionSettingsUpdate,
-				PermissionSettingsTestSMTP,
-				PermissionTemplatesView,
-				PermissionTemplatesUpdate,
-				PermissionTemplatesReset,
-			},
-			System: true,
-		},
 	}
 }
 
@@ -416,6 +316,28 @@ func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 			VALUES(?,?,?,?,?,?,?)
 			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, system=excluded.system, updated_at=excluded.updated_at`,
 			item.ID, item.Name, item.Description, encodePermissions(item.Permissions), boolInt(item.System), now, now); err != nil {
+			return err
+		}
+	}
+	if err := a.cleanupLegacyDefaultPermissionGroups(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (a *App) cleanupLegacyDefaultPermissionGroups(ctx context.Context) error {
+	for _, groupID := range legacyDefaultPermissionGroupIDs {
+		var userCount int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM user_permission_groups WHERE group_id=?`, groupID).Scan(&userCount); err != nil {
+			return err
+		}
+		if userCount == 0 {
+			if _, err := a.db.ExecContext(ctx, `DELETE FROM permission_groups WHERE id=? AND system=1`, groupID); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET system=0, updated_at=? WHERE id=? AND system=1`, a.now().UTC().Format(time.RFC3339Nano), groupID); err != nil {
 			return err
 		}
 	}

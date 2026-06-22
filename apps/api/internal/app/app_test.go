@@ -912,7 +912,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 			t.Fatalf("missing fixed permission group %s in %+v", group.ID, groups.Items)
 		}
 	}
-	if groups.Items[0].ID != PermissionGroupSuperAdmin || groups.Items[1].ID != PermissionGroupRegular || groupByID[PermissionGroupMailboxAdmin].UserCount != 0 {
+	if groups.Items[0].ID != PermissionGroupSuperAdmin || groups.Items[1].ID != PermissionGroupRegular {
 		t.Fatalf("unexpected fixed permission groups: %+v", groups.Items)
 	}
 
@@ -931,14 +931,14 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 	if customGroup.System || customGroup.ID == "" || !userHasPermission(&User{Role: "user", Permissions: customGroup.Permissions}, PermissionMailboxesView) || userHasPermission(&User{Role: "user", Permissions: customGroup.Permissions}, PermissionMailboxesCreate) {
 		t.Fatalf("custom permission group permissions=%+v", customGroup)
 	}
-	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupMailboxAdmin, map[string]any{
+	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupSuperAdmin, map[string]any{
 		"name":        "Changed",
 		"description": "Should not change",
 		"permissions": []string{PermissionMailboxesView},
 	}, &errBody); code != http.StatusForbidden {
 		t.Fatalf("system permission group update should be forbidden code=%d body=%v", code, errBody)
 	}
-	if code := admin.do("DELETE", "/api/admin/permission-groups/"+PermissionGroupMailboxAdmin, nil, &errBody); code != http.StatusForbidden {
+	if code := admin.do("DELETE", "/api/admin/permission-groups/"+PermissionGroupSuperAdmin, nil, &errBody); code != http.StatusForbidden {
 		t.Fatalf("system permission group delete should be forbidden code=%d body=%v", code, errBody)
 	}
 	if code := admin.do("POST", "/api/admin/users", map[string]any{
@@ -952,6 +952,40 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		t.Fatalf("assigning super admin group should be rejected code=%d body=%v", code, errBody)
 	}
 
+	var mailboxAdminGroup PermissionGroup
+	if code := admin.do("POST", "/api/admin/permission-groups", map[string]any{
+		"name":        "Mailbox Admins",
+		"description": "Can manage mailboxes",
+		"permissions": []string{
+			PermissionAdminOverview,
+			PermissionUsersView,
+			PermissionDomainsView,
+			PermissionMailboxesView,
+			PermissionMailboxesCreate,
+			PermissionMailboxesUpdate,
+			PermissionMailboxesDelete,
+		},
+	}, &mailboxAdminGroup); code != http.StatusCreated {
+		t.Fatalf("create mailbox admin group code=%d group=%+v", code, mailboxAdminGroup)
+	}
+
+	var userAdminGroup PermissionGroup
+	if code := admin.do("POST", "/api/admin/permission-groups", map[string]any{
+		"name":        "User Admins",
+		"description": "Can manage users",
+		"permissions": []string{
+			PermissionAdminOverview,
+			PermissionUsersView,
+			PermissionUsersCreate,
+			PermissionUsersUpdate,
+			PermissionUsersDelete,
+			PermissionUsersResetPassword,
+			PermissionGroupsView,
+		},
+	}, &userAdminGroup); code != http.StatusCreated {
+		t.Fatalf("create user admin group code=%d group=%+v", code, userAdminGroup)
+	}
+
 	var mailboxUser AdminUser
 	if code := admin.do("POST", "/api/admin/users", map[string]any{
 		"email":              "mailbox-admin@lanqin.local",
@@ -959,11 +993,11 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"role":               "user",
 		"password":           "Password123!",
 		"disabled":           false,
-		"permissionGroupIds": []string{PermissionGroupMailboxAdmin},
+		"permissionGroupIds": []string{mailboxAdminGroup.ID},
 	}, &mailboxUser); code != http.StatusCreated {
 		t.Fatalf("create mailbox admin user code=%d user=%+v", code, mailboxUser)
 	}
-	if mailboxUser.Role != "user" || len(mailboxUser.PermissionGroupIDs) != 1 || mailboxUser.PermissionGroupIDs[0] != PermissionGroupMailboxAdmin || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
+	if mailboxUser.Role != "user" || len(mailboxUser.PermissionGroupIDs) != 1 || mailboxUser.PermissionGroupIDs[0] != mailboxAdminGroup.ID || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
 		t.Fatalf("mailbox admin authorization=%+v", mailboxUser.User)
 	}
 
@@ -1024,7 +1058,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"role":               "user",
 		"password":           "Password123!",
 		"disabled":           false,
-		"permissionGroupIds": []string{PermissionGroupMailboxAdmin},
+		"permissionGroupIds": []string{mailboxAdminGroup.ID},
 	}, &errBody); code != http.StatusForbidden {
 		t.Fatalf("mailbox admin should not create users code=%d body=%v", code, errBody)
 	}
@@ -1036,7 +1070,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"role":               "user",
 		"password":           "Password123!",
 		"disabled":           false,
-		"permissionGroupIds": []string{PermissionGroupUserAdmin},
+		"permissionGroupIds": []string{userAdminGroup.ID},
 	}, &userManager); code != http.StatusCreated {
 		t.Fatalf("create user admin code=%d user=%+v", code, userManager)
 	}
@@ -1053,7 +1087,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"role":               "user",
 		"password":           "Password123!",
 		"disabled":           false,
-		"permissionGroupIds": []string{PermissionGroupMailboxAdmin},
+		"permissionGroupIds": []string{mailboxAdminGroup.ID},
 	}, &errBody); code != http.StatusBadRequest {
 		t.Fatalf("user admin should not assign mailbox admin group code=%d body=%v", code, errBody)
 	}
@@ -1064,7 +1098,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"role":               "user",
 		"password":           "Password123!",
 		"disabled":           false,
-		"permissionGroupIds": []string{PermissionGroupUserAdmin},
+		"permissionGroupIds": []string{userAdminGroup.ID},
 	}, &regularUser); code != http.StatusCreated {
 		t.Fatalf("user admin should assign own group code=%d user=%+v", code, regularUser)
 	}
