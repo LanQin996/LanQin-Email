@@ -312,10 +312,15 @@ func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 		if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET name=name || ' (' || id || ')' WHERE name=? AND id<>?`, item.Name, item.ID); err != nil {
 			return err
 		}
-		if _, err := a.db.ExecContext(ctx, `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
+		query := `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
 			VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, system=excluded.system, updated_at=excluded.updated_at`,
-			item.ID, item.Name, item.Description, encodePermissions(item.Permissions), boolInt(item.System), now, now); err != nil {
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, system=excluded.system, updated_at=excluded.updated_at`
+		if item.ID == PermissionGroupRegular {
+			query = `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
+				VALUES(?,?,?,?,?,?,?)
+				ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, system=excluded.system, updated_at=excluded.updated_at`
+		}
+		if _, err := a.db.ExecContext(ctx, query, item.ID, item.Name, item.Description, encodePermissions(item.Permissions), boolInt(item.System), now, now); err != nil {
 			return err
 		}
 	}
@@ -367,6 +372,10 @@ func (a *App) permissionsForUser(ctx context.Context, userID, role string) ([]st
 	if role == "admin" {
 		return allPermissionKeys(), nil
 	}
+	seen := map[string]bool{}
+	if err := a.addRegularGroupPermissions(ctx, nil, seen); err != nil {
+		return nil, err
+	}
 	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.permissions_json
 		FROM permission_groups pg
 		JOIN user_permission_groups upg ON upg.group_id=pg.id
@@ -375,7 +384,6 @@ func (a *App) permissionsForUser(ctx context.Context, userID, role string) ([]st
 		return nil, err
 	}
 	defer rows.Close()
-	seen := map[string]bool{}
 	for rows.Next() {
 		var groupID, raw string
 		if err := rows.Scan(&groupID, &raw); err != nil {
@@ -400,10 +408,57 @@ func (a *App) permissionsForUser(ctx context.Context, userID, role string) ([]st
 	return out, nil
 }
 
+func (a *App) addRegularGroupPermissions(ctx context.Context, tx *sql.Tx, seen map[string]bool) error {
+	var raw string
+	query := `SELECT permissions_json FROM permission_groups WHERE id=?`
+	var err error
+	if tx != nil {
+		err = tx.QueryRowContext(ctx, query, PermissionGroupRegular).Scan(&raw)
+	} else {
+		err = a.db.QueryRowContext(ctx, query, PermissionGroupRegular).Scan(&raw)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, permission := range decodeStoredPermissions(raw) {
+		seen[permission] = true
+	}
+	return nil
+}
+
+func (a *App) effectivePermissionsForUserGroups(ctx context.Context, tx *sql.Tx, groupIDs []string) ([]string, error) {
+	seen := map[string]bool{}
+	if err := a.addRegularGroupPermissions(ctx, tx, seen); err != nil {
+		return nil, err
+	}
+	groupPermissions, err := a.permissionsForGroupIDs(ctx, tx, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, permission := range groupPermissions {
+		seen[permission] = true
+	}
+	out := make([]string, 0, len(seen))
+	for _, permission := range allPermissionKeys() {
+		if seen[permission] {
+			out = append(out, permission)
+		}
+	}
+	return out, nil
+}
+
 func (a *App) permissionGroupsForUser(ctx context.Context, userID, role string) ([]string, []PermissionGroupSummary, error) {
 	if role == "admin" {
 		group := PermissionGroupSummary{ID: PermissionGroupSuperAdmin, Name: "超级管理员"}
 		return []string{group.ID}, []PermissionGroupSummary{group}, nil
+	}
+	ids := []string{PermissionGroupRegular}
+	groups := []PermissionGroupSummary{{ID: PermissionGroupRegular, Name: "普通用户"}}
+	if err := a.db.QueryRowContext(ctx, `SELECT name FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&groups[0].Name); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, nil, err
 	}
 	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.name
 		FROM permission_groups pg
@@ -414,8 +469,6 @@ func (a *App) permissionGroupsForUser(ctx context.Context, userID, role string) 
 	}
 	defer rows.Close()
 	order := permissionGroupOrder()
-	ids := []string{}
-	groups := []PermissionGroupSummary{}
 	for rows.Next() {
 		var group PermissionGroupSummary
 		if err := rows.Scan(&group.ID, &group.Name); err != nil {
@@ -452,10 +505,6 @@ func (a *App) permissionGroupsForUser(ctx context.Context, userID, role string) 
 		}
 		return ids[i] < ids[j]
 	})
-	if len(groups) == 0 {
-		group := PermissionGroupSummary{ID: PermissionGroupRegular, Name: "普通用户"}
-		return []string{group.ID}, []PermissionGroupSummary{group}, nil
-	}
 	return ids, groups, nil
 }
 
@@ -582,7 +631,7 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 			return fmt.Errorf("permission group not assignable: %s", groupID)
 		}
 	}
-	groupPermissions, err := a.permissionsForGroupIDs(ctx, tx, groupIDs)
+	groupPermissions, err := a.effectivePermissionsForUserGroups(ctx, tx, groupIDs)
 	if err != nil {
 		return err
 	}

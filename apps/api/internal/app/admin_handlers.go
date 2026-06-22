@@ -235,7 +235,7 @@ func (a *App) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 			if role == "admin" {
 				next.Permissions = allPermissionKeys()
 			} else {
-				permissions, err := a.permissionsForGroupIDs(r.Context(), nil, permissionGroupIDs)
+				permissions, err := a.effectivePermissionsForUserGroups(r.Context(), nil, permissionGroupIDs)
 				if err != nil {
 					badRequest(w, err)
 					return

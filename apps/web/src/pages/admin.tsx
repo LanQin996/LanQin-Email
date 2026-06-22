@@ -305,6 +305,8 @@ function PermissionGroupsSection({ groups, catalog }: { groups: PermissionGroup[
     if (!keyword) return true
     return [group.name, group.description, ...group.permissions].some((value) => value.toLowerCase().includes(keyword))
   })
+  const isEditable = (group: PermissionGroup) => group.id !== "pg_super_admin"
+  const isDeletable = (group: PermissionGroup) => !group.system && group.userCount === 0
   return (
     <Card>
       <CardHeader>
@@ -334,11 +336,11 @@ function PermissionGroupsSection({ groups, catalog }: { groups: PermissionGroup[
                 {(canUpdate || canDelete) && <DropdownMenu>
                   <DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
-                    <DropdownMenuItem disabled={group.system || !canUpdate} onSelect={() => setEditing(group)}>编辑权限组</DropdownMenuItem>
+                    <DropdownMenuItem disabled={!isEditable(group) || !canUpdate} onSelect={() => setEditing(group)}>编辑权限组</DropdownMenuItem>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
                       className="text-destructive"
-                      disabled={group.system || group.userCount > 0 || !canDelete}
+                      disabled={!isDeletable(group) || !canDelete}
                       onSelect={() => setPendingConfirm({ title: "删除权限组？", description: `${group.name} 删除后不能再分配给用户。`, confirmText: "删除权限组", onConfirm: () => remove.mutate(group.id) })}
                     >
                       删除权限组

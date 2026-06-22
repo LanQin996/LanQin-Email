@@ -938,8 +938,22 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 	}, &errBody); code != http.StatusForbidden {
 		t.Fatalf("system permission group update should be forbidden code=%d body=%v", code, errBody)
 	}
+	var regularGroup PermissionGroup
+	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupRegular, map[string]any{
+		"name":        "普通用户",
+		"description": "Default permissions for regular users",
+		"permissions": []string{PermissionAdminOverview},
+	}, &regularGroup); code != http.StatusOK {
+		t.Fatalf("regular user group should be editable code=%d group=%+v", code, regularGroup)
+	}
+	if !regularGroup.System || !userHasPermission(&User{Role: "user", Permissions: regularGroup.Permissions}, PermissionAdminOverview) {
+		t.Fatalf("regular group update did not persist permissions=%+v", regularGroup)
+	}
 	if code := admin.do("DELETE", "/api/admin/permission-groups/"+PermissionGroupSuperAdmin, nil, &errBody); code != http.StatusForbidden {
 		t.Fatalf("system permission group delete should be forbidden code=%d body=%v", code, errBody)
+	}
+	if code := admin.do("DELETE", "/api/admin/permission-groups/"+PermissionGroupRegular, nil, &errBody); code != http.StatusForbidden {
+		t.Fatalf("regular user group delete should be forbidden code=%d body=%v", code, errBody)
 	}
 	if code := admin.do("POST", "/api/admin/users", map[string]any{
 		"email":              "invalid-group@lanqin.local",
@@ -997,8 +1011,23 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 	}, &mailboxUser); code != http.StatusCreated {
 		t.Fatalf("create mailbox admin user code=%d user=%+v", code, mailboxUser)
 	}
-	if mailboxUser.Role != "user" || len(mailboxUser.PermissionGroupIDs) != 1 || mailboxUser.PermissionGroupIDs[0] != mailboxAdminGroup.ID || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
+	if mailboxUser.Role != "user" || !containsString(mailboxUser.PermissionGroupIDs, PermissionGroupRegular) || !containsString(mailboxUser.PermissionGroupIDs, mailboxAdminGroup.ID) || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
 		t.Fatalf("mailbox admin authorization=%+v", mailboxUser.User)
+	}
+
+	var plainUser AdminUser
+	if code := admin.do("POST", "/api/admin/users", map[string]any{
+		"email":              "plain-user@lanqin.local",
+		"displayName":        "Plain User",
+		"role":               "user",
+		"password":           "Password123!",
+		"disabled":           false,
+		"permissionGroupIds": []string{},
+	}, &plainUser); code != http.StatusCreated {
+		t.Fatalf("create plain user code=%d user=%+v", code, plainUser)
+	}
+	if len(plainUser.PermissionGroupIDs) != 1 || plainUser.PermissionGroupIDs[0] != PermissionGroupRegular || !userHasPermission(&plainUser.User, PermissionAdminOverview) {
+		t.Fatalf("plain user should inherit regular permissions: %+v", plainUser.User)
 	}
 
 	var customUser AdminUser
@@ -1307,4 +1336,13 @@ func mustDefaultDomainID(t *testing.T, a *App) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+func containsString(items []string, needle string) bool {
+	for _, item := range items {
+		if item == needle {
+			return true
+		}
+	}
+	return false
 }

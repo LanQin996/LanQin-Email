@@ -127,8 +127,8 @@ func (a *App) handleUpdatePermissionGroup(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusNotFound, "permission group not found")
 		return
 	}
-	if intBool(existingSystem) {
-		respondError(w, http.StatusForbidden, "system permission groups cannot be edited")
+	if id == PermissionGroupSuperAdmin {
+		respondError(w, http.StatusForbidden, "super administrator group cannot be edited")
 		return
 	}
 	var req struct {
