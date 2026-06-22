@@ -221,7 +221,7 @@ export function MailPage() {
     onSettled: () => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["labels"] }) },
   })
   const createLabel = useMutation({
-    mutationFn: (name: string) => api.createLabel({ mailboxId: selectedMailboxId, name }),
+    mutationFn: (name: string) => api.createLabel({ mailboxId: activeMailboxId, name }),
     onMutate: async (name) => {
       await qc.cancelQueries({ queryKey: ["labels"] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
