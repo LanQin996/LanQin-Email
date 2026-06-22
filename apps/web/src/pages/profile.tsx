@@ -12,6 +12,7 @@ import { useMe } from "@/hooks/use-me"
 import { useLogout } from "@/hooks/use-logout"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { validatePasswordConfirm } from "@/lib/validation"
+import { hasPermission } from "@/lib/permissions"
 import { Button } from "@/components/ui/button"
 import { PasswordInput } from "@/components/ui/password-input"
 import { Input } from "@/components/ui/input"
@@ -67,19 +68,41 @@ export function ProfilePage() {
   const themeMountedRef = React.useRef(false)
 
   const rawTab = params.get("tab") as Tab | null
-  const tab: Tab = rawTab && tabKeys.includes(rawTab) ? rawTab : "profile"
   const user = me.data?.user
-  const mailboxes = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes })
-  const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions })
+  const canAccessMail = hasPermission(user, "mail.access")
+  const canReadMail = hasPermission(user, "mail.messages.read")
+  const canOrganizeMail = hasPermission(user, "mail.messages.organize")
+  const canManageLabels = hasPermission(user, "mail.labels.manage")
+  const canManageContacts = hasPermission(user, "mail.contacts.manage")
+  const canManageSignatures = hasPermission(user, "mail.signatures.manage")
+  const canManageRules = hasPermission(user, "mail.rules.manage")
+  const canManageBlocked = hasPermission(user, "mail.blocked_senders.manage")
+  const canViewStats = hasPermission(user, "mail.stats.view")
+  const canApplyMailbox = hasPermission(user, "mail.mailboxes.apply")
+  const visibleTabKeys = tabKeys.filter((key) => {
+    if (key === "profile") return true
+    if (key === "mailboxes") return canAccessMail || canApplyMailbox
+    if (key === "clients") return canAccessMail
+    if (key === "signatures") return canManageSignatures
+    if (key === "contacts") return canManageContacts
+    if (key === "cleanup") return canOrganizeMail
+    if (key === "rules") return canManageRules
+    if (key === "blocked") return canManageBlocked
+    if (key === "stats") return canViewStats
+    return false
+  })
+  const tab: Tab = rawTab && visibleTabKeys.includes(rawTab) ? rawTab : "profile"
+  const mailboxes = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes, enabled: canAccessMail })
+  const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions, enabled: canApplyMailbox })
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
-  const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts })
-  const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures })
-  const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules })
-  const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders })
+  const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts, enabled: canManageContacts })
+  const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures, enabled: canManageSignatures })
+  const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules, enabled: canManageRules })
+  const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders, enabled: canManageBlocked })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
-  const ruleLabels = useQuery({ queryKey: ["labels", "rules", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId })
-  const stats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId })
+  const ruleLabels = useQuery({ queryKey: ["labels", "rules", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && canManageRules && (canReadMail || canManageLabels) })
+  const stats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && canViewStats })
 
   const profile = useMutation({
     mutationFn: (form: FormData) => api.updateProfile({ displayName: String(form.get("displayName") || "") }),
@@ -191,7 +214,11 @@ export function ProfilePage() {
 
   const logout = useLogout()
   async function copy(text: string) { await navigator.clipboard.writeText(text); toast({ title: "已复制" }) }
-  function setTab(next: Tab) { setParams(next === "profile" ? {} : { tab: next }); setMobileSidebarOpen(false) }
+  function setTab(next: Tab) {
+    const visibleNext = visibleTabKeys.includes(next) ? next : "profile"
+    setParams(visibleNext === "profile" ? {} : { tab: visibleNext })
+    setMobileSidebarOpen(false)
+  }
   function toggleSidebar() { sidebarCollapsed ? (sidebarPanelRef.current?.expand(14), setSidebarCollapsed(false)) : (sidebarPanelRef.current?.collapse(), setSidebarCollapsed(true)) }
   if (me.isLoading) return <div className="grid h-svh place-items-center text-muted-foreground">加载中...</div>
   if (me.isError || !user) return <div className="grid h-svh place-items-center text-muted-foreground">登录状态已失效</div>
@@ -205,7 +232,7 @@ export function ProfilePage() {
         <SidebarGroup>
           {!sidebarCollapsed && <SidebarGroupLabel>个人中心</SidebarGroupLabel>}
           <SidebarGroupContent>
-            <SidebarMenu>{tabKeys.map((key) => <SidebarMenuItem key={key}><SidebarMenuButton isActive={tab === key} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => setTab(key)}>{tabs[key].icon}{!sidebarCollapsed && <span>{tabs[key].label}</span>}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
+            <SidebarMenu>{visibleTabKeys.map((key) => <SidebarMenuItem key={key}><SidebarMenuButton isActive={tab === key} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => setTab(key)}>{tabs[key].icon}{!sidebarCollapsed && <span>{tabs[key].label}</span>}</SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
@@ -264,19 +291,19 @@ export function ProfilePage() {
     </div>
   )
   function renderTab() {
-    if (tab === "mailboxes") return <MailboxManagement mailboxes={mailboxes.data?.items || []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} />
+    if (tab === "mailboxes") return <MailboxManagement mailboxes={canAccessMail ? mailboxes.data?.items || [] : []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { if (!canAccessMail) return; setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} />
     if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
-    if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={stats.data} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
+    if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
     if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
-    if (tab === "blocked") return <BlockedSection items={blocked.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={blockedMailboxId} spamCount={stats.data?.byFolder.find((f) => f.role === "spam")?.count || 0} onMailboxChange={setBlockedMailboxId} onCreate={(form) => createBlocked.mutate(form)} onDelete={(id) => deleteBlocked.mutate(id)} pending={createBlocked.isPending} />
+    if (tab === "blocked") return <BlockedSection items={blocked.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={blockedMailboxId} spamCount={canViewStats ? stats.data?.byFolder.find((f) => f.role === "spam")?.count || 0 : 0} onMailboxChange={setBlockedMailboxId} onCreate={(form) => createBlocked.mutate(form)} onDelete={(id) => deleteBlocked.mutate(id)} pending={createBlocked.isPending} />
     if (tab === "stats") return <StatsSection stats={stats.data} mailbox={selectedMailbox} onRefresh={() => stats.refetch()} />
-    return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={stats.data} displayMode={displayMode} onDisplayModeChange={setDisplayMode} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
+    return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} displayMode={displayMode} onDisplayModeChange={setDisplayMode} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
   }
 }
 
-function ProfileOverview({ user, profile, password, passwordFormRef, stats, displayMode, onDisplayModeChange, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; displayMode: DisplayMode; onDisplayModeChange: (mode: DisplayMode) => void; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
+function ProfileOverview({ user, profile, password, passwordFormRef, stats, showStats, displayMode, onDisplayModeChange, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; showStats: boolean; displayMode: DisplayMode; onDisplayModeChange: (mode: DisplayMode) => void; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
   return (
     <div className="space-y-6">
       <Card>
@@ -424,7 +451,7 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, disp
         </CardContent>
       </Card>
 
-      <StatsSummary stats={stats} />
+      {showStats && <StatsSummary stats={stats} />}
     </div>
   )
 }
@@ -718,7 +745,7 @@ function ContactsSection({ items, loading, onCreate, onDelete, onCopy, pending }
   )
 }
 
-function CleanupSection({ mailbox, stats, pending, onCleanup }: { mailbox?: Mailbox; stats?: MailStats; pending: boolean; onCleanup: (target: "empty-trash" | "empty-spam" | "archive-read-inbox") => void }) {
+function CleanupSection({ mailbox, stats, showStats, pending, onCleanup }: { mailbox?: Mailbox; stats?: MailStats; showStats: boolean; pending: boolean; onCleanup: (target: "empty-trash" | "empty-spam" | "archive-read-inbox") => void }) {
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   function confirmCleanup(target: "empty-trash" | "empty-spam" | "archive-read-inbox", title: string, destructive = false) {
     setPendingConfirm({
@@ -731,7 +758,7 @@ function CleanupSection({ mailbox, stats, pending, onCleanup }: { mailbox?: Mail
   }
   return (
     <div className="space-y-6">
-      <StatsSummary stats={stats} />
+      {showStats && <StatsSummary stats={stats} />}
       <Card>
         <CardHeader><CardTitle>清理当前邮箱</CardTitle></CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">

@@ -277,7 +277,7 @@ func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	if r.URL.Query().Get("markRead") != "0" && !msg.IsRead {
+	if r.URL.Query().Get("markRead") != "0" && !msg.IsRead && userHasPermission(currentUser(r), PermissionMailOrganize) {
 		_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 		msg.IsRead = true
 	}
@@ -768,6 +768,11 @@ func (a *App) processScheduledSend(ctx context.Context, id, mailboxID, draftID, 
 	mb, err := a.mailboxByID(ctx, mailboxID)
 	if err != nil || mb.Status != "active" {
 		a.markScheduledSendFailed(ctx, id, "mailbox not found")
+		return
+	}
+	user, err := a.userByID(ctx, mb.UserID)
+	if err != nil || !userHasPermission(user, PermissionMailSchedule) || !userHasPermission(user, PermissionMailSend) {
+		a.markScheduledSendFailed(ctx, id, "mail send permission revoked")
 		return
 	}
 	compose := mailComposeInput{MailboxID: payload.MailboxID, To: payload.To, CC: payload.CC, BCC: payload.BCC, Subject: payload.Subject, Text: payload.Text, HTML: payload.HTML, Attachments: payload.Attachments}

@@ -170,6 +170,19 @@ func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, dis
 	return mailbox
 }
 
+func updateRegularPermissionGroup(t *testing.T, admin *testClient, permissions []string) PermissionGroup {
+	t.Helper()
+	var group PermissionGroup
+	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupRegular, map[string]any{
+		"name":        "Regular Users",
+		"description": "Default permissions for regular users",
+		"permissions": permissions,
+	}, &group); code != http.StatusOK {
+		t.Fatalf("update regular permission group code=%d group=%+v", code, group)
+	}
+	return group
+}
+
 func systemSettingsPayload(settings SystemSettings) map[string]any {
 	return map[string]any{
 		"publicHostname":          settings.PublicHostname,
@@ -938,14 +951,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 	}, &errBody); code != http.StatusForbidden {
 		t.Fatalf("system permission group update should be forbidden code=%d body=%v", code, errBody)
 	}
-	var regularGroup PermissionGroup
-	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupRegular, map[string]any{
-		"name":        "普通用户",
-		"description": "Default permissions for regular users",
-		"permissions": []string{PermissionAdminOverview},
-	}, &regularGroup); code != http.StatusOK {
-		t.Fatalf("regular user group should be editable code=%d group=%+v", code, regularGroup)
-	}
+	regularGroup := updateRegularPermissionGroup(t, admin, []string{PermissionAdminOverview})
 	if !regularGroup.System || !userHasPermission(&User{Role: "user", Permissions: regularGroup.Permissions}, PermissionAdminOverview) {
 		t.Fatalf("regular group update did not persist permissions=%+v", regularGroup)
 	}
@@ -1205,6 +1211,75 @@ func TestLegacySystemPermissionGroupsAreCleanedUp(t *testing.T) {
 	}
 }
 
+func TestRegularUserMailPermissionsAreEnforced(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	mb := createTestMailbox(t, admin, mustDefaultDomainID(t, a), "front-perm", "Front Permissions", "Password123!", nil)
+
+	user := &testClient{t: t, server: ts}
+	if code := user.do("POST", "/api/auth/login", map[string]string{"email": mb.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("user login code=%d", code)
+	}
+	var mine struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := user.do("GET", "/api/mail/mailboxes", nil, &mine); code != http.StatusOK || len(mine.Items) != 1 || mine.Items[0].ID != mb.ID {
+		t.Fatalf("regular user should access mail front code=%d items=%+v", code, mine.Items)
+	}
+	var errBody map[string]any
+	if code := user.do("GET", "/api/admin/overview", nil, &errBody); code != http.StatusForbidden {
+		t.Fatalf("regular mail permissions should not grant admin access code=%d body=%v", code, errBody)
+	}
+
+	updateRegularPermissionGroup(t, admin, withoutPermissions(regularUserDefaultPermissions(), PermissionMailAccess))
+	noAccess := &testClient{t: t, server: ts}
+	if code := noAccess.do("POST", "/api/auth/login", map[string]string{"email": mb.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("no access login code=%d", code)
+	}
+	if code := noAccess.do("GET", "/api/mail/mailboxes", nil, &errBody); code != http.StatusForbidden {
+		t.Fatalf("missing mail access should block mailbox list code=%d body=%v", code, errBody)
+	}
+
+	updateRegularPermissionGroup(t, admin, withoutPermissions(regularUserDefaultPermissions(), PermissionMailSend))
+	noSend := &testClient{t: t, server: ts}
+	if code := noSend.do("POST", "/api/auth/login", map[string]string{"email": mb.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("no send login code=%d", code)
+	}
+	sendPayload := map[string]any{
+		"mailboxId": mb.ID,
+		"to":        []string{"someone@example.test"},
+		"subject":   "blocked send",
+		"text":      "body",
+		"html":      "<p>body</p>",
+	}
+	if code := noSend.do("POST", "/api/mail/send", sendPayload, &errBody); code != http.StatusForbidden {
+		t.Fatalf("missing send permission should block send code=%d body=%v", code, errBody)
+	}
+	schedulePayload := map[string]any{
+		"mailboxId": mb.ID,
+		"to":        []string{"someone@example.test"},
+		"subject":   "blocked schedule",
+		"text":      "body",
+		"html":      "<p>body</p>",
+		"sendAt":    time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339Nano),
+	}
+	if code := noSend.do("POST", "/api/mail/schedule-send", schedulePayload, &errBody); code != http.StatusForbidden {
+		t.Fatalf("missing send permission should block scheduled send creation code=%d body=%v", code, errBody)
+	}
+	if code := noSend.do("GET", "/api/mail/scheduled-sends?mailboxId="+mb.ID, nil, &struct {
+		Items []ScheduledSend `json:"items"`
+	}{}); code != http.StatusOK {
+		t.Fatalf("schedule management permission should remain usable code=%d", code)
+	}
+}
+
 func TestMaildirSyncImportsRFC822(t *testing.T) {
 	a := newTestApp(t)
 	ctx := context.Background()
@@ -1376,4 +1451,18 @@ func containsString(items []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+func withoutPermissions(items []string, removed ...string) []string {
+	removedSet := map[string]bool{}
+	for _, item := range removed {
+		removedSet[item] = true
+	}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if !removedSet[item] {
+			out = append(out, item)
+		}
+	}
+	return out
 }

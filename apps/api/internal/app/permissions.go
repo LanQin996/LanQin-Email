@@ -13,6 +13,23 @@ import (
 )
 
 const (
+	PermissionMailAccess = "mail.access"
+
+	PermissionMailRead        = "mail.messages.read"
+	PermissionMailSend        = "mail.messages.send"
+	PermissionMailDrafts      = "mail.messages.drafts"
+	PermissionMailSchedule    = "mail.messages.schedule"
+	PermissionMailOrganize    = "mail.messages.organize"
+	PermissionMailLabels      = "mail.labels.manage"
+	PermissionMailAttachments = "mail.attachments.download"
+
+	PermissionMailContacts   = "mail.contacts.manage"
+	PermissionMailSignatures = "mail.signatures.manage"
+	PermissionMailRules      = "mail.rules.manage"
+	PermissionMailBlocked    = "mail.blocked_senders.manage"
+	PermissionMailStats      = "mail.stats.view"
+	PermissionMailboxApply   = "mail.mailboxes.apply"
+
 	PermissionAdminOverview = "admin.overview.view"
 
 	PermissionUsersView          = "admin.users.view"
@@ -64,6 +81,8 @@ const (
 	PermissionAliasesManage   = PermissionAliasesUpdate
 	PermissionSystemSettings  = PermissionSettingsUpdate
 )
+
+const regularUserPermissionMigrationKey = "permission_groups.regular_mail_permissions_v1"
 
 const (
 	PermissionGroupSuperAdmin      = "pg_super_admin"
@@ -117,6 +136,13 @@ type PermissionGroup struct {
 }
 
 var legacyPermissionExpansions = map[string][]string{
+	"mail":                    regularUserDefaultPermissions(),
+	"mail.messages":           {PermissionMailAccess, PermissionMailRead, PermissionMailSend, PermissionMailDrafts, PermissionMailSchedule, PermissionMailOrganize, PermissionMailAttachments},
+	"mail.labels":             {PermissionMailAccess, PermissionMailRead, PermissionMailLabels},
+	"mail.contacts":           {PermissionMailContacts},
+	"mail.signatures":         {PermissionMailSignatures},
+	"mail.rules":              {PermissionMailRules, PermissionMailBlocked},
+	"mail.mailboxes":          {PermissionMailboxApply},
 	"admin.overview":          {PermissionAdminOverview},
 	"admin.users":             {PermissionUsersView, PermissionUsersCreate, PermissionUsersUpdate, PermissionUsersDelete, PermissionUsersResetPassword, PermissionGroupsView},
 	"admin.permission_groups": {PermissionGroupsView, PermissionGroupsCreate, PermissionGroupsUpdate, PermissionGroupsDelete},
@@ -129,6 +155,21 @@ var legacyPermissionExpansions = map[string][]string{
 }
 
 var permissionCatalogItems = []PermissionInfo{
+	{Key: PermissionMailAccess, Label: "访问邮箱前台", Description: "进入邮箱前台并查看本人邮箱列表。", Category: "邮箱前台"},
+	{Key: PermissionMailRead, Label: "查看本人邮件", Description: "查看本人文件夹、邮件列表、星标邮件和邮件正文。", Category: "邮箱前台"},
+	{Key: PermissionMailSend, Label: "发送邮件", Description: "使用本人邮箱发送、回复和转发邮件。", Category: "邮箱前台"},
+	{Key: PermissionMailDrafts, Label: "管理草稿", Description: "保存、编辑和删除本人草稿。", Category: "邮箱前台"},
+	{Key: PermissionMailSchedule, Label: "定时发送", Description: "创建、查看和取消本人定时发送任务。", Category: "邮箱前台"},
+	{Key: PermissionMailOrganize, Label: "整理邮件", Description: "标记已读、星标、移动、归档、删除和清理本人邮件。", Category: "邮箱前台"},
+	{Key: PermissionMailLabels, Label: "管理邮件标签", Description: "创建标签，并为本人邮件添加或移除标签。", Category: "邮箱前台"},
+	{Key: PermissionMailAttachments, Label: "下载附件", Description: "下载本人邮件中的附件。", Category: "邮箱前台"},
+	{Key: PermissionMailContacts, Label: "管理联系人", Description: "查看、新增和删除本人的联系人。", Category: "个人中心"},
+	{Key: PermissionMailSignatures, Label: "管理签名", Description: "查看、新增、修改和删除本人的邮件签名。", Category: "个人中心"},
+	{Key: PermissionMailRules, Label: "管理收件规则", Description: "查看、新增和删除本人的收件规则。", Category: "个人中心"},
+	{Key: PermissionMailBlocked, Label: "管理拦截名单", Description: "查看、新增和删除本人的发件人拦截规则。", Category: "个人中心"},
+	{Key: PermissionMailStats, Label: "查看邮箱统计", Description: "查看本人邮箱统计和清理概览。", Category: "个人中心"},
+	{Key: PermissionMailboxApply, Label: "自助申请邮箱", Description: "在开放申请时为本人申请邮箱账号。", Category: "个人中心"},
+
 	{Key: PermissionAdminOverview, Label: "查看概览", Description: "查看后台统计和首次配置检查。", Category: "概览"},
 
 	{Key: PermissionUsersView, Label: "查看用户", Description: "查看用户列表、状态和绑定邮箱。", Category: "用户"},
@@ -182,6 +223,16 @@ func allPermissionKeys() []string {
 	out := make([]string, 0, len(permissionCatalogItems))
 	for _, item := range permissionCatalogItems {
 		out = append(out, item.Key)
+	}
+	return out
+}
+
+func adminPermissionKeys() []string {
+	out := make([]string, 0, len(permissionCatalogItems))
+	for _, item := range permissionCatalogItems {
+		if strings.HasPrefix(item.Key, "admin.") {
+			out = append(out, item.Key)
+		}
 	}
 	return out
 }
@@ -269,9 +320,28 @@ func defaultPermissionGroups() []PermissionGroup {
 			ID:          PermissionGroupRegular,
 			Name:        "普通用户",
 			Description: "仅可使用自己的邮箱功能，不包含后台权限。",
-			Permissions: []string{},
+			Permissions: regularUserDefaultPermissions(),
 			System:      true,
 		},
+	}
+}
+
+func regularUserDefaultPermissions() []string {
+	return []string{
+		PermissionMailAccess,
+		PermissionMailRead,
+		PermissionMailSend,
+		PermissionMailDrafts,
+		PermissionMailSchedule,
+		PermissionMailOrganize,
+		PermissionMailLabels,
+		PermissionMailAttachments,
+		PermissionMailContacts,
+		PermissionMailSignatures,
+		PermissionMailRules,
+		PermissionMailBlocked,
+		PermissionMailStats,
+		PermissionMailboxApply,
 	}
 }
 
@@ -331,7 +401,51 @@ func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 	if err := a.cleanupLegacyDefaultPermissionGroups(ctx); err != nil {
 		return err
 	}
+	if err := a.ensureRegularUserMailPermissions(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (a *App) ensureRegularUserMailPermissions(ctx context.Context) error {
+	var migrated string
+	err := a.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key=?`, regularUserPermissionMigrationKey).Scan(&migrated)
+	if err == nil && migrated == "1" {
+		return nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	var raw string
+	if err := a.db.QueryRowContext(ctx, `SELECT permissions_json FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&raw); err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, permission := range decodeStoredPermissions(raw) {
+		seen[permission] = true
+	}
+	changed := false
+	for _, permission := range regularUserDefaultPermissions() {
+		if !seen[permission] {
+			seen[permission] = true
+			changed = true
+		}
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if changed {
+		permissions := make([]string, 0, len(seen))
+		for _, permission := range allPermissionKeys() {
+			if seen[permission] {
+				permissions = append(permissions, permission)
+			}
+		}
+		if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET permissions_json=?, updated_at=? WHERE id=?`, encodePermissions(permissions), now, PermissionGroupRegular); err != nil {
+			return err
+		}
+	}
+	_, err = a.db.ExecContext(ctx, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)
+		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, regularUserPermissionMigrationKey, "1", now)
+	return err
 }
 
 func (a *App) cleanupLegacyDefaultPermissionGroups(ctx context.Context) error {
@@ -543,7 +657,7 @@ func userHasAnyPermission(user *User, permissions ...string) bool {
 }
 
 func userHasAdminAccess(user *User) bool {
-	return userHasAnyPermission(user, allPermissionKeys()...)
+	return userHasAnyPermission(user, adminPermissionKeys()...)
 }
 
 func (a *App) requireAdminAccess(next http.Handler) http.Handler {

@@ -1,5 +1,22 @@
 import type { PermissionKey, User } from "@/lib/api-types"
 
+export const MAIL_PERMISSIONS: PermissionKey[] = [
+  "mail.access",
+  "mail.messages.read",
+  "mail.messages.send",
+  "mail.messages.drafts",
+  "mail.messages.schedule",
+  "mail.messages.organize",
+  "mail.labels.manage",
+  "mail.attachments.download",
+  "mail.contacts.manage",
+  "mail.signatures.manage",
+  "mail.rules.manage",
+  "mail.blocked_senders.manage",
+  "mail.stats.view",
+  "mail.mailboxes.apply",
+]
+
 export const ADMIN_PERMISSIONS: PermissionKey[] = [
   "admin.overview.view",
   "admin.users.view",
@@ -50,4 +67,8 @@ export function hasAnyPermission(user: User | undefined | null, permissions: Per
 
 export function hasAdminAccess(user: User | undefined | null) {
   return hasAnyPermission(user, ADMIN_PERMISSIONS)
+}
+
+export function hasMailAccess(user: User | undefined | null) {
+  return hasPermission(user, "mail.access")
 }

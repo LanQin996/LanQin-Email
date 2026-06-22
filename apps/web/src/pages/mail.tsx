@@ -12,7 +12,7 @@ import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
 import { api, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
@@ -47,6 +47,7 @@ import {
 import { useMe } from "@/hooks/use-me"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
+import { hasPermission } from "@/lib/permissions"
 
 const folderIcons: Record<string, React.ReactNode> = { inbox: <Inbox className="h-4 w-4" />, sent: <Send className="h-4 w-4" />, drafts: <FileText className="h-4 w-4" />, archive: <Archive className="h-4 w-4" />, spam: <Trash2 className="h-4 w-4" />, trash: <Trash2 className="h-4 w-4" /> }
 const folderLabels: Record<string, string> = {
@@ -107,21 +108,31 @@ export function MailPage() {
   const themeMountedRef = React.useRef(false)
   const mailNotifyStateRef = React.useRef<Record<string, MailNotificationState>>({})
   const mailAudioContextRef = React.useRef<AudioContext | null>(null)
+  const user = me.data?.user
+  const canAccessMail = hasPermission(user, "mail.access")
+  const canReadMail = hasPermission(user, "mail.messages.read")
+  const canSendMail = hasPermission(user, "mail.messages.send")
+  const canManageDrafts = hasPermission(user, "mail.messages.drafts")
+  const canScheduleMail = hasPermission(user, "mail.messages.schedule")
+  const canOrganizeMail = hasPermission(user, "mail.messages.organize")
+  const canManageLabels = hasPermission(user, "mail.labels.manage")
+  const canDownloadAttachments = hasPermission(user, "mail.attachments.download")
+  const canManageSignatures = hasPermission(user, "mail.signatures.manage")
 
-  const mailboxList = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes })
+  const mailboxList = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes, enabled: canAccessMail })
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const selectedMailbox = React.useMemo(() => mailboxList.data?.items.find((item) => item.id === selectedMailboxId), [mailboxList.data?.items, selectedMailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const hasMailboxes = (mailboxList.data?.items.length || 0) > 0
-  const folders = useQuery({ queryKey: ["folders", activeMailboxId], queryFn: () => api.folders(activeMailboxId), enabled: !!activeMailboxId })
-  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId })
-  const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId })
-  const scheduledSends = useQuery({ queryKey: ["scheduled-sends", activeMailboxId], queryFn: () => api.scheduledSends(activeMailboxId), enabled: !!activeMailboxId, refetchInterval: 30000 })
+  const folders = useQuery({ queryKey: ["folders", activeMailboxId], queryFn: () => api.folders(activeMailboxId), enabled: !!activeMailboxId && canReadMail })
+  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && (canReadMail || canManageLabels) })
+  const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && hasPermission(user, "mail.stats.view") })
+  const scheduledSends = useQuery({ queryKey: ["scheduled-sends", activeMailboxId], queryFn: () => api.scheduledSends(activeMailboxId), enabled: !!activeMailboxId && canScheduleMail, refetchInterval: 30000 })
   const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
     queryFn: () => api.messages("Inbox", "", "", activeMailboxId),
-    enabled: !!activeMailboxId,
+    enabled: !!activeMailboxId && canReadMail,
     refetchInterval: mailRefreshInterval,
     refetchIntervalInBackground: true,
   })
@@ -135,9 +146,9 @@ export function MailPage() {
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!activeMailboxId && mailView !== "scheduled" && (mailView !== "label" || !!selectedLabelId),
+    enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && (mailView !== "label" || !!selectedLabelId),
   })
-  const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!, { markRead: false }), enabled: !!selectedId })
+  const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail })
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
     qc.setQueryData(["message", id], (current: MailMessage | undefined) => current ? { ...current, ...patch } : current)
     qc.setQueriesData({ queryKey: ["messages"] }, (current: InfiniteData<MailListResponse> | undefined) => {
@@ -364,7 +375,7 @@ export function MailPage() {
   const visibleScheduledItems = scheduledQuery
     ? scheduledItems.filter((item) => [item.subject, item.snippet, ...(item.to || [])].join(" ").toLowerCase().includes(scheduledQuery))
     : scheduledItems
-  const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, scheduledCount)
+  const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, canScheduleMail ? scheduledCount : 0, canScheduleMail)
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
   const viewTitle = mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
@@ -391,6 +402,7 @@ export function MailPage() {
     ])
   }
   async function runBulkAction(action: BulkAction) {
+    if (!canOrganizeMail) return
     const ids = compactSelectedIds.filter((id) => visibleMessageIds.includes(id))
     if (ids.length === 0) return
     if (action === "delete") {
@@ -438,10 +450,22 @@ export function MailPage() {
       onConfirm: () => del.mutate(message.id),
     })
   }
-  function openCompose(draft?: ComposeDraft) { setComposeDraft(draft || { key: `new-${Date.now()}` }); setComposeOpen(true) }
-  function openReply(message: MailMessage) { openCompose({ key: `reply-${message.id}-${Date.now()}`, to: message.from, subject: withPrefix(message.subject, "Re:"), text: quoteMessage(message) }) }
-  function openForward(message: MailMessage) { openCompose({ key: `forward-${message.id}-${Date.now()}`, subject: withPrefix(message.subject, "Fwd:"), text: quoteMessage(message) }) }
+  function openCompose(draft?: ComposeDraft) {
+    if (draft?.isDraft && !canManageDrafts) return
+    if (!draft?.isDraft && !canSendMail) return
+    setComposeDraft(draft || { key: `new-${Date.now()}` })
+    setComposeOpen(true)
+  }
+  function openReply(message: MailMessage) {
+    if (!canSendMail) return
+    openCompose({ key: `reply-${message.id}-${Date.now()}`, to: message.from, subject: withPrefix(message.subject, "Re:"), text: quoteMessage(message) })
+  }
+  function openForward(message: MailMessage) {
+    if (!canSendMail) return
+    openCompose({ key: `forward-${message.id}-${Date.now()}`, subject: withPrefix(message.subject, "Fwd:"), text: quoteMessage(message) })
+  }
   async function openDraft(message: MailMessage) {
+    if (!canManageDrafts) return
     if (scheduledDraftIds.has(message.id)) {
       toast({ title: "这封草稿已在待发送队列中", description: "请先取消定时发送，再继续编辑。" })
       openScheduled()
@@ -516,7 +540,7 @@ export function MailPage() {
       return
     }
     setSelectedId(messageId)
-    if (message && !message.isRead) {
+    if (message && !message.isRead && canOrganizeMail) {
       markRead.mutate({ id: message.id, read: true })
     }
   }
@@ -561,10 +585,12 @@ export function MailPage() {
             </Button>
           )}
         </div>
-        <Button className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => openCompose()} disabled={!selectedMailbox}>
-          <PencilLine className="h-4 w-4" />
-          {!sidebarCollapsed && <span>写邮件</span>}
-        </Button>
+        {canSendMail && (
+          <Button className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => openCompose()} disabled={!selectedMailbox}>
+            <PencilLine className="h-4 w-4" />
+            {!sidebarCollapsed && <span>写邮件</span>}
+          </Button>
+        )}
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -588,11 +614,11 @@ export function MailPage() {
             {folders.isLoading && <FolderSkeleton />}
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarGroup>
+        {(canReadMail || canManageLabels) && <SidebarGroup>
           {!sidebarCollapsed && <SidebarGroupLabel>标签</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
-              {labelItems.map((label) => (
+              {canReadMail && labelItems.map((label) => (
                 <SidebarMenuItem key={label.id}>
                   <SidebarMenuButton isActive={mailView === "label" && selectedLabelId === label.id} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => openLabel(label.id)}>
                     <Tag className="h-4 w-4" style={{ color: label.color }} />
@@ -601,14 +627,16 @@ export function MailPage() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-              {!sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
-              <SidebarMenuItem>
-                <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => createLabel.mutate(name)} />
-              </SidebarMenuItem>
+              {canReadMail && !sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
+              {canManageLabels && (
+                <SidebarMenuItem>
+                  <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => createLabel.mutate(name)} />
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
             {labels.isLoading && <FolderSkeleton />}
           </SidebarGroupContent>
-        </SidebarGroup>
+        </SidebarGroup>}
       </SidebarContent>
       {!isMobile && (
         <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex justify-center" : "")}>
@@ -630,9 +658,13 @@ export function MailPage() {
     }
   }
 
-  const contentView = !mailboxList.isLoading && !hasMailboxes ? (
+  const contentView = !canAccessMail ? (
+    <PermissionEmptyState title="无邮箱前台权限" description="当前账号未开启邮箱前台访问权限。" onOpenSettings={openSettings} />
+  ) : !canReadMail ? (
+    <PermissionEmptyState title="无邮件查看权限" description="当前账号可以访问邮箱前台，但未开启邮件查看权限。" onOpenSettings={openSettings} />
+  ) : !mailboxList.isLoading && !hasMailboxes ? (
     <NoMailboxState onOpenSettings={openSettings} />
-  ) : mailView === "scheduled" ? (
+  ) : mailView === "scheduled" && canScheduleMail ? (
     <ScheduledSendView
       compact={isMobile || displayMode === "compact"}
       items={visibleScheduledItems}
@@ -642,6 +674,8 @@ export function MailPage() {
       cancelingId={cancelingScheduledId}
       onCancel={(item) => cancelScheduledSend.mutate(item)}
     />
+  ) : mailView === "scheduled" ? (
+    <PermissionEmptyState title="无定时发送权限" description="当前账号不能查看或管理定时发送任务。" onOpenSettings={openSettings} />
   ) : isMobile || displayMode === "compact" ? (
     <CompactMailView
       title={viewTitle}
@@ -676,6 +710,10 @@ export function MailPage() {
       onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
       bulkPending={bulkPending}
       onBulkAction={runBulkAction}
+      canSend={canSendMail}
+      canOrganize={canOrganizeMail}
+      canManageLabels={canManageLabels}
+      canDownloadAttachments={canDownloadAttachments}
     />
   ) : (
     <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
@@ -689,11 +727,11 @@ export function MailPage() {
                 <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
               </div>
             </div>
-            {selectedCountOnPage > 0 && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
+            {selectedCountOnPage > 0 && canOrganizeMail && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
           </div>
           <ScrollArea className="min-h-0 flex-1">
             {messages.isLoading && <MessageSkeleton />}
-            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} />)}
+            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} canOrganize={canOrganizeMail} />)}
             {!messages.isLoading && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
             {!messages.isLoading && hasMoreMessages && (
               <div className="border-b p-4 text-center">
@@ -716,29 +754,31 @@ export function MailPage() {
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="text-xl font-semibold">{selected.subject}</h2>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>
-                  <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>
-                  {selected.folder === "Archive" ? (
+                  {canSendMail && <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
+                  {canSendMail && <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
+                  {canOrganizeMail && (selected.folder === "Archive" ? (
                     <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}>取消归档</Button>
                   ) : (
                     <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}>归档</Button>
-                  )}
-                  <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>
+                  ))}
+                  {canOrganizeMail && <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>}
                 </div>
               </div>
               <MessageMetaPanel message={selected} />
-              <MessageLabels
-                messageLabels={selected.labels || []}
-                availableLabels={labelItems}
-                onAdd={(label) => addLabel.mutate({ id: selected.id, label })}
-                onRemove={(labelId) => removeLabel.mutate({ id: selected.id, labelId })}
-                pending={addLabel.isPending || removeLabel.isPending}
-              />
+              {canManageLabels && (
+                <MessageLabels
+                  messageLabels={selected.labels || []}
+                  availableLabels={labelItems}
+                  onAdd={(label) => addLabel.mutate({ id: selected.id, label })}
+                  onRemove={(labelId) => removeLabel.mutate({ id: selected.id, labelId })}
+                  pending={addLabel.isPending || removeLabel.isPending}
+                />
+              )}
             </div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-6">
                 <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
-                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
+                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground" key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
             </ScrollArea>
           </div>}
@@ -767,7 +807,7 @@ export function MailPage() {
                   <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
                 </Button>
                 <div className="min-w-0 flex-1 text-sm font-semibold">{viewTitle}</div>
-                <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>
+                {canSendMail && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
                 <div className="relative basis-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                   <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
@@ -796,7 +836,7 @@ export function MailPage() {
                     )}
                     {mailView !== "scheduled" && (
                       <>
-                        <Button variant="outline" size="sm" disabled={!activeMailboxId || markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>
+                        {canOrganizeMail && <Button variant="outline" size="sm" disabled={!activeMailboxId || markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>}
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="outline" size="sm"><SlidersHorizontal className="h-4 w-4" />{filterLabels[mailFilter]}</Button>
@@ -824,7 +864,7 @@ export function MailPage() {
         )}
       </SidebarProvider>
 
-      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
+      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} canSend={canSendMail} canManageDrafts={canManageDrafts} canSchedule={canScheduleMail} canManageSignatures={canManageSignatures} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
@@ -839,7 +879,7 @@ export function MailPage() {
   )
 }
 
-function buildMailMenuItems(folders: MailFolder[], starredCount: number, scheduledCount: number): MailMenuItem[] {
+function buildMailMenuItems(folders: MailFolder[], starredCount: number, scheduledCount: number, includeScheduled: boolean): MailMenuItem[] {
   const byName = new Map(folders.map((item) => [item.name, item]))
   const normalizedFolders = ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map((name) => byName.get(name) || { id: `virtual-${name}`, name, role: name.toLowerCase(), unreadCount: 0, totalCount: 0 })
   for (const item of folders) {
@@ -857,6 +897,7 @@ function buildMailMenuItems(folders: MailFolder[], starredCount: number, schedul
   const scheduledItem: MailMenuItem = { type: "scheduled", key: "scheduled", label: "待发送", icon: <Clock3 className="h-4 w-4" />, count: scheduledCount }
   const inboxIndex = folderItems.findIndex((item) => item.type === "folder" && item.folderName === "Inbox")
   const insertAt = inboxIndex >= 0 ? inboxIndex + 1 : 0
+  if (!includeScheduled) return [...folderItems.slice(0, insertAt), starredItem, ...folderItems.slice(insertAt)]
   return [...folderItems.slice(0, insertAt), starredItem, scheduledItem, ...folderItems.slice(insertAt)]
 }
 
@@ -885,6 +926,23 @@ function NoMailboxState({ onOpenSettings }: { onOpenSettings: () => void }) {
         </div>
         <div className="text-lg font-semibold">还没有可用邮箱</div>
         <div className="mt-2 text-sm text-muted-foreground">请在个人中心申请邮箱，或联系管理员为当前账号分配邮箱。</div>
+        <Button className="mt-5" onClick={onOpenSettings}>
+          <Settings className="h-4 w-4" />前往个人中心
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function PermissionEmptyState({ title, description, onOpenSettings }: { title: string; description: string; onOpenSettings: () => void }) {
+  return (
+    <div className="grid min-h-0 flex-1 place-items-center p-6">
+      <div className="w-full max-w-md rounded-lg border border-dashed p-8 text-center">
+        <div className="mx-auto mb-4 grid size-12 place-items-center rounded-full bg-muted">
+          <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div className="text-lg font-semibold">{title}</div>
+        <div className="mt-2 text-sm text-muted-foreground">{description}</div>
         <Button className="mt-5" onClick={onOpenSettings}>
           <Settings className="h-4 w-4" />前往个人中心
         </Button>
@@ -1023,6 +1081,10 @@ function CompactMailView({
   onRemoveLabel,
   bulkPending,
   onBulkAction,
+  canSend,
+  canOrganize,
+  canManageLabels,
+  canDownloadAttachments,
 }: {
   title: string
   icon?: React.ReactNode
@@ -1056,6 +1118,10 @@ function CompactMailView({
   onRemoveLabel: (message: MailMessage, labelId: string) => void
   bulkPending: boolean
   onBulkAction: (action: BulkAction) => void
+  canSend: boolean
+  canOrganize: boolean
+  canManageLabels: boolean
+  canDownloadAttachments: boolean
 }) {
   const selectedIndex = selectedId ? messages.findIndex((message) => message.id === selectedId) : -1
   const previousMessage = selectedIndex > 0 ? messages[selectedIndex - 1] : undefined
@@ -1080,6 +1146,10 @@ function CompactMailView({
         onToggleRead={onToggleRead}
         onAddLabel={onAddLabel}
         onRemoveLabel={onRemoveLabel}
+        canSend={canSend}
+        canOrganize={canOrganize}
+        canManageLabels={canManageLabels}
+        canDownloadAttachments={canDownloadAttachments}
       />
     )
   }
@@ -1098,7 +1168,7 @@ function CompactMailView({
           {selectedIds.length > 0 ? (
             <>
               <span className="hidden text-sm text-muted-foreground min-[380px]:inline">已选 {selectedIds.length} 封</span>
-              <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />
+              {canOrganize && <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />}
             </>
           ) : (
             <div className="text-sm text-muted-foreground">{messages.length} / {total} 封</div>
@@ -1107,7 +1177,7 @@ function CompactMailView({
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && <MessageSkeleton />}
-        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onStar={() => onStar(message)} />)}
+        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onStar={() => onStar(message)} canOrganize={canOrganize} />)}
         {!loading && messages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
         {!loading && hasMore && (
           <div className="border-b p-4 text-center">
@@ -1138,6 +1208,10 @@ function CompactMessageDetail({
   onToggleRead,
   onAddLabel,
   onRemoveLabel,
+  canSend,
+  canOrganize,
+  canManageLabels,
+  canDownloadAttachments,
 }: {
   selected?: MailMessage
   loading: boolean
@@ -1155,6 +1229,10 @@ function CompactMessageDetail({
   onToggleRead: (message: MailMessage) => void
   onAddLabel: (message: MailMessage, label: MailLabel) => void
   onRemoveLabel: (message: MailMessage, labelId: string) => void
+  canSend: boolean
+  canOrganize: boolean
+  canManageLabels: boolean
+  canDownloadAttachments: boolean
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -1182,14 +1260,14 @@ function CompactMessageDetail({
                   <DropdownMenuItem onSelect={() => onSelect(selected.id)}><PencilLine className="h-4 w-4" />编辑草稿</DropdownMenuItem>
                 ) : (
                   <>
-                    <DropdownMenuItem onSelect={() => onReply(selected)}><Reply className="h-4 w-4" />回复</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onForward(selected)}><Forward className="h-4 w-4" />转发</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onArchive(selected)}><Archive className="h-4 w-4" />{selected.folder === "Archive" ? "取消归档" : "归档"}</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</DropdownMenuItem>
-                    <DropdownMenuItem onSelect={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</DropdownMenuItem>
+                    {canSend && <DropdownMenuItem onSelect={() => onReply(selected)}><Reply className="h-4 w-4" />回复</DropdownMenuItem>}
+                    {canSend && <DropdownMenuItem onSelect={() => onForward(selected)}><Forward className="h-4 w-4" />转发</DropdownMenuItem>}
+                    {canOrganize && <DropdownMenuItem onSelect={() => onArchive(selected)}><Archive className="h-4 w-4" />{selected.folder === "Archive" ? "取消归档" : "归档"}</DropdownMenuItem>}
+                    {canOrganize && <DropdownMenuItem onSelect={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</DropdownMenuItem>}
+                    {canOrganize && <DropdownMenuItem onSelect={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</DropdownMenuItem>}
                   </>
                 )}
-                <DropdownMenuItem onSelect={() => onDelete(selected)} className="text-destructive"><Trash2 className="h-4 w-4" />删除</DropdownMenuItem>
+                {canOrganize && <DropdownMenuItem onSelect={() => onDelete(selected)} className="text-destructive"><Trash2 className="h-4 w-4" />删除</DropdownMenuItem>}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -1201,14 +1279,14 @@ function CompactMessageDetail({
               <Button variant="outline" size="sm" onClick={() => onSelect(selected.id)}><PencilLine className="h-4 w-4" />编辑草稿</Button>
             ) : (
               <>
-                {selected && <Button variant="outline" size="sm" onClick={() => onReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
-                {selected && <Button variant="outline" size="sm" onClick={() => onForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
-                {selected && <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>{selected.folder === "Archive" ? "取消归档" : "归档"}</Button>}
-                {selected && <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</Button>}
-                {selected && <Button variant="outline" size="sm" onClick={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</Button>}
+                {selected && canSend && <Button variant="outline" size="sm" onClick={() => onReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
+                {selected && canSend && <Button variant="outline" size="sm" onClick={() => onForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
+                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>{selected.folder === "Archive" ? "取消归档" : "归档"}</Button>}
+                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</Button>}
+                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</Button>}
               </>
             )}
-            {selected && <Button variant="outline" size="sm" onClick={() => onDelete(selected)}><Trash2 className="h-4 w-4" />删除</Button>}
+            {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onDelete(selected)}><Trash2 className="h-4 w-4" />删除</Button>}
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" disabled={!previousMessage} onClick={() => previousMessage && onSelect(previousMessage.id)}>上一封</Button>
@@ -1224,22 +1302,24 @@ function CompactMessageDetail({
               <div className="space-y-5 border-b pb-5">
                 <div className="flex items-start gap-3">
                   <h1 className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight sm:text-2xl">{selected.subject}</h1>
-                  <Button type="button" variant="ghost" size="icon" aria-label={selected.isStarred ? "取消星标" : "添加星标"} className="text-muted-foreground hover:text-yellow-500" onClick={() => onStar(selected)}>
+                  {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={selected.isStarred ? "取消星标" : "添加星标"} className="text-muted-foreground hover:text-yellow-500" onClick={() => onStar(selected)}>
                     <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
-                  </Button>
+                  </Button>}
                 </div>
                 <MessageMetaPanel message={selected} />
-                <MessageLabels
-                  messageLabels={selected.labels || []}
-                  availableLabels={labels}
-                  onAdd={(label) => onAddLabel(selected, label)}
-                  onRemove={(labelId) => onRemoveLabel(selected, labelId)}
-                  pending={labelPending}
-                />
+                {canManageLabels && (
+                  <MessageLabels
+                    messageLabels={selected.labels || []}
+                    availableLabels={labels}
+                    onAdd={(label) => onAddLabel(selected, label)}
+                    onRemove={(labelId) => onRemoveLabel(selected, labelId)}
+                    pending={labelPending}
+                  />
+                )}
               </div>
               <div className="py-6 sm:py-8">
                 <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
-                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a>)}</div></div>}
+                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between" key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
             </div>
           </ScrollArea>
@@ -1248,7 +1328,7 @@ function CompactMessageDetail({
   )
 }
 
-function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onStar }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void }) {
+function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onStar, canOrganize }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void; canOrganize: boolean }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
@@ -1266,9 +1346,9 @@ function CompactMessageRow({ message, active, checked, scheduled, onCheckedChang
             <div className="min-w-0 truncate" title={senderTitle(message)}>{senderName}</div>
             <div className="flex shrink-0 items-center gap-1 sm:hidden">
               <span className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</span>
-              <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
+              {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
                 <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-              </Button>
+              </Button>}
             </div>
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2 sm:mt-0">
@@ -1283,9 +1363,9 @@ function CompactMessageRow({ message, active, checked, scheduled, onCheckedChang
         </div>
       </div>
       <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">{formatDate(message.receivedAt)}</div>
-      <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex" onClick={(event) => { event.stopPropagation(); onStar() }}>
+      {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex" onClick={(event) => { event.stopPropagation(); onStar() }}>
         <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-      </Button>
+      </Button>}
     </div>
   )
 }
@@ -1525,6 +1605,7 @@ function MessageRow({
   onCheckedChange,
   onClick,
   onStar,
+  canOrganize,
 }: {
   message: MailMessage
   active: boolean
@@ -1533,6 +1614,7 @@ function MessageRow({
   onCheckedChange: (checked: boolean) => void
   onClick: () => void
   onStar: () => void
+  canOrganize: boolean
 }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
@@ -1550,7 +1632,7 @@ function MessageRow({
         <div className="mb-1 flex items-center justify-between gap-2">
           <div className="min-w-0 truncate text-sm" title={senderTitle(message)}>{senderName}</div>
           <div className="flex shrink-0 items-center gap-1">
-            <Button
+            {canOrganize && <Button
               type="button"
               variant="ghost"
               size="icon"
@@ -1559,7 +1641,7 @@ function MessageRow({
               onClick={(e) => { e.stopPropagation(); onStar() }}
             >
               <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-            </Button>
+            </Button>}
             <div className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
           </div>
         </div>
@@ -1631,7 +1713,7 @@ function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pendin
   )
 }
 
-function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; onOpenChange: (v: boolean) => void; onSent: () => void }) {
+function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSchedule, canManageSignatures, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; canSend: boolean; canManageDrafts: boolean; canSchedule: boolean; canManageSignatures: boolean; onOpenChange: (v: boolean) => void; onSent: () => void }) {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [files, setFiles] = React.useState<File[]>([])
@@ -1651,7 +1733,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   const [showCc, setShowCc] = React.useState(Boolean(draft?.cc))
   const [showBcc, setShowBcc] = React.useState(Boolean(draft?.bcc))
   const [sendSeparately, setSendSeparately] = React.useState(false)
-  const defaultSignature = useQuery({ queryKey: ["signature", "default", mailbox?.id], queryFn: () => api.defaultSignature(mailbox?.id), enabled: open && !!mailbox?.id })
+  const defaultSignature = useQuery({ queryKey: ["signature", "default", mailbox?.id], queryFn: () => api.defaultSignature(mailbox?.id), enabled: open && !!mailbox?.id && canManageSignatures })
   const signatureText = defaultSignature.data?.signature?.content || ""
   const composerText = draft?.html || (draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : "")
   const [body, setBody] = React.useState<ComposerValue>(() => draft?.html !== undefined ? htmlComposerValue(draft.html) : plainTextComposerValue(composerText))
@@ -1745,7 +1827,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   }, [files])
 
   React.useEffect(() => {
-    if (!open || sendStartedRef.current || !hasDraftContent) return
+    if (!open || sendStartedRef.current || !hasDraftContent || !canManageDrafts) return
     const payloadKey = JSON.stringify({ ...composePayload, draftId })
     if (payloadKey === lastSavedPayloadRef.current) return
     const timer = window.setTimeout(async () => {
@@ -1766,7 +1848,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
       }
     }, 5000)
     return () => window.clearTimeout(timer)
-  }, [open, hasDraftContent, composePayload, draftId, qc])
+  }, [open, hasDraftContent, composePayload, draftId, qc, canManageDrafts])
 
   function buildSendWarnings(attachmentsCount: number) {
     const warnings: string[] = []
@@ -1791,6 +1873,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
   }
 
   async function prepareSend() {
+    if (!canSend) return
     if (!mailbox) return
     const attachments = await Promise.all(files.map(fileToAttachment))
     const to = splitEmails(toValue)
@@ -1824,6 +1907,7 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
     await prepareSend()
   }
   async function scheduleAt(sendAt: string) {
+    if (!canSchedule) return
     if (!mailbox) {
       toast({ title: "请选择发件邮箱" })
       return
@@ -1913,8 +1997,8 @@ function ComposeDialog({ mailbox, open, draft, onOpenChange, onSent }: { mailbox
           </div>
           <DialogFooter className="grid grid-cols-3 gap-2 border-t bg-background px-4 py-3 sm:flex sm:flex-row sm:justify-end sm:px-6 sm:py-4">
             <Button type="button" variant="outline" className="min-h-10 px-3" onClick={() => onOpenChange(false)}>取消</Button>
-            <Button type="button" variant="outline" className="min-h-10 px-3" disabled={send.isPending || scheduleSend.isPending || !mailbox} onClick={() => setScheduleDialogOpen(true)}><Calendar className="h-4 w-4" />定时</Button>
-            <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>
+            {canSchedule && <Button type="button" variant="outline" className="min-h-10 px-3" disabled={send.isPending || scheduleSend.isPending || !mailbox} onClick={() => setScheduleDialogOpen(true)}><Calendar className="h-4 w-4" />定时</Button>}
+            {canSend && <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>}
           </DialogFooter>
         </form>
         <ScheduleSendDialog open={scheduleDialogOpen} pending={scheduleSend.isPending} onOpenChange={setScheduleDialogOpen} onConfirm={scheduleAt} />
