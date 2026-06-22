@@ -233,15 +233,15 @@ func (a *App) handleDeleteMailLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback()
 	if (_, err := tx.ExecContext(ctx, "DELETE FROM message_labels WHERE label_id = ? AND EXISTS (SELECT 1 FROM mail_labels WHERE id = ? AND mailbox_id = ?)", labelID, labelID, mb.ID); err != nil {
         respondError(w, http.StatusInternalServerError, "failed to remove label associations")
         return
     }
-	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM message_labels WHERE label_id=?`, labelID); err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to remove label associations")
-		return
-	}
 	result, err := tx.ExecContext(ctx, `DELETE FROM mail_labels WHERE id=? AND mailbox_id=?`, labelID, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to delete label")
