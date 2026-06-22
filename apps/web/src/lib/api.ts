@@ -108,6 +108,7 @@ export const api = {
     const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""
     return request<MailLabel>(`/api/mail/labels${query}`, { method: "POST", body: JSON.stringify({ name: payload.name, color: payload.color || "" }) })
   },
+  deleteLabel: (id: string) => request<{ labels: MailLabel[] }>(`/api/mail/labels/${id}`, { method: "DELETE" }),
   messages: (folder: string, q = "", cursor = "", mailboxId?: string) => {
     const params = new URLSearchParams({ folder, q, cursor })
     if (mailboxId) params.set("mailboxId", mailboxId)

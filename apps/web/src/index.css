@@ -162,3 +162,29 @@ vue-devtools-anchor,
 [class*="vue-devtools"] {
   display: none !important;
 }
+
+/* Label badge: hide delete button by default, show on hover (desktop) */
+.label-badge-delete {
+  visibility: hidden;
+  width: 0;
+  padding: 0;
+  overflow: hidden;
+  transition: visibility 0.1s, width 0.1s, padding 0.1s, opacity 0.15s;
+}
+.label-badge:hover .label-badge-delete,
+.label-badge:focus-within .label-badge-delete {
+  visibility: visible;
+  width: 1rem;
+  padding: 0;
+  opacity: 1 !important;
+}
+
+/* Touch devices: always show the delete button inside label badges */
+@media (hover: none) and (pointer: coarse) {
+  .label-badge-delete {
+    visibility: visible;
+    width: 1rem;
+    padding: 0;
+    opacity: 1 !important;
+  }
+}

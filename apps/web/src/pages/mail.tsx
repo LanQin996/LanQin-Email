@@ -12,9 +12,9 @@ import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
-import { api, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend } from "@/lib/api"
-import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { api, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend } from "@/lib/api"
+import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
 import { Button } from "@/components/ui/button"
@@ -104,6 +104,8 @@ export function MailPage() {
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const [cancelingScheduledId, setCancelingScheduledId] = React.useState("")
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
+  const [labelEditMode, setLabelEditMode] = React.useState(false)
+  const [newLabelEditing, setNewLabelEditing] = React.useState(false)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
   const themeMountedRef = React.useRef(false)
   const mailNotifyStateRef = React.useRef<Record<string, MailNotificationState>>({})
@@ -186,29 +188,66 @@ export function MailPage() {
   })
   const addLabel = useMutation({
     mutationFn: ({ id, label }: { id: string; label: MailLabel }) => api.addLabel(id, { name: label.name, color: label.color }),
-    onSuccess: async (data) => {
-      if (selectedId) qc.setQueryData(["message", selectedId], (current: MailMessage | undefined) => current ? { ...current, labels: data.labels } : current)
-      await qc.invalidateQueries({ queryKey: ["messages"] })
-      await qc.invalidateQueries({ queryKey: ["labels"] })
+    onMutate: async ({ id, label }) => {
+      await qc.cancelQueries({ queryKey: ["messages"] })
+      if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
+      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
+      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: [...(current.labels || []), label] } : current)
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => m.id === id ? { ...m, labels: [...(m.labels || []), label] } : m) })) } : current)
+      return { prevMessage }
     },
-    onError: (error) => toast({ title: "添加标签失败", description: error.message }),
+    onError: (_error, _vars, context) => {
+      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      toast({ title: "添加标签失败" })
+    },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["labels"] }) },
   })
   const removeLabel = useMutation({
     mutationFn: ({ id, labelId }: { id: string; labelId: string }) => api.removeLabel(id, labelId),
-    onSuccess: async (data) => {
-      if (selectedId) qc.setQueryData(["message", selectedId], (current: MailMessage | undefined) => current ? { ...current, labels: data.labels } : current)
-      await qc.invalidateQueries({ queryKey: ["messages"] })
-      await qc.invalidateQueries({ queryKey: ["labels"] })
+    onMutate: async ({ id, labelId }) => {
+      await qc.cancelQueries({ queryKey: ["messages"] })
+      if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
+      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
+      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: (current.labels || []).filter((l) => l.id !== labelId) } : current)
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => m.id === id ? { ...m, labels: (m.labels || []).filter((l) => l.id !== labelId) } : m) })) } : current)
+      return { prevMessage }
     },
-    onError: (error) => toast({ title: "移除标签失败", description: error.message }),
+    onError: (_error, _vars, context) => {
+      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      toast({ title: "移除标签失败" })
+    },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["labels"] }) },
   })
   const createLabel = useMutation({
     mutationFn: (name: string) => api.createLabel({ mailboxId: selectedMailboxId, name }),
-    onSuccess: async () => {
-      await qc.invalidateQueries({ queryKey: ["labels"] })
-      toast({ title: "标签已创建" })
+    onMutate: async (name) => {
+      await qc.cancelQueries({ queryKey: ["labels"] })
+      const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
+      const tempLabel: MailLabel = { id: `temp-${Date.now()}`, name, color: "" }
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: [...current.items, tempLabel] } : { items: [tempLabel] })
+      return { prevLabels }
     },
-    onError: (error) => toast({ title: "创建标签失败", description: error.message }),
+    onError: (_error, _name, context) => {
+      if (context?.prevLabels) qc.setQueryData(["labels", activeMailboxId], context.prevLabels)
+      toast({ title: "创建标签失败" })
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["labels"] }),
+  })
+  const deleteLabel = useMutation({
+    mutationFn: (id: string) => api.deleteLabel(id),
+    onMutate: async (id) => {
+      await qc.cancelQueries({ queryKey: ["labels"] })
+      const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: current.items.filter((l) => l.id !== id) } : current)
+      return { prevLabels }
+    },
+    onError: (_error, _id, context) => {
+      if (context?.prevLabels) qc.setQueryData(["labels", activeMailboxId], context.prevLabels)
+      toast({ title: "删除标签失败" })
+    },
+    onSettled: () => { qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["messages"] }) },
   })
   const del = useMutation({ mutationFn: (id: string) => api.delete(id), onSuccess: async () => { setSelectedId(null); setPendingConfirm(null); await qc.invalidateQueries({ queryKey: ["messages"] }); await qc.invalidateQueries({ queryKey: ["folders"] }); await qc.invalidateQueries({ queryKey: ["mail-stats"] }); await qc.invalidateQueries({ queryKey: ["labels"] }); toast({ title: "已删除" }) }, onError: (error) => toast({ title: "删除失败", description: error.message }) })
   const move = useMutation({ mutationFn: ({ id, folder }: { id: string; folder: string }) => api.move(id, folder), onSuccess: async () => { setSelectedId(null); await qc.invalidateQueries({ queryKey: ["messages"] }); await qc.invalidateQueries({ queryKey: ["folders"] }); await qc.invalidateQueries({ queryKey: ["mail-stats"] }); await qc.invalidateQueries({ queryKey: ["labels"] }); toast({ title: "已移动" }) } })
@@ -615,22 +654,66 @@ export function MailPage() {
           </SidebarGroupContent>
         </SidebarGroup>
         {(canReadMail || canManageLabels) && <SidebarGroup>
-          {!sidebarCollapsed && <SidebarGroupLabel>标签</SidebarGroupLabel>}
+          {!sidebarCollapsed && (
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <SidebarGroupLabel className="m-0 p-0">标签</SidebarGroupLabel>
+              {canManageLabels && (
+                <div className="flex items-center gap-0.5">
+                  {labelEditMode && (
+                    <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setNewLabelEditing(true)}>
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                  {labelItems.length > 0 && (
+                    <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setLabelEditMode((v) => !v)}>
+                      {labelEditMode ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
           <SidebarGroupContent>
             <SidebarMenu>
-              {canReadMail && labelItems.map((label) => (
-                <SidebarMenuItem key={label.id}>
-                  <SidebarMenuButton isActive={mailView === "label" && selectedLabelId === label.id} className={cn(sidebarCollapsed && "justify-center px-0")} onClick={() => openLabel(label.id)}>
-                    <Tag className="h-4 w-4" style={{ color: label.color }} />
-                    {!sidebarCollapsed && <span>{label.name}</span>}
-                    {!sidebarCollapsed && !!label.messageCount && <Badge variant="secondary" className="ml-auto">{label.messageCount}</Badge>}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {canReadMail && labelItems.map((label) => {
+                const colors = generateLabelColor(label.name)
+                return (
+                  <SidebarMenuItem key={label.id}>
+                    <SidebarMenuButton
+                      isActive={!labelEditMode && mailView === "label" && selectedLabelId === label.id}
+                      className={cn(sidebarCollapsed && "justify-center px-0")}
+                      onClick={() => { if (!labelEditMode) openLabel(label.id) }}
+                    >
+                      {sidebarCollapsed ? (
+                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                      ) : (
+                        <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
+                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                          {label.name}
+                        </Badge>
+                      )}
+                      {!sidebarCollapsed && !labelEditMode && !!label.messageCount && (
+                        <span className="ml-auto text-[11px] text-muted-foreground">{label.messageCount}</span>
+                      )}
+                      {!sidebarCollapsed && labelEditMode && canManageLabels && (
+                        <button
+                          type="button"
+                          className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                          onClick={(e) => { e.stopPropagation(); deleteLabel.mutate(label.id) }}
+                          disabled={deleteLabel.isPending}
+                          aria-label={`删除标签 ${label.name}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
               {canReadMail && !sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
-              {canManageLabels && (
+              {canManageLabels && labelEditMode && newLabelEditing && (
                 <SidebarMenuItem>
-                  <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => createLabel.mutate(name)} />
+                  <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => { createLabel.mutate(name); setNewLabelEditing(false) }} editing={newLabelEditing} onEditingChange={setNewLabelEditing} />
                 </SidebarMenuItem>
               )}
             </SidebarMenu>
@@ -679,7 +762,7 @@ export function MailPage() {
   ) : isMobile || displayMode === "compact" ? (
     <CompactMailView
       title={viewTitle}
-      icon={mailView === "label" && selectedLabel ? <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} /> : undefined}
+      icon={mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : undefined}
       messages={visibleMessages}
       total={allMessages.length}
       selectedIds={compactSelectedIds}
@@ -723,7 +806,7 @@ export function MailPage() {
             <div className="flex min-w-0 items-center gap-3">
               <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Tag className="h-4 w-4" style={{ color: selectedLabel.color }} />}{viewTitle}</div>
+                <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge>}{mailView !== "label" && viewTitle}</div>
                 <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
               </div>
             </div>
@@ -764,16 +847,10 @@ export function MailPage() {
                   {canOrganizeMail && <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>}
                 </div>
               </div>
-              <MessageMetaPanel message={selected} />
-              {canManageLabels && (
-                <MessageLabels
-                  messageLabels={selected.labels || []}
-                  availableLabels={labelItems}
-                  onAdd={(label) => addLabel.mutate({ id: selected.id, label })}
-                  onRemove={(labelId) => removeLabel.mutate({ id: selected.id, labelId })}
-                  pending={addLabel.isPending || removeLabel.isPending}
-                />
-              )}
+              <MessageMetaPanel
+                message={selected}
+                {...(canManageLabels ? { availableLabels: labelItems, onAddLabel: (label: MailLabel) => addLabel.mutate({ id: selected.id, label }), onRemoveLabel: (labelId: string) => removeLabel.mutate({ id: selected.id, labelId }), labelPending: addLabel.isPending || removeLabel.isPending } : {})}
+              />
             </div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-6">
@@ -789,7 +866,7 @@ export function MailPage() {
 
   return (
     <div className="h-svh overflow-hidden bg-background">
-      <SidebarProvider className="h-full min-h-0 w-full">
+      <SidebarProvider className="h-full min-h-0 w-full flex-col">
         {isMobile ? (
           <div className="flex h-full min-h-0 flex-col">
             {!selectedId && (
@@ -806,7 +883,7 @@ export function MailPage() {
                 <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing || autoRefreshing} className={cn("transition-all", (refreshing || autoRefreshing) && "bg-primary/5 text-primary")} title={autoRefreshing ? "自动刷新中" : "刷新邮件"}>
                   <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
                 </Button>
-                <div className="min-w-0 flex-1 text-sm font-semibold">{viewTitle}</div>
+                <div className="min-w-0 flex-1 text-sm font-semibold">{mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : viewTitle}</div>
                 {canSendMail && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
                 <div className="relative basis-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -814,7 +891,7 @@ export function MailPage() {
                 </div>
               </header>
             )}
-            <section className="min-h-0 flex-1">{contentView}</section>
+            <section className="flex min-h-0 flex-1 flex-col">{contentView}</section>
           </div>
         ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
@@ -1306,16 +1383,10 @@ function CompactMessageDetail({
                     <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
                   </Button>}
                 </div>
-                <MessageMetaPanel message={selected} />
-                {canManageLabels && (
-                  <MessageLabels
-                    messageLabels={selected.labels || []}
-                    availableLabels={labels}
-                    onAdd={(label) => onAddLabel(selected, label)}
-                    onRemove={(labelId) => onRemoveLabel(selected, labelId)}
-                    pending={labelPending}
-                  />
-                )}
+                <MessageMetaPanel
+                  message={selected}
+                  {...(canManageLabels ? { availableLabels: labels, onAddLabel: (label: MailLabel) => onAddLabel(selected, label), onRemoveLabel: (labelId: string) => onRemoveLabel(selected, labelId), labelPending } : {})}
+                />
               </div>
               <div className="py-6 sm:py-8">
                 <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
@@ -1355,7 +1426,7 @@ function CompactMessageRow({ message, active, checked, scheduled, onCheckedChang
             <span className="truncate font-medium">{message.subject}</span>
             <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{message.snippet}</span>
             {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
-            {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
+            {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} />)}
             {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
             {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
           </div>
@@ -1370,17 +1441,19 @@ function CompactMessageRow({ message, active, checked, scheduled, onCheckedChang
   )
 }
 
-function NewLabelButton({ collapsed, pending, onCreate }: { collapsed: boolean; pending: boolean; onCreate: (name: string) => void }) {
-  const [editing, setEditing] = React.useState(false)
+function NewLabelButton({ collapsed, pending, onCreate, editing, onEditingChange }: { collapsed: boolean; pending: boolean; onCreate: (name: string) => void; editing?: boolean; onEditingChange?: (v: boolean) => void }) {
+  const [internalEditing, setInternalEditing] = React.useState(false)
+  const isEditing = editing ?? internalEditing
+  const setEditingState = onEditingChange ?? setInternalEditing
   const [value, setValue] = React.useState("")
   if (collapsed) {
     return (
-      <SidebarMenuButton className="justify-center px-0" onClick={() => setEditing(true)}>
+      <SidebarMenuButton className="justify-center px-0" onClick={() => setEditingState(true)}>
         <Plus className="h-4 w-4" />
       </SidebarMenuButton>
     )
   }
-  if (editing) {
+  if (isEditing) {
     return (
       <form
         className="px-2 py-1"
@@ -1390,15 +1463,15 @@ function NewLabelButton({ collapsed, pending, onCreate }: { collapsed: boolean; 
           if (!name) return
           onCreate(name)
           setValue("")
-          setEditing(false)
+          setEditingState(false)
         }}
       >
-        <Input autoFocus value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => { if (!value.trim()) setEditing(false) }} placeholder="新建标签" disabled={pending} />
+        <Input autoFocus value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => { if (!value.trim()) setEditingState(false) }} placeholder="新建标签" disabled={pending} />
       </form>
     )
   }
   return (
-    <SidebarMenuButton className="text-muted-foreground" onClick={() => setEditing(true)}>
+    <SidebarMenuButton className="text-muted-foreground" onClick={() => setEditingState(true)}>
       <Plus className="h-4 w-4" />
       <span>新建标签</span>
     </SidebarMenuButton>
@@ -1521,7 +1594,13 @@ function sameMailTime(a?: string, b?: string) {
   return !Number.isNaN(left) && !Number.isNaN(right) && left === right
 }
 
-function MessageMetaPanel({ message }: { message: MailMessage }) {
+function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel, labelPending }: {
+  message: MailMessage
+  availableLabels?: MailLabel[]
+  onAddLabel?: (label: MailLabel) => void
+  onRemoveLabel?: (labelId: string) => void
+  labelPending?: boolean
+}) {
   const fromName = senderDisplayName(message)
   const fromAddress = senderAddress(message)
   const to = cleanAddressList(message.to)
@@ -1529,6 +1608,7 @@ function MessageMetaPanel({ message }: { message: MailMessage }) {
   const bcc = cleanAddressList(message.bcc)
   const deliveredTo = extractAddress(message.recipientAddress || message.mailboxAddress || "")
   const showSentAt = Boolean(message.sentAt) && !sameMailTime(message.sentAt, message.receivedAt)
+  const labels = message.labels || []
 
   return (
     <div className="space-y-3 rounded-xl border bg-muted/20 p-3 text-sm">
@@ -1569,6 +1649,61 @@ function MessageMetaPanel({ message }: { message: MailMessage }) {
           <MessageMetaRow label="接收时间">
             <span>{formatDateTime(message.receivedAt)}</span>
           </MessageMetaRow>
+          {availableLabels && onAddLabel && onRemoveLabel && (
+            <MessageMetaRow label="标签">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {labels.map((label) => {
+                  const colors = generateLabelColor(label.name)
+                  return (
+                    <Badge key={label.id} variant="outline" className="label-badge group/badge gap-1.5 rounded-md font-normal">
+                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                      <span>{label.name}</span>
+                      <button
+                        type="button"
+                        className="label-badge-delete -mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full opacity-0 transition-opacity hover:bg-muted group-hover/badge:opacity-100"
+                        onClick={() => onRemoveLabel(label.id)}
+                        disabled={labelPending}
+                        aria-label={`移除标签 ${label.name}`}
+                      >
+                        <X className="h-2.5 w-2.5" />
+                      </button>
+                    </Badge>
+                  )
+                })}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                      aria-label="添加标签"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-48">
+                    {availableLabels.length === 0 && <DropdownMenuItem disabled>请先在侧栏新建标签</DropdownMenuItem>}
+                    {availableLabels.map((label) => {
+                      const active = labels.some((l) => l.id === label.id)
+                      const colors = generateLabelColor(label.name)
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={label.id}
+                          checked={active}
+                          onSelect={(event) => {
+                            event.preventDefault()
+                            active ? onRemoveLabel(label.id) : onAddLabel(label)
+                          }}
+                        >
+                          <span className="mr-2 h-2 w-2 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                          <span>{label.name}</span>
+                        </DropdownMenuCheckboxItem>
+                      )
+                    })}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            </MessageMetaRow>
+          )}
         </div>
       </div>
     </div>
@@ -1648,7 +1783,7 @@ function MessageRow({
         <div className="mb-1 flex min-w-0 items-center gap-2">
           <span className="min-w-0 truncate text-sm">{message.subject}</span>
           {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
-          {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} compact />)}
+          {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} />)}
           {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
           {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
         </div>
@@ -1658,58 +1793,13 @@ function MessageRow({
   </div>
 }
 
-function MailLabelBadge({ label, compact }: { label: MailLabel; compact?: boolean }) {
+function MailLabelBadge({ label }: { label: MailLabel }) {
+  const colors = generateLabelColor(label.name)
   return (
-    <Badge
-      variant="outline"
-      className={cn("shrink-0 rounded-md font-normal", compact ? "h-5 px-1.5 text-[11px]" : "h-8 px-2 text-xs")}
-      style={{ borderColor: label.color, color: label.color }}
-    >
+    <Badge variant="outline" className="shrink-0 gap-1.5 rounded-md font-normal">
+      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
       {label.name}
     </Badge>
-  )
-}
-
-function MessageLabels({ messageLabels, availableLabels, onAdd, onRemove, pending }: { messageLabels: MailLabel[]; availableLabels: MailLabel[]; onAdd: (label: MailLabel) => void; onRemove: (labelId: string) => void; pending: boolean }) {
-  const activeIds = new Set(messageLabels.map((label) => label.id))
-  return (
-    <div className="mt-4 space-y-2">
-      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><Tag className="h-3.5 w-3.5" />标签</div>
-      <div className="flex flex-wrap items-center gap-2">
-        {messageLabels.map((label) => (
-          <Badge key={label.id} variant="outline" className="h-8 gap-1.5 rounded-md px-2 text-xs font-normal" style={{ borderColor: label.color, color: label.color }}>
-            <span>{label.name}</span>
-            <Button type="button" variant="ghost" size="icon" className="h-4 w-4 rounded-full p-0 hover:bg-black/5" onClick={() => onRemove(label.id)} disabled={pending}>
-              <X className="h-3 w-3" />
-            </Button>
-          </Badge>
-        ))}
-        {messageLabels.length === 0 && <span className="text-xs text-muted-foreground">无标签</span>}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button type="button" variant="outline" size="sm" disabled={pending}>
-              <Tag className="h-4 w-4" />管理标签
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-52">
-            {availableLabels.length === 0 && <DropdownMenuItem disabled>请先在侧栏新建标签</DropdownMenuItem>}
-            {availableLabels.map((label) => (
-              <DropdownMenuCheckboxItem
-                key={label.id}
-                checked={activeIds.has(label.id)}
-                onSelect={(event) => {
-                  event.preventDefault()
-                  activeIds.has(label.id) ? onRemove(label.id) : onAdd(label)
-                }}
-              >
-                <span className="mr-2 h-2.5 w-2.5 rounded-full" style={{ backgroundColor: label.color }} />
-                <span>{label.name}</span>
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
   )
 }
 

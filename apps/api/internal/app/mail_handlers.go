@@ -216,6 +216,34 @@ func (a *App) handleCreateMailLabel(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusCreated, label)
 }
 
+func (a *App) handleDeleteMailLabel(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	labelID := chi.URLParam(r, "id")
+	if labelID == "" {
+		badRequest(w, fmt.Errorf("label id is required"))
+		return
+	}
+	result, err := a.db.ExecContext(r.Context(), `DELETE FROM mail_labels WHERE id=? AND mailbox_id=?`, labelID, mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to delete label")
+		return
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		respondError(w, http.StatusNotFound, "label not found")
+		return
+	}
+	labels, err := a.labelsForMailbox(r.Context(), mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load labels")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"labels": labels})
+}
+
 func (a *App) handleAddMessageLabel(w http.ResponseWriter, r *http.Request) {
 	msg, err := a.loadMessageForRequest(r, chi.URLParam(r, "id"), false)
 	if err != nil {
