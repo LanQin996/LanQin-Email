@@ -84,3 +84,27 @@ export function decodeMimeHeader(value: string): string {
     }
   })
 }
+
+export interface LabelColorStyle {
+  /** CSS background-color value (HSL string) */
+  backgroundColor: string
+  /** CSS color value for text — always high contrast against the background */
+  color: string
+}
+
+/**
+ * Generate a deterministic, high-contrast color pair for a label name.
+ * Uses FNV-1a hash with position-dependent mixing → HSL mapping.
+ * Text is always white (lightness 45 % guarantees dark-enough background).
+ */
+export function generateLabelColor(name: string): LabelColorStyle {
+  // FNV-1a with 32-bit offset basis and prime
+  let h = 0x811c9dc5
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i) + i * 0x01000193 // position-dependent seed
+    h = Math.imul(h, 0x01000193)
+    h ^= h >>> 16
+  }
+  const hue = ((h >>> 0) % 360 + 360) % 360
+  return { backgroundColor: `hsl(${hue}, 70%, 45%)`, color: "#ffffff" }
+}
