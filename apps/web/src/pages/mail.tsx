@@ -243,6 +243,14 @@ export function MailPage() {
       qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: current.items.filter((l) => l.id !== id) } : current)
       return { prevLabels }
     },
+    onSuccess: (_data, id) => {
+      if (mailView === "label" && selectedLabelId === id) {
+        setMailView("folder")
+        setFolder("Inbox")
+        setSelectedLabelId("")
+        setSelectedId(null)
+      }
+    },
     onError: (_error, _id, context) => {
       if (context?.prevLabels) qc.setQueryData(["labels", activeMailboxId], context.prevLabels)
       toast({ title: "删除标签失败" })

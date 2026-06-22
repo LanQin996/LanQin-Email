@@ -227,7 +227,18 @@ func (a *App) handleDeleteMailLabel(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, fmt.Errorf("label id is required"))
 		return
 	}
-	result, err := a.db.ExecContext(r.Context(), `DELETE FROM mail_labels WHERE id=? AND mailbox_id=?`, labelID, mb.ID)
+	ctx := r.Context()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to begin transaction")
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM message_labels WHERE label_id=?`, labelID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to remove label associations")
+		return
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM mail_labels WHERE id=? AND mailbox_id=?`, labelID, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to delete label")
 		return
@@ -236,7 +247,11 @@ func (a *App) handleDeleteMailLabel(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "label not found")
 		return
 	}
-	labels, err := a.labelsForMailbox(r.Context(), mb.ID)
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to commit transaction")
+		return
+	}
+	labels, err := a.labelsForMailbox(ctx, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load labels")
 		return
