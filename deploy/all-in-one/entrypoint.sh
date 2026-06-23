@@ -23,6 +23,14 @@ elif id rspamd >/dev/null 2>&1; then
   chown -R rspamd:rspamd /run/rspamd /var/lib/rspamd 2>/dev/null || true
 fi
 
+AUTH_POLICY_NONCE_FILE="${LANQIN_AUTH_POLICY_NONCE_FILE:-/data/dovecot-auth-policy-nonce}"
+mkdir -p "$(dirname "$AUTH_POLICY_NONCE_FILE")"
+if [ ! -s "$AUTH_POLICY_NONCE_FILE" ]; then
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$AUTH_POLICY_NONCE_FILE"
+fi
+chmod 600 "$AUTH_POLICY_NONCE_FILE" 2>/dev/null || true
+AUTH_POLICY_HASH_NONCE="$(cat "$AUTH_POLICY_NONCE_FILE")"
+
 TLS_CERT=/etc/ssl/certs/ssl-cert-snakeoil.pem
 TLS_KEY=/etc/ssl/private/ssl-cert-snakeoil.key
 if [ -n "$LANQIN_TLS_CERT_FILE" ] || [ -n "$LANQIN_TLS_KEY_FILE" ]; then
@@ -45,6 +53,7 @@ postconf -e "smtpd_milters = inet:127.0.0.1:11332"
 postconf -e "non_smtpd_milters = inet:127.0.0.1:11332"
 sed -i "s#^ssl_cert = <.*#ssl_cert = <${TLS_CERT}#" /etc/dovecot/dovecot.conf
 sed -i "s#^ssl_key = <.*#ssl_key = <${TLS_KEY}#" /etc/dovecot/dovecot.conf
+sed -i "s#^auth_policy_hash_nonce = .*#auth_policy_hash_nonce = ${AUTH_POLICY_HASH_NONCE}#" /etc/dovecot/dovecot.conf
 
 # Rspamd DKIM keys are exported after API seed/migrations create the SQLite DB.
 /usr/local/bin/lanqin-api >/tmp/lanqin-api-bootstrap.log 2>&1 &
