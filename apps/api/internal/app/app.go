@@ -71,7 +71,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	workerCtx, cancel := context.WithCancel(context.Background())
 	a.workerCancel = cancel
 	go a.scheduledSendWorker(workerCtx)
-	if strings.TrimSpace(cfg.MaildirRoot) != "" {
+	if strings.TrimSpace(a.cfg.MaildirRoot) != "" {
 		go a.maildirWorker(workerCtx)
 	}
 	go a.smtpEventsCleanupWorker(workerCtx)
