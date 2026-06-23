@@ -66,6 +66,7 @@ export const api = {
   permissionGroups: () => request<ListResponse<PermissionGroup> & { catalog: PermissionInfo[] }>("/api/admin/permission-groups"),
   createPermissionGroup: (payload: { name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits }) => request<PermissionGroup>("/api/admin/permission-groups", { method: "POST", body: JSON.stringify(payload) }),
   updatePermissionGroup: (id: string, payload: { name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits }) => request<PermissionGroup>(`/api/admin/permission-groups/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  defaultPermissionLimits: () => request<PermissionLimits>("/api/admin/permission-limits/defaults"),
   deletePermissionGroup: (id: string) => request<{ ok: boolean }>(`/api/admin/permission-groups/${id}`, { method: "DELETE" }),
   createUser: (payload: { email: string; displayName: string; role: "admin" | "user"; password: string; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }),
   updateUser: (id: string, payload: { displayName: string; role: "admin" | "user"; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>(`/api/admin/users/${id}`, { method: "POST", body: JSON.stringify(payload) }),

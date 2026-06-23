@@ -18,6 +18,9 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+// mailMessagesPageSize is the max number of messages returned per page in mail listing.
+const mailMessagesPageSize = 30
+
 type AttachmentInput struct {
 	Filename      string `json:"filename"`
 	ContentType   string `json:"contentType"`
@@ -143,7 +146,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 	if offset < 0 {
 		offset = 0
 	}
-	limit := 30
+	limit := mailMessagesPageSize
 
 	if q != "" {
 		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
@@ -557,6 +560,90 @@ func decodedBase64Len(value string) (int64, error) {
 	return int64(len(data)), nil
 }
 
+var errIMAPRateLimited = errors.New("imap rate limit exceeded")
+var errPOP3RateLimited = errors.New("pop3 rate limit exceeded")
+
+func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Mailbox, table string, dailyLimit, minuteLimit int) error {
+	if dailyLimit == 0 && minuteLimit == 0 {
+		return nil
+	}
+	now := a.now().UTC()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if dailyLimit > 0 {
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id=? AND created_at>=?", user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+			return err
+		}
+		if count >= dailyLimit {
+			return fmt.Errorf("daily limit %d", dailyLimit)
+		}
+	}
+	if minuteLimit > 0 {
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id=? AND created_at>=?", user.ID, now.Add(-time.Minute).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+			return err
+		}
+		if count >= minuteLimit {
+			return fmt.Errorf("per-minute limit %d", minuteLimit)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO "+table+"(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)", newID("evt"), user.ID, mb.ID, now.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Protocol string `json:"protocol"`
+		Username string `json:"username"`
+		IP       string `json:"ip"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		w.WriteHeader(http.StatusCreated)
+		respondJSON(w, http.StatusCreated, map[string]string{"status": "allow"})
+		return
+	}
+	var user *User
+	if req.Username != "" {
+		var passHash string
+		user, passHash, _ = a.userByEmail(r.Context(), req.Username)
+		_ = passHash
+	}
+	if user == nil || user.Disabled {
+		w.WriteHeader(http.StatusCreated)
+		respondJSON(w, http.StatusCreated, map[string]string{"status": "deny", "reason": "user not found or disabled"})
+		return
+	}
+	if user.Role == "admin" {
+		w.WriteHeader(http.StatusCreated)
+		respondJSON(w, http.StatusCreated, map[string]string{"status": "allow"})
+		return
+	}
+	limits := user.Limits
+	var err error
+	switch req.Protocol {
+	case "imap", "IMAP":
+		if limits.IMAPMinuteLimit > 0 {
+			err = a.checkAndRecordProtocolRate(r.Context(), user, nil, "imap_events", 0, limits.IMAPMinuteLimit)
+		}
+	case "pop3", "POP3":
+		if limits.POP3MinuteLimit > 0 {
+			err = a.checkAndRecordProtocolRate(r.Context(), user, nil, "pop3_events", 0, limits.POP3MinuteLimit)
+		}
+	}
+	w.WriteHeader(http.StatusCreated)
+	if err != nil {
+		respondJSON(w, http.StatusCreated, map[string]any{"status": "deny", "reason": err.Error()})
+	} else {
+		respondJSON(w, http.StatusCreated, map[string]any{"status": "allow"})
+	}
+}
+
 func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error {
 	if user == nil || mb == nil || user.Role == "admin" {
 		return nil
@@ -571,9 +658,6 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, `DELETE FROM smtp_send_events WHERE created_at<?`, now.Add(-24*time.Hour).Format(time.RFC3339Nano)); err != nil {
-		return err
-	}
 	if limits.SMTPDailyLimit > 0 {
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
@@ -877,6 +961,33 @@ func (a *App) scheduledSendWorker(ctx context.Context) {
 			a.log.Info("scheduled send worker stopped")
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+func (a *App) smtpEventsCleanupWorker(ctx context.Context) {
+	a.log.Info("smtp events cleanup worker started")
+	ticker := time.NewTicker(10 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			a.log.Info("smtp events cleanup worker stopped")
+			return
+		case <-ticker.C:
+			a.cleanupStaleEvents(ctx)
+		}
+	}
+}
+
+func (a *App) cleanupStaleEvents(ctx context.Context) {
+	cutoff := a.now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	for _, table := range []string{"smtp_send_events", "imap_events", "pop3_events"} {
+		result, err := a.db.ExecContext(ctx, "DELETE FROM "+table+" WHERE created_at<?", cutoff)
+		if err != nil {
+			a.log.Warn("event cleanup failed", "table", table, "error", err)
+		} else if n, _ := result.RowsAffected(); n > 0 {
+			a.log.Debug("event cleanup deleted rows", "table", table, "count", n)
 		}
 	}
 }

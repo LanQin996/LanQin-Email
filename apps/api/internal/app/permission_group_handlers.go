@@ -13,6 +13,10 @@ func (a *App) handlePermissionCatalog(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"items": permissionCatalog()})
 }
 
+func (a *App) handleDefaultPermissionLimits(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, http.StatusOK, defaultPermissionLimits())
+}
+
 func (a *App) handleListPermissionGroups(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,description,permissions_json,limits_json,system,created_at,updated_at
 		FROM permission_groups

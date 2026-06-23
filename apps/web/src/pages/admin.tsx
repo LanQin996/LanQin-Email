@@ -368,6 +368,8 @@ function PermissionGroupDialog({ group, catalog, open, onOpenChange }: { group?:
   const [internalOpen, setInternalOpen] = React.useState(false)
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
+  const defaultLimitsQuery = useQuery({ queryKey: ["admin", "permission-limits", "defaults"], queryFn: api.defaultPermissionLimits, enabled: dialogOpen })
+  const defaultLimits = defaultLimitsQuery.data || defaultPermissionLimits
   const [permissions, setPermissions] = React.useState<PermissionKey[]>(group?.permissions || [])
   const [limits, setLimits] = React.useState<PermissionLimits>(group?.limits || defaultPermissionLimits)
   React.useEffect(() => {
@@ -514,7 +516,8 @@ function PermissionBadges({ permissions, catalog }: { permissions: PermissionKey
 }
 
 function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
-  const value = limits || defaultPermissionLimits
+  const defaultLimitsQuery = useQuery({ queryKey: ["admin", "permission-limits", "defaults"], queryFn: api.defaultPermissionLimits })
+  const value = limits || defaultLimitsQuery.data || defaultPermissionLimits
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
       <Badge variant="secondary" className="font-normal">附件 {limitText(value.maxAttachmentMb, "MB")}</Badge>

@@ -74,6 +74,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	if strings.TrimSpace(cfg.MaildirRoot) != "" {
 		go a.maildirWorker(workerCtx)
 	}
+	go a.smtpEventsCleanupWorker(workerCtx)
 	return a, nil
 }
 
@@ -262,6 +263,21 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_smtp_send_events_user_created ON smtp_send_events(user_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS imap_events (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_imap_events_user_created ON imap_events(user_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS pop3_events (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pop3_events_user_created ON pop3_events(user_id, created_at)`,
+
 		`CREATE TABLE IF NOT EXISTS contacts (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

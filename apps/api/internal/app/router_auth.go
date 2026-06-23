@@ -24,6 +24,7 @@ func (a *App) Router() http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(a.corsMiddleware)
 
+	r.Post("/auth-policy", a.handleAuthPolicy)
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "time": a.now().UTC()})
 	})
@@ -95,6 +96,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionUsersUpdate)).Post("/admin/users/{id}", a.handleUpdateUser)
 			r.With(a.requirePermission(PermissionUsersResetPassword)).Post("/admin/users/{id}/password", a.handleResetUserPassword)
 			r.With(a.requirePermission(PermissionUsersDelete)).Delete("/admin/users/{id}", a.handleDeleteUser)
+			r.With(a.requireAnyPermission(PermissionGroupsView, PermissionUsersView)).Get("/admin/permission-limits/defaults", a.handleDefaultPermissionLimits)
 			r.With(a.requireAnyPermission(PermissionGroupsView, PermissionUsersView)).Get("/admin/permissions", a.handlePermissionCatalog)
 			r.With(a.requireAnyPermission(PermissionGroupsView, PermissionUsersView)).Get("/admin/permission-groups", a.handleListPermissionGroups)
 			r.With(a.requirePermission(PermissionGroupsCreate)).Post("/admin/permission-groups", a.handleCreatePermissionGroup)

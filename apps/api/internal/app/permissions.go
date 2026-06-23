@@ -215,6 +215,19 @@ func mergeLimitValue(left, right int) int {
 	return left
 }
 
+func minimalLimits() PermissionLimits {
+	// minimalLimits sets every field to 1 so that mergePermissionLimits 
+	// (which takes the max of each field) produces correct aggregation 
+	// when no group has a limit set for a given field.
+	return PermissionLimits{
+		MaxAttachmentMB: 1,
+		SMTPDailyLimit:  1,
+		SMTPMinuteLimit: 1,
+		IMAPMinuteLimit: 1,
+		POP3MinuteLimit: 1,
+	}
+}
+
 func actorCanGrantLimits(actor *User, limits PermissionLimits) bool {
 	if actor == nil {
 		return false
@@ -929,7 +942,7 @@ func (a *App) permissionsForGroupIDs(ctx context.Context, tx *sql.Tx, groupIDs [
 }
 
 func (a *App) limitsForGroupIDs(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
-	limits := PermissionLimits{MaxAttachmentMB: 1, SMTPDailyLimit: 1, SMTPMinuteLimit: 1, IMAPMinuteLimit: 1, POP3MinuteLimit: 1}
+	limits := minimalLimits()
 	for _, groupID := range cleanIDList(groupIDs) {
 		if !isAssignablePermissionGroupID(groupID) {
 			return PermissionLimits{}, fmt.Errorf("permission group not assignable: %s", groupID)
