@@ -3,7 +3,7 @@ import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
-import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, PermissionGroup, PermissionInfo, SystemSettings } from "@/lib/api"
+import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,6 +52,7 @@ const sectionPermissions: Record<Section, PermissionKey[]> = {
 const projectRepositoryUrl = "https://github.com/LanQin996/LanQin-Email"
 const projectTag = import.meta.env.VITE_APP_VERSION || ""
 const projectReleaseUrl = import.meta.env.VITE_RELEASE_URL || (projectTag ? `${projectRepositoryUrl}/releases/tag/${projectTag}` : "")
+const defaultPermissionLimits: PermissionLimits = { maxAttachmentMb: 25, smtpDailyLimit: 200, smtpMinuteLimit: 20, imapMinuteLimit: 200, pop3MinuteLimit: 150 }
 
 export function AdminPage() {
   const me = useMe()
@@ -349,6 +350,7 @@ function PermissionGroupsSection({ groups, catalog }: { groups: PermissionGroup[
                 </DropdownMenu>}
               </div>
               <PermissionBadges permissions={group.permissions} catalog={catalog} />
+              <PermissionLimitBadges limits={group.limits} />
             </div>
           ))}
         </div>
@@ -367,8 +369,12 @@ function PermissionGroupDialog({ group, catalog, open, onOpenChange }: { group?:
   const dialogOpen = open ?? internalOpen
   const setDialogOpen = onOpenChange ?? setInternalOpen
   const [permissions, setPermissions] = React.useState<PermissionKey[]>(group?.permissions || [])
+  const [limits, setLimits] = React.useState<PermissionLimits>(group?.limits || defaultPermissionLimits)
   React.useEffect(() => {
-    if (dialogOpen) setPermissions(group?.permissions || [])
+    if (dialogOpen) {
+      setPermissions(group?.permissions || [])
+      setLimits(group?.limits || defaultPermissionLimits)
+    }
   }, [dialogOpen, group])
   const mutation = useMutation({
     mutationFn: (form: FormData) => {
@@ -376,6 +382,7 @@ function PermissionGroupDialog({ group, catalog, open, onOpenChange }: { group?:
         name: String(form.get("name") || ""),
         description: String(form.get("description") || ""),
         permissions,
+        limits,
       }
       return group ? api.updatePermissionGroup(group.id, payload) : api.createPermissionGroup(payload)
     },
@@ -401,6 +408,7 @@ function PermissionGroupDialog({ group, catalog, open, onOpenChange }: { group?:
             <Field name="name" label="名称" defaultValue={group?.name || ""} placeholder="例如：客服主管" />
             <Field name="description" label="说明" defaultValue={group?.description || ""} required={false} />
           </div>
+          <PermissionLimitEditor value={limits} onChange={setLimits} />
           <PermissionPicker catalog={catalog} value={permissions} onChange={setPermissions} />
           <DialogFooter><Button disabled={mutation.isPending}>{mutation.isPending ? "保存中..." : "保存"}</Button></DialogFooter>
         </form>
@@ -455,6 +463,43 @@ function PermissionPicker({ catalog, value, onChange }: { catalog: PermissionInf
   )
 }
 
+function PermissionLimitEditor({ value, onChange }: { value: PermissionLimits; onChange: (value: PermissionLimits) => void }) {
+  function update(key: keyof PermissionLimits, raw: string) {
+    const next = Number(raw)
+    onChange({ ...value, [key]: Number.isFinite(next) && next > 0 ? Math.floor(next) : 0 })
+  }
+  return (
+    <div className="space-y-3 rounded-lg border p-3">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <Label>账号配额</Label>
+        <span className="text-xs text-muted-foreground">填 0 表示不限制</span>
+      </div>
+      <div className="grid gap-3 md:grid-cols-3">
+        <div className="space-y-2">
+          <Label>附件上限 MB</Label>
+          <Input type="number" min={0} value={value.maxAttachmentMb} onChange={(event) => update("maxAttachmentMb", event.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>SMTP 每日封数</Label>
+          <Input type="number" min={0} value={value.smtpDailyLimit} onChange={(event) => update("smtpDailyLimit", event.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>SMTP 每分钟封数</Label>
+          <Input type="number" min={0} value={value.smtpMinuteLimit} onChange={(event) => update("smtpMinuteLimit", event.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>IMAP 每分钟命令数</Label>
+          <Input type="number" min={0} value={value.imapMinuteLimit} onChange={(event) => update("imapMinuteLimit", event.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label>POP3 每分钟命令数</Label>
+          <Input type="number" min={0} value={value.pop3MinuteLimit} onChange={(event) => update("pop3MinuteLimit", event.target.value)} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function PermissionBadges({ permissions, catalog }: { permissions: PermissionKey[]; catalog: PermissionInfo[] }) {
   const labelByKey = new Map(catalog.map((item) => [item.key, item.label]))
   if (permissions.length === 0) return <div className="mt-3 text-sm text-muted-foreground">无后台权限</div>
@@ -466,6 +511,23 @@ function PermissionBadges({ permissions, catalog }: { permissions: PermissionKey
       {permissions.length > 10 && <Badge variant="secondary">+{permissions.length - 10}</Badge>}
     </div>
   )
+}
+
+function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
+  const value = limits || defaultPermissionLimits
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5">
+      <Badge variant="secondary" className="font-normal">附件 {limitText(value.maxAttachmentMb, "MB")}</Badge>
+      <Badge variant="secondary" className="font-normal">SMTP 每日 {limitText(value.smtpDailyLimit, "封")}</Badge>
+      <Badge variant="secondary" className="font-normal">SMTP 每分钟 {limitText(value.smtpMinuteLimit, "封")}</Badge>
+      <Badge variant="secondary" className="font-normal">IMAP 每分钟 {limitText(value.imapMinuteLimit, "次")}</Badge>
+      <Badge variant="secondary" className="font-normal">POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}</Badge>
+    </div>
+  )
+}
+
+function limitText(value: number, unit: string) {
+  return value > 0 ? `${value} ${unit}` : "不限"
 }
 
 function groupPermissionCatalog(catalog: PermissionInfo[]) {

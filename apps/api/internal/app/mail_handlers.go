@@ -391,7 +391,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	msg, err := a.sendMailNow(r.Context(), mb, req)
+	msg, err := a.sendMailNow(r.Context(), currentUser(r), mb, req)
 	if err != nil {
 		if errors.Is(err, errNoRecipients) {
 			badRequest(w, err)
@@ -399,6 +399,14 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, errInvalidMIME) {
 			badRequest(w, err)
+			return
+		}
+		if errors.Is(err, errAttachmentTooLarge) {
+			badRequest(w, err)
+			return
+		}
+		if errors.Is(err, errSMTPRateLimited) {
+			respondError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
 		if strings.HasPrefix(err.Error(), "smtp delivery failed:") {
@@ -413,8 +421,13 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 
 var errNoRecipients = errors.New("at least one recipient is required")
 var errInvalidMIME = errors.New("invalid mime message")
+var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
+var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
 
-func (a *App) sendMailNow(ctx context.Context, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
+func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
+	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {
+		return nil, err
+	}
 	req.To, req.CC, req.BCC = dedupeEmails(req.To), dedupeEmails(req.CC), dedupeEmails(req.BCC)
 	allRecipients := append(append([]string{}, req.To...), append(req.CC, req.BCC...)...)
 	if len(allRecipients) == 0 {
@@ -438,6 +451,9 @@ func (a *App) sendMailNow(ctx context.Context, mb *Mailbox, req mailComposeInput
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidMIME, err)
+	}
+	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+		return nil, err
 	}
 	if a.cfg.SMTPHost != "" {
 		if err := a.sendSMTP(mb.Address, allRecipients, mimeBytes); err != nil {
@@ -505,6 +521,83 @@ func (a *App) sendMailNow(ctx context.Context, mb *Mailbox, req mailComposeInput
 	return msg, nil
 }
 
+func userLimits(user *User) PermissionLimits {
+	if user == nil {
+		return defaultPermissionLimits()
+	}
+	return user.Limits
+}
+
+func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLimits) error {
+	limitBytes := attachmentLimitBytes(limits)
+	if limitBytes == 0 {
+		return nil
+	}
+	for _, att := range attachments {
+		decodedLen, err := decodedBase64Len(att.ContentBase64)
+		if err != nil {
+			return fmt.Errorf("%w: %v", errInvalidMIME, err)
+		}
+		if decodedLen > limitBytes {
+			return fmt.Errorf("%w: max %d MB", errAttachmentTooLarge, limits.MaxAttachmentMB)
+		}
+	}
+	return nil
+}
+
+func decodedBase64Len(value string) (int64, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return 0, err
+	}
+	return int64(len(data)), nil
+}
+
+func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error {
+	if user == nil || mb == nil || user.Role == "admin" {
+		return nil
+	}
+	limits := user.Limits
+	if limits.SMTPDailyLimit == 0 && limits.SMTPMinuteLimit == 0 {
+		return nil
+	}
+	now := a.now().UTC()
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM smtp_send_events WHERE created_at<?`, now.Add(-24*time.Hour).Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if limits.SMTPDailyLimit > 0 {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+			return err
+		}
+		if count >= limits.SMTPDailyLimit {
+			return fmt.Errorf("%w: daily limit %d", errSMTPRateLimited, limits.SMTPDailyLimit)
+		}
+	}
+	if limits.SMTPMinuteLimit > 0 {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-time.Minute).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+			return err
+		}
+		if count >= limits.SMTPMinuteLimit {
+			return fmt.Errorf("%w: per-minute limit %d", errSMTPRateLimited, limits.SMTPMinuteLimit)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`, newID("smtp"), user.ID, mb.ID, now.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	var req mailDraftInput
 	if err := decodeJSON(r, &req); err != nil {
@@ -515,6 +608,16 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
+	}
+	if req.Attachments != nil {
+		if err := validateAttachmentLimit(*req.Attachments, userLimits(currentUser(r))); err != nil {
+			if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+				badRequest(w, err)
+				return
+			}
+			respondError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	compose := mailComposeInput{MailboxID: req.MailboxID, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML}
 	compose.To, compose.CC, compose.BCC = dedupeEmails(compose.To), dedupeEmails(compose.CC), dedupeEmails(compose.BCC)
@@ -687,6 +790,14 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	compose := mailComposeInput{MailboxID: req.MailboxID, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, Attachments: req.Attachments}
+	if err := validateAttachmentLimit(compose.Attachments, userLimits(currentUser(r))); err != nil {
+		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+			badRequest(w, err)
+			return
+		}
+		respondError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	compose.To, compose.CC, compose.BCC = dedupeEmails(compose.To), dedupeEmails(compose.CC), dedupeEmails(compose.BCC)
 	if len(append(append([]string{}, compose.To...), append(compose.CC, compose.BCC...)...)) == 0 {
 		badRequest(w, errNoRecipients)
@@ -823,7 +934,7 @@ func (a *App) processScheduledSend(ctx context.Context, id, mailboxID, draftID, 
 		return
 	}
 	compose := mailComposeInput{MailboxID: payload.MailboxID, To: payload.To, CC: payload.CC, BCC: payload.BCC, Subject: payload.Subject, Text: payload.Text, HTML: payload.HTML, Attachments: payload.Attachments}
-	if _, err := a.sendMailNow(ctx, mb, compose); err != nil {
+	if _, err := a.sendMailNow(ctx, user, mb, compose); err != nil {
 		a.markScheduledSendFailed(ctx, id, err.Error())
 		return
 	}

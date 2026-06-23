@@ -14,7 +14,7 @@ func (a *App) handlePermissionCatalog(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleListPermissionGroups(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,description,permissions_json,system,created_at,updated_at
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,description,permissions_json,limits_json,system,created_at,updated_at
 		FROM permission_groups
 		ORDER BY created_at ASC,name ASC`)
 	if err != nil {
@@ -25,14 +25,15 @@ func (a *App) handleListPermissionGroups(w http.ResponseWriter, r *http.Request)
 	items := []PermissionGroup{}
 	for rows.Next() {
 		var item PermissionGroup
-		var raw, created, updated string
+		var rawPermissions, rawLimits, created, updated string
 		var system int
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &raw, &system, &created, &updated); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &rawPermissions, &rawLimits, &system, &created, &updated); err != nil {
 			rows.Close()
 			respondError(w, http.StatusInternalServerError, "failed to scan permission groups")
 			return
 		}
-		item.Permissions = decodeStoredPermissions(raw)
+		item.Permissions = decodeStoredPermissions(rawPermissions)
+		item.Limits = decodeStoredLimits(rawLimits)
 		item.System = intBool(system)
 		item.CreatedAt = parseTime(created)
 		item.UpdatedAt = parseTime(updated)
@@ -83,9 +84,10 @@ func (a *App) handleListPermissionGroups(w http.ResponseWriter, r *http.Request)
 
 func (a *App) handleCreatePermissionGroup(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Permissions []string `json:"permissions"`
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Permissions []string          `json:"permissions"`
+		Limits      *PermissionLimits `json:"limits"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -105,10 +107,23 @@ func (a *App) handleCreatePermissionGroup(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusForbidden, "cannot grant permissions you do not hold")
 		return
 	}
+	limits := defaultPermissionLimits()
+	if req.Limits != nil {
+		var err error
+		limits, err = normalizePermissionLimits(*req.Limits)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+	}
+	if !actorCanGrantLimits(currentUser(r), limits) {
+		respondError(w, http.StatusForbidden, "cannot grant limits above your own")
+		return
+	}
 	id := newID("pg")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
-		VALUES(?,?,?,?,0,?,?)`, id, name, strings.TrimSpace(req.Description), encodePermissions(permissions), now, now); err != nil {
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+		VALUES(?,?,?,?,?,0,?,?)`, id, name, strings.TrimSpace(req.Description), encodePermissions(permissions), encodePermissionLimits(limits), now, now); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -132,9 +147,10 @@ func (a *App) handleUpdatePermissionGroup(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var req struct {
-		Name        string   `json:"name"`
-		Description string   `json:"description"`
-		Permissions []string `json:"permissions"`
+		Name        string            `json:"name"`
+		Description string            `json:"description"`
+		Permissions []string          `json:"permissions"`
+		Limits      *PermissionLimits `json:"limits"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -154,8 +170,28 @@ func (a *App) handleUpdatePermissionGroup(w http.ResponseWriter, r *http.Request
 		respondError(w, http.StatusForbidden, "cannot grant permissions you do not hold")
 		return
 	}
-	if _, err := a.db.ExecContext(r.Context(), `UPDATE permission_groups SET name=?,description=?,permissions_json=?,updated_at=? WHERE id=?`,
-		name, strings.TrimSpace(req.Description), encodePermissions(permissions), a.now().UTC().Format(time.RFC3339Nano), id); err != nil {
+	limits := defaultPermissionLimits()
+	if req.Limits != nil {
+		var err error
+		limits, err = normalizePermissionLimits(*req.Limits)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+	} else {
+		var rawLimits string
+		if err := a.db.QueryRowContext(r.Context(), `SELECT limits_json FROM permission_groups WHERE id=?`, id).Scan(&rawLimits); err != nil {
+			respondError(w, http.StatusNotFound, "permission group not found")
+			return
+		}
+		limits = decodeStoredLimits(rawLimits)
+	}
+	if !actorCanGrantLimits(currentUser(r), limits) {
+		respondError(w, http.StatusForbidden, "cannot grant limits above your own")
+		return
+	}
+	if _, err := a.db.ExecContext(r.Context(), `UPDATE permission_groups SET name=?,description=?,permissions_json=?,limits_json=?,updated_at=? WHERE id=?`,
+		name, strings.TrimSpace(req.Description), encodePermissions(permissions), encodePermissionLimits(limits), a.now().UTC().Format(time.RFC3339Nano), id); err != nil {
 		badRequest(w, err)
 		return
 	}

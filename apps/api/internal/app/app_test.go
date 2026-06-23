@@ -183,6 +183,20 @@ func updateRegularPermissionGroup(t *testing.T, admin *testClient, permissions [
 	return group
 }
 
+func updateRegularPermissionGroupWithLimits(t *testing.T, admin *testClient, permissions []string, limits PermissionLimits) PermissionGroup {
+	t.Helper()
+	var group PermissionGroup
+	if code := admin.do("POST", "/api/admin/permission-groups/"+PermissionGroupRegular, map[string]any{
+		"name":        "Regular Users",
+		"description": "Default permissions for regular users",
+		"permissions": permissions,
+		"limits":      limits,
+	}, &group); code != http.StatusOK {
+		t.Fatalf("update regular permission group limits code=%d group=%+v", code, group)
+	}
+	return group
+}
+
 func systemSettingsPayload(settings SystemSettings) map[string]any {
 	return map[string]any{
 		"publicHostname":          settings.PublicHostname,
@@ -377,6 +391,70 @@ func TestScheduleSendQueuesFutureMessage(t *testing.T) {
 	}
 	if code := alice.do("GET", "/api/mail/scheduled-sends?mailboxId="+sender.ID, nil, &scheduledList); code != http.StatusOK || len(scheduledList.Items) != 0 {
 		t.Fatalf("scheduled list after cancel code=%d items=%+v", code, scheduledList.Items)
+	}
+}
+
+func TestPermissionGroupMailLimits(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	updateRegularPermissionGroupWithLimits(t, admin, regularUserDefaultPermissions(), PermissionLimits{MaxAttachmentMB: 1, SMTPDailyLimit: 10, SMTPMinuteLimit: 1, IMAPMinuteLimit: 1, POP3MinuteLimit: 1})
+
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "limited-sender", "Limited Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "limited-recipient", "Limited Recipient", "Password123!", nil)
+
+	user := &testClient{t: t, server: ts}
+	if code := user.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("user login code=%d", code)
+	}
+	var me struct {
+		User User `json:"user"`
+	}
+	if code := user.do("GET", "/api/me", nil, &me); code != http.StatusOK {
+		t.Fatalf("me code=%d user=%+v", code, me.User)
+	}
+	if me.User.Limits.MaxAttachmentMB != 1 || me.User.Limits.SMTPMinuteLimit != 1 || me.User.Limits.IMAPMinuteLimit != 1 || me.User.Limits.POP3MinuteLimit != 1 {
+		t.Fatalf("user limits not attached: %+v", me.User.Limits)
+	}
+
+	tooLargeAttachment := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte("x"), 1024*1024+1))
+	var errBody map[string]any
+	if code := user.do("POST", "/api/mail/send", map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "too large",
+		"text":      "body",
+		"html":      "<p>body</p>",
+		"attachments": []map[string]string{{
+			"filename":      "large.bin",
+			"contentType":   "application/octet-stream",
+			"contentBase64": tooLargeAttachment,
+		}},
+	}, &errBody); code != http.StatusBadRequest {
+		t.Fatalf("oversized attachment should be rejected code=%d body=%v", code, errBody)
+	}
+
+	var sent MailMessage
+	payload := map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "first limited send",
+		"text":      "body",
+		"html":      "<p>body</p>",
+	}
+	if code := user.do("POST", "/api/mail/send", payload, &sent); code != http.StatusCreated {
+		t.Fatalf("first send code=%d msg=%+v", code, sent)
+	}
+	payload["subject"] = "second limited send"
+	if code := user.do("POST", "/api/mail/send", payload, &errBody); code != http.StatusTooManyRequests {
+		t.Fatalf("smtp minute limit should reject second send code=%d body=%v", code, errBody)
 	}
 }
 
@@ -925,6 +1003,9 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 			t.Fatalf("missing fixed permission group %s in %+v", group.ID, groups.Items)
 		}
 	}
+	if groupByID[PermissionGroupRegular].Limits != defaultPermissionLimits() {
+		t.Fatalf("regular group limits=%+v want %+v", groupByID[PermissionGroupRegular].Limits, defaultPermissionLimits())
+	}
 	if groups.Items[0].ID != PermissionGroupSuperAdmin || groups.Items[1].ID != PermissionGroupRegular {
 		t.Fatalf("unexpected fixed permission groups: %+v", groups.Items)
 	}
@@ -938,8 +1019,12 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 		"name":        "Mailbox Viewers",
 		"description": "Can view mailboxes only",
 		"permissions": []string{PermissionAdminOverview, PermissionMailboxesView},
+		"limits":      PermissionLimits{MaxAttachmentMB: 5, SMTPDailyLimit: 8, SMTPMinuteLimit: 2, IMAPMinuteLimit: 5, POP3MinuteLimit: 3},
 	}, &customGroup); code != http.StatusCreated {
 		t.Fatalf("custom permission group creation code=%d group=%+v", code, customGroup)
+	}
+	if customGroup.Limits.MaxAttachmentMB != 5 || customGroup.Limits.SMTPDailyLimit != 8 || customGroup.Limits.SMTPMinuteLimit != 2 || customGroup.Limits.IMAPMinuteLimit != 5 || customGroup.Limits.POP3MinuteLimit != 3 {
+		t.Fatalf("custom permission group limits=%+v", customGroup.Limits)
 	}
 	if customGroup.System || customGroup.ID == "" || !userHasPermission(&User{Role: "user", Permissions: customGroup.Permissions}, PermissionMailboxesView) || userHasPermission(&User{Role: "user", Permissions: customGroup.Permissions}, PermissionMailboxesCreate) {
 		t.Fatalf("custom permission group permissions=%+v", customGroup)

@@ -4,7 +4,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, Laptop, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats } from "@/lib/api"
+import { api, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -303,9 +303,27 @@ export function ProfilePage() {
   }
 }
 
-function ProfileOverview({ user, profile, password, passwordFormRef, stats, showStats, displayMode, onDisplayModeChange, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; showStats: boolean; displayMode: DisplayMode; onDisplayModeChange: (mode: DisplayMode) => void; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
+function ProfileOverview({ user, profile, password, passwordFormRef, stats, showStats, displayMode, onDisplayModeChange, twoFactorFormRef, setupTwoFactor, enableTwoFactor, disableTwoFactor, onCopy }: { user: { email: string; displayName: string; role: string; disabled: boolean; twoFactorEnabled: boolean; createdAt: string; limits?: PermissionLimits }; profile: { mutate: (form: FormData) => void; isPending: boolean }; password: { mutate: (form: FormData) => void; isPending: boolean }; passwordFormRef: React.RefObject<HTMLFormElement>; stats?: MailStats; showStats: boolean; displayMode: DisplayMode; onDisplayModeChange: (mode: DisplayMode) => void; twoFactorFormRef: React.RefObject<HTMLFormElement>; setupTwoFactor: { data?: { secret: string; otpauthUrl: string }; mutate: () => void; reset: () => void; isPending: boolean }; enableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; disableTwoFactor: { mutate: (form: FormData) => void; isPending: boolean }; onCopy: (text: string) => void }) {
   return (
     <div className="space-y-6">
+
+      <Card>
+        <CardHeader>
+          <CardTitle>账号配额</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <LimitBadge label="附件上限" value={user.limits?.maxAttachmentMb} unit="MB" />
+            <LimitBadge label="SMTP 每日" value={user.limits?.smtpDailyLimit} unit="封" />
+            <LimitBadge label="SMTP 每分钟" value={user.limits?.smtpMinuteLimit} unit="封" />
+            <LimitBadge label="IMAP 每分钟" value={user.limits?.imapMinuteLimit} unit="次" />
+            <LimitBadge label="POP3 每分钟" value={user.limits?.pop3MinuteLimit} unit="次" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {showStats && <StatsSummary stats={stats} />}
+
       <Card>
         <CardHeader>
           <CardTitle>账户信息</CardTitle>
@@ -451,7 +469,18 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, show
         </CardContent>
       </Card>
 
-      {showStats && <StatsSummary stats={stats} />}
+    </div>
+  )
+}
+
+function LimitBadge({ label, value, unit }: { label: string; value?: number; unit: string }) {
+  return (
+    <div className="rounded-lg border p-3 text-center">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-lg font-semibold tabular-nums tracking-tight">
+        {value !== undefined && value > 0 ? value : "不限"}
+      </div>
+      {value !== undefined && value > 0 && <div className="text-xs text-muted-foreground">{unit}</div>}
     </div>
   )
 }

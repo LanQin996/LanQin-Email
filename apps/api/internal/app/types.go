@@ -11,6 +11,7 @@ type User struct {
 	Protected          bool                     `json:"protected"`
 	TwoFactorEnabled   bool                     `json:"twoFactorEnabled"`
 	Permissions        []string                 `json:"permissions"`
+	Limits             PermissionLimits         `json:"limits"`
 	PermissionGroupIDs []string                 `json:"permissionGroupIds"`
 	PermissionGroups   []PermissionGroupSummary `json:"permissionGroups"`
 	CreatedAt          time.Time                `json:"createdAt"`

@@ -120,6 +120,7 @@ func (a *App) migrate(ctx context.Context) error {
 			name TEXT NOT NULL UNIQUE,
 			description TEXT NOT NULL DEFAULT '',
 			permissions_json TEXT NOT NULL DEFAULT '[]',
+			limits_json TEXT NOT NULL DEFAULT '{"maxAttachmentMb":25,"smtpDailyLimit":200,"smtpMinuteLimit":20,"imapMinuteLimit":200,"pop3MinuteLimit":150}',
 			system INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
@@ -254,6 +255,13 @@ func (a *App) migrate(ctx context.Context) error {
 			sent_at TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_scheduled_sends_due ON scheduled_sends(status, send_at)`,
+		`CREATE TABLE IF NOT EXISTS smtp_send_events (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_smtp_send_events_user_created ON smtp_send_events(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS contacts (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -343,10 +351,43 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateLegacyBootstrapMailbox(ctx); err != nil {
 		return err
 	}
+	if err := a.migratePermissionGroupLimits(ctx); err != nil {
+		return err
+	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (a *App) migratePermissionGroupLimits(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(permission_groups)`)
+	if err != nil {
+		return err
+	}
+	hasLimits := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "limits_json" {
+			hasLimits = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasLimits {
+		return nil
+	}
+	_, err = a.db.ExecContext(ctx, `ALTER TABLE permission_groups ADD COLUMN limits_json TEXT NOT NULL DEFAULT '{"maxAttachmentMb":25,"smtpDailyLimit":200,"smtpMinuteLimit":20,"imapMinuteLimit":200,"pop3MinuteLimit":150}'`)
+	return err
 }
 
 // migrateLegacyBootstrapMailbox removes mailboxes created by an older version of seed()

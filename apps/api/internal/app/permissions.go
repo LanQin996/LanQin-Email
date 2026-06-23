@@ -125,14 +125,125 @@ type PermissionGroupSummary struct {
 }
 
 type PermissionGroup struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Permissions []string  `json:"permissions"`
-	System      bool      `json:"system"`
-	UserCount   int       `json:"userCount"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Description string           `json:"description"`
+	Permissions []string         `json:"permissions"`
+	Limits      PermissionLimits `json:"limits"`
+	System      bool             `json:"system"`
+	UserCount   int              `json:"userCount"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	UpdatedAt   time.Time        `json:"updatedAt"`
+}
+
+type PermissionLimits struct {
+	MaxAttachmentMB  int `json:"maxAttachmentMb"`
+	SMTPDailyLimit   int `json:"smtpDailyLimit"`
+	SMTPMinuteLimit  int `json:"smtpMinuteLimit"`
+	IMAPMinuteLimit  int `json:"imapMinuteLimit"`
+	POP3MinuteLimit  int `json:"pop3MinuteLimit"`
+}
+
+func defaultPermissionLimits() PermissionLimits {
+	return PermissionLimits{
+		MaxAttachmentMB: 25,
+		SMTPDailyLimit:  200,
+		SMTPMinuteLimit: 20,
+		IMAPMinuteLimit: 200,
+		POP3MinuteLimit: 150,
+	}
+}
+
+func normalizePermissionLimits(limits PermissionLimits) (PermissionLimits, error) {
+	if limits.MaxAttachmentMB < 0 {
+		return PermissionLimits{}, errors.New("maxAttachmentMb cannot be negative")
+	}
+	if limits.SMTPDailyLimit < 0 {
+		return PermissionLimits{}, errors.New("smtpDailyLimit cannot be negative")
+	}
+	if limits.SMTPMinuteLimit < 0 {
+		return PermissionLimits{}, errors.New("smtpMinuteLimit cannot be negative")
+	}
+	if limits.IMAPMinuteLimit < 0 {
+		return PermissionLimits{}, errors.New("imapMinuteLimit cannot be negative")
+	}
+	if limits.POP3MinuteLimit < 0 {
+		return PermissionLimits{}, errors.New("pop3MinuteLimit cannot be negative")
+	}
+	return limits, nil
+}
+
+func decodeStoredLimits(value string) PermissionLimits {
+	limits := defaultPermissionLimits()
+	if strings.TrimSpace(value) == "" {
+		return limits
+	}
+	_ = json.Unmarshal([]byte(value), &limits)
+	normalized, err := normalizePermissionLimits(limits)
+	if err != nil {
+		return defaultPermissionLimits()
+	}
+	return normalized
+}
+
+func encodePermissionLimits(limits PermissionLimits) string {
+	normalized, err := normalizePermissionLimits(limits)
+	if err != nil {
+		normalized = defaultPermissionLimits()
+	}
+	data, _ := json.Marshal(normalized)
+	return string(data)
+}
+
+func mergePermissionLimits(left, right PermissionLimits) PermissionLimits {
+	return PermissionLimits{
+		MaxAttachmentMB:  mergeLimitValue(left.MaxAttachmentMB, right.MaxAttachmentMB),
+		SMTPDailyLimit:   mergeLimitValue(left.SMTPDailyLimit, right.SMTPDailyLimit),
+		SMTPMinuteLimit:  mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
+		IMAPMinuteLimit:  mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
+		POP3MinuteLimit:  mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
+	}
+}
+
+func mergeLimitValue(left, right int) int {
+	if left == 0 || right == 0 {
+		return 0
+	}
+	if right > left {
+		return right
+	}
+	return left
+}
+
+func actorCanGrantLimits(actor *User, limits PermissionLimits) bool {
+	if actor == nil {
+		return false
+	}
+	if actor.Role == "admin" {
+		return true
+	}
+	return canGrantLimitValue(actor.Limits.MaxAttachmentMB, limits.MaxAttachmentMB) &&
+		canGrantLimitValue(actor.Limits.SMTPDailyLimit, limits.SMTPDailyLimit) &&
+		canGrantLimitValue(actor.Limits.SMTPMinuteLimit, limits.SMTPMinuteLimit) &&
+		canGrantLimitValue(actor.Limits.IMAPMinuteLimit, limits.IMAPMinuteLimit) &&
+		canGrantLimitValue(actor.Limits.POP3MinuteLimit, limits.POP3MinuteLimit)
+}
+
+func canGrantLimitValue(actorLimit, requestedLimit int) bool {
+	if actorLimit == 0 {
+		return true
+	}
+	if requestedLimit == 0 {
+		return false
+	}
+	return requestedLimit <= actorLimit
+}
+
+func attachmentLimitBytes(limits PermissionLimits) int64 {
+	if limits.MaxAttachmentMB <= 0 {
+		return 0
+	}
+	return int64(limits.MaxAttachmentMB) * 1024 * 1024
 }
 
 var legacyPermissionExpansions = map[string][]string{
@@ -314,6 +425,7 @@ func defaultPermissionGroups() []PermissionGroup {
 			Name:        "超级管理员",
 			Description: "拥有全部后台权限，由用户身份决定，不通过权限组分配。",
 			Permissions: allPermissionKeys(),
+			Limits:      PermissionLimits{},
 			System:      true,
 		},
 		{
@@ -321,6 +433,7 @@ func defaultPermissionGroups() []PermissionGroup {
 			Name:        "普通用户",
 			Description: "仅可使用自己的邮箱功能，不包含后台权限。",
 			Permissions: regularUserDefaultPermissions(),
+			Limits:      defaultPermissionLimits(),
 			System:      true,
 		},
 	}
@@ -386,15 +499,15 @@ func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 		if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET name=name || ' (' || id || ')' WHERE name=? AND id<>?`, item.Name, item.ID); err != nil {
 			return err
 		}
-		query := `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?)
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, system=excluded.system, updated_at=excluded.updated_at`
+		query := `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?)
+			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, limits_json=excluded.limits_json, system=excluded.system, updated_at=excluded.updated_at`
 		if item.ID == PermissionGroupRegular {
-			query = `INSERT INTO permission_groups(id,name,description,permissions_json,system,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?)
+			query = `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+				VALUES(?,?,?,?,?,?,?,?)
 				ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, system=excluded.system, updated_at=excluded.updated_at`
 		}
-		if _, err := a.db.ExecContext(ctx, query, item.ID, item.Name, item.Description, encodePermissions(item.Permissions), boolInt(item.System), now, now); err != nil {
+		if _, err := a.db.ExecContext(ctx, query, item.ID, item.Name, item.Description, encodePermissions(item.Permissions), encodePermissionLimits(item.Limits), boolInt(item.System), now, now); err != nil {
 			return err
 		}
 	}
@@ -475,11 +588,16 @@ func (a *App) attachUserAuthorization(ctx context.Context, u *User) error {
 	if err != nil {
 		return err
 	}
+	limits, err := a.limitsForUser(ctx, u.ID, u.Role)
+	if err != nil {
+		return err
+	}
 	groupIDs, groups, err := a.permissionGroupsForUser(ctx, u.ID, u.Role)
 	if err != nil {
 		return err
 	}
 	u.Permissions = permissions
+	u.Limits = limits
 	u.PermissionGroupIDs = groupIDs
 	u.PermissionGroups = groups
 	u.Protected = a.isDefaultAdminUser(u)
@@ -526,6 +644,59 @@ func (a *App) permissionsForUser(ctx context.Context, userID, role string) ([]st
 	return out, nil
 }
 
+func (a *App) limitsForUser(ctx context.Context, userID, role string) (PermissionLimits, error) {
+	if role == "admin" {
+		return PermissionLimits{}, nil
+	}
+	limits, ok, err := a.regularGroupLimits(ctx, nil)
+	if err != nil {
+		return PermissionLimits{}, err
+	}
+	if !ok {
+		limits = defaultPermissionLimits()
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.limits_json
+		FROM permission_groups pg
+		JOIN user_permission_groups upg ON upg.group_id=pg.id
+		WHERE upg.user_id=?`, userID)
+	if err != nil {
+		return PermissionLimits{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var groupID, raw string
+		if err := rows.Scan(&groupID, &raw); err != nil {
+			return PermissionLimits{}, err
+		}
+		if !isAssignablePermissionGroupID(groupID) {
+			continue
+		}
+		limits = mergePermissionLimits(limits, decodeStoredLimits(raw))
+	}
+	if err := rows.Err(); err != nil {
+		return PermissionLimits{}, err
+	}
+	return limits, nil
+}
+
+func (a *App) regularGroupLimits(ctx context.Context, tx *sql.Tx) (PermissionLimits, bool, error) {
+	var raw string
+	query := `SELECT limits_json FROM permission_groups WHERE id=?`
+	var err error
+	if tx != nil {
+		err = tx.QueryRowContext(ctx, query, PermissionGroupRegular).Scan(&raw)
+	} else {
+		err = a.db.QueryRowContext(ctx, query, PermissionGroupRegular).Scan(&raw)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return PermissionLimits{}, false, nil
+	}
+	if err != nil {
+		return PermissionLimits{}, false, err
+	}
+	return decodeStoredLimits(raw), true, nil
+}
+
 func (a *App) addRegularGroupPermissions(ctx context.Context, tx *sql.Tx, seen map[string]bool) error {
 	var raw string
 	query := `SELECT permissions_json FROM permission_groups WHERE id=?`
@@ -566,6 +737,21 @@ func (a *App) effectivePermissionsForUserGroups(ctx context.Context, tx *sql.Tx,
 		}
 	}
 	return out, nil
+}
+
+func (a *App) effectiveLimitsForUserGroups(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
+	limits, ok, err := a.regularGroupLimits(ctx, tx)
+	if err != nil {
+		return PermissionLimits{}, err
+	}
+	if !ok {
+		limits = defaultPermissionLimits()
+	}
+	groupLimits, err := a.limitsForGroupIDs(ctx, tx, groupIDs)
+	if err != nil {
+		return PermissionLimits{}, err
+	}
+	return mergePermissionLimits(limits, groupLimits), nil
 }
 
 func (a *App) permissionGroupsForUser(ctx context.Context, userID, role string) ([]string, []PermissionGroupSummary, error) {
@@ -742,6 +928,31 @@ func (a *App) permissionsForGroupIDs(ctx context.Context, tx *sql.Tx, groupIDs [
 	return out, nil
 }
 
+func (a *App) limitsForGroupIDs(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
+	limits := PermissionLimits{MaxAttachmentMB: 1, SMTPDailyLimit: 1, SMTPMinuteLimit: 1, IMAPMinuteLimit: 1, POP3MinuteLimit: 1}
+	for _, groupID := range cleanIDList(groupIDs) {
+		if !isAssignablePermissionGroupID(groupID) {
+			return PermissionLimits{}, fmt.Errorf("permission group not assignable: %s", groupID)
+		}
+		var raw string
+		query := `SELECT limits_json FROM permission_groups WHERE id=?`
+		var err error
+		if tx != nil {
+			err = tx.QueryRowContext(ctx, query, groupID).Scan(&raw)
+		} else {
+			err = a.db.QueryRowContext(ctx, query, groupID).Scan(&raw)
+		}
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return PermissionLimits{}, fmt.Errorf("permission group not found: %s", groupID)
+			}
+			return PermissionLimits{}, err
+		}
+		limits = mergePermissionLimits(limits, decodeStoredLimits(raw))
+	}
+	return limits, nil
+}
+
 func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID string, groupIDs []string, actor *User) error {
 	groupIDs = cleanIDList(groupIDs)
 	for _, groupID := range groupIDs {
@@ -755,6 +966,13 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	}
 	if !actorCanGrantPermissions(actor, groupPermissions) {
 		return errors.New("cannot assign permissions you do not hold")
+	}
+	groupLimits, err := a.effectiveLimitsForUserGroups(ctx, tx, groupIDs)
+	if err != nil {
+		return err
+	}
+	if !actorCanGrantLimits(actor, groupLimits) {
+		return errors.New("cannot assign limits above your own")
 	}
 	exec := func(query string, args ...any) error {
 		var err error
@@ -778,18 +996,19 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 }
 
 func (a *App) permissionGroupByID(ctx context.Context, id string) (*PermissionGroup, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT pg.id,pg.name,pg.description,pg.permissions_json,pg.system,pg.created_at,pg.updated_at,COUNT(upg.user_id)
+	row := a.db.QueryRowContext(ctx, `SELECT pg.id,pg.name,pg.description,pg.permissions_json,pg.limits_json,pg.system,pg.created_at,pg.updated_at,COUNT(upg.user_id)
 		FROM permission_groups pg
 		LEFT JOIN user_permission_groups upg ON upg.group_id=pg.id
 		WHERE pg.id=?
-		GROUP BY pg.id,pg.name,pg.description,pg.permissions_json,pg.system,pg.created_at,pg.updated_at`, id)
+		GROUP BY pg.id,pg.name,pg.description,pg.permissions_json,pg.limits_json,pg.system,pg.created_at,pg.updated_at`, id)
 	var group PermissionGroup
-	var raw, created, updated string
+	var rawPermissions, rawLimits, created, updated string
 	var system int
-	if err := row.Scan(&group.ID, &group.Name, &group.Description, &raw, &system, &created, &updated, &group.UserCount); err != nil {
+	if err := row.Scan(&group.ID, &group.Name, &group.Description, &rawPermissions, &rawLimits, &system, &created, &updated, &group.UserCount); err != nil {
 		return nil, err
 	}
-	group.Permissions = decodeStoredPermissions(raw)
+	group.Permissions = decodeStoredPermissions(rawPermissions)
+	group.Limits = decodeStoredLimits(rawLimits)
 	group.System = intBool(system)
 	group.CreatedAt = parseTime(created)
 	group.UpdatedAt = parseTime(updated)

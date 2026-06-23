@@ -13,7 +13,7 @@ import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
-import { api, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend } from "@/lib/api"
+import { api, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, PermissionLimits } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
@@ -954,7 +954,7 @@ export function MailPage() {
         )}
       </SidebarProvider>
 
-      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} canSend={canSendMail} canManageDrafts={canManageDrafts} canSchedule={canScheduleMail} canManageSignatures={canManageSignatures} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
+      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} limits={user?.limits} canSend={canSendMail} canManageDrafts={canManageDrafts} canSchedule={canScheduleMail} canManageSignatures={canManageSignatures} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
@@ -1816,7 +1816,7 @@ function MailLabelBadge({ label }: { label: MailLabel }) {
   )
 }
 
-function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSchedule, canManageSignatures, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; canSend: boolean; canManageDrafts: boolean; canSchedule: boolean; canManageSignatures: boolean; onOpenChange: (v: boolean) => void; onSent: () => void }) {
+function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts, canSchedule, canManageSignatures, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; limits?: PermissionLimits; canSend: boolean; canManageDrafts: boolean; canSchedule: boolean; canManageSignatures: boolean; onOpenChange: (v: boolean) => void; onSent: () => void }) {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [files, setFiles] = React.useState<File[]>([])
@@ -1841,6 +1841,8 @@ function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSche
   const composerText = draft?.html || (draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : "")
   const [body, setBody] = React.useState<ComposerValue>(() => draft?.html !== undefined ? htmlComposerValue(draft.html) : plainTextComposerValue(composerText))
   const activeMailboxId = draft?.mailboxId || mailbox?.id || ""
+  const maxAttachmentBytes = attachmentLimitBytes(limits)
+  const maxAttachmentText = maxAttachmentBytes > 0 ? formatBytes(maxAttachmentBytes) : "不限"
   const composePayload = React.useMemo<DraftPayload>(() => ({
     mailboxId: activeMailboxId,
     to: splitEmails(toValue),
@@ -1975,9 +1977,30 @@ function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSche
     })
   }
 
+  function addFiles(nextFiles: File[]) {
+    if (nextFiles.length === 0) return
+    const allowed = maxAttachmentBytes > 0 ? nextFiles.filter((file) => file.size <= maxAttachmentBytes) : nextFiles
+    const blockedCount = nextFiles.length - allowed.length
+    if (blockedCount > 0) {
+      toast({ title: "附件超过权限组上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+    }
+    if (allowed.length > 0) {
+      setAttachmentsTouched(true)
+      setFiles((current) => [...current, ...allowed])
+    }
+  }
+
+  function attachmentsWithinLimit() {
+    if (maxAttachmentBytes <= 0) return true
+    if (files.every((file) => file.size <= maxAttachmentBytes)) return true
+    toast({ title: "附件超过权限组上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+    return false
+  }
+
   async function prepareSend() {
     if (!canSend) return
     if (!mailbox) return
+    if (!attachmentsWithinLimit()) return
     const attachments = await Promise.all(files.map(fileToAttachment))
     const to = splitEmails(toValue)
     const cc = showCc ? splitEmails(ccValue) : []
@@ -2015,6 +2038,7 @@ function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSche
       toast({ title: "请选择发件邮箱" })
       return
     }
+    if (!attachmentsWithinLimit()) return
     const attachments = await Promise.all(files.map(fileToAttachment))
     const payload: SendPayload & { draftId?: string; sendAt: string } = {
       mailboxId: mailbox.id,
@@ -2093,8 +2117,9 @@ function ComposeDialog({ mailbox, open, draft, canSend, canManageDrafts, canSche
               defaultHtml={draft?.html}
               files={files}
               signatureText={signatureText}
+              maxAttachmentText={maxAttachmentText}
               onChange={setBody}
-              onPickFiles={(nextFiles) => { setAttachmentsTouched(true); setFiles((current) => [...current, ...nextFiles]) }}
+              onPickFiles={addFiles}
               onRemoveFile={(index) => { setAttachmentsTouched(true); setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}
             />
           </div>
@@ -2328,7 +2353,7 @@ function scheduleToNodeAttributes(schedule: ScheduleDraft) {
   }
 }
 
-function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; files: File[]; signatureText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
+function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, maxAttachmentText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; files: File[]; signatureText: string; maxAttachmentText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
@@ -2507,6 +2532,7 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, onC
             <DropdownMenuItem className={composerMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <span className="rounded-md border px-2 py-1 text-xs text-muted-foreground">附件 {maxAttachmentText}</span>
         <ToolbarTextButton label="日程" icon={<Calendar className="h-4 w-4" />} onClick={() => setScheduleOpen(true)} />
         <DropdownMenu open={emojiOpen} onOpenChange={setEmojiOpen}>
           <DropdownMenuTrigger asChild>
@@ -3065,6 +3091,10 @@ function quoteMessage(message: MailMessage) {
   return `\n\n----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
 }
 function stripHtml(html: string) { const div = document.createElement("div"); div.innerHTML = DOMPurify.sanitize(html); return div.textContent || div.innerText || "" }
+function attachmentLimitBytes(limits?: PermissionLimits) {
+  const mb = limits?.maxAttachmentMb || 0
+  return mb > 0 ? mb * 1024 * 1024 : 0
+}
 async function fileToAttachment(file: File) {
   const buffer = await file.arrayBuffer()
   let binary = ""

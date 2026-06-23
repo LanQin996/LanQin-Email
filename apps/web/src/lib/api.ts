@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -64,8 +64,8 @@ export const api = {
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
   users: () => request<ListResponse<AdminUser>>("/api/admin/users"),
   permissionGroups: () => request<ListResponse<PermissionGroup> & { catalog: PermissionInfo[] }>("/api/admin/permission-groups"),
-  createPermissionGroup: (payload: { name: string; description: string; permissions: PermissionKey[] }) => request<PermissionGroup>("/api/admin/permission-groups", { method: "POST", body: JSON.stringify(payload) }),
-  updatePermissionGroup: (id: string, payload: { name: string; description: string; permissions: PermissionKey[] }) => request<PermissionGroup>(`/api/admin/permission-groups/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  createPermissionGroup: (payload: { name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits }) => request<PermissionGroup>("/api/admin/permission-groups", { method: "POST", body: JSON.stringify(payload) }),
+  updatePermissionGroup: (id: string, payload: { name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits }) => request<PermissionGroup>(`/api/admin/permission-groups/${id}`, { method: "POST", body: JSON.stringify(payload) }),
   deletePermissionGroup: (id: string) => request<{ ok: boolean }>(`/api/admin/permission-groups/${id}`, { method: "DELETE" }),
   createUser: (payload: { email: string; displayName: string; role: "admin" | "user"; password: string; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }),
   updateUser: (id: string, payload: { displayName: string; role: "admin" | "user"; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>(`/api/admin/users/${id}`, { method: "POST", body: JSON.stringify(payload) }),
