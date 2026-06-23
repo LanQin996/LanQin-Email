@@ -814,6 +814,29 @@ func TestAdminSMTPTestEndpoint(t *testing.T) {
 	}
 }
 
+func TestAuthPolicyDovecotResponseFormat(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+
+	var allowed map[string]any
+	if code := client.do("POST", "/auth-policy?command=allow", map[string]string{"login": "admin@lanqin.local", "protocol": "smtp"}, &allowed); code != http.StatusOK {
+		t.Fatalf("auth policy allow code=%d body=%v", code, allowed)
+	}
+	if allowed["status"] != float64(0) {
+		t.Fatalf("expected numeric allow status 0, got %#v", allowed["status"])
+	}
+
+	var denied map[string]any
+	if code := client.do("POST", "/auth-policy?command=allow", map[string]string{"login": "missing@lanqin.local", "protocol": "imap"}, &denied); code != http.StatusOK {
+		t.Fatalf("auth policy deny code=%d body=%v", code, denied)
+	}
+	if denied["status"] != float64(-1) {
+		t.Fatalf("expected numeric deny status -1, got %#v", denied["status"])
+	}
+}
+
 func TestProfileAndPasswordUpdate(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())

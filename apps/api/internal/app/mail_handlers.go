@@ -599,48 +599,67 @@ func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Ma
 
 func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Protocol string `json:"protocol"`
-		Username string `json:"username"`
-		IP       string `json:"ip"`
+		Login        string `json:"login"`
+		Protocol     string `json:"protocol"`
+		Username     string `json:"username"`
+		IP           string `json:"ip"`
+		Remote       string `json:"remote"`
+		Success      *bool  `json:"success"`
+		PolicyReject *bool  `json:"policy_reject"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
-		w.WriteHeader(http.StatusCreated)
-		respondJSON(w, http.StatusCreated, map[string]string{"status": "allow"})
+		respondJSON(w, http.StatusOK, map[string]int{"status": 0})
 		return
 	}
 	var user *User
-	if req.Username != "" {
-		var passHash string
-		user, passHash, _ = a.userByEmail(r.Context(), req.Username)
-		_ = passHash
+	var mailbox *Mailbox
+	login := normalizeEmail(req.Login)
+	if login == "" {
+		login = normalizeEmail(req.Username)
+	}
+	if login != "" {
+		if mb, err := a.mailboxByAddress(r.Context(), login); err == nil {
+			mailbox = mb
+			user, _ = a.userByID(r.Context(), mb.UserID)
+		}
+		if user == nil {
+			var passHash string
+			user, passHash, _ = a.userByEmail(r.Context(), login)
+			_ = passHash
+		}
 	}
 	if user == nil || user.Disabled {
-		w.WriteHeader(http.StatusCreated)
-		respondJSON(w, http.StatusCreated, map[string]string{"status": "deny", "reason": "user not found or disabled"})
+		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "user not found or disabled"})
 		return
 	}
 	if user.Role == "admin" {
-		w.WriteHeader(http.StatusCreated)
-		respondJSON(w, http.StatusCreated, map[string]string{"status": "allow"})
+		respondJSON(w, http.StatusOK, map[string]int{"status": 0})
 		return
 	}
 	limits := user.Limits
 	var err error
-	switch req.Protocol {
-	case "imap", "IMAP":
+	switch strings.ToLower(req.Protocol) {
+	case "imap":
 		if limits.IMAPMinuteLimit > 0 {
-			err = a.checkAndRecordProtocolRate(r.Context(), user, nil, "imap_events", 0, limits.IMAPMinuteLimit)
+			if mailbox == nil {
+				err = errors.New("mailbox not found")
+			} else {
+				err = a.checkAndRecordProtocolRate(r.Context(), user, mailbox, "imap_events", 0, limits.IMAPMinuteLimit)
+			}
 		}
-	case "pop3", "POP3":
+	case "pop3":
 		if limits.POP3MinuteLimit > 0 {
-			err = a.checkAndRecordProtocolRate(r.Context(), user, nil, "pop3_events", 0, limits.POP3MinuteLimit)
+			if mailbox == nil {
+				err = errors.New("mailbox not found")
+			} else {
+				err = a.checkAndRecordProtocolRate(r.Context(), user, mailbox, "pop3_events", 0, limits.POP3MinuteLimit)
+			}
 		}
 	}
-	w.WriteHeader(http.StatusCreated)
 	if err != nil {
-		respondJSON(w, http.StatusCreated, map[string]any{"status": "deny", "reason": err.Error()})
+		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": err.Error()})
 	} else {
-		respondJSON(w, http.StatusCreated, map[string]any{"status": "allow"})
+		respondJSON(w, http.StatusOK, map[string]int{"status": 0})
 	}
 }
 

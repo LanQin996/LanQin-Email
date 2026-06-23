@@ -128,7 +128,7 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
-- 第三方客户端通过 SMTP `465/587` 发信时，Postfix 会把已认证发件人的邮件自动 BCC 到 `发件人+Sent@域名`，Dovecot LMTP 会保存到该邮箱的 `Sent` 文件夹，Webmail 扫描后会显示在“已发送”。
+- 第三方客户端可通过 SMTP `465/587` 发信；Webmail 内的“已发送”由 Webmail API 发信流程写入。
 
 ## 邮件客户端 TLS 证书
 
