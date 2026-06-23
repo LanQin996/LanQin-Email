@@ -2,7 +2,7 @@ import * as React from "react"
 import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
+import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
 import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -1081,7 +1081,47 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   )
 }
 
+function parseSemver(tag: string): number[] {
+  return (tag.startsWith("v") ? tag.slice(1) : tag).split(".").map(Number)
+}
+
 function AboutProjectCard() {
+  const { toast } = useToast()
+  const latestRelease = useQuery({
+    queryKey: ["github", "latest-release"],
+    queryFn: async () => {
+      const res = await fetch("https://api.github.com/repos/LanQin996/LanQin-Email/releases/latest")
+      if (!res.ok) throw new Error("rate limited or unavailable")
+      return res.json() as Promise<{ tag_name: string; html_url: string }>
+    },
+    enabled: !!projectTag,
+    staleTime: 1000 * 60 * 60, // 1 hour
+    retry: 1,
+  })
+  const updateAvailable = React.useMemo(() => {
+    if (!projectTag || !latestRelease.data) return false
+    const current = parseSemver(projectTag)
+    const latest = parseSemver(latestRelease.data.tag_name)
+    for (let i = 0; i < Math.max(current.length, latest.length); i++) {
+      const a = current[i] ?? 0
+      const b = latest[i] ?? 0
+      if (b > a) return true
+      if (a > b) return false
+    }
+    return false
+  }, [projectTag, latestRelease.data])
+
+  React.useEffect(() => {
+    if (updateAvailable && latestRelease.data) {
+      toast({
+        title: "发现新版本",
+        description: `${latestRelease.data.tag_name} 已可用，点击版本号查看详情。`,
+      })
+    }
+    // Only toast once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [updateAvailable])
+
   return (
     <Card>
       <CardHeader>
@@ -1090,12 +1130,25 @@ function AboutProjectCard() {
       <CardContent className="space-y-4 text-sm">
         <AboutRow label="版本">
           {projectTag ? (
-            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
-              <a href={projectReleaseUrl} target="_blank" rel="noreferrer">
-                <GitBranch className="h-5 w-5 text-primary" />
-                {projectTag}
-              </a>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+                <a href={projectReleaseUrl} target="_blank" rel="noreferrer">
+                  <GitBranch className="h-5 w-5 text-primary" />
+                  {projectTag}
+                </a>
+              </Button>
+              {updateAvailable && latestRelease.data && (
+                <Button type="button" variant="default" className="h-11 px-4 text-base font-normal" asChild>
+                  <a href={latestRelease.data.html_url} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-5 w-5" />
+                    新版本 {latestRelease.data.tag_name}
+                  </a>
+                </Button>
+              )}
+              {latestRelease.isLoading && (
+                <span className="text-xs text-muted-foreground">检查更新中...</span>
+              )}
+            </div>
           ) : (
             <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" disabled>
               <GitBranch className="h-5 w-5 text-muted-foreground" />
