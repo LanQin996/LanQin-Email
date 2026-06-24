@@ -840,6 +840,25 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	}
 }
 
+func TestHTMLPolicyPreservesEmailLayoutStyles(t *testing.T) {
+	policy := NewHTMLPolicy()
+	out := policy.Sanitize(`<div class="card" style="max-width:600px;margin:0 auto;background:linear-gradient(135deg,#667eea,#764ba2);box-shadow:0 8px 24px rgba(0,0,0,.12);color:#fff" onclick="alert(1)">
+		<table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse"><tr><td align="center" style="padding:24px;text-align:center;background-color:#f8fafc">
+		<a href="javascript:alert(1)">bad</a><img src="x" onerror="alert(1)"><script>alert(1)</script>hello
+		</td></tr></table>
+	</div>`)
+	for _, want := range []string{"class=\"card\"", "max-width: 600px", "margin: 0 auto", "background: linear-gradient", "box-shadow:", "cellpadding=\"0\"", "cellspacing=\"0\"", "align=\"center\"", "text-align: center"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("sanitized html missing %q: %s", want, out)
+		}
+	}
+	for _, blocked := range []string{"onclick", "onerror", "javascript:", "<script"} {
+		if strings.Contains(strings.ToLower(out), blocked) {
+			t.Fatalf("sanitized html kept unsafe %q: %s", blocked, out)
+		}
+	}
+}
+
 func TestMailSendQueuesSMTPFailureForRetry(t *testing.T) {
 	a := newTestApp(t)
 	a.cfg.SMTPHost = "127.0.0.1"

@@ -1,4 +1,8 @@
 declare module "dompurify" {
-  const DOMPurify: { sanitize: (source: string) => string }
+  type SanitizeConfig = {
+    ADD_ATTR?: string[]
+    ADD_TAGS?: string[]
+  }
+  const DOMPurify: { sanitize: (source: string, config?: SanitizeConfig) => string }
   export default DOMPurify
 }

@@ -22,7 +22,20 @@ type HTMLPolicy struct{ policy *bluemonday.Policy }
 
 func NewHTMLPolicy() *HTMLPolicy {
 	p := bluemonday.UGCPolicy()
-	p.AllowAttrs("style").OnElements("p", "span", "div", "table", "td", "th")
+	p.AllowAttrs("style").Globally()
+	p.AllowAttrs("class").Matching(bluemonday.SpaceSeparatedTokens).Globally()
+	p.AllowAttrs("align", "valign").Matching(bluemonday.Paragraph).Globally()
+	p.AllowAttrs("width", "height").Matching(bluemonday.NumberOrPercent).Globally()
+	p.AllowAttrs("bgcolor", "color").Matching(regexp.MustCompile(`(?i)^#[0-9a-f]{3,8}$|^[a-z][a-z0-9 -]{0,31}$`)).Globally()
+	p.AllowAttrs("border", "cellpadding", "cellspacing").Matching(bluemonday.Number).OnElements("table")
+	p.AllowStyles(
+		"background", "background-color", "background-image", "border", "border-collapse", "border-color",
+		"border-radius", "border-spacing", "border-style", "border-width", "box-shadow", "color", "display",
+		"font", "font-family", "font-size", "font-style", "font-weight", "height", "letter-spacing",
+		"line-height", "margin", "margin-bottom", "margin-left", "margin-right", "margin-top", "max-width",
+		"min-width", "opacity", "padding", "padding-bottom", "padding-left", "padding-right", "padding-top",
+		"text-align", "text-decoration", "text-transform", "vertical-align", "white-space", "width",
+	).MatchingHandler(safeEmailCSSValue).Globally()
 	return &HTMLPolicy{policy: p}
 }
 
@@ -31,6 +44,20 @@ func (p *HTMLPolicy) Sanitize(s string) string {
 		return s
 	}
 	return p.policy.Sanitize(s)
+}
+
+func safeEmailCSSValue(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || len(value) > 512 {
+		return false
+	}
+	unsafe := []string{"expression", "javascript:", "vbscript:", "data:", "behavior", "-moz-binding", "@import", "</", "url("}
+	for _, token := range unsafe {
+		if strings.Contains(value, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func newID(prefix string) string {

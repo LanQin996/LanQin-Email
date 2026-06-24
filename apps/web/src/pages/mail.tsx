@@ -867,7 +867,7 @@ export function MailPage() {
             </div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-6">
-                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
+                <MailHtmlFrame message={selected} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground" key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
             </ScrollArea>
@@ -1402,13 +1402,69 @@ function CompactMessageDetail({
                 />
               </div>
               <div className="py-6 sm:py-8">
-                <div className="mail-html prose max-w-none text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(selected.bodyHtml || `<pre>${escapeHtml(selected.bodyText || "")}</pre>`) }} />
+                <MailHtmlFrame message={selected} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={`/api/mail/attachments/${a.id}`} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between" key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
             </div>
           </ScrollArea>
         )}
     </div>
+  )
+}
+
+function MailHtmlFrame({ message }: { message: MailMessage }) {
+  const iframeRef = React.useRef<HTMLIFrameElement>(null)
+  const [height, setHeight] = React.useState(260)
+  const srcDoc = React.useMemo(() => buildMailFrameSrcDoc(message.bodyHtml || "", message.bodyText || ""), [message.bodyHtml, message.bodyText])
+
+  const resize = React.useCallback(() => {
+    const doc = iframeRef.current?.contentDocument
+    if (!doc) return
+    const body = doc.body
+    const html = doc.documentElement
+    const nextHeight = Math.max(180, Math.ceil(Math.max(body?.scrollHeight || 0, body?.offsetHeight || 0, html?.scrollHeight || 0, html?.offsetHeight || 0)))
+    setHeight(nextHeight)
+  }, [])
+
+  React.useEffect(() => {
+    setHeight(260)
+    const frame = iframeRef.current
+    if (!frame) return
+    let observer: ResizeObserver | undefined
+    const timers = [window.setTimeout(resize, 0), window.setTimeout(resize, 120), window.setTimeout(resize, 600)]
+    const attach = () => {
+      const doc = frame.contentDocument
+      if (!doc) return
+      doc.querySelectorAll("a[href]").forEach((link) => {
+        link.setAttribute("target", "_blank")
+        link.setAttribute("rel", "noopener noreferrer")
+      })
+      resize()
+      if ("ResizeObserver" in window) {
+        observer = new ResizeObserver(resize)
+        observer.observe(doc.documentElement)
+        if (doc.body) observer.observe(doc.body)
+      }
+      doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", resize, { once: true }))
+    }
+    frame.addEventListener("load", attach)
+    return () => {
+      frame.removeEventListener("load", attach)
+      observer?.disconnect()
+      timers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [resize, srcDoc])
+
+  return (
+    <iframe
+      ref={iframeRef}
+      title="邮件正文"
+      className="block w-full border-0 bg-white"
+      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+      referrerPolicy="no-referrer"
+      srcDoc={srcDoc}
+      style={{ height }}
+    />
   )
 }
 
@@ -3055,6 +3111,38 @@ function plainTextToHtml(value: string) {
 function plainTextToHtmlFragment(value: string) { return value.split("\n").map((line) => escapeHtml(line)).join("<br>") }
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
+}
+function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
+  const rawBody = bodyHtml.trim() ? bodyHtml : `<pre>${escapeHtml(bodyText || "")}</pre>`
+  const sanitizedBody = DOMPurify.sanitize(rawBody, {
+    ADD_ATTR: ["style", "align", "valign", "bgcolor", "border", "cellpadding", "cellspacing", "width", "height"],
+    ADD_TAGS: ["center"],
+  })
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<base target="_blank">
+<style>
+  html, body { margin: 0; padding: 0; background: #fff; color: #111827; }
+  body {
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    -webkit-text-size-adjust: 100%;
+    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  img { max-width: 100%; height: auto; }
+  table { max-width: 100%; }
+  pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>${sanitizedBody}</body>
+</html>`
 }
 function sanitizeComposerHtml(value: string) {
   return DOMPurify.sanitize(value || "")
