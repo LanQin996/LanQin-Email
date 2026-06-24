@@ -22,6 +22,7 @@ type HTMLPolicy struct{ policy *bluemonday.Policy }
 
 func NewHTMLPolicy() *HTMLPolicy {
 	p := bluemonday.UGCPolicy()
+	p.AllowElements("html", "head", "body", "center", "font")
 	p.AllowAttrs("style").Globally()
 	p.AllowAttrs("class").Matching(bluemonday.SpaceSeparatedTokens).Globally()
 	p.AllowAttrs("align", "valign").Matching(bluemonday.Paragraph).Globally()
@@ -43,7 +44,53 @@ func (p *HTMLPolicy) Sanitize(s string) string {
 	if p == nil || p.policy == nil {
 		return s
 	}
-	return p.policy.Sanitize(s)
+	styles, withoutStyles := extractSafeEmailStyles(s)
+	clean := p.policy.Sanitize(withoutStyles)
+	if len(styles) == 0 {
+		return clean
+	}
+	return strings.Join(styles, "") + clean
+}
+
+var emailStyleTagRe = regexp.MustCompile(`(?is)<style\b([^>]*)>(.*?)</style>`)
+
+func extractSafeEmailStyles(value string) ([]string, string) {
+	styles := []string{}
+	withoutStyles := emailStyleTagRe.ReplaceAllStringFunc(value, func(tag string) string {
+		match := emailStyleTagRe.FindStringSubmatch(tag)
+		if len(match) != 3 {
+			return ""
+		}
+		attrs, css := match[1], strings.TrimSpace(match[2])
+		if !safeEmailStyleAttrs(attrs) || !safeEmailCSSBlock(css) {
+			return ""
+		}
+		styles = append(styles, `<style type="text/css">`+css+`</style>`)
+		return ""
+	})
+	return styles, withoutStyles
+}
+
+func safeEmailStyleAttrs(attrs string) bool {
+	attrs = strings.ToLower(strings.TrimSpace(attrs))
+	if attrs == "" {
+		return true
+	}
+	return regexp.MustCompile(`^\s*type\s*=\s*["']?text/css["']?\s*$`).MatchString(attrs)
+}
+
+func safeEmailCSSBlock(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" || len(value) > 50000 {
+		return false
+	}
+	unsafe := []string{"expression", "javascript:", "vbscript:", "data:", "behavior", "-moz-binding", "@import", "</", "url("}
+	for _, token := range unsafe {
+		if strings.Contains(value, token) {
+			return false
+		}
+	}
+	return true
 }
 
 func safeEmailCSSValue(value string) bool {

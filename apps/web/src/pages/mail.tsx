@@ -3114,17 +3114,31 @@ function escapeHtml(value: string) {
 }
 function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
   const rawBody = bodyHtml.trim() ? bodyHtml : `<pre>${escapeHtml(bodyText || "")}</pre>`
-  const sanitizedBody = DOMPurify.sanitize(rawBody, {
-    ADD_ATTR: ["style", "align", "valign", "bgcolor", "border", "cellpadding", "cellspacing", "width", "height"],
-    ADD_TAGS: ["center"],
+  const sanitized = DOMPurify.sanitize(rawBody, {
+    ADD_ATTR: ["style", "type", "align", "valign", "bgcolor", "border", "cellpadding", "cellspacing", "width", "height"],
+    ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
+    WHOLE_DOCUMENT: /<html[\s>]/i.test(rawBody) || /<body[\s>]/i.test(rawBody),
   })
+  if (/<html[\s>]/i.test(sanitized) || /<body[\s>]/i.test(sanitized)) {
+    const hasHead = /<head[\s>]/i.test(sanitized)
+    const withBase = hasHead
+      ? sanitized.replace(/<head([^>]*)>/i, `<head$1><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base target="_blank">${mailFrameBaseStyle()}`)
+      : sanitized.replace(/<html([^>]*)>/i, `<html$1><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base target="_blank">${mailFrameBaseStyle()}</head>`)
+    return /<!doctype/i.test(withBase) ? withBase : `<!doctype html>${withBase}`
+  }
   return `<!doctype html>
 <html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <base target="_blank">
-<style>
+${mailFrameBaseStyle()}
+</head>
+<body>${sanitized}</body>
+</html>`
+}
+function mailFrameBaseStyle() {
+  return `<style>
   html, body { margin: 0; padding: 0; background: #fff; color: #111827; }
   body {
     box-sizing: border-box;
@@ -3139,10 +3153,7 @@ function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
   table { max-width: 100%; }
   pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   a { color: #2563eb; }
-</style>
-</head>
-<body>${sanitizedBody}</body>
-</html>`
+</style>`
 }
 function sanitizeComposerHtml(value: string) {
   return DOMPurify.sanitize(value || "")
