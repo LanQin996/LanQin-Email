@@ -233,6 +233,13 @@ func (a *App) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
+		`CREATE TABLE IF NOT EXISTS sent_message_dedupe_keys (
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+			message_id TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(mailbox_id, folder_id, message_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id TEXT PRIMARY KEY,
 			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

@@ -960,6 +960,17 @@ func TestSubmissionSentCopyDedupesByMessageID(t *testing.T) {
 	}
 }
 
+func TestSentMessageDedupeTableExists(t *testing.T) {
+	a := newTestApp(t)
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='sent_message_dedupe_keys'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sent message dedupe table count=%d, want 1", count)
+	}
+}
+
 func TestSubmissionServersAcceptStartTLSAndImplicitTLS(t *testing.T) {
 	a := newTestApp(t)
 	host, port, received := startCapturingSMTP(t, 2)

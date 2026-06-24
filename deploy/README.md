@@ -170,6 +170,8 @@ LANQIN_SMTP_PORT=25
 LANQIN_SMTP_REQUIRE_TLS=false
 ```
 
+Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
+
 如果页面提示 `smtp delivery failed: EOF`，通常是 Postfix 会话被中断。优先检查：
 
 ```bash

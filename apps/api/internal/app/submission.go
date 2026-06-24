@@ -286,6 +286,9 @@ func (a *App) submitSMTPMessage(ctx context.Context, user *User, mb *Mailbox, ma
 		if err := a.sendSMTP(mb.Address, recipients, prepared); err != nil {
 			if sentID != "" {
 				a.deleteMessage(ctx, sentID)
+				if sentFolderID, ferr := a.ensureFolder(ctx, mb.ID, "Sent"); ferr == nil {
+					a.deleteSentDedupeKey(ctx, mb.ID, sentFolderID, msg.MessageID)
+				}
 			}
 			return smtpError(451, smtpserver.EnhancedCode{4, 4, 0}, "smtp relay failed")
 		}
@@ -363,13 +366,52 @@ func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, atta
 		var existing string
 		err := a.db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, msg.MailboxID, sentFolderID, msg.MessageID).Scan(&existing)
 		if err == nil {
+			if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil && !errors.Is(err, errSentDedupeExists) {
+				return "", err
+			}
 			return "", nil
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", err
 		}
+		if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil {
+			if errors.Is(err, errSentDedupeExists) {
+				return "", nil
+			}
+			return "", err
+		}
 	}
-	return a.insertMessage(ctx, msg, attachments)
+	id, err := a.insertMessage(ctx, msg, attachments)
+	if err != nil {
+		if msg.MessageID != "" {
+			a.deleteSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID)
+		}
+		return "", err
+	}
+	return id, nil
+}
+
+var errSentDedupeExists = errors.New("sent message already exists")
+
+func (a *App) insertSentDedupeKey(ctx context.Context, mailboxID, folderID, messageID string) error {
+	if strings.TrimSpace(messageID) == "" {
+		return nil
+	}
+	res, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO sent_message_dedupe_keys(mailbox_id,folder_id,message_id,created_at) VALUES(?,?,?,?)`, mailboxID, folderID, messageID, a.now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	if rows, err := res.RowsAffected(); err == nil && rows == 0 {
+		return errSentDedupeExists
+	}
+	return nil
+}
+
+func (a *App) deleteSentDedupeKey(ctx context.Context, mailboxID, folderID, messageID string) {
+	if strings.TrimSpace(messageID) == "" {
+		return
+	}
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM sent_message_dedupe_keys WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mailboxID, folderID, messageID)
 }
 
 func readMessageHeader(raw []byte) (textproto.MIMEHeader, []byte, error) {
