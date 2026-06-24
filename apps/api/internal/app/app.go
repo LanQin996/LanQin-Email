@@ -427,6 +427,9 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateMessageAuthentication(ctx); err != nil {
 		return err
 	}
+	if err := a.rebuildHTMLOnlyMessageSnippets(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
 		return err
 	}
@@ -490,6 +493,47 @@ func (a *App) migrateMessageAuthentication(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) rebuildHTMLOnlyMessageSnippets(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `SELECT id,body_html,snippet FROM messages WHERE trim(body_text)='' AND body_html<>''`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type update struct {
+		id      string
+		snippet string
+	}
+	updates := []update{}
+	for rows.Next() {
+		var id, bodyHTML, current string
+		if err := rows.Scan(&id, &bodyHTML, &current); err != nil {
+			return err
+		}
+		next := snippetFrom("", bodyHTML)
+		if next != current {
+			updates = append(updates, update{id: id, snippet: next})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, item := range updates {
+		if _, err := tx.ExecContext(ctx, `UPDATE messages SET snippet=?,updated_at=? WHERE id=?`, item.snippet, now, item.id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (a *App) migrateSendQueueMessageID(ctx context.Context) error {

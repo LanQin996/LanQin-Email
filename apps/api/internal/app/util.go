@@ -53,6 +53,7 @@ func (p *HTMLPolicy) Sanitize(s string) string {
 }
 
 var emailStyleTagRe = regexp.MustCompile(`(?is)<style\b([^>]*)>(.*?)</style>`)
+var htmlNonContentTagRe = regexp.MustCompile(`(?is)<(style|script|head|title|noscript)\b[^>]*>.*?</\s*(style|script|head|title|noscript)\s*>`)
 
 func extractSafeEmailStyles(value string) ([]string, string) {
 	styles := []string{}
@@ -241,6 +242,7 @@ func snippetFrom(text, html string) string {
 }
 
 func stripTags(s string) string {
+	s = htmlNonContentTagRe.ReplaceAllString(s, " ")
 	var b strings.Builder
 	inTag := false
 	for _, r := range s {

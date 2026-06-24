@@ -442,6 +442,46 @@ func TestParseMailAuthenticationResults(t *testing.T) {
 	}
 }
 
+func TestSnippetFromHTMLIgnoresStyleContent(t *testing.T) {
+	html := `<html><head><style>body { margin: 0; padding: 24px; background: #f4f4f5; }</style><title>Hidden title</title></head><body><p>蓝钦AI 余额充值成功</p></body></html>`
+	got := snippetFrom("", html)
+	if strings.Contains(got, "body {") || strings.Contains(got, "margin:") || strings.Contains(got, "Hidden title") {
+		t.Fatalf("snippet kept non-content html text: %q", got)
+	}
+	if !strings.Contains(got, "蓝钦AI 余额充值成功") {
+		t.Fatalf("snippet missing body text: %q", got)
+	}
+}
+
+func TestRebuildHTMLOnlyMessageSnippetsDropsStyleContent(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	folderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	bodyHTML := `<html><head><style>body { margin: 0; padding: 24px; background: #f4f4f5; }</style></head><body><p>hello readable body</p></body></html>`
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, "msg_css_snippet", mb.ID, folderID, "", newID("uid"), "<css-snippet@example.test>", "css", mb.Address, "", "[]", "[]", "[]", now, now, "body { margin: 0; padding: 24px; }", "", bodyHTML, 1, 0, 0, int64(len(bodyHTML)), now, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.rebuildHTMLOnlyMessageSnippets(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var snippet string
+	if err := a.db.QueryRowContext(ctx, `SELECT snippet FROM messages WHERE id='msg_css_snippet'`).Scan(&snippet); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(snippet, "body {") || strings.Contains(snippet, "margin:") {
+		t.Fatalf("snippet was not rebuilt: %q", snippet)
+	}
+	if snippet != "hello readable body" {
+		t.Fatalf("snippet=%q, want body text", snippet)
+	}
+}
+
 func TestMailRulesConditionGroupsAndActions(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
