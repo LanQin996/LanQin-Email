@@ -70,6 +70,45 @@ export type SendPayload = { mailboxId?: string; to: string[]; cc: string[]; bcc:
 export type DraftPayload = Omit<SendPayload, "attachments"> & { attachments?: SendPayload["attachments"] }
 export type ScheduleSendPayload = SendPayload & { draftId?: string; sendAt: string }
 export type ScheduledSend = { id: string; mailboxId: string; draftId?: string; subject: string; to: string[]; snippet: string; sendAt: string; status: "pending" | "sending" | "sent" | "failed" | "cancelled"; error?: string; createdAt: string; updatedAt: string; sentAt?: string }
+export type SendQueueStatus = "queued" | "sending" | "delivered" | "failed" | "canceled"
+export type SendQueueItem = {
+  id: string
+  mailboxId: string
+  sentMessageId?: string
+  messageId?: string
+  mailFrom?: string
+  headerFrom?: string
+  subject: string
+  recipients: string[]
+  source: string
+  status: SendQueueStatus
+  attemptCount: number
+  maxAttempts: number
+  nextAttemptAt?: string
+  lastError?: string
+  error?: string
+  failureReason?: string
+  createdAt: string
+  updatedAt: string
+  deliveredAt?: string
+}
+export type SendQueueAuditEvent = {
+  id: string
+  queueId?: string
+  mailboxId?: string
+  sentMessageId?: string
+  source?: string
+  status?: SendQueueStatus
+  event?: string
+  eventType?: string
+  mailFrom?: string
+  headerFrom?: string
+  recipients?: string[]
+  message?: string
+  error?: string
+  attemptCount?: number
+  createdAt: string
+}
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
 export type MailRuleCondition = { field: "from" | "to" | "subject" | "body"; operator: "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with"; value: string }

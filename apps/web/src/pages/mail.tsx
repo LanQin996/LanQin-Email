@@ -12,8 +12,8 @@ import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
-import { api, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, PermissionLimits } from "@/lib/api"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { api, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
@@ -61,7 +61,7 @@ const folderLabels: Record<string, string> = {
 
 type ComposeDraft = { key: string; id?: string; mailboxId?: string; to?: string; cc?: string; bcc?: string; subject?: string; text?: string; html?: string; files?: File[]; isDraft?: boolean }
 type MailFilter = "all" | "unread" | "starred" | "attachments"
-type MailView = "folder" | "starred" | "label" | "scheduled"
+type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue"
 type MailListResponse = { items?: MailMessage[]; nextCursor?: string }
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
@@ -69,6 +69,7 @@ type ComposeSendIntent = { title: string; description: string; confirmText: stri
 type MailMenuItem =
   | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number }
   | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number }
+  | { type: "sendQueue"; key: string; label: string; icon: React.ReactNode; count: number }
   | { type: "folder"; key: string; folderName: string; label: string; icon: React.ReactNode; count: number }
 
 const filterLabels: Record<MailFilter, string> = {
@@ -103,6 +104,9 @@ export function MailPage() {
   const [bulkPending, setBulkPending] = React.useState(false)
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const [cancelingScheduledId, setCancelingScheduledId] = React.useState("")
+  const [sendQueueStatus, setSendQueueStatus] = React.useState<SendQueueStatus | "all">("all")
+  const [sendQueueAuditId, setSendQueueAuditId] = React.useState("")
+  const [sendQueuePendingId, setSendQueuePendingId] = React.useState("")
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
   const [labelEditMode, setLabelEditMode] = React.useState(false)
   const [newLabelEditing, setNewLabelEditing] = React.useState(false)
@@ -130,6 +134,9 @@ export function MailPage() {
   const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && (canReadMail || canManageLabels) })
   const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && hasPermission(user, "mail.stats.view") })
   const scheduledSends = useQuery({ queryKey: ["scheduled-sends", activeMailboxId], queryFn: () => api.scheduledSends(activeMailboxId), enabled: !!activeMailboxId && canScheduleMail, refetchInterval: 30000 })
+  const canViewSendQueue = canReadMail
+  const sendQueue = useQuery({ queryKey: ["send-queue", activeMailboxId, sendQueueStatus], queryFn: () => api.sendQueue({ mailboxId: activeMailboxId, status: sendQueueStatus }), enabled: !!activeMailboxId && canViewSendQueue, refetchInterval: 15000 })
+  const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: !!sendQueueAuditId && canViewSendQueue })
   const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
@@ -148,7 +155,7 @@ export function MailPage() {
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && (mailView !== "label" || !!selectedLabelId),
+    enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && mailView !== "sendQueue" && (mailView !== "label" || !!selectedLabelId),
   })
   const detail = useQuery({ queryKey: ["message", selectedId], queryFn: () => api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail })
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
@@ -275,6 +282,28 @@ export function MailPage() {
     },
     onError: (error) => toast({ title: "操作失败", description: error instanceof Error ? error.message : "请稍后重试" }),
     onSettled: () => setCancelingScheduledId(""),
+  })
+  const retrySendQueue = useMutation({
+    mutationFn: (item: SendQueueItem) => api.retrySendQueue(item.id),
+    onMutate: (item) => setSendQueuePendingId(item.id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["send-queue"] })
+      await qc.invalidateQueries({ queryKey: ["send-queue-audit"] })
+      toast({ title: "已重新加入发送队列" })
+    },
+    onError: (error) => toast({ title: "重试失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onSettled: () => setSendQueuePendingId(""),
+  })
+  const cancelSendQueue = useMutation({
+    mutationFn: (item: SendQueueItem) => api.cancelSendQueue(item.id),
+    onMutate: (item) => setSendQueuePendingId(item.id),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["send-queue"] })
+      await qc.invalidateQueries({ queryKey: ["send-queue-audit"] })
+      toast({ title: "已取消发送任务" })
+    },
+    onError: (error) => toast({ title: "取消失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onSettled: () => setSendQueuePendingId(""),
   })
   const markAllRead = useMutation({
     mutationFn: async (items: MailMessage[]) => {
@@ -403,6 +432,7 @@ export function MailPage() {
         qc.invalidateQueries({ queryKey: ["mail-stats"] }),
         qc.invalidateQueries({ queryKey: ["labels"] }),
         qc.invalidateQueries({ queryKey: ["scheduled-sends"] }),
+        qc.invalidateQueries({ queryKey: ["send-queue"] }),
         qc.invalidateQueries({ queryKey: ["mail-notifications"] }),
       ]).finally(() => {
         setLastAutoRefreshAt(new Date())
@@ -429,10 +459,16 @@ export function MailPage() {
   const visibleScheduledItems = scheduledQuery
     ? scheduledItems.filter((item) => [item.subject, item.snippet, ...(item.to || [])].join(" ").toLowerCase().includes(scheduledQuery))
     : scheduledItems
-  const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, canScheduleMail ? scheduledCount : 0, canScheduleMail)
+  const sendQueueItems = sendQueue.data?.items || []
+  const sendQueueCount = sendQueueItems.filter((item) => item.status === "failed" || item.status === "queued" || item.status === "sending").length
+  const sendQueueQuery = query.trim().toLowerCase()
+  const visibleSendQueueItems = sendQueueQuery
+    ? sendQueueItems.filter((item) => [item.subject, item.source, item.lastError, item.error, item.failureReason, ...(item.recipients || [])].join(" ").toLowerCase().includes(sendQueueQuery))
+    : sendQueueItems
+  const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, canScheduleMail ? scheduledCount : 0, canScheduleMail, canViewSendQueue ? sendQueueCount : 0, canViewSendQueue)
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
-  const viewTitle = mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
+  const viewTitle = mailView === "sendQueue" ? "发送队列" : mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
   const emptyMessage = getEmptyMessage(mailView, folder, allMessages.length)
   const visibleMessageIds = visibleMessages.map((message) => message.id)
   const selectedCountOnPage = compactSelectedIds.filter((id) => visibleMessageIds.includes(id)).length
@@ -453,6 +489,7 @@ export function MailPage() {
       qc.invalidateQueries({ queryKey: ["mail-stats"] }),
       qc.invalidateQueries({ queryKey: ["labels"] }),
       qc.invalidateQueries({ queryKey: ["scheduled-sends"] }),
+      qc.invalidateQueries({ queryKey: ["send-queue"] }),
     ])
   }
   async function runBulkAction(action: BulkAction) {
@@ -576,6 +613,13 @@ export function MailPage() {
     setMailFilter("all")
     setMobileSidebarOpen(false)
   }
+  function openSendQueue() {
+    setMailView("sendQueue")
+    setSelectedLabelId("")
+    setSelectedId(null)
+    setMailFilter("all")
+    setMobileSidebarOpen(false)
+  }
   function openLabel(labelId: string) {
     setSelectedLabelId(labelId)
     setMailView("label")
@@ -654,9 +698,9 @@ export function MailPage() {
               {mailMenuItems.map((item) => (
                 <SidebarMenuItem key={item.key}>
                   <SidebarMenuButton
-                    isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : mailView === "folder" && folder === item.folderName}
+                    isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : item.type === "sendQueue" ? mailView === "sendQueue" : mailView === "folder" && folder === item.folderName}
                     className={cn(sidebarCollapsed && "justify-center px-0")}
-                    onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : openFolder(item.folderName)}
+                    onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : item.type === "sendQueue" ? openSendQueue() : openFolder(item.folderName)}
                   >
                     {item.icon}
                     {!sidebarCollapsed && <span>{item.label}</span>}
@@ -772,6 +816,23 @@ export function MailPage() {
     />
   ) : mailView === "scheduled" ? (
     <PermissionEmptyState title="无定时发送权限" description="当前账号不能查看或管理定时发送任务。" onOpenSettings={openSettings} />
+  ) : mailView === "sendQueue" && canViewSendQueue ? (
+    <SendQueueView
+      compact={isMobile || displayMode === "compact"}
+      items={visibleSendQueueItems}
+      total={sendQueueItems.length}
+      loading={sendQueue.isLoading}
+      query={query}
+      status={sendQueueStatus}
+      pendingId={sendQueuePendingId}
+      onStatusChange={setSendQueueStatus}
+      onRetry={(item) => retrySendQueue.mutate(item)}
+      onCancel={(item) => cancelSendQueue.mutate(item)}
+      onAudit={(item) => setSendQueueAuditId(item.id)}
+      canMutate={canSendMail}
+    />
+  ) : mailView === "sendQueue" ? (
+    <PermissionEmptyState title="无发送队列权限" description="当前账号不能查看发送队列。" onOpenSettings={openSettings} />
   ) : isMobile || displayMode === "compact" ? (
     <CompactMailView
       title={viewTitle}
@@ -900,7 +961,7 @@ export function MailPage() {
                 {canSendMail && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
                 <div className="relative basis-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
+                  <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
                 </div>
               </header>
             )}
@@ -924,7 +985,7 @@ export function MailPage() {
                         {autoRefreshing ? "自动刷新中..." : lastAutoRefreshAt ? `已刷新 ${lastAutoRefreshAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "自动刷新已开启"}
                       </div>
                     )}
-                    {mailView !== "scheduled" && (
+                    {mailView !== "scheduled" && mailView !== "sendQueue" && (
                       <>
                         {canOrganizeMail && <Button variant="outline" size="sm" disabled={!activeMailboxId || markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>}
                         <DropdownMenu>
@@ -944,7 +1005,7 @@ export function MailPage() {
                   </div>
                   <div className="relative w-full max-w-md">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
+                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
                   </div>
                 </header>
                 {contentView}
@@ -954,7 +1015,13 @@ export function MailPage() {
         )}
       </SidebarProvider>
 
-      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} limits={user?.limits} canSend={canSendMail} canManageDrafts={canManageDrafts} canSchedule={canScheduleMail} canManageSignatures={canManageSignatures} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }) }} />
+      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} limits={user?.limits} canSend={canSendMail} canManageDrafts={canManageDrafts} canSchedule={canScheduleMail} canManageSignatures={canManageSignatures} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }); qc.invalidateQueries({ queryKey: ["send-queue"] }) }} />
+      <SendQueueAuditDialog
+        open={!!sendQueueAuditId}
+        loading={sendQueueAudit.isLoading}
+        events={sendQueueAudit.data?.items || []}
+        onOpenChange={(open) => { if (!open) setSendQueueAuditId("") }}
+      />
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
@@ -969,7 +1036,7 @@ export function MailPage() {
   )
 }
 
-function buildMailMenuItems(folders: MailFolder[], starredCount: number, scheduledCount: number, includeScheduled: boolean): MailMenuItem[] {
+function buildMailMenuItems(folders: MailFolder[], starredCount: number, scheduledCount: number, includeScheduled: boolean, sendQueueCount: number, includeSendQueue: boolean): MailMenuItem[] {
   const byName = new Map(folders.map((item) => [item.name, item]))
   const normalizedFolders = ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map((name) => byName.get(name) || { id: `virtual-${name}`, name, role: name.toLowerCase(), unreadCount: 0, totalCount: 0 })
   for (const item of folders) {
@@ -985,10 +1052,13 @@ function buildMailMenuItems(folders: MailFolder[], starredCount: number, schedul
   }))
   const starredItem: MailMenuItem = { type: "starred", key: "starred", label: "星标邮件", icon: <Star className="h-4 w-4" />, count: starredCount }
   const scheduledItem: MailMenuItem = { type: "scheduled", key: "scheduled", label: "待发送", icon: <Clock3 className="h-4 w-4" />, count: scheduledCount }
+  const sendQueueItem: MailMenuItem = { type: "sendQueue", key: "send-queue", label: "发送队列", icon: <History className="h-4 w-4" />, count: sendQueueCount }
   const inboxIndex = folderItems.findIndex((item) => item.type === "folder" && item.folderName === "Inbox")
   const insertAt = inboxIndex >= 0 ? inboxIndex + 1 : 0
-  if (!includeScheduled) return [...folderItems.slice(0, insertAt), starredItem, ...folderItems.slice(insertAt)]
-  return [...folderItems.slice(0, insertAt), starredItem, scheduledItem, ...folderItems.slice(insertAt)]
+  const specialItems: MailMenuItem[] = [starredItem]
+  if (includeScheduled) specialItems.push(scheduledItem)
+  if (includeSendQueue) specialItems.push(sendQueueItem)
+  return [...folderItems.slice(0, insertAt), ...specialItems, ...folderItems.slice(insertAt)]
 }
 
 function FolderSkeleton() { return <div className="space-y-2 p-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-4/5" /><Skeleton className="h-8 w-3/4" /></div> }
@@ -996,6 +1066,7 @@ function MessageSkeleton() { return <div className="space-y-0">{Array.from({ len
 
 function getEmptyMessage(mailView: MailView, folder: string, total: number) {
   if (mailView === "scheduled") return total === 0 ? "没有待发送邮件" : "当前搜索没有匹配的定时邮件"
+  if (mailView === "sendQueue") return total === 0 ? "发送队列为空" : "当前搜索没有匹配的发送任务"
   if (total > 0) return "当前筛选条件下没有邮件"
   if (mailView === "starred") return "暂无星标邮件"
   if (mailView === "label") return "当前标签没有邮件"
@@ -1112,6 +1183,180 @@ function ScheduledStatusBadge({ status }: { status: ScheduledSend["status"] }) {
       {label}
     </Badge>
   )
+}
+
+const sendQueueStatusOptions: { value: SendQueueStatus | "all"; label: string }[] = [
+  { value: "all", label: "全部状态" },
+  { value: "queued", label: "排队中" },
+  { value: "sending", label: "发送中" },
+  { value: "failed", label: "发送失败" },
+  { value: "delivered", label: "已投递" },
+  { value: "canceled", label: "已取消" },
+]
+
+function SendQueueView({
+  compact,
+  items,
+  total,
+  loading,
+  query,
+  status,
+  pendingId,
+  onStatusChange,
+  onRetry,
+  onCancel,
+  onAudit,
+  canMutate,
+}: {
+  compact: boolean
+  items: SendQueueItem[]
+  total: number
+  loading: boolean
+  query: string
+  status: SendQueueStatus | "all"
+  pendingId: string
+  onStatusChange: (status: SendQueueStatus | "all") => void
+  onRetry: (item: SendQueueItem) => void
+  onCancel: (item: SendQueueItem) => void
+  onAudit: (item: SendQueueItem) => void
+  canMutate: boolean
+}) {
+  const empty = query.trim() ? "当前搜索没有匹配的发送任务" : "发送队列为空"
+  return (
+    <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className={cn("flex shrink-0 items-center justify-between gap-3 border-b", compact ? "min-h-12 px-4 py-2" : "h-14 px-5")}>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4" />发送队列</div>
+          <div className="text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
+        </div>
+        <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
+          <SelectTrigger className="h-9 w-[132px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+      <ScrollArea className="min-h-0 flex-1">
+        {loading && <ScheduledSendSkeleton />}
+        {!loading && items.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div>}
+        {!loading && items.map((item) => (
+          <SendQueueRow
+            key={item.id}
+            item={item}
+            compact={compact}
+            pending={pendingId === item.id}
+            onRetry={() => onRetry(item)}
+            onCancel={() => onCancel(item)}
+            onAudit={() => onAudit(item)}
+            canMutate={canMutate}
+          />
+        ))}
+      </ScrollArea>
+    </div>
+  )
+}
+
+function SendQueueRow({ item, compact, pending, onRetry, onCancel, onAudit, canMutate }: { item: SendQueueItem; compact: boolean; pending: boolean; onRetry: () => void; onCancel: () => void; onAudit: () => void; canMutate: boolean }) {
+  const recipients = item.recipients?.length ? item.recipients.join(", ") : "未记录收件人"
+  const failure = item.lastError || item.error || item.failureReason || ""
+  const canRetry = item.status === "failed"
+  const canCancel = item.status === "queued" || item.status === "failed"
+  return (
+    <div className={cn("border-b transition-colors hover:bg-accent/40", compact ? "p-4" : "px-5 py-4")}>
+      <div className={cn("gap-4", compact ? "space-y-3" : "grid grid-cols-[minmax(0,1fr)_210px_220px] items-center")}>
+        <div className="min-w-0">
+          <div className="mb-1 flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-semibold">{item.subject || "(无主题)"}</span>
+            <SendQueueStatusBadge status={item.status} />
+          </div>
+          <div className="truncate text-xs text-muted-foreground">发给 {recipients}</div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>来源：{sendQueueSourceLabel(item.source)}</span>
+            <span>尝试：{item.attemptCount}/{item.maxAttempts}</span>
+            {item.nextAttemptAt && <span>下次：{formatDateTime(item.nextAttemptAt)}</span>}
+          </div>
+          {failure && <div className="mt-2 line-clamp-2 text-xs text-destructive">{failure}</div>}
+        </div>
+        <div className="space-y-1 text-sm">
+          <div className="text-xs text-muted-foreground">更新时间</div>
+          <div className="font-medium">{formatDateTime(item.updatedAt || item.createdAt)}</div>
+          {item.deliveredAt && <div className="text-xs text-muted-foreground">投递于 {formatDateTime(item.deliveredAt)}</div>}
+        </div>
+        <div className={cn("flex flex-wrap gap-2", compact ? "justify-start" : "justify-end")}>
+          <Button type="button" variant="outline" size="sm" onClick={onAudit}>
+            <History className="h-4 w-4" />时间线
+          </Button>
+          {canMutate && canRetry && (
+            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={onRetry}>
+              <RotateCcw className="h-4 w-4" />{pending ? "处理中..." : "重试"}
+            </Button>
+          )}
+          {canMutate && canCancel && (
+            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={onCancel}>
+              {pending ? "处理中..." : "取消"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SendQueueStatusBadge({ status }: { status: SendQueueStatus }) {
+  const label = status === "queued" ? "排队中" : status === "sending" ? "发送中" : status === "delivered" ? "已投递" : status === "failed" ? "发送失败" : "已取消"
+  return (
+    <Badge variant={status === "failed" ? "destructive" : status === "sending" || status === "queued" ? "secondary" : "outline"} className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">
+      {label}
+    </Badge>
+  )
+}
+
+function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: boolean; loading: boolean; events: SendQueueAuditEvent[]; onOpenChange: (open: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(92vw,42rem)] max-w-none">
+        <DialogHeader>
+          <DialogTitle>投递时间线</DialogTitle>
+        </DialogHeader>
+        <div className="max-h-[60vh] overflow-auto pr-1">
+          {loading && <div className="space-y-3">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full" />)}</div>}
+          {!loading && events.length === 0 && <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">暂无投递事件</div>}
+          {!loading && events.length > 0 && (
+            <div className="space-y-3">
+              {events.map((event) => (
+                <div key={event.id} className="rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-sm font-medium">
+                      {event.status && <SendQueueStatusBadge status={event.status} />}
+                      <span>{event.message || event.event || event.eventType || "队列事件"}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {typeof event.attemptCount === "number" && <span>尝试次数：{event.attemptCount}</span>}
+                    {event.error && <span className="text-destructive">{event.error}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function sendQueueSourceLabel(source: string) {
+  const normalized = source.toLowerCase()
+  if (normalized === "submission") return "SMTP Submission"
+  if (normalized === "webmail") return "Webmail"
+  if (normalized === "scheduled") return "定时发送"
+  return source || "未知"
 }
 
 type BulkAction = "read" | "unread" | "star" | "unstar" | "archive" | "trash" | "spam" | "delete"

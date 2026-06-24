@@ -1054,6 +1054,193 @@ func TestSendQueueStaleDeliveredMarkerDoesNotRedeliver(t *testing.T) {
 	}
 }
 
+func TestSendQueueAPIPermissionIsolation(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	aliceMB := createTestMailbox(t, admin, domainID, "queue-alice", "Queue Alice", "Password123!", nil)
+	bobMB := createTestMailbox(t, admin, domainID, "queue-bob", "Queue Bob", "Password123!", nil)
+	aliceUser, _, err := a.userByEmail(context.Background(), aliceMB.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobUser, _, err := a.userByEmail(context.Background(), bobMB.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := a.now().UTC()
+	aliceQueueID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     aliceUser.ID,
+		MailboxID:  aliceMB.ID,
+		MessageID:  "<alice-queue@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   aliceMB.Address,
+		HeaderFrom: aliceMB.Address,
+		Recipients: []string{"person@example.test"},
+		MIMEBytes:  []byte("From: queue-alice@example.test\r\nTo: person@example.test\r\nSubject: alice\r\n\r\nbody"),
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     bobUser.ID,
+		MailboxID:  bobMB.ID,
+		MessageID:  "<bob-queue@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   bobMB.Address,
+		HeaderFrom: bobMB.Address,
+		Recipients: []string{"person@example.test"},
+		MIMEBytes:  []byte("From: queue-bob@example.test\r\nTo: person@example.test\r\nSubject: bob\r\n\r\nbody"),
+		Now:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	alice := &testClient{t: t, server: ts}
+	if code := alice.do("POST", "/api/auth/login", map[string]string{"email": aliceMB.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("alice login code=%d", code)
+	}
+	var list struct {
+		Items []SendQueueEntry `json:"items"`
+	}
+	if code := alice.do("GET", "/api/mail/send-queue?mailboxId="+aliceMB.ID, nil, &list); code != http.StatusOK {
+		t.Fatalf("list own queue code=%d items=%+v", code, list.Items)
+	}
+	if len(list.Items) != 1 || list.Items[0].ID != aliceQueueID || list.Items[0].MailboxID != aliceMB.ID {
+		t.Fatalf("own queue isolation failed: %+v", list.Items)
+	}
+	if code := alice.do("GET", "/api/mail/send-queue?mailboxId="+bobMB.ID, nil, &map[string]any{}); code != http.StatusNotFound {
+		t.Fatalf("listing another mailbox should be hidden, code=%d", code)
+	}
+	if code := alice.do("GET", "/api/mail/send-queue/"+list.Items[0].ID+"/audit", nil, &struct {
+		Items []SendAuditEvent `json:"items"`
+	}{}); code != http.StatusOK {
+		t.Fatalf("own audit code=%d", code)
+	}
+}
+
+func TestSendQueueAPIRetryAndCancel(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	now := a.now().UTC()
+	failedID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		MessageID:  "<failed-retry-api@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.test"},
+		MIMEBytes:  []byte("From: admin@lanqin.local\r\nTo: person@example.test\r\nSubject: retry\r\n\r\nbody"),
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=3,last_error='temporary failure',next_attempt_at=? WHERE id=?`, sendQueueStatusFailed, now.Add(time.Hour).Format(time.RFC3339Nano), failedID); err != nil {
+		t.Fatal(err)
+	}
+	var retried SendQueueEntry
+	if code := client.do("POST", "/api/mail/send-queue/"+failedID+"/retry", nil, &retried); code != http.StatusOK {
+		t.Fatalf("retry failed queue code=%d item=%+v", code, retried)
+	}
+	if retried.Status != sendQueueStatusQueued || retried.AttemptCount != 0 || retried.LastError != "" {
+		t.Fatalf("retry did not reset queue item: %+v", retried)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		if !strings.Contains(body, "Subject: retry") {
+			t.Fatalf("unexpected retried body: %q", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("retried queue item was not relayed")
+	}
+
+	deliveredID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		MessageID:  "<delivered-retry-api@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.test"},
+		MIMEBytes:  []byte("From: admin@lanqin.local\r\nTo: person@example.test\r\nSubject: delivered\r\n\r\nbody"),
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,delivered_at=?,mime_base64='' WHERE id=?`, sendQueueStatusDelivered, now.Format(time.RFC3339Nano), deliveredID); err != nil {
+		t.Fatal(err)
+	}
+	if code := client.do("POST", "/api/mail/send-queue/"+deliveredID+"/retry", nil, &map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("delivered retry should be rejected, code=%d", code)
+	}
+
+	cancelID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		MessageID:  "<cancel-api@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.test"},
+		MIMEBytes:  []byte("From: admin@lanqin.local\r\nTo: person@example.test\r\nSubject: cancel\r\n\r\nbody"),
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canceled SendQueueEntry
+	if code := client.do("DELETE", "/api/mail/send-queue/"+cancelID, nil, &canceled); code != http.StatusOK {
+		t.Fatalf("cancel queued item code=%d item=%+v", code, canceled)
+	}
+	if canceled.Status != sendQueueStatusCanceled {
+		t.Fatalf("canceled status=%q", canceled.Status)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		if strings.Contains(body, "Subject: cancel") {
+			t.Fatalf("canceled queue item was relayed: %q", body)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+	var status string
+	if err := a.db.QueryRow(`SELECT status FROM send_queue WHERE id=?`, cancelID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusCanceled {
+		t.Fatalf("cancel status after worker=%q", status)
+	}
+}
+
 func TestSubmissionAuthRequiresMailboxPasswordAndSendPermission(t *testing.T) {
 	a := newTestApp(t)
 	user, mailbox, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
@@ -1374,6 +1561,43 @@ func TestSubmissionRequeuesDeliveredDuplicateMessageID(t *testing.T) {
 	var status string
 	var attemptCount int
 	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<delivered-requeue@example.test>").Scan(&status, &attemptCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered || attemptCount != 1 {
+		t.Fatalf("queue status=%q attempts=%d, want delivered attempts=1", status, attemptCount)
+	}
+}
+
+func TestSubmissionRequeuesCanceledDuplicateMessageID(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: canceled resend\r\nMessage-ID: <canceled-requeue@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,updated_at=? WHERE mailbox_id=? AND message_id=?`, sendQueueStatusCanceled, a.now().UTC().Format(time.RFC3339Nano), mb.ID, "<canceled-requeue@example.test>"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("requeued canceled message was not relayed")
+	}
+	var status string
+	var attemptCount int
+	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<canceled-requeue@example.test>").Scan(&status, &attemptCount); err != nil {
 		t.Fatal(err)
 	}
 	if status != sendQueueStatusDelivered || attemptCount != 1 {

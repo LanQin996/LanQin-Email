@@ -907,6 +907,214 @@ func (a *App) handleScheduledSends(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (a *App) handleSendQueue(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	status := strings.TrimSpace(r.URL.Query().Get("status"))
+	cursor, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
+	if cursor < 0 {
+		cursor = 0
+	}
+	limit := 30
+	args := []any{user.ID, mb.ID}
+	where := `mb.user_id=? AND sq.mailbox_id=?`
+	if status != "" {
+		if !validSendQueueStatus(status) {
+			badRequest(w, errors.New("invalid send queue status"))
+			return
+		}
+		where += ` AND sq.status=?`
+		args = append(args, status)
+	}
+	args = append(args, limit+1, cursor)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT sq.id,sq.mailbox_id,sq.sent_message_id,sq.message_id,COALESCE(m.subject,''),sq.source,sq.mail_from,sq.header_from,sq.recipients_json,sq.status,sq.attempt_count,sq.max_attempts,sq.next_attempt_at,sq.last_error,sq.created_at,sq.updated_at,sq.delivered_at
+		FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id LEFT JOIN messages m ON m.id=sq.sent_message_id WHERE `+where+` ORDER BY sq.created_at DESC, sq.id DESC LIMIT ? OFFSET ?`, args...)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send queue")
+		return
+	}
+	defer rows.Close()
+	items := []SendQueueEntry{}
+	for rows.Next() {
+		item, err := scanSendQueueEntry(rows)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to scan send queue")
+			return
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send queue")
+		return
+	}
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		next = strconv.Itoa(cursor + limit)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+}
+
+func (a *App) handleSendQueueAudit(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if !a.sendQueueBelongsToUser(r.Context(), id, user.ID) {
+		respondError(w, http.StatusNotFound, "send queue item not found")
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,queue_id,mailbox_id,sent_message_id,source,event,status,mail_from,header_from,recipients_json,error,created_at
+		FROM send_audit_events WHERE queue_id=? ORDER BY created_at ASC, id ASC`, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send audit")
+		return
+	}
+	defer rows.Close()
+	items := []SendAuditEvent{}
+	for rows.Next() {
+		var item SendAuditEvent
+		var recipientsJSON, createdAt string
+		if err := rows.Scan(&item.ID, &item.QueueID, &item.MailboxID, &item.SentMessageID, &item.Source, &item.Event, &item.Status, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &item.Error, &createdAt); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to scan send audit")
+			return
+		}
+		item.Recipients = jsonDecodeSlice(recipientsJSON)
+		item.CreatedAt = parseTime(createdAt)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send audit")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *App) handleRetrySendQueue(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	item, err := a.loadSendQueueEntryForUser(r.Context(), id, user.ID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "send queue item not found")
+		return
+	}
+	if item.Status != sendQueueStatusFailed {
+		badRequest(w, errors.New("send queue item is not failed"))
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE send_queue SET status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=? AND EXISTS (SELECT 1 FROM mailboxes mb WHERE mb.id=send_queue.mailbox_id AND mb.user_id=?)`,
+		sendQueueStatusQueued, now, now, id, sendQueueStatusFailed, user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to retry send queue item")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		respondError(w, http.StatusNotFound, "send queue item not found")
+		return
+	}
+	a.deleteSendQueueDeliveredMarker(id)
+	a.recordSendAudit(r.Context(), sendAuditRetry, sendQueueStatusQueued, sendAuditInput{
+		QueueID:       item.ID,
+		UserID:        user.ID,
+		MailboxID:     item.MailboxID,
+		SentMessageID: item.SentMessageID,
+		Source:        item.Source,
+		MailFrom:      item.MailFrom,
+		HeaderFrom:    item.HeaderFrom,
+		Recipients:    item.Recipients,
+	})
+	updated, err := a.loadSendQueueEntryForUser(r.Context(), id, user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send queue item")
+		return
+	}
+	respondJSON(w, http.StatusOK, updated)
+}
+
+func (a *App) handleCancelSendQueue(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	item, err := a.loadSendQueueEntryForUser(r.Context(), id, user.ID)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "send queue item not found")
+		return
+	}
+	if item.Status != sendQueueStatusQueued && item.Status != sendQueueStatusFailed {
+		badRequest(w, errors.New("send queue item cannot be canceled"))
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE send_queue SET status=?,last_error='',updated_at=? WHERE id=? AND status IN (?,?) AND EXISTS (SELECT 1 FROM mailboxes mb WHERE mb.id=send_queue.mailbox_id AND mb.user_id=?)`,
+		sendQueueStatusCanceled, now, id, sendQueueStatusQueued, sendQueueStatusFailed, user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to cancel send queue item")
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		respondError(w, http.StatusNotFound, "send queue item not found")
+		return
+	}
+	a.deleteSendQueueDeliveredMarker(id)
+	a.recordSendAudit(r.Context(), sendAuditCanceled, sendQueueStatusCanceled, sendAuditInput{
+		QueueID:       item.ID,
+		UserID:        user.ID,
+		MailboxID:     item.MailboxID,
+		SentMessageID: item.SentMessageID,
+		Source:        item.Source,
+		MailFrom:      item.MailFrom,
+		HeaderFrom:    item.HeaderFrom,
+		Recipients:    item.Recipients,
+	})
+	updated, err := a.loadSendQueueEntryForUser(r.Context(), id, user.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send queue item")
+		return
+	}
+	respondJSON(w, http.StatusOK, updated)
+}
+
+type sendQueueEntryScanner interface{ Scan(dest ...any) error }
+
+func scanSendQueueEntry(row sendQueueEntryScanner) (SendQueueEntry, error) {
+	var item SendQueueEntry
+	var recipientsJSON, nextAttemptAt, createdAt, updatedAt string
+	var deliveredAt sql.NullString
+	err := row.Scan(&item.ID, &item.MailboxID, &item.SentMessageID, &item.MessageID, &item.Subject, &item.Source, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &item.Status, &item.AttemptCount, &item.MaxAttempts, &nextAttemptAt, &item.LastError, &createdAt, &updatedAt, &deliveredAt)
+	if err != nil {
+		return item, err
+	}
+	item.Recipients = jsonDecodeSlice(recipientsJSON)
+	item.NextAttemptAt = parseTime(nextAttemptAt)
+	item.CreatedAt = parseTime(createdAt)
+	item.UpdatedAt = parseTime(updatedAt)
+	item.DeliveredAt = nullableTime(deliveredAt)
+	return item, nil
+}
+
+func (a *App) loadSendQueueEntryForUser(ctx context.Context, id, userID string) (SendQueueEntry, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT sq.id,sq.mailbox_id,sq.sent_message_id,sq.message_id,COALESCE(m.subject,''),sq.source,sq.mail_from,sq.header_from,sq.recipients_json,sq.status,sq.attempt_count,sq.max_attempts,sq.next_attempt_at,sq.last_error,sq.created_at,sq.updated_at,sq.delivered_at
+		FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id LEFT JOIN messages m ON m.id=sq.sent_message_id WHERE sq.id=? AND mb.user_id=?`, id, userID)
+	return scanSendQueueEntry(row)
+}
+
+func (a *App) sendQueueBelongsToUser(ctx context.Context, id, userID string) bool {
+	var count int
+	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id WHERE sq.id=? AND mb.user_id=?`, id, userID).Scan(&count)
+	return count > 0
+}
+
+func validSendQueueStatus(status string) bool {
+	switch status {
+	case sendQueueStatusQueued, sendQueueStatusSending, sendQueueStatusDelivered, sendQueueStatusFailed, sendQueueStatusCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		MailboxID   string            `json:"mailboxId"`

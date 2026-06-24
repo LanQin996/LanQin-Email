@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -131,6 +131,17 @@ export const api = {
   scheduledSends: (mailboxId?: string) => request<ListResponse<ScheduledSend>>(`/api/mail/scheduled-sends${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   scheduleSend: (payload: ScheduleSendPayload) => request<ScheduledSend>("/api/mail/schedule-send", { method: "POST", body: JSON.stringify(payload), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   cancelScheduledSend: (id: string) => request<{ ok: boolean }>(`/api/mail/schedule-send/${id}`, { method: "DELETE" }),
+  sendQueue: (params: { mailboxId?: string; status?: SendQueueStatus | "all"; cursor?: string } = {}) => {
+    const query = new URLSearchParams()
+    if (params.mailboxId) query.set("mailboxId", params.mailboxId)
+    if (params.status && params.status !== "all") query.set("status", params.status)
+    if (params.cursor) query.set("cursor", params.cursor)
+    const suffix = query.toString()
+    return request<ListResponse<SendQueueItem>>(`/api/mail/send-queue${suffix ? `?${suffix}` : ""}`)
+  },
+  sendQueueAudit: (id: string) => request<ListResponse<SendQueueAuditEvent>>(`/api/mail/send-queue/${id}/audit`),
+  retrySendQueue: (id: string) => request<SendQueueItem>(`/api/mail/send-queue/${id}/retry`, { method: "POST", timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  cancelSendQueue: (id: string) => request<SendQueueItem>(`/api/mail/send-queue/${id}`, { method: "DELETE" }),
   saveDraft: (payload: DraftPayload, id?: string) => request<MailMessage>(id ? `/api/mail/drafts/${id}` : "/api/mail/drafts", { method: "POST", body: JSON.stringify(payload), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   deleteDraft: (id: string) => request<{ ok: boolean }>(`/api/mail/drafts/${id}`, { method: "DELETE" }),
   markRead: (id: string, read: boolean) => request<{ ok: boolean }>(`/api/mail/messages/${id}/mark-read`, { method: "POST", body: JSON.stringify({ read }) }),

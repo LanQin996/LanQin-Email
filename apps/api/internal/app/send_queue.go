@@ -16,12 +16,14 @@ const (
 	sendQueueStatusSending   = "sending"
 	sendQueueStatusDelivered = "delivered"
 	sendQueueStatusFailed    = "failed"
+	sendQueueStatusCanceled  = "canceled"
 
 	sendAuditAccepted  = "accepted"
 	sendAuditQueued    = "queued"
 	sendAuditDelivered = "delivered"
 	sendAuditFailed    = "failed"
 	sendAuditRetry     = "retry"
+	sendAuditCanceled  = "canceled"
 
 	sendSourceWebmail    = "webmail"
 	sendSourceSubmission = "submission"
@@ -85,7 +87,7 @@ func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error
 			return "", err
 		}
 		if existingID != id {
-			if status == sendQueueStatusDelivered || (status == sendQueueStatusFailed && attemptCount >= maxAttempts) {
+			if status == sendQueueStatusDelivered || status == sendQueueStatusCanceled || (status == sendQueueStatusFailed && attemptCount >= maxAttempts) {
 				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=?`,
 					in.UserID, in.SentMessageID, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), existingID, status)
 				if err != nil {
