@@ -118,6 +118,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionMessagesRead)).Get("/admin/messages/{id}", a.handleAdminMessage)
 			r.With(a.requirePermission(PermissionMessagesAttachment)).Get("/admin/attachments/{id}", a.handleAdminAttachment)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings", a.handleGetSystemSettings)
+			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/maildir-sync/health", a.handleMaildirSyncHealth)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings", a.handleUpdateSystemSettings)
 			r.With(a.requirePermission(PermissionSettingsTestSMTP)).Post("/admin/settings/test-smtp", a.handleTestSMTP)
 			r.With(a.requirePermission(PermissionTemplatesView)).Get("/admin/mail-templates", a.handleListMailTemplates)

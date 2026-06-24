@@ -3,7 +3,7 @@ import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
-import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
+import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -864,6 +864,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const canResetTemplates = hasPermission(user, "admin.templates.reset")
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates, enabled: canViewTemplates })
   const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "templates" | "security" | "about">("base")
+  const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage" })
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
   const [openRegistration, setOpenRegistration] = React.useState(false)
@@ -912,6 +913,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "settings"] })
+      qc.invalidateQueries({ queryKey: ["admin", "maildir-sync", "health"] })
       qc.invalidateQueries({ queryKey: ["dns-records"] })
       qc.invalidateQueries({ queryKey: ["public-settings"] })
       toast({ title: "系统设置已保存" })
@@ -1002,12 +1004,15 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
         </CardContent>
       </Card>}
 
-      {settingsTab === "storage" && <Card>
-        <CardHeader><CardTitle>存储设置</CardTitle></CardHeader>
-        <CardContent>
-          <Field name="maildirRoot" label="Maildir 根目录" defaultValue={settings?.maildirRoot || ""} required={false} />
-        </CardContent>
-      </Card>}
+      {settingsTab === "storage" && <div className="space-y-6">
+        <Card>
+          <CardHeader><CardTitle>存储设置</CardTitle></CardHeader>
+          <CardContent>
+            <Field name="maildirRoot" label="Maildir 根目录" defaultValue={settings?.maildirRoot || ""} required={false} />
+          </CardContent>
+        </Card>
+        <MaildirSyncHealthCard health={maildirHealth.data} loading={maildirHealth.isLoading} error={maildirHealth.error} onRefresh={() => maildirHealth.refetch()} refreshing={maildirHealth.isFetching} fallbackRoot={settings?.maildirRoot || ""} />
+      </div>}
 
       {settingsTab === "mail" && <Card>
         <CardHeader><CardTitle>邮件设置</CardTitle></CardHeader>
@@ -1079,6 +1084,102 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       </div>}
     </form>
   )
+}
+
+function MaildirSyncHealthCard({ health, loading, error, onRefresh, refreshing, fallbackRoot }: { health?: MaildirSyncHealth; loading: boolean; error: Error | null; onRefresh: () => void; refreshing: boolean; fallbackRoot: string }) {
+  const root = health?.root || fallbackRoot
+  const configured = health?.configured ?? !!root
+  const lastRun = health?.lastRun
+  const counters = lastRun?.counts || health?.summary
+  const recentErrors = health?.recentErrors || []
+  const status = health?.running ? "running" : lastRun?.status || (configured ? "idle" : "disabled")
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <CardTitle>Maildir 同步健康</CardTitle>
+            <div className="break-all text-xs text-muted-foreground">{root || "未配置 Maildir 根目录"}</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Badge variant={configured ? "default" : "secondary"}>{configured ? "已配置" : "未配置"}</Badge>
+            <Badge variant={health?.running ? "default" : health?.workerStarted ? "outline" : "secondary"}>{health?.running ? "运行中" : health?.workerStarted ? "worker 已启动" : "worker 未启动"}</Badge>
+            <Button type="button" variant="outline" size="sm" onClick={onRefresh} disabled={loading || refreshing}>
+              <RefreshCcw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
+              刷新
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{queryErrorMessage(error)}</div>}
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <InfoLine label="当前状态" value={<MaildirStatusBadge status={status} />} />
+          <InfoLine label="最近开始" value={formatOptionalDate(lastRun?.startedAt)} />
+          <InfoLine label="最近结束" value={formatOptionalDate(lastRun?.finishedAt)} />
+          <InfoLine label="最近耗时" value={formatDuration(lastRun?.durationMs)} />
+          <InfoLine label="扫描间隔" value={health?.scanSeconds ? `${health.scanSeconds} 秒` : "-"} />
+          <InfoLine label="下次运行" value={formatOptionalDate(health?.nextRunAt)} />
+          <InfoLine label="最后错误" value={lastRun?.error || health?.lastError || "-"} />
+          <InfoLine label="错误数" value={counterValue(counters, "fileErrors")} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {maildirCounterRows(counters).map((item) => <InfoBox key={item.key} label={item.label} value={item.value} />)}
+        </div>
+        <div className="space-y-2">
+          <div className="text-sm font-medium">最近错误</div>
+          {recentErrors.length === 0 && <Empty text={loading ? "正在读取同步状态..." : "暂无同步错误"} />}
+          {recentErrors.length > 0 && (
+            <div className="space-y-2">
+              {recentErrors.slice(0, 5).map((item, index) => (
+                <div key={`${item}-${index}`} className="rounded-lg border px-3 py-2 text-sm">
+                  <div className="break-words text-destructive">{item || "未知错误"}</div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function MaildirStatusBadge({ status }: { status: string }) {
+	const normalized = status.toLowerCase()
+	if (normalized === "running") return <Badge>运行中</Badge>
+	if (["ok", "success", "succeeded", "idle"].includes(normalized)) return <Badge variant="outline">{normalized === "idle" ? "等待下次扫描" : "正常"}</Badge>
+	if (normalized === "partial") return <Badge variant="secondary">部分成功</Badge>
+	if (["error", "failed", "failure"].includes(normalized)) return <Badge variant="destructive">失败</Badge>
+	if (["disabled", "not_configured"].includes(normalized)) return <Badge variant="secondary">未启用</Badge>
+	return <Badge variant="secondary">{status || "-"}</Badge>
+}
+
+function maildirCounterRows(counters?: Record<string, number | undefined>) {
+  return [
+    { key: "filesScanned", label: "扫描文件", value: counterValue(counters, "filesScanned") },
+    { key: "imported", label: "导入", value: counterValue(counters, "imported") },
+    { key: "backfilled", label: "回填", value: counterValue(counters, "backfilled") },
+    { key: "cleaned", label: "清理", value: counterValue(counters, "cleaned") },
+    { key: "fileErrors", label: "文件错误", value: counterValue(counters, "fileErrors") },
+  ]
+}
+
+function counterValue(counters: Record<string, number | undefined> | undefined, key: string) {
+  return Number(counters?.[key] || 0)
+}
+
+function formatOptionalDate(value?: string) {
+  return value ? formatDate(value) || "-" : "-"
+}
+
+function formatDuration(value?: number) {
+  if (!value) return "-"
+  if (value < 1000) return `${value} ms`
+  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} 秒`
+}
+
+function queryErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "读取 Maildir 同步健康失败"
 }
 
 function parseSemver(tag: string): number[] {

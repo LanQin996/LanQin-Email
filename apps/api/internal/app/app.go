@@ -22,12 +22,13 @@ import (
 )
 
 type App struct {
-	cfg          Config
-	db           *sql.DB
-	log          *slog.Logger
-	now          func() time.Time
-	policy       *HTMLPolicy
-	workerCancel context.CancelFunc
+	cfg           Config
+	db            *sql.DB
+	log           *slog.Logger
+	now           func() time.Time
+	policy        *HTMLPolicy
+	workerCancel  context.CancelFunc
+	maildirHealth *maildirSyncHealthTracker
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -47,7 +48,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	}
 	db.SetMaxOpenConns(1)
 
-	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy()}
+	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
 	if err := a.configureSQLite(context.Background()); err != nil {
 		db.Close()
 		return nil, err

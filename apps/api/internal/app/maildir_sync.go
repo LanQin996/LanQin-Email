@@ -49,10 +49,12 @@ func (a *App) maildirWorker(ctx context.Context) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
+	nextRunAt := a.now().UTC()
+	a.maildirHealth.markWorkerStarted(&nextRunAt)
 	a.log.Info("maildir sync worker started", "root", a.cfg.MaildirRoot, "interval", interval.String())
-	if n, err := a.syncMaildirOnce(ctx); err != nil {
+	if counts, err := a.syncMaildirOnceTracked(ctx, interval); err != nil {
 		a.log.Warn("initial maildir sync failed", "error", err)
-	} else if n > 0 {
+	} else if n := counts.total(); n > 0 {
 		a.log.Info("initial maildir sync processed messages", "count", n)
 	}
 	ticker := time.NewTicker(interval)
@@ -60,43 +62,66 @@ func (a *App) maildirWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			a.maildirHealth.markWorkerStopped()
 			a.log.Info("maildir sync worker stopped")
 			return
 		case <-ticker.C:
-			n, err := a.syncMaildirOnce(ctx)
+			counts, err := a.syncMaildirOnceTracked(ctx, interval)
 			if err != nil {
 				a.log.Warn("maildir sync failed", "error", err)
 				continue
 			}
-			if n > 0 {
+			if n := counts.total(); n > 0 {
 				a.log.Info("maildir sync processed messages", "count", n)
 			}
 		}
 	}
 }
 
+func (a *App) syncMaildirOnceTracked(ctx context.Context, interval time.Duration) (maildirSyncCounts, error) {
+	startedAt := a.now().UTC()
+	a.maildirHealth.markRunStarted(startedAt)
+	counts, err := a.syncMaildirOnceDetailed(ctx)
+	finishedAt := a.now().UTC()
+	var nextRunAt *time.Time
+	if interval > 0 && err == nil {
+		next := finishedAt.Add(interval)
+		nextRunAt = &next
+	}
+	a.maildirHealth.markRunFinished(finishedAt, counts, err, nextRunAt)
+	return counts, err
+}
+
 func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
+	counts, err := a.syncMaildirOnceDetailed(ctx)
+	return counts.total(), err
+}
+
+func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, error) {
 	root := strings.TrimSpace(a.cfg.MaildirRoot)
 	if root == "" {
-		return 0, nil
+		return maildirSyncCounts{}, nil
 	}
 	mailboxes, err := a.maildirMailboxes(ctx)
 	if err != nil {
-		return 0, err
+		return maildirSyncCounts{}, err
 	}
-	imported := 0
+	counts := maildirSyncCounts{}
 	for _, mb := range mailboxes {
 		if mb.Unregistered {
-			count, err := a.syncUnregisteredMaildir(ctx, mb)
+			mbCounts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
+			counts.FilesScanned += mbCounts.FilesScanned
+			counts.Imported += mbCounts.Imported
+			counts.FileErrors += mbCounts.FileErrors
+			counts.fileErrorDetails = append(counts.fileErrorDetails, mbCounts.fileErrorDetails...)
 			if err != nil {
-				return imported, err
+				return counts, err
 			}
-			imported += count
 			continue
 		}
 		folders, err := a.maildirFolders(ctx, mb.ID)
 		if err != nil {
-			return imported, err
+			return counts, err
 		}
 		base := filepath.Join(root, mb.Domain, mb.LocalPart, "Maildir")
 		for _, folder := range folders {
@@ -104,7 +129,7 @@ func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
 			for _, sub := range []string{"new", "cur"} {
 				select {
 				case <-ctx.Done():
-					return imported, ctx.Err()
+					return counts, ctx.Err()
 				default:
 				}
 				dir := filepath.Join(folderBase, sub)
@@ -113,20 +138,23 @@ func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
 					if errors.Is(err, os.ErrNotExist) {
 						continue
 					}
-					return imported, err
+					return counts, err
 				}
 				for _, entry := range entries {
 					if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 						continue
 					}
 					path := filepath.Join(dir, entry.Name())
+					counts.FilesScanned++
 					ok, err := a.syncMaildirFile(ctx, mb, folder, path)
 					if err != nil {
+						counts.FileErrors++
+						counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
 						a.log.Warn("maildir file import failed", "path", path, "error", err)
 						continue
 					}
 					if ok {
-						imported++
+						counts.Imported++
 					}
 				}
 			}
@@ -134,15 +162,15 @@ func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
 	}
 	backfilled, err := a.backfillSQLiteMessagesToMaildir(ctx)
 	if err != nil {
-		return imported, err
+		return counts, err
 	}
-	imported += backfilled
+	counts.Backfilled += backfilled
 	cleaned, err := a.cleanupMissingMaildirMessages(ctx)
 	if err != nil {
-		return imported, err
+		return counts, err
 	}
-	imported += cleaned
-	return imported, nil
+	counts.Cleaned += cleaned
+	return counts, nil
 }
 
 func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
@@ -189,12 +217,17 @@ func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
 }
 
 func (a *App) syncUnregisteredMaildir(ctx context.Context, mb maildirMailbox) (int, error) {
+	counts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
+	return counts.Imported, err
+}
+
+func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMailbox) (maildirSyncCounts, error) {
 	base := filepath.Join(strings.TrimSpace(a.cfg.MaildirRoot), mb.Domain, mb.LocalPart, "Maildir")
-	imported := 0
+	counts := maildirSyncCounts{}
 	for _, sub := range []string{"new", "cur"} {
 		select {
 		case <-ctx.Done():
-			return imported, ctx.Err()
+			return counts, ctx.Err()
 		default:
 		}
 		dir := filepath.Join(base, sub)
@@ -203,24 +236,27 @@ func (a *App) syncUnregisteredMaildir(ctx context.Context, mb maildirMailbox) (i
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return imported, err
+			return counts, err
 		}
 		for _, entry := range entries {
 			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
+			counts.FilesScanned++
 			ok, err := a.syncUnregisteredMaildirFile(ctx, mb, path)
 			if err != nil {
+				counts.FileErrors++
+				counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
 				a.log.Warn("unregistered maildir file import failed", "path", path, "error", err)
 				continue
 			}
 			if ok {
-				imported++
+				counts.Imported++
 			}
 		}
 	}
-	return imported, nil
+	return counts, nil
 }
 
 func (a *App) syncUnregisteredMaildirFile(ctx context.Context, mb maildirMailbox, path string) (bool, error) {

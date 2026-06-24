@@ -2323,6 +2323,103 @@ func TestMaildirSyncImportsRFC822(t *testing.T) {
 	}
 }
 
+func TestMaildirSyncHealthDisabled(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+
+	var health maildirSyncHealthResponse
+	if code := admin.do("GET", "/api/admin/maildir-sync/health", nil, &health); code != http.StatusOK {
+		t.Fatalf("health code=%d body=%+v", code, health)
+	}
+	if health.Configured || health.Enabled || health.WorkerStarted || health.Running {
+		t.Fatalf("unexpected disabled health: %+v", health)
+	}
+	if health.ScanSeconds != 30 {
+		t.Fatalf("scan seconds=%d, want default 30", health.ScanSeconds)
+	}
+}
+
+func TestMaildirSyncHealthAfterTrackedSync(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	a.cfg.MaildirRoot = root
+	a.cfg.MaildirScanSeconds = 45
+	adminUser, _, err := a.userByEmail(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mailboxID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM mailboxes WHERE user_id=? AND address=?`, adminUser.ID, "admin@lanqin.local").Scan(&mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE mailbox_id=?`, mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	mailboxes, err := a.maildirMailboxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin maildirMailbox
+	for _, mb := range mailboxes {
+		if mb.Address == "admin@lanqin.local" {
+			admin = mb
+			break
+		}
+	}
+	if admin.ID == "" {
+		t.Fatal("admin mailbox not found")
+	}
+	dir := filepath.Join(root, admin.Domain, admin.LocalPart, "Maildir", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: sender@example.test",
+		"To: admin@lanqin.local",
+		"Subject: Maildir health import",
+		"Message-Id: <maildir-health@example.test>",
+		"Date: Sat, 13 Jun 2026 15:00:00 +0000",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"hello from health test",
+	}, "\r\n")
+	if err := os.WriteFile(filepath.Join(dir, "1749826800.M1P1.health"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	counts, err := a.syncMaildirOnceTracked(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Imported != 1 || counts.FilesScanned != 1 {
+		t.Fatalf("counts=%+v, want imported=1 filesScanned=1", counts)
+	}
+	health := a.maildirHealth.snapshot(a.cfg)
+	if !health.Configured || !health.Enabled {
+		t.Fatalf("configured health=%+v, want enabled", health)
+	}
+	if health.Running {
+		t.Fatalf("health still running: %+v", health)
+	}
+	if health.LastRun == nil || health.LastRun.Status != "success" {
+		t.Fatalf("last run=%+v, want success", health.LastRun)
+	}
+	if health.LastRun.Counts.Imported != 1 || health.Summary.Imported != 1 {
+		t.Fatalf("health counts last=%+v summary=%+v", health.LastRun.Counts, health.Summary)
+	}
+	if health.NextRunAt == nil {
+		t.Fatalf("next run is nil")
+	}
+}
+
 func TestMaildirSyncImportsSentFolder(t *testing.T) {
 	a := newTestApp(t)
 	ctx := context.Background()

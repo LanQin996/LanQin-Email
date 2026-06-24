@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -95,6 +95,7 @@ export const api = {
   },
   adminMessage: (id: string) => request<MailMessage>(`/api/admin/messages/${id}`),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
+  maildirSyncHealth: () => request<MaildirSyncHealth>("/api/admin/maildir-sync/health"),
   updateSystemSettings: (payload: SystemSettingsPayload) => request<SystemSettings>("/api/admin/settings", { method: "POST", body: JSON.stringify(payload) }),
   testSmtp: (to: string) => request<{ ok: boolean }>("/api/admin/settings/test-smtp", { method: "POST", body: JSON.stringify({ to }), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   mailTemplates: () => request<ListResponse<MailTemplate>>("/api/admin/mail-templates"),

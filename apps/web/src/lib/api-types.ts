@@ -79,6 +79,21 @@ export type BlockedSender = { id: string; mailboxId: string; email: string; reas
 export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; storageBytes: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
 export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
+export type MaildirSyncCounts = { filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
+export type MaildirSyncRun = { startedAt: string; finishedAt?: string; durationMs: number; status: "running" | "success" | "partial" | "error"; error?: string; counts: MaildirSyncCounts }
+export type MaildirSyncHealth = {
+  configured: boolean
+  enabled: boolean
+  root: string
+  scanSeconds: number
+  workerStarted: boolean
+  running: boolean
+  lastRun?: MaildirSyncRun
+  lastError?: string
+  nextRunAt?: string
+  recentErrors: string[]
+  summary: MaildirSyncCounts
+}
 export type SystemSettings = {
   publicHostname: string
   publicBaseUrl: string
