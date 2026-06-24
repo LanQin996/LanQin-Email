@@ -128,12 +128,12 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
-- 第三方客户端可通过 SMTP `465/587` 发信；Webmail 内的“已发送”由 Webmail API 发信流程写入。
+- 第三方客户端可通过 LanQin API 提供的 SMTP `465/587` 发信；Webmail/API 和第三方客户端的“已发送”都由 API 写入，客户端后续 IMAP APPEND 到 Sent 会按 `Message-ID` 去重。
 
 ## 邮件客户端 TLS 证书
 
 Web 站点可以由宿主机 Nginx / 宝塔反代到容器 `80`，但 SMTP/IMAP/POP3 端口不会使用 Web 反代的证书。
-如果第三方客户端连接 `465/587/993/995` 时提示证书是 `localhost`，说明 Postfix/Dovecot 仍在使用容器自带的测试证书。
+如果第三方客户端连接 `465/587/993/995` 时提示证书是 `localhost`，说明 LanQin API 或 Dovecot 仍在使用容器自带的测试证书。
 
 生产环境请把域名证书挂载进容器，并在 `.env` 指向证书文件：
 
@@ -174,7 +174,8 @@ LANQIN_SMTP_REQUIRE_TLS=false
 
 ```bash
 docker compose exec lanqin-email supervisorctl status
-docker compose exec lanqin-email postconf -M smtp/inet submission/inet
+docker compose exec lanqin-email postconf -M smtp/inet
+# SMTP 提交 465/587 由 LanQin API 提供，不再由 Postfix 监听。
 docker compose exec lanqin-email sqlite3 /data/lanqin.db "select key,value from system_settings where key like 'smtp%' order by key;"
 docker compose logs --tail=200 lanqin-email
 ```

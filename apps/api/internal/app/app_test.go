@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -16,6 +17,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/emersion/go-sasl"
+	smtpclient "github.com/emersion/go-smtp"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -48,6 +53,30 @@ func startFakeSMTP(t *testing.T) (string, string, <-chan string) {
 		t.Fatal(err)
 	}
 	received := make(chan string, 1)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go handleFakeSMTPConn(conn, received)
+		}
+	}()
+	host, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host, port, received
+}
+
+func startCapturingSMTP(t *testing.T, capacity int) (string, string, <-chan string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan string, capacity)
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
@@ -769,6 +798,232 @@ func TestMailSendReturnsSMTPFailure(t *testing.T) {
 	}
 	if got, _ := errBody["error"].(string); !strings.Contains(got, "smtp delivery failed") {
 		t.Fatalf("error=%q", got)
+	}
+}
+
+func TestSubmissionAuthRequiresMailboxPasswordAndSendPermission(t *testing.T) {
+	a := newTestApp(t)
+	user, mailbox, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatalf("authenticate submission: %v", err)
+	}
+	if user.Email != "admin@lanqin.local" || mailbox.Address != "admin@lanqin.local" {
+		t.Fatalf("unexpected auth user=%+v mailbox=%+v", user, mailbox)
+	}
+	if _, _, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "wrong-password"); err == nil {
+		t.Fatal("wrong password should fail")
+	}
+
+	ctx := context.Background()
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID := newID("usr")
+	domainID := mustDefaultDomainID(t, a)
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, userID, "nosend@lanqin.local", "No Send", "user", string(hash), 0, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, newID("mb"), userID, domainID, "nosend", "nosend@lanqin.local", "No Send", string(hash), 1024, "active", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET permissions_json=?, updated_at=? WHERE id=?`, encodePermissions(withoutPermissions(regularUserDefaultPermissions(), PermissionMailSend)), now, PermissionGroupRegular); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.authenticateSubmission(ctx, "nosend@lanqin.local", "Password123!"); err == nil {
+		t.Fatal("missing send permission should fail")
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE users SET disabled=1 WHERE id=?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.authenticateSubmission(ctx, "nosend@lanqin.local", "Password123!"); err == nil {
+		t.Fatal("disabled owner should fail")
+	}
+}
+
+func TestSubmissionSendsRelayAndStoresSentCopy(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 2)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	raw := strings.Join([]string{
+		"From: Admin <admin@lanqin.local>",
+		"To: person@example.com",
+		"Bcc: hidden@example.com",
+		"Subject: Submission sent",
+		"Message-ID: <submission-sent@example.test>",
+		"Date: Tue, 24 Jun 2025 10:00:00 +0000",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"hello from submission",
+	}, "\r\n")
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com", "hidden@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("submit smtp message: %v", err)
+	}
+	select {
+	case body := <-received:
+		if strings.Contains(strings.ToLower(body), "\r\nbcc:") || strings.Contains(body, "hidden@example.com") {
+			t.Fatalf("relay body leaked bcc: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay message not received")
+	}
+	sentFolderID, err := a.ensureFolder(context.Background(), mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subject, bccJSON string
+	var read int
+	if err := a.db.QueryRow(`SELECT subject,bcc_addrs,is_read FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<submission-sent@example.test>").Scan(&subject, &bccJSON, &read); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "Submission sent" || read != 1 {
+		t.Fatalf("unexpected sent message subject=%q read=%d", subject, read)
+	}
+	if got := jsonDecodeSlice(bccJSON); len(got) != 1 || got[0] != "hidden@example.com" {
+		t.Fatalf("bcc json=%s", bccJSON)
+	}
+}
+
+func TestSubmissionRejectsMismatchedSender(t *testing.T) {
+	a := newTestApp(t)
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: attacker@example.com\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("mismatched header From should fail")
+	}
+	raw = "From: admin@lanqin.local, attacker@example.com\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("multiple header From addresses should fail")
+	}
+	raw = "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, "attacker@example.com", []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("mismatched MAIL FROM should fail")
+	}
+}
+
+func TestSubmissionRelayFailureRemovesSentCopy(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: relay fail\r\nMessage-ID: <relay-fail@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("relay failure should fail")
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND message_id=?`, mb.ID, "<relay-fail@example.test>").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("sent copy should be removed after relay failure, count=%d", count)
+	}
+}
+
+func TestSubmissionSentCopyDedupesByMessageID(t *testing.T) {
+	a := newTestApp(t)
+	host, port, _ := startCapturingSMTP(t, 4)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: dedupe\r\nMessage-ID: <dedupe@example.test>\r\n\r\nbody"
+	for i := 0; i < 2; i++ {
+		if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+			t.Fatalf("submit %d: %v", i, err)
+		}
+	}
+	sentFolderID, err := a.ensureFolder(context.Background(), mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<dedupe@example.test>").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sent copy count=%d, want 1", count)
+	}
+}
+
+func TestSubmissionServersAcceptStartTLSAndImplicitTLS(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 2)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	tlsConfig, err := LoadServerTLSConfig(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	startServer := func(t *testing.T, implicit bool) string {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := a.newSubmissionServer(ln.Addr().String(), tlsConfig)
+		go func() {
+			if implicit {
+				_ = srv.Serve(tls.NewListener(ln, tlsConfig))
+			} else {
+				_ = srv.Serve(ln)
+			}
+		}()
+		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+		return ln.Addr().String()
+	}
+
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: starttls\r\nMessage-ID: <starttls@example.test>\r\n\r\nbody"
+	addr := startServer(t, false)
+	client, err := smtpclient.DialStartTLS(addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Auth(sasl.NewPlainClient("", "admin@lanqin.local", "ChangeMe123!")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendMail("admin@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("starttls relay not received")
+	}
+
+	raw = "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: smtps\r\nMessage-ID: <smtps@example.test>\r\n\r\nbody"
+	addr = startServer(t, true)
+	client, err = smtpclient.DialTLS(addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Auth(sasl.NewPlainClient("", "admin@lanqin.local", "ChangeMe123!")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendMail("admin@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("implicit tls relay not received")
 	}
 }
 

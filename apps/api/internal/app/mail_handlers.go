@@ -1548,6 +1548,11 @@ func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 	_ = os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID))
 }
 
+func (a *App) deleteMessage(ctx context.Context, messageID string) {
+	a.deleteMessageFiles(ctx, messageID)
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, messageID)
+}
+
 type messageSummaryScanner interface{ Scan(dest ...any) error }
 
 func scanAdminMessageSummary(row messageSummaryScanner) (MailMessage, error) {

@@ -191,6 +191,14 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - 云厂商常默认封禁 25 端口；无法收发公网邮件时先检查端口、安全组、防火墙与反向 DNS。
 - SQLite 适合单机部署；多节点部署前需要迁移数据库，并同步调整 Postfix/Dovecot 查询配置。
 
+## SMTP 提交
+
+- 第三方客户端的 SMTP 提交 `465/587` 由 LanQin API 进程处理。
+- Postfix 只保留 `25` 端口，用于公网入站邮件和内部/外部 relay。
+- Webmail/API 发信继续由现有 API 发信流程写入 Sent。
+- 第三方客户端发信会先校验邮箱密码，写入 Sent，再 relay 到 `LANQIN_SMTP_HOST:LANQIN_SMTP_PORT`。
+- 如果客户端随后又通过 IMAP APPEND 写入自己的 Sent 副本，Maildir 同步会按 Sent 文件夹内的 `Message-ID` 去重。
+
 ## License
 
 [MIT](./LICENSE)

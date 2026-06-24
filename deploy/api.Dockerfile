@@ -17,5 +17,5 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends ca-certificates tzdata
 WORKDIR /app
 COPY --from=build /out/lanqin-api /usr/local/bin/lanqin-api
-EXPOSE 8080
+EXPOSE 8080 465 587
 CMD ["lanqin-api"]

@@ -7,11 +7,14 @@ set -eu
 : "${LANQIN_ADDR:=127.0.0.1:8080}"
 : "${LANQIN_SMTP_HOST:=127.0.0.1}"
 : "${LANQIN_SMTP_PORT:=25}"
+: "${LANQIN_SUBMISSION_ADDR:=:587}"
+: "${LANQIN_SUBMISSION_TLS_ADDR:=:465}"
+: "${LANQIN_SUBMISSION_MAX_MESSAGE_MB:=35}"
 : "${LANQIN_MAILDIR_ROOT:=/var/mail/vhosts}"
 : "${LANQIN_TLS_CERT_FILE:=}"
 : "${LANQIN_TLS_KEY_FILE:=}"
 
-export LANQIN_DATA_DIR LANQIN_DB_PATH LANQIN_ADDR LANQIN_SMTP_HOST LANQIN_SMTP_PORT LANQIN_MAILDIR_ROOT
+export LANQIN_DATA_DIR LANQIN_DB_PATH LANQIN_ADDR LANQIN_SMTP_HOST LANQIN_SMTP_PORT LANQIN_SUBMISSION_ADDR LANQIN_SUBMISSION_TLS_ADDR LANQIN_SUBMISSION_MAX_MESSAGE_MB LANQIN_MAILDIR_ROOT LANQIN_TLS_CERT_FILE LANQIN_TLS_KEY_FILE
 
 addgroup --system --gid 5000 vmail 2>/dev/null || true
 adduser --system --uid 5000 --gid 5000 --home /var/mail/vhosts --no-create-home vmail 2>/dev/null || true
@@ -47,7 +50,6 @@ postconf -e "myorigin = ${LANQIN_PUBLIC_HOSTNAME}"
 postconf -e "smtpd_tls_cert_file = ${TLS_CERT}"
 postconf -e "smtpd_tls_key_file = ${TLS_KEY}"
 postconf -e "virtual_transport = lmtp:inet:127.0.0.1:24"
-postconf -e "smtpd_sasl_path = inet:127.0.0.1:12345"
 postconf -e "milter_mail_macros = i {mail_addr} {client_addr} {client_name} {auth_authen}"
 postconf -e "smtpd_milters = inet:127.0.0.1:11332"
 postconf -e "non_smtpd_milters = inet:127.0.0.1:11332"
