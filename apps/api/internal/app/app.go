@@ -74,6 +74,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	if strings.TrimSpace(a.cfg.MaildirRoot) != "" {
 		go a.maildirWorker(workerCtx)
 	}
+	go a.sendQueueWorker(workerCtx)
 	go a.smtpEventsCleanupWorker(workerCtx)
 	return a, nil
 }
@@ -240,6 +241,53 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			PRIMARY KEY(mailbox_id, folder_id, message_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS send_as_grants (
+			id TEXT PRIMARY KEY,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			address TEXT NOT NULL,
+			display_name TEXT NOT NULL DEFAULT '',
+			enabled INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE(mailbox_id, address)
+		)`,
+		`CREATE TABLE IF NOT EXISTS send_queue (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			message_id TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL,
+			mail_from TEXT NOT NULL,
+			header_from TEXT NOT NULL,
+			recipients_json TEXT NOT NULL,
+			mime_base64 TEXT NOT NULL,
+			status TEXT NOT NULL DEFAULT 'queued',
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			max_attempts INTEGER NOT NULL DEFAULT 5,
+			next_attempt_at TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_queue_due ON send_queue(status, next_attempt_at, created_at)`,
+		`CREATE TABLE IF NOT EXISTS send_audit_events (
+			id TEXT PRIMARY KEY,
+			queue_id TEXT NOT NULL DEFAULT '',
+			user_id TEXT NOT NULL DEFAULT '',
+			mailbox_id TEXT NOT NULL DEFAULT '',
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			source TEXT NOT NULL,
+			event TEXT NOT NULL,
+			status TEXT NOT NULL,
+			mail_from TEXT NOT NULL DEFAULT '',
+			header_from TEXT NOT NULL DEFAULT '',
+			recipients_json TEXT NOT NULL DEFAULT '[]',
+			error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created ON send_audit_events(created_at)`,
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id TEXT PRIMARY KEY,
 			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -377,10 +425,45 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migratePermissionGroupLimits(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateSendQueueMessageID(ctx); err != nil {
+		return err
+	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (a *App) migrateSendQueueMessageID(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(send_queue)`)
+	if err != nil {
+		return err
+	}
+	hasMessageID := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "message_id" {
+			hasMessageID = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !hasMessageID {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE send_queue ADD COLUMN message_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	_, err = a.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_send_queue_mailbox_source_message_id ON send_queue(mailbox_id, source, message_id) WHERE message_id <> ''`)
+	return err
 }
 
 func (a *App) migratePermissionGroupLimits(ctx context.Context) error {

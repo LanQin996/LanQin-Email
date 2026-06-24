@@ -185,7 +185,8 @@ func (s *submissionSession) Mail(from string, _ *smtpserver.MailOptions) error {
 		return smtpserver.ErrAuthRequired
 	}
 	from = normalizeEmail(from)
-	if from == "" || from != normalizeEmail(s.mailbox.Address) {
+	authorized, _, err := s.app.authorizedSender(context.Background(), s.mailbox, from)
+	if err != nil || from == "" || from != authorized {
 		return smtpError(553, smtpserver.EnhancedCode{5, 7, 1}, "sender must match authenticated mailbox")
 	}
 	s.mailFrom = from
@@ -273,30 +274,31 @@ func (a *App) submitSMTPMessage(ctx context.Context, user *User, mb *Mailbox, ma
 	if err != nil {
 		return err
 	}
-	prepared, msg, attachments, err := a.prepareSubmittedMessage(raw, mb.Address, mailFrom, recipients)
+	prepared, msg, attachments, err := a.prepareSubmittedMessage(ctx, raw, mb, mailFrom, recipients)
 	if err != nil {
 		return err
 	}
 	msg.MailboxID = mb.ID
-	sentID, err := a.insertSentMessageOnce(ctx, msg, attachments)
+	sentID, insertedSent, err := a.insertSentMessageOnce(ctx, msg, attachments)
 	if err != nil {
 		return err
 	}
-	if a.cfg.SMTPHost != "" {
-		if err := a.sendSMTP(mb.Address, recipients, prepared); err != nil {
-			if sentID != "" {
+	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceSubmission, MailFrom: mailFrom, HeaderFrom: msg.From, Recipients: recipients})
+	if sentID != "" {
+		if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: msg.MessageID, Source: sendSourceSubmission, MailFrom: mailFrom, HeaderFrom: msg.From, Recipients: recipients, MIMEBytes: prepared, Now: a.now().UTC()}); err != nil {
+			if insertedSent {
 				a.deleteMessage(ctx, sentID)
 				if sentFolderID, ferr := a.ensureFolder(ctx, mb.ID, "Sent"); ferr == nil {
 					a.deleteSentDedupeKey(ctx, mb.ID, sentFolderID, msg.MessageID)
 				}
 			}
-			return smtpError(451, smtpserver.EnhancedCode{4, 4, 0}, "smtp relay failed")
+			return err
 		}
 	}
 	return nil
 }
 
-func (a *App) prepareSubmittedMessage(raw []byte, authenticatedAddress, mailFrom string, recipients []string) ([]byte, storedMessage, []AttachmentInput, error) {
+func (a *App) prepareSubmittedMessage(ctx context.Context, raw []byte, mb *Mailbox, mailFrom string, recipients []string) ([]byte, storedMessage, []AttachmentInput, error) {
 	header, body, err := readMessageHeader(raw)
 	if err != nil {
 		return nil, storedMessage{}, nil, smtpError(554, smtpserver.EnhancedCode{5, 6, 0}, "invalid message")
@@ -305,8 +307,8 @@ func (a *App) prepareSubmittedMessage(raw []byte, authenticatedAddress, mailFrom
 	if !ok || fromAddress == "" {
 		return nil, storedMessage{}, nil, smtpError(550, smtpserver.EnhancedCode{5, 7, 1}, "From header must contain exactly one address")
 	}
-	authAddress := normalizeEmail(authenticatedAddress)
-	if normalizeEmail(mailFrom) != authAddress || normalizeEmail(fromAddress) != authAddress {
+	authAddress, fromName, err := a.authorizedSender(ctx, mb, fromAddress)
+	if err != nil || normalizeEmail(mailFrom) != authAddress || normalizeEmail(fromAddress) != authAddress {
 		return nil, storedMessage{}, nil, smtpError(553, smtpserver.EnhancedCode{5, 7, 1}, "sender must match authenticated mailbox")
 	}
 	now := a.now().UTC()
@@ -353,10 +355,10 @@ func (a *App) prepareSubmittedMessage(raw []byte, authenticatedAddress, mailFrom
 	return prepared, msg, attachments, nil
 }
 
-func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, attachments []AttachmentInput) (string, error) {
+func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, attachments []AttachmentInput) (string, bool, error) {
 	sentFolderID, err := a.ensureFolder(ctx, msg.MailboxID, "Sent")
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	msg.FolderID = sentFolderID
 	if msg.MessageUID == "" {
@@ -367,18 +369,22 @@ func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, atta
 		err := a.db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, msg.MailboxID, sentFolderID, msg.MessageID).Scan(&existing)
 		if err == nil {
 			if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil && !errors.Is(err, errSentDedupeExists) {
-				return "", err
+				return "", false, err
 			}
-			return "", nil
+			return existing, false, nil
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return "", err
+			return "", false, err
 		}
 		if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil {
 			if errors.Is(err, errSentDedupeExists) {
-				return "", nil
+				var existing string
+				if err := a.db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, msg.MailboxID, sentFolderID, msg.MessageID).Scan(&existing); err == nil {
+					return existing, false, nil
+				}
+				return "", false, nil
 			}
-			return "", err
+			return "", false, err
 		}
 	}
 	id, err := a.insertMessage(ctx, msg, attachments)
@@ -386,9 +392,9 @@ func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, atta
 		if msg.MessageID != "" {
 			a.deleteSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID)
 		}
-		return "", err
+		return "", false, err
 	}
-	return id, nil
+	return id, true, nil
 }
 
 var errSentDedupeExists = errors.New("sent message already exists")
