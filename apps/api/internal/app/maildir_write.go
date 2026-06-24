@@ -120,7 +120,7 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 	if strings.EqualFold(folderName, "Inbox") && !state.IsRead {
 		subdir = "new"
 	}
-	if err := ensureMaildirFolderDirs(folderBase); err != nil {
+	if err := ensureMaildirFolderDirs(base, folderBase); err != nil {
 		return err
 	}
 	filename := maildirFilename(messageID, state.MessageID)
@@ -128,6 +128,10 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 	finalPath := filepath.Join(folderBase, subdir, filename)
 	finalPath = maildirPathWithFlags(finalPath, state.IsRead, state.IsStarred)
 	if err := os.WriteFile(tmpPath, raw, 0o600); err != nil {
+		return err
+	}
+	if err := applyMaildirOwnership(tmpPath); err != nil {
+		_ = os.Remove(tmpPath)
 		return err
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
@@ -213,7 +217,7 @@ func (a *App) moveMessageMaildir(ctx context.Context, messageID, targetFolderID 
 	}
 	base := filepath.Join(strings.TrimSpace(a.cfg.MaildirRoot), mb.Domain, mb.LocalPart, "Maildir")
 	folderBase := maildirFolderPath(base, folderName)
-	if err := ensureMaildirFolderDirs(folderBase); err != nil {
+	if err := ensureMaildirFolderDirs(base, folderBase); err != nil {
 		return err
 	}
 	subdir := "cur"
@@ -223,6 +227,9 @@ func (a *App) moveMessageMaildir(ctx context.Context, messageID, targetFolderID 
 	targetPath := filepath.Join(folderBase, subdir, filepath.Base(state.RawPath))
 	if filepath.Clean(targetPath) != filepath.Clean(state.RawPath) {
 		if err := os.Rename(state.RawPath, targetPath); err != nil {
+			return err
+		}
+		if err := applyMaildirOwnership(targetPath); err != nil {
 			return err
 		}
 	}
@@ -316,6 +323,9 @@ func (a *App) updateMessageMaildirFlags(ctx context.Context, messageID string, r
 		return err
 	}
 	if err := os.Rename(state.RawPath, targetPath); err != nil {
+		return err
+	}
+	if err := applyMaildirOwnership(targetPath); err != nil {
 		return err
 	}
 	modSeq, err := a.bumpFolderModSeq(ctx, state.FolderID)
@@ -481,13 +491,31 @@ func (a *App) pathIsUnderMaildirRoot(path string) (bool, error) {
 	return rel != "." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..", nil
 }
 
-func ensureMaildirFolderDirs(folderBase string) error {
+func ensureMaildirFolderDirs(base, folderBase string) error {
 	for _, sub := range []string{"tmp", "new", "cur"} {
 		if err := os.MkdirAll(filepath.Join(folderBase, sub), 0o755); err != nil {
 			return err
 		}
 	}
+	for _, dir := range maildirOwnershipDirs(base, folderBase) {
+		if err := applyMaildirOwnership(dir); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func maildirOwnershipDirs(base, folderBase string) []string {
+	dirs := []string{
+		filepath.Dir(filepath.Dir(base)),
+		filepath.Dir(base),
+		base,
+	}
+	if filepath.Clean(folderBase) != filepath.Clean(base) {
+		dirs = append(dirs, folderBase)
+	}
+	dirs = append(dirs, filepath.Join(folderBase, "tmp"), filepath.Join(folderBase, "new"), filepath.Join(folderBase, "cur"))
+	return dirs
 }
 
 func maildirFilename(messageID, headerMessageID string) string {
