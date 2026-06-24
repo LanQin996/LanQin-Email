@@ -462,6 +462,30 @@ func (a *App) migrateSendQueueMessageID(ctx context.Context) error {
 			return err
 		}
 	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM send_queue
+		WHERE id IN (
+			SELECT id FROM (
+				SELECT id,
+					ROW_NUMBER() OVER (
+						PARTITION BY mailbox_id, source, message_id
+						ORDER BY
+							CASE status
+								WHEN 'queued' THEN 0
+								WHEN 'sending' THEN 1
+								WHEN 'failed' THEN 2
+								WHEN 'delivered' THEN 3
+								ELSE 4
+							END,
+							created_at DESC,
+							id DESC
+					) AS row_num
+				FROM send_queue
+				WHERE message_id <> ''
+			)
+			WHERE row_num > 1
+		)`); err != nil {
+		return err
+	}
 	_, err = a.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_send_queue_mailbox_source_message_id ON send_queue(mailbox_id, source, message_id) WHERE message_id <> ''`)
 	return err
 }

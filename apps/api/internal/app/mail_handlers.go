@@ -416,6 +416,10 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
+		if errors.Is(err, errSenderNotAuthorized) {
+			respondError(w, http.StatusForbidden, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -426,6 +430,7 @@ var errNoRecipients = errors.New("at least one recipient is required")
 var errInvalidMIME = errors.New("invalid mime message")
 var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
 var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
+var errSenderNotAuthorized = errors.New("sender address is not authorized")
 
 func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
 	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {

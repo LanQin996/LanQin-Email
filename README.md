@@ -194,6 +194,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ## SMTP 提交
 
 - 第三方客户端的 SMTP 提交 `465/587` 由 LanQin API 进程处理。
+- 启用 SMTP 提交前必须配置 `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`；API 不会用 localhost 自签证书对外提供 465/587。
 - Postfix 只保留 `25` 端口，用于公网入站邮件和内部/外部 relay。
 - Webmail/API 和第三方客户端发信都会先写入 Sent，再进入发送队列。
 - 发送队列由 LanQin API 后台 worker relay 到 `LANQIN_SMTP_HOST:LANQIN_SMTP_PORT`，失败会记录审计并按退避策略重试。

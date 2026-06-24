@@ -5,6 +5,8 @@ services:
     environment:
       LANQIN_SMTP_HOST: ${LANQIN_STACK_SMTP_HOST:-postfix}
       LANQIN_SMTP_PORT: ${LANQIN_STACK_SMTP_PORT:-25}
+      LANQIN_SUBMISSION_ADDR: ${LANQIN_SUBMISSION_ADDR:-}
+      LANQIN_SUBMISSION_TLS_ADDR: ${LANQIN_SUBMISSION_TLS_ADDR:-}
     volumes:
       - ./data:/data
       - ./mail:/var/mail/vhosts:ro

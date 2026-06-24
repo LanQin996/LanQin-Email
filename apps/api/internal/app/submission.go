@@ -3,20 +3,15 @@ package app
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
-	"crypto/x509"
-	"crypto/x509/pkix"
 	"database/sql"
-	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"math/big"
 	netmail "net/mail"
 	"net/textproto"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,7 +20,9 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const defaultSubmissionMaxRecipients = 200
+const (
+	defaultSubmissionMaxRecipients = 200
+)
 
 type SubmissionServers struct {
 	Plain *smtpserver.Server
@@ -76,59 +73,20 @@ func (a *App) newSubmissionServer(addr string, tlsConfig *tls.Config) *smtpserve
 }
 
 func LoadServerTLSConfig(cfg Config) (*tls.Config, error) {
-	cert, err := loadOrGenerateCertificate(cfg)
-	if err != nil {
-		return nil, err
+	certFile, keyFile := strings.TrimSpace(cfg.TLSCertFile), strings.TrimSpace(cfg.TLSKeyFile)
+	if certFile == "" || keyFile == "" {
+		return nil, errors.New("LANQIN_TLS_CERT_FILE and LANQIN_TLS_KEY_FILE are required when SMTP submission is enabled")
 	}
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-	}, nil
-}
-
-func loadOrGenerateCertificate(cfg Config) (tls.Certificate, error) {
-	certFile, keyFile := strings.TrimSpace(cfg.TLSCertFile), strings.TrimSpace(cfg.TLSKeyFile)
-	if certFile != "" || keyFile != "" {
-		if certFile == "" || keyFile == "" {
-			return tls.Certificate{}, errors.New("both TLS certificate and key files are required")
-		}
-		return tls.LoadX509KeyPair(certFile, keyFile)
-	}
-	return generateSelfSignedCertificate(cfg.PublicHostname)
-}
-
-func generateSelfSignedCertificate(hostname string) (tls.Certificate, error) {
-	if strings.TrimSpace(hostname) == "" {
-		hostname = "localhost"
-	}
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	now := time.Now().UTC()
-	tmpl := x509.Certificate{
-		SerialNumber: serial,
-		Subject: pkix.Name{
-			CommonName: hostname,
+		MinVersion: tls.VersionTLS12,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, err
+			}
+			return &cert, nil
 		},
-		NotBefore:             now.Add(-time.Hour),
-		NotAfter:              now.Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		BasicConstraintsValid: true,
-		DNSNames:              []string{hostname, "localhost"},
-	}
-	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
-	if err != nil {
-		return tls.Certificate{}, err
-	}
-	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
-	return tls.X509KeyPair(certPEM, keyPEM)
+	}, nil
 }
 
 type submissionLogWriter struct {
@@ -434,7 +392,15 @@ func readMessageHeader(raw []byte) (textproto.MIMEHeader, []byte, error) {
 
 func serializeMessage(header textproto.MIMEHeader, body []byte) []byte {
 	var buf bytes.Buffer
-	for key, values := range header {
+	keys := make([]string, 0, len(header))
+	for key := range header {
+		keys = append(keys, key)
+	}
+	sort.SliceStable(keys, func(i, j int) bool {
+		return textproto.CanonicalMIMEHeaderKey(keys[i]) < textproto.CanonicalMIMEHeaderKey(keys[j])
+	})
+	for _, key := range keys {
+		values := header[key]
 		canonical := textproto.CanonicalMIMEHeaderKey(key)
 		for _, value := range values {
 			fmt.Fprintf(&buf, "%s: %s\r\n", canonical, strings.ReplaceAll(strings.ReplaceAll(value, "\r", ""), "\n", " "))

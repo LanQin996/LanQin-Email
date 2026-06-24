@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -25,7 +24,8 @@ const (
 	sendSourceWebmail    = "webmail"
 	sendSourceSubmission = "submission"
 
-	sendQueueStaleAfter = 15 * time.Minute
+	sendQueueStaleAfter  = 15 * time.Minute
+	sendQueueConcurrency = 4
 )
 
 type sendQueueInput struct {
@@ -81,9 +81,9 @@ func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error
 			return "", err
 		}
 		if existingID != id {
-			if status == sendQueueStatusFailed && attemptCount >= maxAttempts {
-				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=? AND attempt_count>=max_attempts`,
-					in.UserID, in.SentMessageID, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), existingID, sendQueueStatusFailed)
+			if status == sendQueueStatusDelivered || (status == sendQueueStatusFailed && attemptCount >= maxAttempts) {
+				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=?`,
+					in.UserID, in.SentMessageID, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), existingID, status)
 				if err != nil {
 					return "", err
 				}
@@ -154,8 +154,28 @@ func (a *App) processDueSendQueue(ctx context.Context) error {
 	if err := rows.Err(); err != nil {
 		return err
 	}
+	sem := make(chan struct{}, sendQueueConcurrency)
+	done := make(chan struct{}, len(ids))
 	for _, id := range ids {
-		a.processSendQueueItem(ctx, id)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case sem <- struct{}{}:
+		}
+		go func(id string) {
+			defer func() {
+				<-sem
+				done <- struct{}{}
+			}()
+			a.processSendQueueItem(ctx, id)
+		}(id)
+	}
+	for range ids {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-done:
+		}
 	}
 	return nil
 }
@@ -322,7 +342,7 @@ func (a *App) authorizedSender(ctx context.Context, mb *Mailbox, from string) (s
 	err := a.db.QueryRowContext(ctx, `SELECT display_name,enabled FROM send_as_grants WHERE mailbox_id=? AND address=?`, mb.ID, from).Scan(&displayName, &enabled)
 	if err == nil {
 		if enabled == 0 {
-			return "", "", fmt.Errorf("send-as address is disabled")
+			return "", "", errSenderNotAuthorized
 		}
 		return from, strings.TrimSpace(displayName), nil
 	}
@@ -331,8 +351,12 @@ func (a *App) authorizedSender(ctx context.Context, mb *Mailbox, from string) (s
 	}
 	var aliasDestination string
 	err = a.db.QueryRowContext(ctx, `SELECT destination FROM aliases WHERE source=? AND enabled=1`, from).Scan(&aliasDestination)
-	if err == nil && normalizeEmail(aliasDestination) == normalizeEmail(mb.Address) {
-		return from, mb.DisplayName, nil
+	if err == nil {
+		for _, destination := range strings.Split(aliasDestination, ",") {
+			if normalizeEmail(destination) == normalizeEmail(mb.Address) {
+				return from, mb.DisplayName, nil
+			}
+		}
 	}
-	return "", "", fmt.Errorf("send-as address is not authorized")
+	return "", "", errSenderNotAuthorized
 }

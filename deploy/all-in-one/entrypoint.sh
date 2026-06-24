@@ -7,8 +7,8 @@ set -eu
 : "${LANQIN_ADDR:=127.0.0.1:8080}"
 : "${LANQIN_SMTP_HOST:=127.0.0.1}"
 : "${LANQIN_SMTP_PORT:=25}"
-: "${LANQIN_SUBMISSION_ADDR:=:587}"
-: "${LANQIN_SUBMISSION_TLS_ADDR:=:465}"
+: "${LANQIN_SUBMISSION_ADDR:=}"
+: "${LANQIN_SUBMISSION_TLS_ADDR:=}"
 : "${LANQIN_SUBMISSION_MAX_MESSAGE_MB:=35}"
 : "${LANQIN_MAILDIR_ROOT:=/var/mail/vhosts}"
 : "${LANQIN_TLS_CERT_FILE:=}"
@@ -40,10 +40,18 @@ if [ -n "$LANQIN_TLS_CERT_FILE" ] || [ -n "$LANQIN_TLS_KEY_FILE" ]; then
   if [ -f "$LANQIN_TLS_CERT_FILE" ] && [ -f "$LANQIN_TLS_KEY_FILE" ]; then
     TLS_CERT="$LANQIN_TLS_CERT_FILE"
     TLS_KEY="$LANQIN_TLS_KEY_FILE"
+    : "${LANQIN_SUBMISSION_ADDR:=:587}"
+    : "${LANQIN_SUBMISSION_TLS_ADDR:=:465}"
   else
     echo "warning: LANQIN_TLS_CERT_FILE/LANQIN_TLS_KEY_FILE not readable; using snakeoil localhost certificate" >&2
   fi
 fi
+if [ -n "$LANQIN_SUBMISSION_ADDR$LANQIN_SUBMISSION_TLS_ADDR" ] && { [ "$TLS_CERT" = "/etc/ssl/certs/ssl-cert-snakeoil.pem" ] || [ "$TLS_KEY" = "/etc/ssl/private/ssl-cert-snakeoil.key" ]; }; then
+  echo "warning: SMTP submission disabled because LANQIN_TLS_CERT_FILE/LANQIN_TLS_KEY_FILE are not configured with readable certificate files" >&2
+  LANQIN_SUBMISSION_ADDR=""
+  LANQIN_SUBMISSION_TLS_ADDR=""
+fi
+export LANQIN_SUBMISSION_ADDR LANQIN_SUBMISSION_TLS_ADDR
 
 postconf -e "myhostname = ${LANQIN_PUBLIC_HOSTNAME}"
 postconf -e "myorigin = ${LANQIN_PUBLIC_HOSTNAME}"
