@@ -328,6 +328,10 @@ func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("markRead") != "0" && !msg.IsRead && userHasPermission(currentUser(r), PermissionMailOrganize) {
+		read := true
+		if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, &read, nil); err != nil {
+			a.log.Warn("failed to update maildir read flag", "message_id", msg.ID, "error", err)
+		}
 		_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 		msg.IsRead = true
 	}

@@ -2418,6 +2418,9 @@ func TestWebmailSentWritesMaildirSent(t *testing.T) {
 	if !strings.Contains(filepath.ToSlash(rawPath), "/.Sent/cur/") {
 		t.Fatalf("raw_path=%q, want .Sent/cur", rawPath)
 	}
+	if !strings.Contains(filepath.Base(rawPath), maildirFlagSeparator()+"S") {
+		t.Fatalf("sent raw_path missing seen flag: %s", rawPath)
+	}
 	raw, err := os.ReadFile(rawPath)
 	if err != nil {
 		t.Fatal(err)
@@ -2505,6 +2508,9 @@ func TestDraftWritesAndUpdatesMaildirDrafts(t *testing.T) {
 	rawPath := maildirRawPathForTest(t, a, draft.ID)
 	if !strings.Contains(filepath.ToSlash(rawPath), "/.Drafts/cur/") {
 		t.Fatalf("raw_path=%q, want .Drafts/cur", rawPath)
+	}
+	if !strings.Contains(filepath.Base(rawPath), maildirFlagSeparator()+"S") {
+		t.Fatalf("draft raw_path missing seen flag: %s", rawPath)
 	}
 	oldRawPath := rawPath
 

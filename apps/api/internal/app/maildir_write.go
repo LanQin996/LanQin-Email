@@ -120,6 +120,7 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 	filename := maildirFilename(messageID, state.MessageID)
 	tmpPath := filepath.Join(folderBase, "tmp", filename)
 	finalPath := filepath.Join(folderBase, subdir, filename)
+	finalPath = maildirPathWithFlags(finalPath, state.IsRead, state.IsStarred)
 	if err := os.WriteFile(tmpPath, raw, 0o600); err != nil {
 		return err
 	}
@@ -490,20 +491,40 @@ func maildirPathWithFlags(path string, read, starred bool) string {
 	}
 	base := name
 	sep := maildirFlagSeparator()
+	existingFlags := ""
 	if idx := strings.LastIndex(base, sep); idx >= 0 {
+		existingFlags = base[idx+len(sep):]
 		base = base[:idx]
 	}
-	flags := ""
+	flags := preserveMaildirFlags(existingFlags, "SF")
 	if read {
-		flags += "S"
+		flags = appendMaildirFlag(flags, 'S')
 	}
 	if starred {
-		flags += "F"
+		flags = appendMaildirFlag(flags, 'F')
 	}
 	if flags != "" {
 		base += sep + flags
 	}
 	return filepath.Join(dir, base)
+}
+
+func preserveMaildirFlags(flags, managed string) string {
+	var b strings.Builder
+	for _, flag := range flags {
+		if strings.ContainsRune(managed, flag) || strings.ContainsRune(b.String(), flag) {
+			continue
+		}
+		b.WriteRune(flag)
+	}
+	return b.String()
+}
+
+func appendMaildirFlag(flags string, flag rune) string {
+	if strings.ContainsRune(flags, flag) {
+		return flags
+	}
+	return flags + string(flag)
 }
 
 func maildirFlagSeparator() string {
