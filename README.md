@@ -11,6 +11,8 @@
 
 LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + TypeScript + shadcn/ui，后端使用 Go + SQLite，部署时可用单容器集成 API、Web、Nginx、Postfix、Dovecot、Rspamd。
 
+交流群组：[Telegram 群组](https://t.me/+EhII7MSyi3QwNDQ5)
+
 ## 功能特性
 
 - **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
@@ -20,6 +22,16 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 - **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
 - **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
 - **部署友好**：默认 all-in-one 单容器，也提供多容器 stack 方便调试 Postfix/Dovecot/Rspamd。
+
+## 界面预览
+
+| Webmail 邮件阅读与列表 | 写邮件 · 富文本编辑工具栏 |
+| --- | --- |
+| ![Webmail 邮件阅读与列表](./docs/screenshots/mail-preview.png) | ![写邮件富文本编辑工具栏](./docs/screenshots/compose-preview.png) |
+| 多邮箱切换、文件夹、搜索、标签、星标与邮件阅读面板。 | 富文本工具栏支持字体、标题、加粗、斜体、下划线、颜色、高亮、列表、对齐、引用、代码块、附件、表情与定时发送。 |
+| 管理后台 · 系统概览 | 第三方客户端配置 |
+| ![管理后台系统概览](./docs/screenshots/admin-preview.png) | ![第三方客户端配置](./docs/screenshots/client-preview.png) |
+| 管理用户、权限组、域名、邮箱、别名、系统设置与发送审计。 | 一键查看 IMAP / POP3 / SMTP 服务器、端口、安全方式与账号信息。 |
 
 ## 目录结构
 
@@ -204,3 +216,17 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ## License
 
 [MIT](./LICENSE)
+
+
+## Star 趋势
+
+<a href="https://www.star-history.com/?repos=LanQin996%2FLanQin-Email&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=LanQin996/LanQin-Email&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=LanQin996/LanQin-Email&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=LanQin996/LanQin-Email&type=date&legend=top-left" />
+ </picture>
+</a>
+
+友情链接：[LINUX DO](https://linux.do/) —— 新的理想型社区
+

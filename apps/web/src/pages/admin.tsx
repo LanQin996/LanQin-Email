@@ -52,6 +52,7 @@ const sectionPermissions: Record<Section, PermissionKey[]> = {
   settings: ["admin.settings.view", "admin.templates.view"],
 }
 const projectRepositoryUrl = "https://github.com/LanQin996/LanQin-Email"
+const projectTelegramUrl = "https://t.me/+EhII7MSyi3QwNDQ5"
 const projectTag = import.meta.env.VITE_APP_VERSION || ""
 const projectReleaseUrl = import.meta.env.VITE_RELEASE_URL || (projectTag ? `${projectRepositoryUrl}/releases/tag/${projectTag}` : "")
 const defaultPermissionLimits: PermissionLimits = { maxAttachmentMb: 25, smtpDailyLimit: 200, smtpMinuteLimit: 20, imapMinuteLimit: 200, pop3MinuteLimit: 150 }
@@ -1385,6 +1386,12 @@ function AboutProjectCard() {
               <a href={`${projectRepositoryUrl}/issues`} target="_blank" rel="noreferrer">
                 <Circle className="h-5 w-5 text-muted-foreground" />
                 Issues
+              </a>
+            </Button>
+            <Button type="button" variant="outline" className="h-11 justify-start px-4 text-base font-normal" asChild>
+              <a href={projectTelegramUrl} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-5 w-5 text-sky-500" />
+                Telegram 群组
               </a>
             </Button>
           </div>
