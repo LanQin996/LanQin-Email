@@ -128,18 +128,21 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
-- 第三方客户端可通过 SMTP `465/587` 发信；Webmail 内的“已发送”由 Webmail API 发信流程写入。
+- 第三方客户端可通过 LanQin API 提供的 SMTP `465/587` 发信；Webmail/API 和第三方客户端的“已发送”都由 API 写入，外发投递进入发送队列并由 API worker relay/retry，客户端后续 IMAP APPEND 到 Sent 会按 `Message-ID` 去重。
+- send-as v1 支持本人邮箱、启用的别名转发 source 指向本人邮箱，或数据库表 `send_as_grants` 中显式授权的地址。
 
 ## 邮件客户端 TLS 证书
 
 Web 站点可以由宿主机 Nginx / 宝塔反代到容器 `80`，但 SMTP/IMAP/POP3 端口不会使用 Web 反代的证书。
-如果第三方客户端连接 `465/587/993/995` 时提示证书是 `localhost`，说明 Postfix/Dovecot 仍在使用容器自带的测试证书。
+如果第三方客户端连接 `993/995` 时提示证书是 `localhost`，说明 Dovecot 仍在使用容器自带的测试证书。LanQin API 的 SMTP `465/587` submission 不会使用自签测试证书；启用前必须配置可读的真实证书。
 
 生产环境请把域名证书挂载进容器，并在 `.env` 指向证书文件：
 
 ```env
 LANQIN_TLS_CERT_FILE=/certs/fullchain.pem
 LANQIN_TLS_KEY_FILE=/certs/privkey.pem
+LANQIN_SUBMISSION_ADDR=:587
+LANQIN_SUBMISSION_TLS_ADDR=:465
 ```
 
 单容器示例：
@@ -170,12 +173,16 @@ LANQIN_SMTP_PORT=25
 LANQIN_SMTP_REQUIRE_TLS=false
 ```
 
-如果页面提示 `smtp delivery failed: EOF`，通常是 Postfix 会话被中断。优先检查：
+Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
+
+如果发送队列里出现 relay 失败，通常是 Postfix 会话被中断或外部 SMTP 配置错误。优先检查：
 
 ```bash
 docker compose exec lanqin-email supervisorctl status
-docker compose exec lanqin-email postconf -M smtp/inet submission/inet
+docker compose exec lanqin-email postconf -M smtp/inet
+# SMTP 提交 465/587 由 LanQin API 提供，不再由 Postfix 监听。
 docker compose exec lanqin-email sqlite3 /data/lanqin.db "select key,value from system_settings where key like 'smtp%' order by key;"
+docker compose exec lanqin-email sqlite3 /data/lanqin.db "select status,attempt_count,last_error from send_queue order by created_at desc limit 10;"
 docker compose logs --tail=200 lanqin-email
 ```
 

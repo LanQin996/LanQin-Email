@@ -336,6 +336,8 @@ func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 
 type mailComposeInput struct {
 	MailboxID   string            `json:"mailboxId"`
+	From        string            `json:"from"`
+	FromName    string            `json:"fromName"`
 	To          []string          `json:"to"`
 	CC          []string          `json:"cc"`
 	BCC         []string          `json:"bcc"`
@@ -358,6 +360,8 @@ type mailDraftInput struct {
 
 type scheduledSendPayload struct {
 	MailboxID   string            `json:"mailboxId"`
+	From        string            `json:"from"`
+	FromName    string            `json:"fromName"`
 	To          []string          `json:"to"`
 	CC          []string          `json:"cc"`
 	BCC         []string          `json:"bcc"`
@@ -412,8 +416,8 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusTooManyRequests, err.Error())
 			return
 		}
-		if strings.HasPrefix(err.Error(), "smtp delivery failed:") {
-			respondError(w, http.StatusBadGateway, err.Error())
+		if errors.Is(err, errSenderNotAuthorized) {
+			respondError(w, http.StatusForbidden, err.Error())
 			return
 		}
 		respondError(w, http.StatusInternalServerError, err.Error())
@@ -426,6 +430,7 @@ var errNoRecipients = errors.New("at least one recipient is required")
 var errInvalidMIME = errors.New("invalid mime message")
 var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
 var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
+var errSenderNotAuthorized = errors.New("sender address is not authorized")
 
 func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
 	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {
@@ -448,9 +453,16 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 	}
 
 	now := a.now().UTC()
+	fromAddress, fromName, err := a.authorizedSender(ctx, mb, req.From)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.FromName) != "" && normalizeEmail(req.From) == normalizeEmail(mb.Address) {
+		fromName = strings.TrimSpace(req.FromName)
+	}
 	messageID := fmt.Sprintf("<%s@%s>", newID("msg"), strings.Split(mb.Address, "@")[1])
 	mimeBytes, err := BuildMIME(MIMEMessage{
-		From: mb.Address, FromName: mb.DisplayName, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
+		From: fromAddress, FromName: fromName, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidMIME, err)
@@ -458,20 +470,20 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
 		return nil, err
 	}
-	if a.cfg.SMTPHost != "" {
-		if err := a.sendSMTP(mb.Address, allRecipients, mimeBytes); err != nil {
-			return nil, fmt.Errorf("smtp delivery failed: %w", err)
-		}
-	}
 
 	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
 	if err != nil {
 		return nil, fmt.Errorf("failed to load sent folder: %w", err)
 	}
-	base := storedMessage{MailboxID: mb.ID, FolderID: sentFolderID, MessageUID: newID("uid"), MessageID: messageID, Subject: req.Subject, From: mb.Address, FromName: mb.DisplayName, To: req.To, CC: req.CC, BCC: req.BCC, SentAt: now, ReceivedAt: now, Snippet: snippetFrom(req.Text, req.HTML), BodyText: req.Text, BodyHTML: req.HTML, IsRead: true}
+	base := storedMessage{MailboxID: mb.ID, FolderID: sentFolderID, MessageUID: newID("uid"), MessageID: messageID, Subject: req.Subject, From: fromAddress, FromName: fromName, To: req.To, CC: req.CC, BCC: req.BCC, SentAt: now, ReceivedAt: now, Snippet: snippetFrom(req.Text, req.HTML), BodyText: req.Text, BodyHTML: req.HTML, IsRead: true}
 	sentID, err := a.insertMessage(ctx, base, req.Attachments)
 	if err != nil {
 		return nil, fmt.Errorf("failed to store sent message: %w", err)
+	}
+	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
+	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
+		a.deleteMessage(ctx, sentID)
+		return nil, fmt.Errorf("failed to enqueue delivery: %w", err)
 	}
 
 	// Development/local-domain delivery: known local recipients go to their Inbox.
@@ -925,7 +937,7 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	payload := scheduledSendPayload{MailboxID: compose.MailboxID, To: compose.To, CC: compose.CC, BCC: compose.BCC, Subject: compose.Subject, Text: compose.Text, HTML: compose.HTML, Attachments: compose.Attachments, DraftID: draftID}
+	payload := scheduledSendPayload{MailboxID: compose.MailboxID, From: compose.From, FromName: compose.FromName, To: compose.To, CC: compose.CC, BCC: compose.BCC, Subject: compose.Subject, Text: compose.Text, HTML: compose.HTML, Attachments: compose.Attachments, DraftID: draftID}
 	item := ScheduledSend{ID: newID("sched"), MailboxID: mb.ID, DraftID: draftID, Subject: payload.Subject, To: payload.To, Snippet: snippetFrom(payload.Text, payload.HTML), SendAt: sendAt.UTC(), Status: "pending", CreatedAt: parseTime(now), UpdatedAt: parseTime(now)}
 	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO scheduled_sends(id,user_id,mailbox_id,draft_id,payload_json,send_at,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, item.ID, currentUser(r).ID, mb.ID, nullableString(draftID), jsonEncode(payload), item.SendAt.Format(time.RFC3339Nano), item.Status, now, now); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to schedule send")
@@ -1326,6 +1338,18 @@ func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*Ma
 }
 
 func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments []AttachmentInput) (string, error) {
+	return a.insertMessageWithDB(ctx, a.db, msg, attachments)
+}
+
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type dbQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg storedMessage, attachments []AttachmentInput) (string, error) {
 	id := newID("mail")
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	hasAttachments := len(attachments) > 0
@@ -1343,13 +1367,14 @@ func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments 
 		folderID = msg.FolderID
 	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
-	_, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
+	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, now, now)
 	if err != nil {
 		return "", err
 	}
 	for _, att := range attachments {
-		if err := a.storeAttachment(ctx, id, att); err != nil {
+		if err := a.storeAttachmentWithDB(ctx, db, id, att); err != nil {
+			a.deleteMessageFiles(ctx, id)
 			return "", err
 		}
 	}
@@ -1357,6 +1382,10 @@ func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments 
 }
 
 func (a *App) storeAttachment(ctx context.Context, messageID string, input AttachmentInput) error {
+	return a.storeAttachmentWithDB(ctx, a.db, messageID, input)
+}
+
+func (a *App) storeAttachmentWithDB(ctx context.Context, db dbExecutor, messageID string, input AttachmentInput) error {
 	filename := filepath.Base(strings.TrimSpace(input.Filename))
 	if filename == "." || filename == "" {
 		filename = "attachment.bin"
@@ -1378,7 +1407,7 @@ func (a *App) storeAttachment(ctx context.Context, messageID string, input Attac
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,storage_path,created_at) VALUES(?,?,?,?,?,?,?)`, id, messageID, filename, contentType, len(data), path, a.now().UTC().Format(time.RFC3339Nano))
+	_, err = db.ExecContext(ctx, `INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,storage_path,created_at) VALUES(?,?,?,?,?,?,?)`, id, messageID, filename, contentType, len(data), path, a.now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 
@@ -1546,6 +1575,11 @@ func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 		}
 	}
 	_ = os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID))
+}
+
+func (a *App) deleteMessage(ctx context.Context, messageID string) {
+	a.deleteMessageFiles(ctx, messageID)
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, messageID)
 }
 
 type messageSummaryScanner interface{ Scan(dest ...any) error }

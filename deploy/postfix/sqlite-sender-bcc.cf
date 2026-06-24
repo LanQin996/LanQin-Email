@@ -1,2 +1,0 @@
-dbpath = /data/lanqin.db
-query = SELECT local_part || '+Sent@' || substr(address, instr(address, '@') + 1) FROM mailboxes WHERE lower(address)=lower('%s') AND status='active'

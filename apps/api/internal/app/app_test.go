@@ -4,18 +4,31 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/emersion/go-sasl"
+	smtpclient "github.com/emersion/go-smtp"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -41,6 +54,63 @@ func newTestApp(t *testing.T) *App {
 	return a
 }
 
+func defaultAdminUserAndMailbox(t *testing.T, a *App) (*User, *Mailbox) {
+	t.Helper()
+	ctx := context.Background()
+	user, _, err := a.userByEmail(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	mb, err := a.mailboxByAddress(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return user, mb
+}
+
+func writeTestCertificateFiles(t *testing.T, hostname string) (string, string) {
+	t.Helper()
+	if strings.TrimSpace(hostname) == "" {
+		hostname = "localhost"
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	tmpl := x509.Certificate{
+		SerialNumber: serial,
+		Subject: pkix.Name{
+			CommonName: hostname,
+		},
+		NotBefore:             now.Add(-time.Hour),
+		NotAfter:              now.Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{hostname, "localhost"},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, &tmpl, &tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(t.TempDir(), "cert.pem")
+	keyPath := filepath.Join(filepath.Dir(certPath), "key.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
+
 func startFakeSMTP(t *testing.T) (string, string, <-chan string) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -48,6 +118,30 @@ func startFakeSMTP(t *testing.T) (string, string, <-chan string) {
 		t.Fatal(err)
 	}
 	received := make(chan string, 1)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go handleFakeSMTPConn(conn, received)
+		}
+	}()
+	host, port, err := net.SplitHostPort(ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return host, port, received
+}
+
+func startCapturingSMTP(t *testing.T, capacity int) (string, string, <-chan string) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan string, capacity)
 	t.Cleanup(func() { _ = ln.Close() })
 	go func() {
 		for {
@@ -746,7 +840,7 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	}
 }
 
-func TestMailSendReturnsSMTPFailure(t *testing.T) {
+func TestMailSendQueuesSMTPFailureForRetry(t *testing.T) {
 	a := newTestApp(t)
 	a.cfg.SMTPHost = "127.0.0.1"
 	a.cfg.SMTPPort = "1"
@@ -763,12 +857,748 @@ func TestMailSendReturnsSMTPFailure(t *testing.T) {
 		"subject": "smtp failure should surface",
 		"text":    "hello",
 	}
-	var errBody map[string]any
-	if code := admin.do("POST", "/api/mail/send", payload, &errBody); code != http.StatusBadGateway {
-		t.Fatalf("smtp failure code=%d body=%v", code, errBody)
+	var sent MailMessage
+	if code := admin.do("POST", "/api/mail/send", payload, &sent); code != http.StatusCreated {
+		t.Fatalf("smtp queued send code=%d body=%+v", code, sent)
 	}
-	if got, _ := errBody["error"].(string); !strings.Contains(got, "smtp delivery failed") {
-		t.Fatalf("error=%q", got)
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var status, lastError string
+	if err := a.db.QueryRow(`SELECT status,last_error FROM send_queue WHERE sent_message_id=?`, sent.ID).Scan(&status, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusFailed || lastError == "" {
+		t.Fatalf("queue status=%q lastError=%q", status, lastError)
+	}
+	var auditCount int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_audit_events WHERE sent_message_id=? AND event=?`, sent.ID, sendAuditRetry).Scan(&auditCount); err != nil {
+		t.Fatal(err)
+	}
+	if auditCount != 1 {
+		t.Fatalf("retry audit count=%d, want 1", auditCount)
+	}
+}
+
+func TestMailSendRejectsUnauthorizedFrom(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	var errBody map[string]any
+	if code := admin.do("POST", "/api/mail/send", map[string]any{
+		"from":    "attacker@example.com",
+		"to":      []string{"person@example.com"},
+		"subject": "bad from",
+		"text":    "hello",
+	}, &errBody); code != http.StatusForbidden {
+		t.Fatalf("unauthorized from code=%d body=%v", code, errBody)
+	}
+}
+
+func TestMailSendRollsBackSentCopyWhenQueueInsertFails(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "postfix"
+	a.cfg.SMTPPort = "25"
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	if _, err := a.db.ExecContext(context.Background(), `DROP TABLE send_queue`); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.sendMailNow(context.Background(), user, mb, mailComposeInput{
+		To:      []string{"person@example.com"},
+		Subject: "queue insert failure",
+		Text:    "hello",
+	})
+	if err == nil || !strings.Contains(err.Error(), "failed to enqueue delivery") {
+		t.Fatalf("sendMailNow error=%v, want enqueue failure", err)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND subject=?`, mb.ID, "queue insert failure").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("sent copy should be removed after enqueue failure, count=%d", count)
+	}
+}
+
+func TestSendQueueRecoversStaleSendingItems(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	now := a.now().UTC()
+	mimeBytes := []byte("From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: stale\r\n\r\nbody")
+	queueID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.com"},
+		MIMEBytes:  mimeBytes,
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleAt := now.Add(-sendQueueStaleAfter - time.Minute).Format(time.RFC3339Nano)
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=1,updated_at=? WHERE id=?`, sendQueueStatusSending, staleAt, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("recovered queue item was not relayed")
+	}
+	var status string
+	if err := a.db.QueryRow(`SELECT status FROM send_queue WHERE id=?`, queueID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered {
+		t.Fatalf("queue status=%q, want delivered", status)
+	}
+	var mimeBase64 string
+	if err := a.db.QueryRow(`SELECT mime_base64 FROM send_queue WHERE id=?`, queueID).Scan(&mimeBase64); err != nil {
+		t.Fatal(err)
+	}
+	if mimeBase64 != "" {
+		t.Fatal("delivered queue item should not retain raw MIME")
+	}
+}
+
+func TestSendQueueStaleDeliveredMarkerDoesNotRedeliver(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	now := a.now().UTC()
+	mimeBytes := []byte("From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: marker\r\n\r\nbody")
+	queueID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.com"},
+		MIMEBytes:  mimeBytes,
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleAt := now.Add(-sendQueueStaleAfter - time.Minute).Format(time.RFC3339Nano)
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=1,updated_at=? WHERE id=?`, sendQueueStatusSending, staleAt, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.writeSendQueueDeliveredMarker(queueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		t.Fatalf("stale delivered marker should not redeliver, got %q", body)
+	case <-time.After(200 * time.Millisecond):
+	}
+	var status, mimeBase64 string
+	if err := a.db.QueryRow(`SELECT status,mime_base64 FROM send_queue WHERE id=?`, queueID).Scan(&status, &mimeBase64); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered {
+		t.Fatalf("queue status=%q, want delivered", status)
+	}
+	if mimeBase64 != "" {
+		t.Fatal("delivered marker recovery should clear raw MIME")
+	}
+	delivered, err := a.hasSendQueueDeliveredMarker(queueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered {
+		t.Fatal("delivered marker should be removed after database state is repaired")
+	}
+}
+
+func TestSubmissionAuthRequiresMailboxPasswordAndSendPermission(t *testing.T) {
+	a := newTestApp(t)
+	user, mailbox, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatalf("authenticate submission: %v", err)
+	}
+	if user.Email != "admin@lanqin.local" || mailbox.Address != "admin@lanqin.local" {
+		t.Fatalf("unexpected auth user=%+v mailbox=%+v", user, mailbox)
+	}
+	if _, _, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "wrong-password"); err == nil {
+		t.Fatal("wrong password should fail")
+	}
+
+	ctx := context.Background()
+	hash, err := bcrypt.GenerateFromPassword([]byte("Password123!"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	userID := newID("usr")
+	domainID := mustDefaultDomainID(t, a)
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, userID, "nosend@lanqin.local", "No Send", "user", string(hash), 0, now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, newID("mb"), userID, domainID, "nosend", "nosend@lanqin.local", "No Send", string(hash), 1024, "active", now, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET permissions_json=?, updated_at=? WHERE id=?`, encodePermissions(withoutPermissions(regularUserDefaultPermissions(), PermissionMailSend)), now, PermissionGroupRegular); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.authenticateSubmission(ctx, "nosend@lanqin.local", "Password123!"); err == nil {
+		t.Fatal("missing send permission should fail")
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE users SET disabled=1 WHERE id=?`, userID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.authenticateSubmission(ctx, "nosend@lanqin.local", "Password123!"); err == nil {
+		t.Fatal("disabled owner should fail")
+	}
+}
+
+func TestSubmissionSendsRelayAndStoresSentCopy(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 2)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	raw := strings.Join([]string{
+		"From: Admin <admin@lanqin.local>",
+		"To: person@example.com",
+		"Bcc: hidden@example.com",
+		"Subject: Submission sent",
+		"Message-ID: <submission-sent@example.test>",
+		"Date: Tue, 24 Jun 2025 10:00:00 +0000",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"hello from submission",
+	}, "\r\n")
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com", "hidden@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("submit smtp message: %v", err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		if strings.Contains(strings.ToLower(body), "\r\nbcc:") || strings.Contains(body, "hidden@example.com") {
+			t.Fatalf("relay body leaked bcc: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay message not received")
+	}
+	sentFolderID, err := a.ensureFolder(context.Background(), mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var subject, bccJSON string
+	var read int
+	if err := a.db.QueryRow(`SELECT subject,bcc_addrs,is_read FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<submission-sent@example.test>").Scan(&subject, &bccJSON, &read); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "Submission sent" || read != 1 {
+		t.Fatalf("unexpected sent message subject=%q read=%d", subject, read)
+	}
+	if got := jsonDecodeSlice(bccJSON); len(got) != 1 || got[0] != "hidden@example.com" {
+		t.Fatalf("bcc json=%s", bccJSON)
+	}
+	var deliveredAudits int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_audit_events WHERE event=? AND status=?`, sendAuditDelivered, sendQueueStatusDelivered).Scan(&deliveredAudits); err != nil {
+		t.Fatal(err)
+	}
+	if deliveredAudits != 1 {
+		t.Fatalf("delivered audit count=%d, want 1", deliveredAudits)
+	}
+}
+
+func TestSubmissionRejectsMismatchedSender(t *testing.T) {
+	a := newTestApp(t)
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: attacker@example.com\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("mismatched header From should fail")
+	}
+	raw = "From: admin@lanqin.local, attacker@example.com\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("multiple header From addresses should fail")
+	}
+	raw = "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: nope\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, "attacker@example.com", []string{"person@example.com"}, strings.NewReader(raw)); err == nil {
+		t.Fatal("mismatched MAIL FROM should fail")
+	}
+}
+
+func TestSerializeMessageUsesStableHeaderOrder(t *testing.T) {
+	header := textproto.MIMEHeader{
+		"Subject":  {"stable"},
+		"From":     {"admin@lanqin.local"},
+		"Message":  {"custom"},
+		"X-Zebra":  {"z"},
+		"X-Answer": {"a"},
+	}
+	first := string(serializeMessage(header, []byte("body")))
+	for i := 0; i < 20; i++ {
+		if got := string(serializeMessage(header, []byte("body"))); got != first {
+			t.Fatalf("serializeMessage is not stable:\nfirst=%q\ngot=%q", first, got)
+		}
+	}
+	if !strings.HasPrefix(first, "From: admin@lanqin.local\r\n") {
+		t.Fatalf("unexpected header order: %q", first)
+	}
+}
+
+func TestSubmissionRelayFailureKeepsSentCopyAndRetries(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: relay fail\r\nMessage-ID: <relay-fail@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("submission should queue relay failure for retry: %v", err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND message_id=?`, mb.ID, "<relay-fail@example.test>").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sent copy should remain after queued relay failure, count=%d", count)
+	}
+	var status, lastError string
+	if err := a.db.QueryRow(`SELECT status,last_error FROM send_queue WHERE mailbox_id=? AND sent_message_id <> ''`, mb.ID).Scan(&status, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusFailed || lastError == "" {
+		t.Fatalf("queue status=%q lastError=%q", status, lastError)
+	}
+}
+
+func TestSubmissionSentCopyDedupesByMessageID(t *testing.T) {
+	a := newTestApp(t)
+	host, port, _ := startCapturingSMTP(t, 4)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: dedupe\r\nMessage-ID: <dedupe@example.test>\r\n\r\nbody"
+	for i := 0; i < 2; i++ {
+		if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+			t.Fatalf("submit %d: %v", i, err)
+		}
+	}
+	sentFolderID, err := a.ensureFolder(context.Background(), mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<dedupe@example.test>").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sent copy count=%d, want 1", count)
+	}
+	var queueCount int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<dedupe@example.test>").Scan(&queueCount); err != nil {
+		t.Fatal(err)
+	}
+	if queueCount != 1 {
+		t.Fatalf("send queue count=%d, want 1", queueCount)
+	}
+}
+
+func TestInsertSentMessageOnceFailsWhenDedupeKeyHasNoMessage(t *testing.T) {
+	a := newTestApp(t)
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	ctx := context.Background()
+	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageID := "<orphan-sent-dedupe@example.test>"
+	if err := a.insertSentDedupeKey(ctx, mb.ID, sentFolderID, messageID); err != nil {
+		t.Fatal(err)
+	}
+	now := a.now().UTC()
+	sentID, inserted, err := a.insertSentMessageOnce(ctx, storedMessage{
+		MailboxID:  mb.ID,
+		MessageUID: newID("uid"),
+		MessageID:  messageID,
+		Subject:    "orphan dedupe",
+		From:       mb.Address,
+		To:         []string{"person@example.com"},
+		SentAt:     now,
+		ReceivedAt: now,
+		BodyText:   "body",
+		IsRead:     true,
+	}, nil)
+	if !errors.Is(err, errSentDedupeExists) {
+		t.Fatalf("insertSentMessageOnce error=%v, want errSentDedupeExists", err)
+	}
+	if sentID != "" || inserted {
+		t.Fatalf("sentID=%q inserted=%v, want empty false", sentID, inserted)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, messageID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphan dedupe should not create sent message, count=%d", count)
+	}
+}
+
+func TestSubmissionRequeuesTerminalFailedDuplicateMessageID(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: requeue\r\nMessage-ID: <requeue@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=max_attempts,next_attempt_at=?,last_error='terminal' WHERE mailbox_id=? AND message_id=?`, sendQueueStatusFailed, a.now().UTC().Add(time.Hour).Format(time.RFC3339Nano), mb.ID, "<requeue@example.test>"); err != nil {
+		t.Fatal(err)
+	}
+
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("requeued terminal failure was not relayed")
+	}
+	var status string
+	var attemptCount int
+	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<requeue@example.test>").Scan(&status, &attemptCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered || attemptCount != 1 {
+		t.Fatalf("queue status=%q attempts=%d, want delivered attempts=1", status, attemptCount)
+	}
+}
+
+func TestSubmissionRequeuesDeliveredDuplicateMessageID(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 2)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: resend\r\nMessage-ID: <delivered-requeue@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first delivery not received")
+	}
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("requeued delivered message was not relayed")
+	}
+	var status string
+	var attemptCount int
+	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<delivered-requeue@example.test>").Scan(&status, &attemptCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered || attemptCount != 1 {
+		t.Fatalf("queue status=%q attempts=%d, want delivered attempts=1", status, attemptCount)
+	}
+}
+
+func TestSubmissionAllowsAuthorizedAliasSendAs(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO aliases(id,domain_id,source,destination,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID("als"), mustDefaultDomainID(t, a), "team@lanqin.local", "admin@lanqin.local", 1, a.now().UTC().Format(time.RFC3339Nano), a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	user, mb, err := a.authenticateSubmission(ctx, "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: Team <team@lanqin.local>\r\nTo: person@example.com\r\nSubject: alias send-as\r\nMessage-ID: <alias-send-as@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(ctx, user, mb, "team@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("authorized alias send-as should submit: %v", err)
+	}
+	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromAddr string
+	if err := a.db.QueryRow(`SELECT from_addr FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<alias-send-as@example.test>").Scan(&fromAddr); err != nil {
+		t.Fatal(err)
+	}
+	if fromAddr != "team@lanqin.local" {
+		t.Fatalf("from_addr=%q, want alias", fromAddr)
+	}
+}
+
+func TestSubmissionAllowsMultiDestinationAliasSendAs(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO aliases(id,domain_id,source,destination,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID("als"), mustDefaultDomainID(t, a), "team-many@lanqin.local", "other@lanqin.local, admin@lanqin.local", 1, a.now().UTC().Format(time.RFC3339Nano), a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	user, mb, err := a.authenticateSubmission(ctx, "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: Team <team-many@lanqin.local>\r\nTo: person@example.com\r\nSubject: alias send-as\r\nMessage-ID: <multi-alias-send-as@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(ctx, user, mb, "team-many@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("authorized multi-destination alias send-as should submit: %v", err)
+	}
+}
+
+func TestSubmissionAllowsExplicitSendAsGrant(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	user, mb, err := a.authenticateSubmission(ctx, "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO send_as_grants(id,mailbox_id,address,display_name,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID("sag"), mb.ID, "support@example.com", "Support", 1, now, now); err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: Support <support@example.com>\r\nTo: person@example.com\r\nSubject: explicit send-as\r\nMessage-ID: <explicit-send-as@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(ctx, user, mb, "support@example.com", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatalf("explicit send-as grant should submit: %v", err)
+	}
+	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fromAddr, fromName string
+	if err := a.db.QueryRow(`SELECT from_addr,from_name FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, "<explicit-send-as@example.test>").Scan(&fromAddr, &fromName); err != nil {
+		t.Fatal(err)
+	}
+	if fromAddr != "support@example.com" || fromName != "Support" {
+		t.Fatalf("from=%q name=%q, want explicit grant", fromAddr, fromName)
+	}
+}
+
+func TestSentMessageDedupeTableExists(t *testing.T) {
+	a := newTestApp(t)
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM sqlite_master WHERE type='table' AND name='sent_message_dedupe_keys'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("sent message dedupe table count=%d, want 1", count)
+	}
+}
+
+func TestSendQueueMessageIDMigrationDropsDuplicatesBeforeUniqueIndex(t *testing.T) {
+	a := newTestApp(t)
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	if _, err := a.db.Exec(`DROP INDEX IF EXISTS idx_send_queue_mailbox_source_message_id`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO send_queue(id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,status,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"dup_old", user.ID, mb.ID, "sent1", "<dup@example.test>", sendSourceSubmission, "admin@lanqin.local", "admin@lanqin.local", "[]", "bWVzc2FnZQ==", sendQueueStatusDelivered, a.now().UTC().Format(time.RFC3339Nano), "2026-06-24T00:00:00Z", "2026-06-24T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`INSERT INTO send_queue(id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,status,next_attempt_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"dup_keep", user.ID, mb.ID, "sent2", "<dup@example.test>", sendSourceSubmission, "admin@lanqin.local", "admin@lanqin.local", "[]", "bWVzc2FnZQ==", sendQueueStatusQueued, a.now().UTC().Format(time.RFC3339Nano), "2026-06-24T00:01:00Z", "2026-06-24T00:01:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.migrateSendQueueMessageID(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE mailbox_id=? AND source=? AND message_id='<dup@example.test>'`, mb.ID, sendSourceSubmission).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("duplicate queue rows count=%d, want 1", count)
+	}
+	var keptID string
+	if err := a.db.QueryRow(`SELECT id FROM send_queue WHERE mailbox_id=? AND source=? AND message_id='<dup@example.test>'`, mb.ID, sendSourceSubmission).Scan(&keptID); err != nil {
+		t.Fatal(err)
+	}
+	if keptID != "dup_keep" {
+		t.Fatalf("kept queue id=%q, want dup_keep", keptID)
+	}
+}
+
+func TestSubmissionTLSConfigRequiresCertificateFiles(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SubmissionAddr = ":587"
+	a.cfg.SubmissionTLSAddr = ":465"
+	if _, err := LoadServerTLSConfig(a.cfg); err == nil {
+		t.Fatal("submission TLS config should require certificate files")
+	}
+}
+
+func TestSubmissionTLSConfigReloadsCertificateFiles(t *testing.T) {
+	a := newTestApp(t)
+	certPath, keyPath := writeTestCertificateFiles(t, "first.example.test")
+	a.cfg.TLSCertFile = certPath
+	a.cfg.TLSKeyFile = keyPath
+	tlsConfig, err := LoadServerTLSConfig(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstLeaf, err := x509.ParseCertificate(first.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextCertPath, nextKeyPath := writeTestCertificateFiles(t, "second.example.test")
+	nextCert, err := os.ReadFile(nextCertPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextKey, err := os.ReadFile(nextKeyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(certPath, nextCert, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, nextKey, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	second, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondLeaf, err := x509.ParseCertificate(second.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstLeaf.Subject.CommonName != "first.example.test" || secondLeaf.Subject.CommonName != "second.example.test" {
+		t.Fatalf("cert reload common names first=%q second=%q", firstLeaf.Subject.CommonName, secondLeaf.Subject.CommonName)
+	}
+}
+
+func TestSubmissionServersAcceptStartTLSAndImplicitTLS(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 2)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	certPath, keyPath := writeTestCertificateFiles(t, "mail.example.test")
+	a.cfg.TLSCertFile = certPath
+	a.cfg.TLSKeyFile = keyPath
+	tlsConfig, err := LoadServerTLSConfig(a.cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	startServer := func(t *testing.T, implicit bool) string {
+		t.Helper()
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		srv := a.newSubmissionServer(ln.Addr().String(), tlsConfig)
+		go func() {
+			if implicit {
+				_ = srv.Serve(tls.NewListener(ln, tlsConfig))
+			} else {
+				_ = srv.Serve(ln)
+			}
+		}()
+		t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+		return ln.Addr().String()
+	}
+
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: starttls\r\nMessage-ID: <starttls@example.test>\r\n\r\nbody"
+	addr := startServer(t, false)
+	client, err := smtpclient.DialStartTLS(addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Auth(sasl.NewPlainClient("", "admin@lanqin.local", "ChangeMe123!")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendMail("admin@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("starttls relay not received")
+	}
+
+	raw = "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: smtps\r\nMessage-ID: <smtps@example.test>\r\n\r\nbody"
+	addr = startServer(t, true)
+	client, err = smtpclient.DialTLS(addr, &tls.Config{InsecureSkipVerify: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Auth(sasl.NewPlainClient("", "admin@lanqin.local", "ChangeMe123!")); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.SendMail("admin@lanqin.local", []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.Close()
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("implicit tls relay not received")
 	}
 }
 

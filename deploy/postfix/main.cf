@@ -14,13 +14,11 @@ virtual_transport = lmtp:inet:dovecot:24
 virtual_mailbox_base = /var/mail/vhosts
 
 smtpd_banner = $myhostname ESMTP LanQin Email
-smtpd_relay_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
-smtpd_recipient_restrictions = permit_mynetworks, permit_sasl_authenticated, reject_unauth_destination
+smtpd_relay_restrictions = permit_mynetworks, reject_unauth_destination
+smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination
 
-# Submission auth via Dovecot.
-smtpd_sasl_type = dovecot
-smtpd_sasl_path = inet:dovecot:12345
-smtpd_sasl_auth_enable = yes
+# 465/587 提交由 LanQin API 处理；Postfix 25 只负责入站和内部 relay。
+smtpd_sasl_auth_enable = no
 smtpd_tls_cert_file = /etc/ssl/certs/ssl-cert-snakeoil.pem
 smtpd_tls_key_file = /etc/ssl/private/ssl-cert-snakeoil.key
 smtpd_tls_security_level = may

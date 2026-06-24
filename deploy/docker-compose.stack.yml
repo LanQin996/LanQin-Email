@@ -2,9 +2,21 @@ services:
   api:
     image: ${LANQIN_API_IMAGE:-ghcr.io/lanqin996/lanqin-email-api:latest}
     env_file: .env
+    environment:
+      LANQIN_SMTP_HOST: ${LANQIN_STACK_SMTP_HOST:-postfix}
+      LANQIN_SMTP_PORT: ${LANQIN_STACK_SMTP_PORT:-25}
+      LANQIN_SUBMISSION_ADDR: ${LANQIN_SUBMISSION_ADDR:-}
+      LANQIN_SUBMISSION_TLS_ADDR: ${LANQIN_SUBMISSION_TLS_ADDR:-}
     volumes:
-      - ./data:/data:ro
+      - ./data:/data
       - ./mail:/var/mail/vhosts:ro
+      # 生产环境如需第三方客户端校验证书，请取消下面挂载的注释，并在 .env 配置：
+      # LANQIN_TLS_CERT_FILE=/certs/fullchain.pem
+      # LANQIN_TLS_KEY_FILE=/certs/privkey.pem
+      # - /etc/letsencrypt/live/${LANQIN_PUBLIC_HOSTNAME}:/certs:ro
+    ports:
+      - "465:465"
+      - "587:587"
     depends_on:
       - dovecot
       - postfix
@@ -36,8 +48,6 @@ services:
       # - /etc/letsencrypt:/etc/letsencrypt:ro
     ports:
       - "25:25"
-      - "465:465"
-      - "587:587"
     depends_on:
       - dovecot
       - rspamd

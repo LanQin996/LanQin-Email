@@ -22,6 +22,11 @@ type Config struct {
 	SMTPUsername            string
 	SMTPPassword            string
 	SMTPRequireTLS          bool
+	SubmissionAddr          string
+	SubmissionTLSAddr       string
+	SubmissionMaxMessageMB  int
+	TLSCertFile             string
+	TLSKeyFile              string
 	MaildirRoot             string
 	MaildirScanSeconds      int
 	AllowInsecureHTTP       bool
@@ -55,6 +60,11 @@ func LoadConfig() Config {
 		SMTPUsername:            getenv("LANQIN_SMTP_USERNAME", ""),
 		SMTPPassword:            getenv("LANQIN_SMTP_PASSWORD", ""),
 		SMTPRequireTLS:          getenvBool("LANQIN_SMTP_REQUIRE_TLS", false),
+		SubmissionAddr:          getenv("LANQIN_SUBMISSION_ADDR", ""),
+		SubmissionTLSAddr:       getenv("LANQIN_SUBMISSION_TLS_ADDR", ""),
+		SubmissionMaxMessageMB:  getenvInt("LANQIN_SUBMISSION_MAX_MESSAGE_MB", 35),
+		TLSCertFile:             getenv("LANQIN_TLS_CERT_FILE", ""),
+		TLSKeyFile:              getenv("LANQIN_TLS_KEY_FILE", ""),
 		MaildirRoot:             getenv("LANQIN_MAILDIR_ROOT", ""),
 		MaildirScanSeconds:      getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", 30),
 		AllowInsecureHTTP:       getenvBool("LANQIN_ALLOW_INSECURE_HTTP", true),
