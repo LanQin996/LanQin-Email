@@ -975,6 +975,61 @@ func TestSendQueueRecoversStaleSendingItems(t *testing.T) {
 	}
 }
 
+func TestSendQueueStaleDeliveredMarkerDoesNotRedeliver(t *testing.T) {
+	a := newTestApp(t)
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	now := a.now().UTC()
+	mimeBytes := []byte("From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: marker\r\n\r\nbody")
+	queueID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"person@example.com"},
+		MIMEBytes:  mimeBytes,
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	staleAt := now.Add(-sendQueueStaleAfter - time.Minute).Format(time.RFC3339Nano)
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=1,updated_at=? WHERE id=?`, sendQueueStatusSending, staleAt, queueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.writeSendQueueDeliveredMarker(queueID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case body := <-received:
+		t.Fatalf("stale delivered marker should not redeliver, got %q", body)
+	case <-time.After(200 * time.Millisecond):
+	}
+	var status, mimeBase64 string
+	if err := a.db.QueryRow(`SELECT status,mime_base64 FROM send_queue WHERE id=?`, queueID).Scan(&status, &mimeBase64); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered {
+		t.Fatalf("queue status=%q, want delivered", status)
+	}
+	if mimeBase64 != "" {
+		t.Fatal("delivered marker recovery should clear raw MIME")
+	}
+	delivered, err := a.hasSendQueueDeliveredMarker(queueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delivered {
+		t.Fatal("delivered marker should be removed after database state is repaired")
+	}
+}
+
 func TestSubmissionAuthRequiresMailboxPasswordAndSendPermission(t *testing.T) {
 	a := newTestApp(t)
 	user, mailbox, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")

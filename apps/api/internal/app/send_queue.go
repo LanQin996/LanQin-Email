@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -26,6 +28,8 @@ const (
 
 	sendQueueStaleAfter  = 15 * time.Minute
 	sendQueueConcurrency = 4
+
+	sendQueueDeliveredMarkerDir = "send_queue_delivered"
 )
 
 type sendQueueInput struct {
@@ -87,6 +91,7 @@ func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error
 				if err != nil {
 					return "", err
 				}
+				a.deleteSendQueueDeliveredMarker(existingID)
 				a.recordSendAudit(ctx, sendAuditQueued, sendQueueStatusQueued, sendAuditInput{
 					QueueID:       existingID,
 					UserID:        in.UserID,
@@ -195,6 +200,14 @@ func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 			return err
 		}
 		item.Recipients = jsonDecodeSlice(recipientsJSON)
+		delivered, err := a.hasSendQueueDeliveredMarker(item.ID)
+		if err != nil {
+			return err
+		}
+		if delivered {
+			items = append(items, item)
+			continue
+		}
 		mimeBytes, err := base64.StdEncoding.DecodeString(mimeBase64)
 		if err != nil {
 			return err
@@ -207,6 +220,16 @@ func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	for _, item := range items {
+		delivered, err := a.hasSendQueueDeliveredMarker(item.ID)
+		if err != nil {
+			return err
+		}
+		if delivered {
+			if err := a.markSendQueueDelivered(ctx, item); err != nil {
+				return err
+			}
+			continue
+		}
 		res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND status=?`, sendQueueStatusFailed, now, "send attempt interrupted", now, item.ID, sendQueueStatusSending)
 		if err != nil {
 			return err
@@ -230,12 +253,23 @@ func (a *App) processSendQueueItem(ctx context.Context, id string) {
 		a.markSendQueueFailed(ctx, item, err)
 		return
 	}
-	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='',mime_base64='' WHERE id=?`, sendQueueStatusDelivered, now, now, item.ID); err != nil {
+	if err := a.writeSendQueueDeliveredMarker(item.ID); err != nil {
+		a.log.Warn("failed to persist send queue delivered marker", "id", item.ID, "error", err)
+	}
+	if err := a.markSendQueueDelivered(ctx, item); err != nil {
 		a.log.Warn("failed to mark send queue delivered", "id", item.ID, "error", err)
 		return
 	}
+}
+
+func (a *App) markSendQueueDelivered(ctx context.Context, item sendQueueItem) error {
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='',mime_base64='' WHERE id=?`, sendQueueStatusDelivered, now, now, item.ID); err != nil {
+		return err
+	}
+	a.deleteSendQueueDeliveredMarker(item.ID)
 	a.recordSendAudit(ctx, sendAuditDelivered, sendQueueStatusDelivered, sendAuditInputFromQueue(item, ""))
+	return nil
 }
 
 func (a *App) claimSendQueueItem(ctx context.Context, id string) (sendQueueItem, error) {
@@ -326,6 +360,49 @@ func (a *App) recordSendAudit(ctx context.Context, event, status string, in send
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, newID("audit"), in.QueueID, in.UserID, in.MailboxID, in.SentMessageID, source, event, status, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), jsonEncode(dedupeEmails(in.Recipients)), in.Error, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		a.log.Warn("failed to record send audit", "event", event, "error", err)
+	}
+}
+
+func (a *App) sendQueueDeliveredMarkerPath(id string) string {
+	safeID := filepath.Base(strings.TrimSpace(id))
+	if safeID == "" || safeID == "." {
+		safeID = "unknown"
+	}
+	return filepath.Join(a.cfg.DataDir, sendQueueDeliveredMarkerDir, safeID+".marker")
+}
+
+func (a *App) writeSendQueueDeliveredMarker(id string) error {
+	path := a.sendQueueDeliveredMarkerPath(id)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, filepath.Base(path)+"."+newID("tmp"))
+	if err := os.WriteFile(tmp, []byte(a.now().UTC().Format(time.RFC3339Nano)), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+func (a *App) hasSendQueueDeliveredMarker(id string) (bool, error) {
+	_, err := os.Stat(a.sendQueueDeliveredMarkerPath(id))
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
+}
+
+func (a *App) deleteSendQueueDeliveredMarker(id string) {
+	err := os.Remove(a.sendQueueDeliveredMarkerPath(id))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		a.log.Warn("failed to remove send queue delivered marker", "id", id, "error", err)
 	}
 }
 
