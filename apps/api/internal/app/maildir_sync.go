@@ -137,6 +137,11 @@ func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
 		return imported, err
 	}
 	imported += backfilled
+	cleaned, err := a.cleanupMissingMaildirMessages(ctx)
+	if err != nil {
+		return imported, err
+	}
+	imported += cleaned
 	return imported, nil
 }
 
@@ -297,7 +302,7 @@ func (a *App) syncMaildirFile(ctx context.Context, mb maildirMailbox, folder mai
 	}
 	msg.MailboxID = mb.ID
 	msg.FolderID = folder.ID
-	msg.IsRead = !strings.EqualFold(folder.Name, "Inbox")
+	msg.IsRead, msg.IsStarred = maildirFlagsFromPath(path, folder.Name)
 	msg.RawPath = path
 	if msg.MessageUID == "" {
 		msg.MessageUID = newID("uid")
@@ -317,7 +322,14 @@ func (a *App) syncMaildirFile(ctx context.Context, mb maildirMailbox, folder mai
 	if exists, err := a.maildirMessageExists(ctx, mb.ID, folder.ID, path, msg.MessageID); err != nil {
 		return false, err
 	} else if exists {
-		a.attachMaildirRawPathToExisting(ctx, mb.ID, folder.ID, path, msg.MessageID)
+		if _, err := a.syncExistingMaildirMessageState(ctx, mb.ID, folder.ID, path, msg.MessageID, msg.IsRead, msg.IsStarred); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	if handled, err := a.syncExistingMaildirMessageState(ctx, mb.ID, folder.ID, path, msg.MessageID, msg.IsRead, msg.IsStarred); err != nil {
+		return false, err
+	} else if handled {
 		return false, nil
 	}
 	id, err := a.insertMessage(ctx, msg, attachments)
@@ -353,6 +365,145 @@ func (a *App) attachMaildirRawPathToExisting(ctx context.Context, mailboxID, fol
 		rawPath, a.now().UTC().Format(time.RFC3339Nano), mailboxID, folderID, messageID); err != nil {
 		a.log.Warn("failed to attach maildir raw path to existing message", "path", rawPath, "error", err)
 	}
+}
+
+func (a *App) syncExistingMaildirMessageState(ctx context.Context, mailboxID, folderID, rawPath, messageID string, read, starred bool) (bool, error) {
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	res, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,updated_at=? WHERE mailbox_id=? AND raw_path=?`,
+		folderID, rawPath, boolInt(read), boolInt(starred), now, mailboxID, rawPath)
+	if err != nil {
+		return false, err
+	}
+	if rows, _ := res.RowsAffected(); rows > 0 {
+		return true, nil
+	}
+	if strings.TrimSpace(messageID) == "" {
+		return false, nil
+	}
+	type candidate struct {
+		ID      string
+		RawPath string
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE mailbox_id=? AND message_id=? AND message_id <> '' ORDER BY CASE WHEN folder_id=? THEN 0 ELSE 1 END, created_at`, mailboxID, messageID, folderID)
+	if err != nil {
+		return false, err
+	}
+	var chosen candidate
+	for rows.Next() {
+		var c candidate
+		if err := rows.Scan(&c.ID, &c.RawPath); err != nil {
+			rows.Close()
+			return false, err
+		}
+		if c.RawPath == "" || c.RawPath == rawPath {
+			chosen = c
+			break
+		}
+		ok, err := a.pathIsUnderMaildirRoot(c.RawPath)
+		if err != nil {
+			rows.Close()
+			return false, err
+		}
+		if ok {
+			if _, err := os.Stat(c.RawPath); errors.Is(err, os.ErrNotExist) {
+				chosen = c
+				break
+			} else if err != nil {
+				rows.Close()
+				return false, err
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return false, err
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+	if chosen.ID == "" {
+		a.removeDuplicateMaildirMessage(ctx, rawPath, mailboxID, folderID, messageID)
+		return false, nil
+	}
+	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,updated_at=? WHERE id=?`, folderID, rawPath, boolInt(read), boolInt(starred), now, chosen.ID)
+	return err == nil, err
+}
+
+func (a *App) removeDuplicateMaildirMessage(ctx context.Context, rawPath, mailboxID, folderID, messageID string) {
+	var existing string
+	err := a.db.QueryRowContext(ctx, `SELECT raw_path FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' AND raw_path<>'' LIMIT 1`, mailboxID, folderID, messageID).Scan(&existing)
+	if err != nil || existing == "" || existing == rawPath {
+		return
+	}
+	a.removeMaildirPath(ctx, rawPath)
+}
+
+func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
+	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
+		return 0, nil
+	}
+	cutoff := a.now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE COALESCE(mailbox_id,'')<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	type item struct {
+		ID      string
+		RawPath string
+	}
+	var missing []item
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.ID, &it.RawPath); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ok, err := a.pathIsUnderMaildirRoot(it.RawPath)
+		if err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if !ok {
+			continue
+		}
+		if _, err := os.Stat(it.RawPath); errors.Is(err, os.ErrNotExist) {
+			missing = append(missing, it)
+		} else if err != nil {
+			rows.Close()
+			return 0, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	for _, it := range missing {
+		a.deleteMessageFiles(ctx, it.ID)
+		if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, it.ID); err != nil {
+			return 0, err
+		}
+	}
+	return len(missing), nil
+}
+
+func maildirFlagsFromPath(path, folderName string) (bool, bool) {
+	base := filepath.Base(path)
+	flags := ""
+	hasFlags := false
+	for _, sep := range []string{maildirFlagSeparator(), ":2,", "!2,"} {
+		if idx := strings.LastIndex(base, sep); idx >= 0 {
+			flags = base[idx+len(sep):]
+			hasFlags = true
+			break
+		}
+	}
+	if hasFlags {
+		return strings.ContainsRune(flags, 'S'), strings.ContainsRune(flags, 'F')
+	}
+	return !strings.EqualFold(folderName, "Inbox"), false
 }
 
 func (a *App) attachUnregisteredMaildirRawPathToExisting(ctx context.Context, rawPath, messageID, recipient string) {

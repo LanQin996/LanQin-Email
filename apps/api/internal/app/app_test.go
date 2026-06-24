@@ -2632,6 +2632,162 @@ func TestMessageFlagsUpdateMaildir(t *testing.T) {
 	}
 }
 
+func TestMaildirSyncUpdatesMovedMessageState(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "imap moved",
+		Text:      "move body",
+		HTML:      "<p>move body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentPath := maildirRawPathForTest(t, a, msg.ID)
+	archiveID, err := a.ensureFolder(ctx, mb.ID, "Archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveDir := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(sentPath))), ".Archive", "cur")
+	if err := os.MkdirAll(archiveDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	archivePath := filepath.Join(archiveDir, filepath.Base(sentPath))
+	if err := os.Rename(sentPath, archivePath); err != nil {
+		t.Fatal(err)
+	}
+	count, err := a.syncMaildirOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("sync count=%d, want no import/backfill", count)
+	}
+	var folderID, rawPath string
+	if err := a.db.QueryRowContext(ctx, `SELECT folder_id,raw_path FROM messages WHERE id=?`, msg.ID).Scan(&folderID, &rawPath); err != nil {
+		t.Fatal(err)
+	}
+	if folderID != archiveID || rawPath != archivePath {
+		t.Fatalf("folder/raw after move=%q %q, want %q %q", folderID, rawPath, archiveID, archivePath)
+	}
+}
+
+func TestMaildirSyncKeepsDistinctCopiesWithSameMessageID(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"admin@lanqin.local"},
+		Subject:   "self copy",
+		Text:      "self body",
+		HTML:      "<p>self body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.syncMaildirOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var copies int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE mailbox_id=? AND message_id=?`, mb.ID, msg.MessageID).Scan(&copies); err != nil {
+		t.Fatal(err)
+	}
+	if copies != 2 {
+		t.Fatalf("copies with same Message-ID=%d, want Sent and Inbox copies", copies)
+	}
+}
+
+func TestMaildirSyncUpdatesFlagsFromIMAP(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "imap flags",
+		Text:      "flag body",
+		HTML:      "<p>flag body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPath := maildirRawPathForTest(t, a, msg.ID)
+	flaggedPath := maildirPathWithFlags(rawPath, false, true)
+	if err := os.MkdirAll(filepath.Dir(flaggedPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(rawPath, flaggedPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET updated_at=? WHERE id=?`, a.now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano), msg.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.syncMaildirOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var read, starred int
+	var dbPath string
+	if err := a.db.QueryRowContext(ctx, `SELECT is_read,is_starred,raw_path FROM messages WHERE id=?`, msg.ID).Scan(&read, &starred, &dbPath); err != nil {
+		t.Fatal(err)
+	}
+	if read != 0 || starred != 1 || dbPath != flaggedPath {
+		t.Fatalf("flags/path after sync read=%d starred=%d path=%q want 0 1 %q", read, starred, dbPath, flaggedPath)
+	}
+}
+
+func TestMaildirSyncDeletesMissingMessage(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "imap delete",
+		Text:      "delete body",
+		HTML:      "<p>delete body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPath := maildirRawPathForTest(t, a, msg.ID)
+	if err := os.Remove(rawPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET updated_at=? WHERE id=?`, a.now().UTC().Add(-10*time.Minute).Format(time.RFC3339Nano), msg.ID); err != nil {
+		t.Fatal(err)
+	}
+	count, err := a.syncMaildirOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("cleanup count=%d, want 1", count)
+	}
+	var remaining int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE id=?`, msg.ID).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	}
+	if remaining != 0 {
+		t.Fatalf("message remaining=%d, want deleted", remaining)
+	}
+}
+
 func mustDefaultDomainID(t *testing.T, a *App) string {
 	t.Helper()
 	var id string
