@@ -2580,6 +2580,52 @@ func TestMoveAndDeleteMessageUpdateMaildir(t *testing.T) {
 	}
 }
 
+func TestMessageFlagsUpdateMaildir(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	srv := httptest.NewServer(a.Router())
+	defer srv.Close()
+	client := &testClient{t: t, server: srv}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"admin@lanqin.local"},
+		Subject:   "flag me",
+		Text:      "flag body",
+		HTML:      "<p>flag body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := client.do("POST", "/api/mail/messages/"+msg.ID+"/mark-read", map[string]bool{"read": false}, nil); code != http.StatusOK {
+		t.Fatalf("mark unread code=%d", code)
+	}
+	unreadPath := maildirRawPathForTest(t, a, msg.ID)
+	if strings.Contains(filepath.Base(unreadPath), maildirFlagSeparator()) {
+		t.Fatalf("unread path should not have seen flag: %s", unreadPath)
+	}
+	if !strings.EqualFold(filepath.Base(filepath.Dir(unreadPath)), "new") {
+		t.Fatalf("unread path dir=%s, want new", filepath.Dir(unreadPath))
+	}
+	if code := client.do("POST", "/api/mail/messages/"+msg.ID+"/star", map[string]bool{"starred": true}, nil); code != http.StatusOK {
+		t.Fatalf("star code=%d", code)
+	}
+	starredPath := maildirRawPathForTest(t, a, msg.ID)
+	if !strings.Contains(filepath.Base(starredPath), maildirFlagSeparator()+"F") {
+		t.Fatalf("starred path missing F flag: %s", starredPath)
+	}
+	if !strings.EqualFold(filepath.Base(filepath.Dir(starredPath)), "cur") {
+		t.Fatalf("starred path dir=%s, want cur", filepath.Dir(starredPath))
+	}
+}
+
 func mustDefaultDomainID(t *testing.T, a *App) string {
 	t.Helper()
 	var id string

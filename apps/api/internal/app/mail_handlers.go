@@ -1138,6 +1138,10 @@ func (a *App) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 	if req.Read != nil {
 		read = *req.Read
 	}
+	if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, &read, nil); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update message")
+		return
+	}
 	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=?, updated_at=? WHERE id=?`, boolInt(read), a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update message")
@@ -1159,6 +1163,10 @@ func (a *App) handleStar(w http.ResponseWriter, r *http.Request) {
 	starred := !msg.IsStarred
 	if req.Starred != nil {
 		starred = *req.Starred
+	}
+	if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, nil, &starred); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update message")
+		return
 	}
 	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_starred=?, updated_at=? WHERE id=?`, boolInt(starred), a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 	if err != nil {

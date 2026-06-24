@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -67,12 +68,23 @@ func (a *App) rewriteMessageMaildir(ctx context.Context, messageID string) error
 }
 
 func (a *App) writeRawMessageToMaildir(ctx context.Context, messageID string, raw []byte, replace bool) error {
+	state, err := a.maildirMessageState(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	return a.writeRawMessageToMaildirFolder(ctx, messageID, state.FolderID, raw, replace, false)
+}
+
+func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, folderID string, raw []byte, replace bool, updateFolder bool) error {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
 		return nil
 	}
 	state, err := a.maildirMessageState(ctx, messageID)
 	if err != nil {
 		return err
+	}
+	if folderID != "" {
+		state.FolderID = folderID
 	}
 	if state.MailboxID == "" || state.FolderID == "" {
 		return nil
@@ -118,7 +130,11 @@ func (a *App) writeRawMessageToMaildir(ctx context.Context, messageID string, ra
 	if replace || state.RawPath != "" {
 		a.removeMaildirPath(ctx, state.RawPath)
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?, updated_at=? WHERE id=?`, finalPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	if updateFolder {
+		_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,updated_at=? WHERE id=?`, state.FolderID, finalPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	} else {
+		_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?, updated_at=? WHERE id=?`, finalPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	}
 	return err
 }
 
@@ -204,11 +220,7 @@ func (a *App) writeMessageToNewMaildirFolder(ctx context.Context, messageID, fol
 	if err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, folderID, a.now().UTC().Format(time.RFC3339Nano), messageID)
-	if err != nil {
-		return err
-	}
-	return a.writeRawMessageToMaildir(ctx, messageID, raw, true)
+	return a.writeRawMessageToMaildirFolder(ctx, messageID, folderID, raw, true, true)
 }
 
 func (a *App) deleteMessageMaildirFile(ctx context.Context, messageID string) {
@@ -217,6 +229,52 @@ func (a *App) deleteMessageMaildirFile(ctx context.Context, messageID string) {
 		return
 	}
 	a.removeMaildirPath(ctx, rawPath)
+}
+
+func (a *App) updateMessageMaildirFlags(ctx context.Context, messageID string, read, starred *bool) error {
+	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
+		return nil
+	}
+	state, err := a.maildirMessageState(ctx, messageID)
+	if err != nil {
+		return err
+	}
+	if state.RawPath == "" {
+		return nil
+	}
+	ok, err := a.pathIsUnderMaildirRoot(state.RawPath)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if _, err := os.Stat(state.RawPath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	currentRead := state.IsRead
+	currentStarred := state.IsStarred
+	if read != nil {
+		currentRead = *read
+	}
+	if starred != nil {
+		currentStarred = *starred
+	}
+	targetPath := maildirPathWithFlags(state.RawPath, currentRead, currentStarred)
+	if filepath.Clean(targetPath) == filepath.Clean(state.RawPath) {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(state.RawPath, targetPath); err != nil {
+		return err
+	}
+	_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,updated_at=? WHERE id=?`, targetPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	return err
 }
 
 func (a *App) removeMaildirPath(ctx context.Context, rawPath string) {
@@ -282,19 +340,21 @@ type maildirMessageState struct {
 	MessageID string
 	RawPath   string
 	IsRead    bool
+	IsStarred bool
 }
 
 func (a *App) maildirMessageState(ctx context.Context, id string) (maildirMessageState, error) {
 	var state maildirMessageState
 	var mailboxID, folderID sql.NullString
-	var read int
-	err := a.db.QueryRowContext(ctx, `SELECT mailbox_id,folder_id,message_id,raw_path,is_read FROM messages WHERE id=?`, id).Scan(&mailboxID, &folderID, &state.MessageID, &state.RawPath, &read)
+	var read, starred int
+	err := a.db.QueryRowContext(ctx, `SELECT mailbox_id,folder_id,message_id,raw_path,is_read,is_starred FROM messages WHERE id=?`, id).Scan(&mailboxID, &folderID, &state.MessageID, &state.RawPath, &read, &starred)
 	if err != nil {
 		return state, err
 	}
 	state.MailboxID = mailboxID.String
 	state.FolderID = folderID.String
 	state.IsRead = intBool(read)
+	state.IsStarred = intBool(starred)
 	return state, nil
 }
 
@@ -418,4 +478,37 @@ func messageDate(msg storedMessage) time.Time {
 		return msg.ReceivedAt
 	}
 	return time.Now().UTC()
+}
+
+func maildirPathWithFlags(path string, read, starred bool) string {
+	dir := filepath.Dir(path)
+	name := filepath.Base(path)
+	if read || starred {
+		dir = filepath.Join(filepath.Dir(dir), "cur")
+	} else if filepath.Base(dir) == "cur" {
+		dir = filepath.Join(filepath.Dir(dir), "new")
+	}
+	base := name
+	sep := maildirFlagSeparator()
+	if idx := strings.LastIndex(base, sep); idx >= 0 {
+		base = base[:idx]
+	}
+	flags := ""
+	if read {
+		flags += "S"
+	}
+	if starred {
+		flags += "F"
+	}
+	if flags != "" {
+		base += sep + flags
+	}
+	return filepath.Join(dir, base)
+}
+
+func maildirFlagSeparator() string {
+	if runtime.GOOS == "windows" {
+		return "!2,"
+	}
+	return ":2,"
 }

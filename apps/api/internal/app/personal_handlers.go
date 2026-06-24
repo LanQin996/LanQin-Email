@@ -1087,10 +1087,18 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string,
 				}
 			}
 		case "star":
+			starred := true
+			if err := a.updateMessageMaildirFlags(ctx, messageID, nil, &starred); err != nil {
+				return err
+			}
 			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_starred=1, updated_at=? WHERE id=?`, now, messageID); err != nil {
 				return err
 			}
 		case "mark-read":
+			read := true
+			if err := a.updateMessageMaildirFlags(ctx, messageID, &read, nil); err != nil {
+				return err
+			}
 			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, now, messageID); err != nil {
 				return err
 			}
