@@ -786,7 +786,7 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	args = append(args, limit+1, offset)
 
-	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m
 		LEFT JOIN folders f ON f.id=m.folder_id
 		LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id
@@ -1039,6 +1039,6 @@ func (a *App) ensureFolder(ctx context.Context, mailboxID, folder string) (strin
 	}
 	role := strings.ToLower(folder)
 	id = newID("fld")
-	_, err := a.db.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,created_at) VALUES(?,?,?,?,?)`, id, mailboxID, folder, role, a.now().UTC().Format(time.RFC3339Nano))
+	_, err := a.db.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, mailboxID, folder, role, a.newUIDValidity(), 1, 1, a.now().UTC().Format(time.RFC3339Nano))
 	return id, err
 }

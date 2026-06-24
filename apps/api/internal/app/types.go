@@ -57,11 +57,14 @@ type Alias struct {
 }
 
 type MailFolder struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Role        string `json:"role"`
-	UnreadCount int    `json:"unreadCount"`
-	TotalCount  int    `json:"totalCount"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Role          string `json:"role"`
+	UnreadCount   int    `json:"unreadCount"`
+	TotalCount    int    `json:"totalCount"`
+	UIDValidity   int64  `json:"uidValidity"`
+	UIDNext       int64  `json:"uidNext"`
+	HighestModSeq int64  `json:"highestModseq"`
 }
 
 type MailLabel struct {
@@ -81,6 +84,8 @@ type MailMessage struct {
 	FolderID       string       `json:"folderId"`
 	Folder         string       `json:"folder"`
 	MessageUID     string       `json:"messageUid"`
+	IMAPUID        int64        `json:"imapUid"`
+	IMAPModSeq     int64        `json:"imapModseq"`
 	MessageID      string       `json:"messageId"`
 	Subject        string       `json:"subject"`
 	From           string       `json:"from"`

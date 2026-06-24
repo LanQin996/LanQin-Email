@@ -2729,6 +2729,99 @@ func TestMessageFlagsUpdateMaildir(t *testing.T) {
 	}
 }
 
+func TestIMAPUIDAndModSeqProgression(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	srv := httptest.NewServer(a.Router())
+	defer srv.Close()
+	client := &testClient{t: t, server: srv}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+	sentID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	archiveID, err := a.ensureFolder(ctx, mb.ID, "Archive")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := a.sendMailNow(ctx, user, mb, mailComposeInput{MailboxID: mb.ID, To: []string{"one@example.test"}, Subject: "uid one", Text: "one", HTML: "<p>one</p>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.sendMailNow(ctx, user, mb, mailComposeInput{MailboxID: mb.ID, To: []string{"two@example.test"}, Subject: "uid two", Text: "two", HTML: "<p>two</p>"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstUID, firstModSeq, secondUID int64
+	if err := a.db.QueryRowContext(ctx, `SELECT imap_uid,imap_modseq FROM messages WHERE id=?`, first.ID).Scan(&firstUID, &firstModSeq); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRowContext(ctx, `SELECT imap_uid FROM messages WHERE id=?`, second.ID).Scan(&secondUID); err != nil {
+		t.Fatal(err)
+	}
+	if firstUID <= 0 || secondUID != firstUID+1 {
+		t.Fatalf("sent UIDs first=%d second=%d, want consecutive positive", firstUID, secondUID)
+	}
+	var sentUIDNext int64
+	if err := a.db.QueryRowContext(ctx, `SELECT uid_next FROM folders WHERE id=?`, sentID).Scan(&sentUIDNext); err != nil {
+		t.Fatal(err)
+	}
+	if sentUIDNext <= secondUID {
+		t.Fatalf("sent uid_next=%d, second uid=%d", sentUIDNext, secondUID)
+	}
+
+	starred := true
+	if err := a.updateMessageMaildirFlags(ctx, first.ID, nil, &starred); err != nil {
+		t.Fatal(err)
+	}
+	modSeq, err := a.updateMessageModSeq(ctx, first.ID, sentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_starred=1,imap_modseq=? WHERE id=?`, modSeq, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	var afterFlagUID, afterFlagModSeq int64
+	if err := a.db.QueryRowContext(ctx, `SELECT imap_uid,imap_modseq FROM messages WHERE id=?`, first.ID).Scan(&afterFlagUID, &afterFlagModSeq); err != nil {
+		t.Fatal(err)
+	}
+	if afterFlagUID != firstUID || afterFlagModSeq <= firstModSeq {
+		t.Fatalf("after flag uid/modseq=%d/%d, want uid %d and modseq > %d", afterFlagUID, afterFlagModSeq, firstUID, firstModSeq)
+	}
+
+	if err := a.moveMessageMaildir(ctx, first.ID, archiveID); err != nil {
+		t.Fatal(err)
+	}
+	var archiveUID, archiveModSeq int64
+	var folderID string
+	if err := a.db.QueryRowContext(ctx, `SELECT folder_id,imap_uid,imap_modseq FROM messages WHERE id=?`, first.ID).Scan(&folderID, &archiveUID, &archiveModSeq); err != nil {
+		t.Fatal(err)
+	}
+	if folderID != archiveID {
+		t.Fatalf("folder after move=%s, want archive %s", folderID, archiveID)
+	}
+	if archiveUID <= 0 {
+		t.Fatalf("archive uid=%d, want positive uid", archiveUID)
+	}
+	var archiveUIDNext, archiveHighestModSeq int64
+	if err := a.db.QueryRowContext(ctx, `SELECT uid_next,highest_modseq FROM folders WHERE id=?`, archiveID).Scan(&archiveUIDNext, &archiveHighestModSeq); err != nil {
+		t.Fatal(err)
+	}
+	if archiveUIDNext <= archiveUID {
+		t.Fatalf("archive uid_next=%d, uid=%d", archiveUIDNext, archiveUID)
+	}
+	if archiveModSeq != archiveHighestModSeq {
+		t.Fatalf("archive modseq=%d highest=%d, want equal", archiveModSeq, archiveHighestModSeq)
+	}
+}
+
 func TestMaildirSyncUpdatesMovedMessageState(t *testing.T) {
 	a := newTestApp(t)
 	ctx := context.Background()

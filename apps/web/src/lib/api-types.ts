@@ -56,11 +56,11 @@ export type AdminOverview = { users: number; activeUsers: number; domains: numbe
 export type Domain = { id: string; name: string; status: string; dkimSelector: string; dkimPublicKey?: string; dnsStatus: string; dnsCheckedAt?: string; createdAt: string }
 export type Mailbox = { id: string; userId: string; userEmail?: string; domainId: string; localPart: string; address: string; displayName: string; quotaMb: number; status: string; createdAt: string }
 export type Alias = { id: string; domainId: string; source: string; destination: string; enabled: boolean; createdAt: string }
-export type MailFolder = { id: string; name: string; role: string; unreadCount: number; totalCount: number }
+export type MailFolder = { id: string; name: string; role: string; unreadCount: number; totalCount: number; uidValidity: number; uidNext: number; highestModseq: number }
 export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
 export type MailLabel = { id: string; mailboxId?: string; name: string; color: string; messageCount?: number }
 export type MailMessage = {
-  id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; messageId: string; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
+  id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
   labels?: MailLabel[]
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }

@@ -84,7 +84,13 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 		return err
 	}
 	if folderID != "" {
+		oldFolderID := state.FolderID
 		state.FolderID = folderID
+		if updateFolder && oldFolderID != "" && oldFolderID != state.FolderID {
+			if _, err := a.bumpFolderModSeq(ctx, oldFolderID); err != nil {
+				return err
+			}
+		}
 	}
 	if state.MailboxID == "" || state.FolderID == "" {
 		return nil
@@ -132,16 +138,45 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 		a.removeMaildirPath(ctx, state.RawPath)
 	}
 	if updateFolder {
-		_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,updated_at=? WHERE id=?`, state.FolderID, finalPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+		if state.IMAPUID > 0 && folderID == "" {
+			modSeq, metaErr := a.bumpFolderModSeq(ctx, state.FolderID)
+			if metaErr != nil {
+				return metaErr
+			}
+			_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`, state.FolderID, finalPath, modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
+		} else {
+			meta, metaErr := a.nextIMAPMetadata(ctx, a.db, state.FolderID)
+			if metaErr != nil {
+				return metaErr
+			}
+			_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,imap_uid=?,imap_modseq=?,updated_at=? WHERE id=?`, state.FolderID, finalPath, meta.UID, meta.ModSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
+		}
 	} else {
-		_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?, updated_at=? WHERE id=?`, finalPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+		modSeq, metaErr := a.bumpFolderModSeq(ctx, state.FolderID)
+		if metaErr != nil {
+			return metaErr
+		}
+		_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`, finalPath, modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
 	}
 	return err
 }
 
 func (a *App) moveMessageMaildir(ctx context.Context, messageID, targetFolderID string) error {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
-		_, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, targetFolderID, a.now().UTC().Format(time.RFC3339Nano), messageID)
+		state, stateErr := a.maildirMessageState(ctx, messageID)
+		if stateErr != nil {
+			return stateErr
+		}
+		if state.FolderID != "" && state.FolderID != targetFolderID {
+			if _, err := a.bumpFolderModSeq(ctx, state.FolderID); err != nil {
+				return err
+			}
+		}
+		meta, metaErr := a.nextIMAPMetadata(ctx, a.db, targetFolderID)
+		if metaErr != nil {
+			return metaErr
+		}
+		_, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,imap_uid=?,imap_modseq=?,updated_at=? WHERE id=?`, targetFolderID, meta.UID, meta.ModSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
 		return err
 	}
 	state, err := a.maildirMessageState(ctx, messageID)
@@ -191,7 +226,16 @@ func (a *App) moveMessageMaildir(ctx context.Context, messageID, targetFolderID 
 			return err
 		}
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,updated_at=? WHERE id=?`, targetFolderID, targetPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	if state.FolderID != "" && state.FolderID != targetFolderID {
+		if _, err := a.bumpFolderModSeq(ctx, state.FolderID); err != nil {
+			return err
+		}
+	}
+	meta, err := a.nextIMAPMetadata(ctx, a.db, targetFolderID)
+	if err != nil {
+		return err
+	}
+	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,imap_uid=?,imap_modseq=?,updated_at=? WHERE id=?`, targetFolderID, targetPath, meta.UID, meta.ModSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
 	return err
 }
 
@@ -274,7 +318,11 @@ func (a *App) updateMessageMaildirFlags(ctx context.Context, messageID string, r
 	if err := os.Rename(state.RawPath, targetPath); err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,updated_at=? WHERE id=?`, targetPath, a.now().UTC().Format(time.RFC3339Nano), messageID)
+	modSeq, err := a.bumpFolderModSeq(ctx, state.FolderID)
+	if err != nil {
+		return err
+	}
+	_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`, targetPath, modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), messageID)
 	return err
 }
 
@@ -336,19 +384,21 @@ func (a *App) backfillSQLiteMessagesToMaildir(ctx context.Context) (int, error) 
 }
 
 type maildirMessageState struct {
-	MailboxID string
-	FolderID  string
-	MessageID string
-	RawPath   string
-	IsRead    bool
-	IsStarred bool
+	MailboxID  string
+	FolderID   string
+	MessageID  string
+	RawPath    string
+	IsRead     bool
+	IsStarred  bool
+	IMAPUID    int64
+	IMAPModSeq int64
 }
 
 func (a *App) maildirMessageState(ctx context.Context, id string) (maildirMessageState, error) {
 	var state maildirMessageState
 	var mailboxID, folderID sql.NullString
 	var read, starred int
-	err := a.db.QueryRowContext(ctx, `SELECT mailbox_id,folder_id,message_id,raw_path,is_read,is_starred FROM messages WHERE id=?`, id).Scan(&mailboxID, &folderID, &state.MessageID, &state.RawPath, &read, &starred)
+	err := a.db.QueryRowContext(ctx, `SELECT mailbox_id,folder_id,message_id,raw_path,is_read,is_starred,imap_uid,imap_modseq FROM messages WHERE id=?`, id).Scan(&mailboxID, &folderID, &state.MessageID, &state.RawPath, &read, &starred, &state.IMAPUID, &state.IMAPModSeq)
 	if err != nil {
 		return state, err
 	}

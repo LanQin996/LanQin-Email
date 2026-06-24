@@ -405,13 +405,38 @@ func (a *App) attachMaildirRawPathToExisting(ctx context.Context, mailboxID, fol
 
 func (a *App) syncExistingMaildirMessageState(ctx context.Context, mailboxID, folderID, rawPath, messageID string, read, starred bool) (bool, error) {
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	res, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,updated_at=? WHERE mailbox_id=? AND raw_path=?`,
-		folderID, rawPath, boolInt(read), boolInt(starred), now, mailboxID, rawPath)
-	if err != nil {
-		return false, err
+	var samePathID, oldFolderID string
+	var oldRead, oldStarred int
+	var oldModSeq int64
+	err := a.db.QueryRowContext(ctx, `SELECT id,COALESCE(folder_id,''),is_read,is_starred,imap_modseq FROM messages WHERE mailbox_id=? AND raw_path=?`, mailboxID, rawPath).Scan(&samePathID, &oldFolderID, &oldRead, &oldStarred, &oldModSeq)
+	if err == nil {
+		if oldFolderID != folderID {
+			if oldFolderID != "" {
+				if _, err := a.bumpFolderModSeq(ctx, oldFolderID); err != nil {
+					return false, err
+				}
+			}
+			meta, err := a.nextIMAPMetadata(ctx, a.db, folderID)
+			if err != nil {
+				return false, err
+			}
+			_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,imap_uid=?,imap_modseq=?,updated_at=? WHERE id=?`,
+				folderID, rawPath, boolInt(read), boolInt(starred), meta.UID, meta.ModSeq, now, samePathID)
+			return err == nil, err
+		}
+		modSeq := oldModSeq
+		if oldRead != boolInt(read) || oldStarred != boolInt(starred) {
+			modSeq, err = a.bumpFolderModSeq(ctx, folderID)
+			if err != nil {
+				return false, err
+			}
+		}
+		_, err = a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,is_read=?,is_starred=?,imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`,
+			rawPath, boolInt(read), boolInt(starred), modSeq, modSeq, now, samePathID)
+		return err == nil, err
 	}
-	if rows, _ := res.RowsAffected(); rows > 0 {
-		return true, nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
 	}
 	if strings.TrimSpace(messageID) == "" {
 		return false, nil
@@ -461,7 +486,20 @@ func (a *App) syncExistingMaildirMessageState(ctx context.Context, mailboxID, fo
 		a.removeDuplicateMaildirMessage(ctx, rawPath, mailboxID, folderID, messageID)
 		return false, nil
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,updated_at=? WHERE id=?`, folderID, rawPath, boolInt(read), boolInt(starred), now, chosen.ID)
+	var previousFolderID string
+	if err := a.db.QueryRowContext(ctx, `SELECT COALESCE(folder_id,'') FROM messages WHERE id=?`, chosen.ID).Scan(&previousFolderID); err != nil {
+		return false, err
+	}
+	if previousFolderID != "" && previousFolderID != folderID {
+		if _, err := a.bumpFolderModSeq(ctx, previousFolderID); err != nil {
+			return false, err
+		}
+	}
+	meta, err := a.nextIMAPMetadata(ctx, a.db, folderID)
+	if err != nil {
+		return false, err
+	}
+	_, err = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?,raw_path=?,is_read=?,is_starred=?,imap_uid=?,imap_modseq=?,updated_at=? WHERE id=?`, folderID, rawPath, boolInt(read), boolInt(starred), meta.UID, meta.ModSeq, now, chosen.ID)
 	return err == nil, err
 }
 
@@ -518,8 +556,15 @@ func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
 	}
 	for _, it := range missing {
 		a.deleteMessageFiles(ctx, it.ID)
+		var folderID sql.NullString
+		_ = a.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id=?`, it.ID).Scan(&folderID)
 		if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, it.ID); err != nil {
 			return 0, err
+		}
+		if folderID.Valid && folderID.String != "" {
+			if _, err := a.bumpFolderModSeq(ctx, folderID.String); err != nil {
+				return 0, err
+			}
 		}
 	}
 	return len(missing), nil

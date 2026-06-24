@@ -1091,7 +1091,11 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string,
 			if err := a.updateMessageMaildirFlags(ctx, messageID, nil, &starred); err != nil {
 				return err
 			}
-			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_starred=1, updated_at=? WHERE id=?`, now, messageID); err != nil {
+			modSeq, err := a.updateMessageModSeq(ctx, messageID, "")
+			if err != nil {
+				return err
+			}
+			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_starred=1, imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END, updated_at=? WHERE id=?`, modSeq, modSeq, now, messageID); err != nil {
 				return err
 			}
 		case "mark-read":
@@ -1099,7 +1103,11 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string,
 			if err := a.updateMessageMaildirFlags(ctx, messageID, &read, nil); err != nil {
 				return err
 			}
-			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, now, messageID); err != nil {
+			modSeq, err := a.updateMessageModSeq(ctx, messageID, "")
+			if err != nil {
+				return err
+			}
+			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET is_read=1, imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END, updated_at=? WHERE id=?`, modSeq, modSeq, now, messageID); err != nil {
 				return err
 			}
 		case "label":

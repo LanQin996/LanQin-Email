@@ -84,7 +84,8 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT f.id,f.name,f.role,
 		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
-		COUNT(m.id) AS total
+		COUNT(m.id) AS total,
+		f.uid_validity,f.uid_next,f.highest_modseq
 		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
 		WHERE f.mailbox_id=? GROUP BY f.id,f.name,f.role
 		ORDER BY CASE f.role WHEN 'inbox' THEN 1 WHEN 'sent' THEN 2 WHEN 'drafts' THEN 3 WHEN 'archive' THEN 4 WHEN 'spam' THEN 5 WHEN 'trash' THEN 6 ELSE 99 END, f.name`, mb.ID)
@@ -96,7 +97,7 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	items := []MailFolder{}
 	for rows.Next() {
 		var f MailFolder
-		if err := rows.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to scan folders")
 			return
 		}
@@ -154,7 +155,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 		args = append(args, like, like, like, like, like)
 	}
 	args = append(args, limit+1, offset)
-	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`
 	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
@@ -332,7 +333,11 @@ func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, &read, nil); err != nil {
 			a.log.Warn("failed to update maildir read flag", "message_id", msg.ID, "error", err)
 		}
-		_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+		if modSeq, err := a.updateMessageModSeq(r.Context(), msg.ID, msg.FolderID); err == nil && modSeq > 0 {
+			_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, imap_modseq=?, updated_at=? WHERE id=?`, modSeq, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+		} else {
+			_, _ = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=1, updated_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+		}
 		msg.IsRead = true
 	}
 	respondJSON(w, http.StatusOK, msg)
@@ -814,8 +819,13 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 		_ = a.db.QueryRowContext(r.Context(), `SELECT COALESCE(SUM(size_bytes),0) FROM attachments WHERE message_id=?`, draftID).Scan(&attachmentBytes)
 		size += attachmentBytes
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET subject=?,to_addrs=?,cc_addrs=?,bcc_addrs=?,sent_at=?,received_at=?,snippet=?,body_text=?,body_html=?,is_read=1,has_attachments=?,size_bytes=?,updated_at=? WHERE id=?`,
-		subject, jsonEncode(compose.To), jsonEncode(compose.CC), jsonEncode(compose.BCC), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), snippetFrom(compose.Text, compose.HTML), compose.Text, compose.HTML, boolInt(hasAttachments), size, now.Format(time.RFC3339Nano), draftID)
+	modSeq, err := a.updateMessageModSeq(r.Context(), draftID, existing.FolderID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update draft")
+		return
+	}
+	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET subject=?,to_addrs=?,cc_addrs=?,bcc_addrs=?,sent_at=?,received_at=?,snippet=?,body_text=?,body_html=?,is_read=1,has_attachments=?,size_bytes=?,imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`,
+		subject, jsonEncode(compose.To), jsonEncode(compose.CC), jsonEncode(compose.BCC), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), snippetFrom(compose.Text, compose.HTML), compose.Text, compose.HTML, boolInt(hasAttachments), size, modSeq, modSeq, now.Format(time.RFC3339Nano), draftID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update draft")
 		return
@@ -848,6 +858,7 @@ func (a *App) handleDeleteDraft(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to delete draft")
 		return
 	}
+	_, _ = a.bumpFolderModSeq(r.Context(), msg.FolderID)
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
@@ -1146,7 +1157,12 @@ func (a *App) handleMarkRead(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update message")
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=?, updated_at=? WHERE id=?`, boolInt(read), a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+	modSeq, err := a.updateMessageModSeq(r.Context(), msg.ID, msg.FolderID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update message")
+		return
+	}
+	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=?, imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END, updated_at=? WHERE id=?`, boolInt(read), modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update message")
 		return
@@ -1172,7 +1188,12 @@ func (a *App) handleStar(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update message")
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_starred=?, updated_at=? WHERE id=?`, boolInt(starred), a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+	modSeq, err := a.updateMessageModSeq(r.Context(), msg.ID, msg.FolderID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update message")
+		return
+	}
+	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET is_starred=?, imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END, updated_at=? WHERE id=?`, boolInt(starred), modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update message")
 		return
@@ -1215,6 +1236,9 @@ func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		a.deleteMessageMaildirFile(r.Context(), msg.ID)
 		a.deleteMessageFiles(r.Context(), msg.ID)
 		_, err = a.db.ExecContext(r.Context(), `DELETE FROM messages WHERE id=?`, msg.ID)
+		if err == nil {
+			_, _ = a.bumpFolderModSeq(r.Context(), msg.FolderID)
+		}
 	} else {
 		trashID, e := a.ensureFolder(r.Context(), msg.MailboxID, "Trash")
 		if e != nil {
@@ -1348,7 +1372,7 @@ func (a *App) loadMessageForRequest(r *http.Request, id string, includeBody bool
 }
 
 func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*MailMessage, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.id=?`, id)
 	msg, err := scanMessageFull(row, includeBody)
 	if err != nil {
@@ -1398,9 +1422,17 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 	if strings.TrimSpace(msg.FolderID) != "" {
 		folderID = msg.FolderID
 	}
+	imapUID, imapModSeq := int64(0), int64(1)
+	if strings.TrimSpace(msg.FolderID) != "" {
+		meta, err := a.nextIMAPMetadata(ctx, db, msg.FolderID)
+		if err != nil {
+			return "", err
+		}
+		imapUID, imapModSeq = meta.UID, meta.ModSeq
+	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
-	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, now, now)
+	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,imap_uid,imap_modseq,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, imapUID, imapModSeq, now, now)
 	if err != nil {
 		return "", err
 	}
@@ -1610,9 +1642,14 @@ func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 }
 
 func (a *App) deleteMessage(ctx context.Context, messageID string) {
+	var folderID sql.NullString
+	_ = a.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id=?`, messageID).Scan(&folderID)
 	a.deleteMessageMaildirFile(ctx, messageID)
 	a.deleteMessageFiles(ctx, messageID)
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, messageID)
+	if folderID.Valid && folderID.String != "" {
+		_, _ = a.bumpFolderModSeq(ctx, folderID.String)
+	}
 }
 
 type messageSummaryScanner interface{ Scan(dest ...any) error }
@@ -1621,7 +1658,7 @@ func scanAdminMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.MailboxAddress, &msg.OwnerEmail, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.MailboxAddress, &msg.OwnerEmail, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
@@ -1635,7 +1672,7 @@ func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
@@ -1650,7 +1687,7 @@ func scanMessageFull(row messageSummaryScanner, includeBody bool) (MailMessage, 
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
 	var bodyText, bodyHTML string
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes)
 	if err != nil {
 		return msg, err
 	}
