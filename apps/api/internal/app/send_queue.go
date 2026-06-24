@@ -66,18 +66,38 @@ func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error
 	}
 	id := newID("snd")
 	messageID := strings.TrimSpace(in.MessageID)
+	mimeBase64 := base64.StdEncoding.EncodeToString(in.MIMEBytes)
+	recipientsJSON := jsonEncode(dedupeEmails(in.Recipients))
 	_, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO send_queue(id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,status,next_attempt_at,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		id, in.UserID, in.MailboxID, in.SentMessageID, messageID, in.Source, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), jsonEncode(dedupeEmails(in.Recipients)), base64.StdEncoding.EncodeToString(in.MIMEBytes), sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+		id, in.UserID, in.MailboxID, in.SentMessageID, messageID, in.Source, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
 	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(messageID) != "" {
-		var existingID string
-		if err := a.db.QueryRowContext(ctx, `SELECT id FROM send_queue WHERE mailbox_id=? AND source=? AND message_id=?`, in.MailboxID, in.Source, messageID).Scan(&existingID); err != nil {
+		var existingID, status string
+		var attemptCount, maxAttempts int
+		if err := a.db.QueryRowContext(ctx, `SELECT id,status,attempt_count,max_attempts FROM send_queue WHERE mailbox_id=? AND source=? AND message_id=?`, in.MailboxID, in.Source, messageID).Scan(&existingID, &status, &attemptCount, &maxAttempts); err != nil {
 			return "", err
 		}
 		if existingID != id {
+			if status == sendQueueStatusFailed && attemptCount >= maxAttempts {
+				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=? AND attempt_count>=max_attempts`,
+					in.UserID, in.SentMessageID, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), existingID, sendQueueStatusFailed)
+				if err != nil {
+					return "", err
+				}
+				a.recordSendAudit(ctx, sendAuditQueued, sendQueueStatusQueued, sendAuditInput{
+					QueueID:       existingID,
+					UserID:        in.UserID,
+					MailboxID:     in.MailboxID,
+					SentMessageID: in.SentMessageID,
+					Source:        in.Source,
+					MailFrom:      in.MailFrom,
+					HeaderFrom:    in.HeaderFrom,
+					Recipients:    in.Recipients,
+				})
+			}
 			return existingID, nil
 		}
 	}
@@ -191,7 +211,7 @@ func (a *App) processSendQueueItem(ctx context.Context, id string) {
 		return
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='' WHERE id=?`, sendQueueStatusDelivered, now, now, item.ID); err != nil {
+	if _, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='',mime_base64='' WHERE id=?`, sendQueueStatusDelivered, now, now, item.ID); err != nil {
 		a.log.Warn("failed to mark send queue delivered", "id", item.ID, "error", err)
 		return
 	}

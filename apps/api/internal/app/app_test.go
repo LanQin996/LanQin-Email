@@ -894,6 +894,13 @@ func TestSendQueueRecoversStaleSendingItems(t *testing.T) {
 	if status != sendQueueStatusDelivered {
 		t.Fatalf("queue status=%q, want delivered", status)
 	}
+	var mimeBase64 string
+	if err := a.db.QueryRow(`SELECT mime_base64 FROM send_queue WHERE id=?`, queueID).Scan(&mimeBase64); err != nil {
+		t.Fatal(err)
+	}
+	if mimeBase64 != "" {
+		t.Fatal("delivered queue item should not retain raw MIME")
+	}
 }
 
 func TestSubmissionAuthRequiresMailboxPasswordAndSendPermission(t *testing.T) {
@@ -1079,6 +1086,46 @@ func TestSubmissionSentCopyDedupesByMessageID(t *testing.T) {
 	}
 	if queueCount != 1 {
 		t.Fatalf("send queue count=%d, want 1", queueCount)
+	}
+}
+
+func TestSubmissionRequeuesTerminalFailedDuplicateMessageID(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	user, mb, err := a.authenticateSubmission(context.Background(), "admin@lanqin.local", "ChangeMe123!")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := "From: admin@lanqin.local\r\nTo: person@example.com\r\nSubject: requeue\r\nMessage-ID: <requeue@example.test>\r\n\r\nbody"
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=max_attempts,next_attempt_at=?,last_error='terminal' WHERE mailbox_id=? AND message_id=?`, sendQueueStatusFailed, a.now().UTC().Add(time.Hour).Format(time.RFC3339Nano), mb.ID, "<requeue@example.test>"); err != nil {
+		t.Fatal(err)
+	}
+
+	host, port, received := startCapturingSMTP(t, 1)
+	a.cfg.SMTPHost = host
+	a.cfg.SMTPPort = port
+	if err := a.submitSMTPMessage(context.Background(), user, mb, mb.Address, []string{"person@example.com"}, strings.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueSendQueue(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-received:
+	case <-time.After(2 * time.Second):
+		t.Fatal("requeued terminal failure was not relayed")
+	}
+	var status string
+	var attemptCount int
+	if err := a.db.QueryRow(`SELECT status,attempt_count FROM send_queue WHERE mailbox_id=? AND message_id=?`, mb.ID, "<requeue@example.test>").Scan(&status, &attemptCount); err != nil {
+		t.Fatal(err)
+	}
+	if status != sendQueueStatusDelivered || attemptCount != 1 {
+		t.Fatalf("queue status=%q attempts=%d, want delivered attempts=1", status, attemptCount)
 	}
 }
 
