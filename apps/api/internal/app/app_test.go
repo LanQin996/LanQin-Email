@@ -12,6 +12,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"io"
 	"log/slog"
 	"math/big"
@@ -1176,6 +1177,46 @@ func TestSubmissionSentCopyDedupesByMessageID(t *testing.T) {
 	}
 	if queueCount != 1 {
 		t.Fatalf("send queue count=%d, want 1", queueCount)
+	}
+}
+
+func TestInsertSentMessageOnceFailsWhenDedupeKeyHasNoMessage(t *testing.T) {
+	a := newTestApp(t)
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	ctx := context.Background()
+	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messageID := "<orphan-sent-dedupe@example.test>"
+	if err := a.insertSentDedupeKey(ctx, mb.ID, sentFolderID, messageID); err != nil {
+		t.Fatal(err)
+	}
+	now := a.now().UTC()
+	sentID, inserted, err := a.insertSentMessageOnce(ctx, storedMessage{
+		MailboxID:  mb.ID,
+		MessageUID: newID("uid"),
+		MessageID:  messageID,
+		Subject:    "orphan dedupe",
+		From:       mb.Address,
+		To:         []string{"person@example.com"},
+		SentAt:     now,
+		ReceivedAt: now,
+		BodyText:   "body",
+		IsRead:     true,
+	}, nil)
+	if !errors.Is(err, errSentDedupeExists) {
+		t.Fatalf("insertSentMessageOnce error=%v, want errSentDedupeExists", err)
+	}
+	if sentID != "" || inserted {
+		t.Fatalf("sentID=%q inserted=%v, want empty false", sentID, inserted)
+	}
+	var count int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=?`, mb.ID, sentFolderID, messageID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("orphan dedupe should not create sent message, count=%d", count)
 	}
 }
 

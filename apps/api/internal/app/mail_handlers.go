@@ -1338,6 +1338,18 @@ func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*Ma
 }
 
 func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments []AttachmentInput) (string, error) {
+	return a.insertMessageWithDB(ctx, a.db, msg, attachments)
+}
+
+type dbExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type dbQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg storedMessage, attachments []AttachmentInput) (string, error) {
 	id := newID("mail")
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	hasAttachments := len(attachments) > 0
@@ -1355,13 +1367,14 @@ func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments 
 		folderID = msg.FolderID
 	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
-	_, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
+	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, now, now)
 	if err != nil {
 		return "", err
 	}
 	for _, att := range attachments {
-		if err := a.storeAttachment(ctx, id, att); err != nil {
+		if err := a.storeAttachmentWithDB(ctx, db, id, att); err != nil {
+			a.deleteMessageFiles(ctx, id)
 			return "", err
 		}
 	}
@@ -1369,6 +1382,10 @@ func (a *App) insertMessage(ctx context.Context, msg storedMessage, attachments 
 }
 
 func (a *App) storeAttachment(ctx context.Context, messageID string, input AttachmentInput) error {
+	return a.storeAttachmentWithDB(ctx, a.db, messageID, input)
+}
+
+func (a *App) storeAttachmentWithDB(ctx context.Context, db dbExecutor, messageID string, input AttachmentInput) error {
 	filename := filepath.Base(strings.TrimSpace(input.Filename))
 	if filename == "." || filename == "" {
 		filename = "attachment.bin"
@@ -1390,7 +1407,7 @@ func (a *App) storeAttachment(ctx context.Context, messageID string, input Attac
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,storage_path,created_at) VALUES(?,?,?,?,?,?,?)`, id, messageID, filename, contentType, len(data), path, a.now().UTC().Format(time.RFC3339Nano))
+	_, err = db.ExecContext(ctx, `INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,storage_path,created_at) VALUES(?,?,?,?,?,?,?)`, id, messageID, filename, contentType, len(data), path, a.now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 

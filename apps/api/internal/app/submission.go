@@ -322,46 +322,76 @@ func (a *App) insertSentMessageOnce(ctx context.Context, msg storedMessage, atta
 	if msg.MessageUID == "" {
 		msg.MessageUID = newID("uid")
 	}
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", false, err
+	}
+	committed := false
+	messageIDForCleanup := ""
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+			if messageIDForCleanup != "" {
+				a.deleteMessageFiles(ctx, messageIDForCleanup)
+			}
+		}
+	}()
 	if msg.MessageID != "" {
-		var existing string
-		err := a.db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, msg.MailboxID, sentFolderID, msg.MessageID).Scan(&existing)
+		existing, err := sentMessageIDByMessageID(ctx, tx, msg.MailboxID, sentFolderID, msg.MessageID)
 		if err == nil {
-			if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil && !errors.Is(err, errSentDedupeExists) {
+			if err := a.insertSentDedupeKeyWithDB(ctx, tx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil && !errors.Is(err, errSentDedupeExists) {
 				return "", false, err
 			}
+			if err := tx.Commit(); err != nil {
+				return "", false, err
+			}
+			committed = true
 			return existing, false, nil
 		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return "", false, err
 		}
-		if err := a.insertSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil {
+		if err := a.insertSentDedupeKeyWithDB(ctx, tx, msg.MailboxID, sentFolderID, msg.MessageID); err != nil {
 			if errors.Is(err, errSentDedupeExists) {
-				var existing string
-				if err := a.db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, msg.MailboxID, sentFolderID, msg.MessageID).Scan(&existing); err == nil {
+				existing, qerr := sentMessageIDByMessageID(ctx, tx, msg.MailboxID, sentFolderID, msg.MessageID)
+				if qerr == nil {
+					if err := tx.Commit(); err != nil {
+						return "", false, err
+					}
+					committed = true
 					return existing, false, nil
 				}
-				return "", false, nil
+				if errors.Is(qerr, sql.ErrNoRows) {
+					return "", false, fmt.Errorf("sent dedupe key exists without sent message: %w", errSentDedupeExists)
+				}
+				return "", false, qerr
 			}
 			return "", false, err
 		}
 	}
-	id, err := a.insertMessage(ctx, msg, attachments)
+	id, err := a.insertMessageWithDB(ctx, tx, msg, attachments)
 	if err != nil {
-		if msg.MessageID != "" {
-			a.deleteSentDedupeKey(ctx, msg.MailboxID, sentFolderID, msg.MessageID)
-		}
 		return "", false, err
 	}
+	messageIDForCleanup = id
+	if err := tx.Commit(); err != nil {
+		return "", false, err
+	}
+	committed = true
 	return id, true, nil
 }
 
 var errSentDedupeExists = errors.New("sent message already exists")
 
 func (a *App) insertSentDedupeKey(ctx context.Context, mailboxID, folderID, messageID string) error {
+	return a.insertSentDedupeKeyWithDB(ctx, a.db, mailboxID, folderID, messageID)
+}
+
+func (a *App) insertSentDedupeKeyWithDB(ctx context.Context, db dbExecutor, mailboxID, folderID, messageID string) error {
 	if strings.TrimSpace(messageID) == "" {
 		return nil
 	}
-	res, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO sent_message_dedupe_keys(mailbox_id,folder_id,message_id,created_at) VALUES(?,?,?,?)`, mailboxID, folderID, messageID, a.now().UTC().Format(time.RFC3339Nano))
+	res, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO sent_message_dedupe_keys(mailbox_id,folder_id,message_id,created_at) VALUES(?,?,?,?)`, mailboxID, folderID, messageID, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}
@@ -369,6 +399,12 @@ func (a *App) insertSentDedupeKey(ctx context.Context, mailboxID, folderID, mess
 		return errSentDedupeExists
 	}
 	return nil
+}
+
+func sentMessageIDByMessageID(ctx context.Context, db dbQueryer, mailboxID, folderID, messageID string) (string, error) {
+	var existing string
+	err := db.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' LIMIT 1`, mailboxID, folderID, messageID).Scan(&existing)
+	return existing, err
 }
 
 func (a *App) deleteSentDedupeKey(ctx context.Context, mailboxID, folderID, messageID string) {
