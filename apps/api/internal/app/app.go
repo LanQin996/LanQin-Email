@@ -582,7 +582,7 @@ func (a *App) migrateLegacyBootstrapMailbox(ctx context.Context) error {
 			return err
 		}
 		for _, messageID := range messageIDs {
-			a.deleteMessageFiles(ctx, messageID)
+			a.deleteMessage(ctx, messageID)
 		}
 		if _, err := a.db.ExecContext(ctx, `DELETE FROM mailboxes WHERE id=?`, item.id); err != nil {
 			return err

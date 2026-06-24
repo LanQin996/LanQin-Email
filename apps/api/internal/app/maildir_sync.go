@@ -53,7 +53,7 @@ func (a *App) maildirWorker(ctx context.Context) {
 	if n, err := a.syncMaildirOnce(ctx); err != nil {
 		a.log.Warn("initial maildir sync failed", "error", err)
 	} else if n > 0 {
-		a.log.Info("initial maildir sync imported messages", "count", n)
+		a.log.Info("initial maildir sync processed messages", "count", n)
 	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -69,7 +69,7 @@ func (a *App) maildirWorker(ctx context.Context) {
 				continue
 			}
 			if n > 0 {
-				a.log.Info("maildir sync imported messages", "count", n)
+				a.log.Info("maildir sync processed messages", "count", n)
 			}
 		}
 	}
@@ -132,6 +132,11 @@ func (a *App) syncMaildirOnce(ctx context.Context) (int, error) {
 			}
 		}
 	}
+	backfilled, err := a.backfillSQLiteMessagesToMaildir(ctx)
+	if err != nil {
+		return imported, err
+	}
+	imported += backfilled
 	return imported, nil
 }
 
@@ -248,6 +253,7 @@ func (a *App) syncUnregisteredMaildirFile(ctx context.Context, mb maildirMailbox
 	if exists, err := a.unregisteredMaildirMessageExists(ctx, path, msg.MessageID, msg.RecipientAddr); err != nil {
 		return false, err
 	} else if exists {
+		a.attachUnregisteredMaildirRawPathToExisting(ctx, path, msg.MessageID, msg.RecipientAddr)
 		return false, nil
 	}
 	_, err = a.insertMessage(ctx, msg, attachments)
@@ -311,6 +317,7 @@ func (a *App) syncMaildirFile(ctx context.Context, mb maildirMailbox, folder mai
 	if exists, err := a.maildirMessageExists(ctx, mb.ID, folder.ID, path, msg.MessageID); err != nil {
 		return false, err
 	} else if exists {
+		a.attachMaildirRawPathToExisting(ctx, mb.ID, folder.ID, path, msg.MessageID)
 		return false, nil
 	}
 	id, err := a.insertMessage(ctx, msg, attachments)
@@ -336,6 +343,26 @@ func (a *App) unregisteredMaildirMessageExists(ctx context.Context, rawPath, mes
 		return false, err
 	}
 	return count > 0, nil
+}
+
+func (a *App) attachMaildirRawPathToExisting(ctx context.Context, mailboxID, folderID, rawPath, messageID string) {
+	if strings.TrimSpace(messageID) == "" || strings.TrimSpace(rawPath) == "" {
+		return
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,updated_at=? WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' AND raw_path=''`,
+		rawPath, a.now().UTC().Format(time.RFC3339Nano), mailboxID, folderID, messageID); err != nil {
+		a.log.Warn("failed to attach maildir raw path to existing message", "path", rawPath, "error", err)
+	}
+}
+
+func (a *App) attachUnregisteredMaildirRawPathToExisting(ctx context.Context, rawPath, messageID, recipient string) {
+	if strings.TrimSpace(messageID) == "" || strings.TrimSpace(rawPath) == "" {
+		return
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET raw_path=?,updated_at=? WHERE mailbox_id IS NULL AND recipient_addr=? AND message_id=? AND message_id <> '' AND raw_path=''`,
+		rawPath, a.now().UTC().Format(time.RFC3339Nano), recipient, messageID); err != nil {
+		a.log.Warn("failed to attach unregistered maildir raw path to existing message", "path", rawPath, "error", err)
+	}
 }
 
 func unregisteredRecipientFromMessage(msg storedMessage, domain string) string {

@@ -2397,6 +2397,189 @@ func TestMaildirSyncImportsSentFolder(t *testing.T) {
 	}
 }
 
+func TestWebmailSentWritesMaildirSent(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "maildir sent copy",
+		Text:      "sent body",
+		HTML:      "<p>sent body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPath := maildirRawPathForTest(t, a, msg.ID)
+	if !strings.Contains(filepath.ToSlash(rawPath), "/.Sent/cur/") {
+		t.Fatalf("raw_path=%q, want .Sent/cur", rawPath)
+	}
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Subject: maildir sent copy") {
+		t.Fatalf("sent maildir raw missing subject:\n%s", string(raw))
+	}
+	count, err := a.syncMaildirOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("sync imported own sent copy=%d, want 0", count)
+	}
+}
+
+func TestMaildirSyncBackfillsSQLiteOnlySent(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "legacy sent copy",
+		Text:      "legacy body",
+		HTML:      "<p>legacy body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPath := maildirRawPathForTest(t, a, msg.ID)
+	if err := os.Remove(oldPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET raw_path='' WHERE id=?`, msg.ID); err != nil {
+		t.Fatal(err)
+	}
+	count, err := a.syncMaildirOnce(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("backfilled=%d, want 1", count)
+	}
+	newPath := maildirRawPathForTest(t, a, msg.ID)
+	if !strings.Contains(filepath.ToSlash(newPath), "/.Sent/cur/") {
+		t.Fatalf("raw_path=%q, want .Sent/cur", newPath)
+	}
+	var messages int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE mailbox_id=? AND message_id=?`, mb.ID, msg.MessageID).Scan(&messages); err != nil {
+		t.Fatal(err)
+	}
+	if messages != 1 {
+		t.Fatalf("messages with same Message-ID=%d, want 1", messages)
+	}
+}
+
+func TestDraftWritesAndUpdatesMaildirDrafts(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.MaildirRoot = t.TempDir()
+	srv := httptest.NewServer(a.Router())
+	defer srv.Close()
+	client := &testClient{t: t, server: srv}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	var draft MailMessage
+	payload := map[string]any{
+		"mailboxId": mb.ID,
+		"to":        []string{"recipient@example.test"},
+		"subject":   "draft one",
+		"text":      "draft body one",
+		"html":      "<p>draft body one</p>",
+	}
+	if code := client.do("POST", "/api/mail/drafts", payload, &draft); code != http.StatusCreated {
+		t.Fatalf("save draft code=%d draft=%+v", code, draft)
+	}
+	rawPath := maildirRawPathForTest(t, a, draft.ID)
+	if !strings.Contains(filepath.ToSlash(rawPath), "/.Drafts/cur/") {
+		t.Fatalf("raw_path=%q, want .Drafts/cur", rawPath)
+	}
+	oldRawPath := rawPath
+
+	payload["subject"] = "draft two"
+	payload["text"] = "draft body two"
+	payload["html"] = "<p>draft body two</p>"
+	if code := client.do("POST", "/api/mail/drafts/"+draft.ID, payload, &draft); code != http.StatusOK {
+		t.Fatalf("update draft code=%d draft=%+v", code, draft)
+	}
+	rawPath = maildirRawPathForTest(t, a, draft.ID)
+	if _, err := os.Stat(oldRawPath); err == nil && oldRawPath != rawPath {
+		t.Fatalf("old draft maildir file still exists: %s", oldRawPath)
+	}
+	raw, err := os.ReadFile(rawPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "Subject: draft two") {
+		t.Fatalf("updated draft raw missing new subject:\n%s", string(raw))
+	}
+}
+
+func TestMoveAndDeleteMessageUpdateMaildir(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	a.cfg.MaildirRoot = t.TempDir()
+	srv := httptest.NewServer(a.Router())
+	defer srv.Close()
+	client := &testClient{t: t, server: srv}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+
+	msg, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"recipient@example.test"},
+		Subject:   "move me",
+		Text:      "move body",
+		HTML:      "<p>move body</p>",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentPath := maildirRawPathForTest(t, a, msg.ID)
+	if code := client.do("POST", "/api/mail/messages/"+msg.ID+"/move", map[string]string{"folder": "Archive"}, nil); code != http.StatusOK {
+		t.Fatalf("move code=%d", code)
+	}
+	archivePath := maildirRawPathForTest(t, a, msg.ID)
+	if !strings.Contains(filepath.ToSlash(archivePath), "/.Archive/cur/") {
+		t.Fatalf("raw_path=%q, want .Archive/cur", archivePath)
+	}
+	if _, err := os.Stat(sentPath); err == nil && sentPath != archivePath {
+		t.Fatalf("old sent maildir file still exists: %s", sentPath)
+	}
+	if code := client.do("DELETE", "/api/mail/messages/"+msg.ID, nil, nil); code != http.StatusOK {
+		t.Fatalf("trash code=%d", code)
+	}
+	trashPath := maildirRawPathForTest(t, a, msg.ID)
+	if !strings.Contains(filepath.ToSlash(trashPath), "/.Trash/cur/") {
+		t.Fatalf("raw_path=%q, want .Trash/cur", trashPath)
+	}
+	if _, err := os.Stat(archivePath); err == nil && archivePath != trashPath {
+		t.Fatalf("old archive maildir file still exists: %s", archivePath)
+	}
+	if code := client.do("DELETE", "/api/mail/messages/"+msg.ID, nil, nil); code != http.StatusOK {
+		t.Fatalf("permanent delete code=%d", code)
+	}
+	if _, err := os.Stat(trashPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("trash maildir file exists after permanent delete err=%v", err)
+	}
+}
+
 func mustDefaultDomainID(t *testing.T, a *App) string {
 	t.Helper()
 	var id string
@@ -2427,4 +2610,26 @@ func withoutPermissions(items []string, removed ...string) []string {
 		}
 	}
 	return out
+}
+
+func maildirRawPathForTest(t *testing.T, a *App, messageID string) string {
+	t.Helper()
+	var rawPath string
+	if err := a.db.QueryRow(`SELECT raw_path FROM messages WHERE id=?`, messageID).Scan(&rawPath); err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(rawPath) == "" {
+		t.Fatalf("message %s raw_path is empty", messageID)
+	}
+	if _, err := os.Stat(rawPath); err != nil {
+		t.Fatalf("raw_path %s stat error: %v", rawPath, err)
+	}
+	return rawPath
+}
+
+func clearMailboxMessagesForTest(t *testing.T, a *App, mailboxID string) {
+	t.Helper()
+	if _, err := a.db.Exec(`DELETE FROM messages WHERE mailbox_id=?`, mailboxID); err != nil {
+		t.Fatal(err)
+	}
 }

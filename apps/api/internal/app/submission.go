@@ -241,6 +241,15 @@ func (a *App) submitSMTPMessage(ctx context.Context, user *User, mb *Mailbox, ma
 	if err != nil {
 		return err
 	}
+	if insertedSent {
+		if err := a.rewriteMessageMaildir(ctx, sentID); err != nil {
+			a.deleteMessage(ctx, sentID)
+			if sentFolderID, ferr := a.ensureFolder(ctx, mb.ID, "Sent"); ferr == nil {
+				a.deleteSentDedupeKey(ctx, mb.ID, sentFolderID, msg.MessageID)
+			}
+			return err
+		}
+	}
 	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceSubmission, MailFrom: mailFrom, HeaderFrom: msg.From, Recipients: recipients})
 	if sentID != "" {
 		if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: msg.MessageID, Source: sendSourceSubmission, MailFrom: mailFrom, HeaderFrom: msg.From, Recipients: recipients, MIMEBytes: prepared, Now: a.now().UTC()}); err != nil {

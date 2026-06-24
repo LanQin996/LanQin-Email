@@ -715,7 +715,7 @@ func (a *App) handleDeleteMailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	rows.Close()
 	for _, messageID := range messageIDs {
-		a.deleteMessageFiles(r.Context(), messageID)
+		a.deleteMessage(r.Context(), messageID)
 	}
 	res, err := a.db.ExecContext(r.Context(), `DELETE FROM mailboxes WHERE id=?`, id)
 	if err != nil {

@@ -723,11 +723,14 @@ func (a *App) deleteMessagesInFolder(ctx context.Context, mailboxID, folder stri
 		}
 		ids = append(ids, id)
 	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
 	for _, id := range ids {
-		a.deleteMessageFiles(ctx, id)
-		if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, id); err != nil {
-			return 0, err
-		}
+		a.deleteMessage(ctx, id)
 	}
 	return int64(len(ids)), nil
 }
@@ -741,13 +744,31 @@ func (a *App) archiveReadInbox(ctx context.Context, mailboxID string) (int64, er
 	if err != nil {
 		return 0, err
 	}
-	res, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE mailbox_id=? AND folder_id=? AND is_read=1`,
-		archiveID, a.now().UTC().Format(time.RFC3339Nano), mailboxID, inboxID)
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND is_read=1`, mailboxID, inboxID)
 	if err != nil {
 		return 0, err
 	}
-	n, _ := res.RowsAffected()
-	return n, nil
+	defer rows.Close()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := a.moveMessageMaildir(ctx, id, archiveID); err != nil {
+			return 0, err
+		}
+	}
+	return int64(len(ids)), nil
 }
 
 func scanContact(row messageSummaryScanner) (Contact, error) {
@@ -861,7 +882,7 @@ func (a *App) applyInboundControls(ctx context.Context, messageID, mailboxID, fr
 	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM blocked_senders WHERE user_id=? AND (mailbox_id='' OR mailbox_id=?) AND email=?`, userID, mailboxID, from).Scan(&blocked)
 	if blocked > 0 {
 		if spamID, err := a.ensureFolder(ctx, mailboxID, "Spam"); err == nil {
-			_, _ = a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, spamID, a.now().UTC().Format(time.RFC3339Nano), messageID)
+			_ = a.moveMessageMaildir(ctx, messageID, spamID)
 		}
 		return
 	}
@@ -1048,20 +1069,20 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string,
 		switch action.Type {
 		case "archive":
 			if folderID, err := a.ensureFolder(ctx, mailboxID, "Archive"); err == nil {
-				if _, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, folderID, now, messageID); err != nil {
+				if err := a.moveMessageMaildir(ctx, messageID, folderID); err != nil {
 					return err
 				}
 			}
 		case "trash":
 			if folderID, err := a.ensureFolder(ctx, mailboxID, "Trash"); err == nil {
-				if _, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, folderID, now, messageID); err != nil {
+				if err := a.moveMessageMaildir(ctx, messageID, folderID); err != nil {
 					return err
 				}
 			}
 		case "move":
 			target := ruleTargetFolder(action.Value)
 			if folderID, err := a.ensureFolder(ctx, mailboxID, target); err == nil {
-				if _, err := a.db.ExecContext(ctx, `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, folderID, now, messageID); err != nil {
+				if err := a.moveMessageMaildir(ctx, messageID, folderID); err != nil {
 					return err
 				}
 			}

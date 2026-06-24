@@ -480,6 +480,10 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 	if err != nil {
 		return nil, fmt.Errorf("failed to store sent message: %w", err)
 	}
+	if err := a.writeRawMessageToMaildir(ctx, sentID, mimeBytes, false); err != nil {
+		a.deleteMessage(ctx, sentID)
+		return nil, fmt.Errorf("failed to store sent message in maildir: %w", err)
+	}
 	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
 	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
 		a.deleteMessage(ctx, sentID)
@@ -503,7 +507,9 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 			copyMsg.RecipientAddr = normalizeEmail(rcpt)
 			copyMsg.MessageUID = newID("uid")
 			copyMsg.IsRead = false
-			_, _ = a.insertMessage(ctx, copyMsg, req.Attachments)
+			if copyID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
+				_ = a.writeStoredMessageToMaildir(ctx, copyID, copyMsg, req.Attachments)
+			}
 			continue
 		}
 		if rcptMailbox.Status != "active" {
@@ -514,7 +520,9 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 				copyMsg.RecipientAddr = normalizeEmail(rcpt)
 				copyMsg.MessageUID = newID("uid")
 				copyMsg.IsRead = false
-				_, _ = a.insertMessage(ctx, copyMsg, req.Attachments)
+				if copyID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
+					_ = a.writeStoredMessageToMaildir(ctx, copyID, copyMsg, req.Attachments)
+				}
 			}
 			continue
 		}
@@ -528,6 +536,7 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 		copyMsg.MessageUID = newID("uid")
 		copyMsg.IsRead = false
 		if inboxMsgID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
+			_ = a.writeStoredMessageToMaildir(ctx, inboxMsgID, copyMsg, req.Attachments)
 			a.applyInboundControls(ctx, inboxMsgID, rcptMailbox.ID, copyMsg.From, copyMsg.Subject)
 		}
 	}
@@ -767,6 +776,11 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "failed to save draft")
 			return
 		}
+		if err := a.writeStoredMessageToMaildir(r.Context(), draftID, stored, attachments); err != nil {
+			a.deleteMessage(r.Context(), draftID)
+			respondError(w, http.StatusInternalServerError, "failed to save draft")
+			return
+		}
 		msg, _ := a.messageByID(r.Context(), draftID, true)
 		respondJSON(w, http.StatusCreated, msg)
 		return
@@ -810,6 +824,10 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if err := a.rewriteMessageMaildir(r.Context(), draftID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to update draft")
+		return
+	}
 	msg, _ := a.messageByID(r.Context(), draftID, true)
 	respondJSON(w, http.StatusOK, msg)
 }
@@ -820,6 +838,7 @@ func (a *App) handleDeleteDraft(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "draft not found")
 		return
 	}
+	a.deleteMessageMaildirFile(r.Context(), msg.ID)
 	a.deleteMessageFiles(r.Context(), msg.ID)
 	if _, err := a.db.ExecContext(r.Context(), `DELETE FROM messages WHERE id=?`, msg.ID); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to delete draft")
@@ -1081,8 +1100,7 @@ func (a *App) processScheduledSend(ctx context.Context, id, mailboxID, draftID, 
 		return
 	}
 	if draftID != "" {
-		a.deleteMessageFiles(ctx, draftID)
-		_, _ = a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, draftID)
+		a.deleteMessage(ctx, draftID)
 	}
 	sentAt := a.now().UTC().Format(time.RFC3339Nano)
 	if _, err := a.db.ExecContext(ctx, `UPDATE scheduled_sends SET status='sent',sent_at=?,updated_at=?,error='' WHERE id=?`, sentAt, sentAt, id); err != nil {
@@ -1168,8 +1186,7 @@ func (a *App) handleMove(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to load folder")
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, folderID, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
-	if err != nil {
+	if err := a.moveMessageMaildir(r.Context(), msg.ID, folderID); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to move message")
 		return
 	}
@@ -1183,6 +1200,7 @@ func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if strings.EqualFold(msg.Folder, "Trash") {
+		a.deleteMessageMaildirFile(r.Context(), msg.ID)
 		a.deleteMessageFiles(r.Context(), msg.ID)
 		_, err = a.db.ExecContext(r.Context(), `DELETE FROM messages WHERE id=?`, msg.ID)
 	} else {
@@ -1190,7 +1208,9 @@ func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			err = e
 		} else {
-			_, err = a.db.ExecContext(r.Context(), `UPDATE messages SET folder_id=?, updated_at=? WHERE id=?`, trashID, a.now().UTC().Format(time.RFC3339Nano), msg.ID)
+			if e := a.moveMessageMaildir(r.Context(), msg.ID, trashID); e != nil {
+				err = e
+			}
 		}
 	}
 	if err != nil {
@@ -1578,6 +1598,7 @@ func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 }
 
 func (a *App) deleteMessage(ctx context.Context, messageID string) {
+	a.deleteMessageMaildirFile(ctx, messageID)
 	a.deleteMessageFiles(ctx, messageID)
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, messageID)
 }
