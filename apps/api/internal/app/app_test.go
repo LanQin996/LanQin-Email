@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -419,6 +420,201 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	}
 	if code := bob.do("DELETE", "/api/mail/messages/"+detail.ID, nil, &ok); code != http.StatusOK {
 		t.Fatalf("delete code=%d", code)
+	}
+}
+
+func TestParseMailAuthenticationResults(t *testing.T) {
+	header := textproto.MIMEHeader{}
+	header.Add("Authentication-Results", "mx.example.test; spf=pass smtp.mailfrom=sender.example; dkim=fail (bad signature) header.d=sender.example; dmarc=none")
+	header.Add("Received-SPF", "softfail (mx.example.test: transitioning domain) client-ip=192.0.2.10; envelope-from=sender@example.test")
+
+	auth := parseMailAuthentication(header)
+	if auth.SPF != "pass" || auth.DKIM != "fail" || auth.DMARC != "none" {
+		t.Fatalf("unexpected auth summary: %+v", auth)
+	}
+	if !strings.Contains(auth.AuthenticationResults, "spf=pass") || !strings.Contains(auth.ReceivedSPF, "softfail") {
+		t.Fatalf("raw auth headers not preserved: %+v", auth)
+	}
+
+	unknown := parseMailAuthentication(textproto.MIMEHeader{})
+	if unknown.SPF != "unknown" || unknown.DKIM != "unknown" || unknown.DMARC != "unknown" {
+		t.Fatalf("missing headers should be unknown, got %+v", unknown)
+	}
+}
+
+func TestMailRulesConditionGroupsAndActions(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "rule-sender", "Rule Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "rule-recipient", "Rule Recipient", "Password123!", nil)
+
+	rcpt := &testClient{t: t, server: ts}
+	if code := rcpt.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("recipient login=%d", code)
+	}
+	var rule MailRule
+	rulePayload := map[string]any{
+		"mailboxId":  recipient.ID,
+		"name":       "priority archive",
+		"matchMode":  "all",
+		"conditions": []map[string]any{{"matchMode": "any", "conditions": []map[string]string{{"field": "from", "operator": "contains", "value": sender.Address}, {"field": "subject", "operator": "contains", "value": "urgent"}}}, {"field": "cc", "operator": "contains", "value": "lead@example.test"}, {"field": "attachment", "operator": "contains", "value": "plan.pdf"}, {"field": "size", "operator": "gte", "value": "10"}, {"field": "date", "operator": "after", "value": "2020-01-01"}},
+		"actions":    []map[string]string{{"type": "label", "value": "Priority"}, {"type": "move", "value": "Archive"}, {"type": "mark-read"}, {"type": "star"}},
+	}
+	if code := rcpt.do("POST", "/api/me/rules", rulePayload, &rule); code != http.StatusCreated {
+		t.Fatalf("create rule code=%d rule=%+v", code, rule)
+	}
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login=%d", code)
+	}
+	var sent MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{
+		"to":          []string{recipient.Address},
+		"cc":          []string{"lead@example.test"},
+		"subject":     "quarterly update",
+		"text":        "body",
+		"attachments": []map[string]string{{"filename": "plan.pdf", "contentType": "application/pdf", "contentBase64": base64.StdEncoding.EncodeToString([]byte("rule attachment payload"))}},
+	}, &sent); code != http.StatusCreated {
+		t.Fatalf("send code=%d sent=%+v", code, sent)
+	}
+
+	var archived struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := rcpt.do("GET", "/api/mail/messages?mailboxId="+recipient.ID+"&folder=Archive", nil, &archived); code != http.StatusOK || len(archived.Items) != 1 {
+		t.Fatalf("archive list code=%d items=%+v", code, archived.Items)
+	}
+	msg := archived.Items[0]
+	if !msg.IsRead || !msg.IsStarred {
+		t.Fatalf("rule flags read=%v starred=%v", msg.IsRead, msg.IsStarred)
+	}
+	if len(msg.Labels) != 1 || msg.Labels[0].Name != "Priority" {
+		t.Fatalf("labels=%+v, want Priority", msg.Labels)
+	}
+}
+
+func TestMailRulesMailboxIsolation(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	owner := createTestMailbox(t, admin, domainID, "rule-owner", "Rule Owner", "Password123!", nil)
+	other := createTestMailbox(t, admin, domainID, "rule-other", "Rule Other", "Password123!", nil)
+	sender := createTestMailbox(t, admin, domainID, "rule-outsider", "Rule Outsider", "Password123!", nil)
+
+	ownerClient := &testClient{t: t, server: ts}
+	if code := ownerClient.do("POST", "/api/auth/login", map[string]string{"email": owner.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("owner login=%d", code)
+	}
+	var denied map[string]any
+	if code := ownerClient.do("POST", "/api/me/rules", map[string]any{"mailboxId": other.ID, "fromContains": sender.Address, "action": "archive"}, &denied); code != http.StatusNotFound {
+		t.Fatalf("cross-mailbox rule create code=%d body=%v", code, denied)
+	}
+	var rule MailRule
+	if code := ownerClient.do("POST", "/api/me/rules", map[string]any{"mailboxId": owner.ID, "fromContains": sender.Address, "action": "archive"}, &rule); code != http.StatusCreated {
+		t.Fatalf("create owner rule code=%d rule=%+v", code, rule)
+	}
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login=%d", code)
+	}
+	var sent MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{other.Address}, "subject": "isolation", "text": "body"}, &sent); code != http.StatusCreated {
+		t.Fatalf("send to other code=%d sent=%+v", code, sent)
+	}
+
+	otherClient := &testClient{t: t, server: ts}
+	if code := otherClient.do("POST", "/api/auth/login", map[string]string{"email": other.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("other login=%d", code)
+	}
+	var inbox struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := otherClient.do("GET", "/api/mail/messages?mailboxId="+other.ID+"&folder=Inbox", nil, &inbox); code != http.StatusOK || len(inbox.Items) != 1 {
+		t.Fatalf("other inbox code=%d items=%+v", code, inbox.Items)
+	}
+	var archived struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := otherClient.do("GET", "/api/mail/messages?mailboxId="+other.ID+"&folder=Archive", nil, &archived); code != http.StatusOK || len(archived.Items) != 0 {
+		t.Fatalf("other archive code=%d items=%+v", code, archived.Items)
+	}
+}
+
+func TestBlockedSenderMovesInboundToSpamAndIsolatesUsers(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/domains", nil, &domains); code != http.StatusOK || len(domains.Items) == 0 {
+		t.Fatalf("domains code=%d items=%+v", code, domains.Items)
+	}
+	sender := createTestMailbox(t, admin, domains.Items[0].ID, "blocked-sender", "Blocked Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domains.Items[0].ID, "blocked-recipient", "Blocked Recipient", "Password123!", nil)
+	other := createTestMailbox(t, admin, domains.Items[0].ID, "blocked-other", "Blocked Other", "Password123!", nil)
+
+	recipientClient := &testClient{t: t, server: ts}
+	if code := recipientClient.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("recipient login code=%d", code)
+	}
+	var blocked BlockedSender
+	if code := recipientClient.do("POST", "/api/me/blocked-senders", map[string]any{"mailboxId": recipient.ID, "email": sender.Address, "reason": "test"}, &blocked); code != http.StatusCreated {
+		t.Fatalf("blocked sender code=%d body=%+v", code, blocked)
+	}
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login code=%d", code)
+	}
+	var sent MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "blocked sender test", "text": "body"}, &sent); code != http.StatusCreated {
+		t.Fatalf("send code=%d sent=%+v", code, sent)
+	}
+
+	var inbox struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := recipientClient.do("GET", "/api/mail/messages?mailboxId="+recipient.ID+"&folder=Inbox&q=blocked%20sender", nil, &inbox); code != http.StatusOK || len(inbox.Items) != 0 {
+		t.Fatalf("recipient inbox code=%d items=%+v", code, inbox.Items)
+	}
+	var spam struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := recipientClient.do("GET", "/api/mail/messages?mailboxId="+recipient.ID+"&folder=Spam&q=blocked%20sender", nil, &spam); code != http.StatusOK || len(spam.Items) != 1 {
+		t.Fatalf("recipient spam code=%d items=%+v", code, spam.Items)
+	}
+
+	otherClient := &testClient{t: t, server: ts}
+	if code := otherClient.do("POST", "/api/auth/login", map[string]string{"email": other.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("other login code=%d", code)
+	}
+	var denied map[string]any
+	if code := otherClient.do("GET", "/api/mail/messages/"+spam.Items[0].ID+"?markRead=0", nil, &denied); code != http.StatusNotFound {
+		t.Fatalf("other user should not read spam message code=%d body=%v", code, denied)
 	}
 }
 
@@ -1238,6 +1434,108 @@ func TestSendQueueAPIRetryAndCancel(t *testing.T) {
 	}
 	if status != sendQueueStatusCanceled {
 		t.Fatalf("cancel status after worker=%q", status)
+	}
+}
+
+func TestAdminSendAuditAccessAndFilters(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	domainID := mustDefaultDomainID(t, a)
+	otherMB := createTestMailbox(t, admin, domainID, "audit-other", "Audit Other", "Password123!", nil)
+	now := a.now().UTC()
+	ctx := context.Background()
+	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"msg_audit_one", mb.ID, sentFolderID, "", "uid-audit-one", "<audit-one@example.test>", "audit one", mb.Address, "", jsonEncode([]string{"one@example.test"}), "[]", "[]", now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), "audit", "", "", 1, 0, 0, 0, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO send_queue(id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,status,next_attempt_at,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"snd_audit_one", user.ID, mb.ID, "msg_audit_one", "<audit-one@example.test>", sendSourceWebmail, mb.Address, mb.Address, jsonEncode([]string{"one@example.test"}), "", sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	events := []struct {
+		id            string
+		queueID       string
+		mailboxID     string
+		sentMessageID string
+		event         string
+		status        string
+		recipients    []string
+		errorText     string
+		createdAt     time.Time
+	}{
+		{"audit_one", "snd_audit_one", mb.ID, "msg_audit_one", sendAuditQueued, sendQueueStatusQueued, []string{"one@example.test"}, "", now.Add(-2 * time.Hour)},
+		{"audit_two", "snd_audit_one", mb.ID, "msg_audit_one", sendAuditFailed, sendQueueStatusFailed, []string{"one@example.test"}, "temporary failure", now.Add(-1 * time.Hour)},
+		{"audit_other", "snd_audit_other", otherMB.ID, "", sendAuditDelivered, sendQueueStatusDelivered, []string{"two@example.test"}, "", now},
+	}
+	for _, item := range events {
+		if _, err := a.db.ExecContext(ctx, `INSERT INTO send_audit_events(id,queue_id,user_id,mailbox_id,sent_message_id,source,event,status,mail_from,header_from,recipients_json,error,created_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, item.id, item.queueID, user.ID, item.mailboxID, item.sentMessageID, sendSourceWebmail, item.event, item.status, mb.Address, mb.Address, jsonEncode(item.recipients), item.errorText, item.createdAt.Format(time.RFC3339Nano)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if code := (&testClient{t: t, server: ts}).do("GET", "/api/admin/send-audit", nil, nil); code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated send audit code=%d", code)
+	}
+	regular := &testClient{t: t, server: ts}
+	if code := regular.do("POST", "/api/auth/login", map[string]string{"email": otherMB.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("regular login code=%d", code)
+	}
+	if code := regular.do("GET", "/api/admin/send-audit", nil, nil); code != http.StatusForbidden {
+		t.Fatalf("regular send audit code=%d", code)
+	}
+	updateRegularPermissionGroup(t, admin, []string{PermissionAdminOverview})
+	if code := regular.do("GET", "/api/admin/send-audit", nil, nil); code != http.StatusForbidden {
+		t.Fatalf("admin access without messages permission code=%d", code)
+	}
+
+	var all struct {
+		Items []SendAuditEvent `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/send-audit", nil, &all); code != http.StatusOK || len(all.Items) != 3 {
+		t.Fatalf("admin all audit code=%d items=%+v", code, all.Items)
+	}
+	var byMailbox struct {
+		Items []SendAuditEvent `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/send-audit?mailboxId="+mb.ID, nil, &byMailbox); code != http.StatusOK || len(byMailbox.Items) != 2 {
+		t.Fatalf("mailbox filter code=%d items=%+v", code, byMailbox.Items)
+	}
+	var byEvent struct {
+		Items []SendAuditEvent `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/send-audit?event=failed", nil, &byEvent); code != http.StatusOK || len(byEvent.Items) != 1 || byEvent.Items[0].Error != "temporary failure" {
+		t.Fatalf("event filter code=%d items=%+v", code, byEvent.Items)
+	}
+	var byMessage struct {
+		Items []SendAuditEvent `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/send-audit?messageId="+url.QueryEscape("<audit-one@example.test>"), nil, &byMessage); code != http.StatusOK || len(byMessage.Items) != 2 {
+		t.Fatalf("message filter code=%d items=%+v", code, byMessage.Items)
+	}
+	var byTime struct {
+		Items []SendAuditEvent `json:"items"`
+	}
+	from := now.Add(-90 * time.Minute).Format(time.RFC3339Nano)
+	if code := admin.do("GET", "/api/admin/send-audit?from="+url.QueryEscape(from), nil, &byTime); code != http.StatusOK || len(byTime.Items) != 2 {
+		t.Fatalf("time filter code=%d items=%+v", code, byTime.Items)
+	}
+	if byEvent.Items[0].MailboxAddress != mb.Address || byEvent.Items[0].MessageID != "<audit-one@example.test>" {
+		t.Fatalf("audit metadata missing: %+v", byEvent.Items[0])
 	}
 }
 
@@ -2547,6 +2845,87 @@ func TestMaildirSyncImportsRFC822(t *testing.T) {
 	}
 }
 
+func TestMaildirImportStoresAuthenticationResults(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	a.cfg.MaildirRoot = root
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+
+	adminUser, _, err := a.userByEmail(ctx, "admin@lanqin.local")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mailboxID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM mailboxes WHERE user_id=? AND address=?`, adminUser.ID, "admin@lanqin.local").Scan(&mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE mailbox_id=?`, mailboxID); err != nil {
+		t.Fatal(err)
+	}
+
+	mailboxes, err := a.maildirMailboxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin maildirMailbox
+	for _, mb := range mailboxes {
+		if mb.Address == "admin@lanqin.local" {
+			admin = mb
+			break
+		}
+	}
+	if admin.ID == "" {
+		t.Fatal("admin mailbox not found")
+	}
+	dir := filepath.Join(root, admin.Domain, admin.LocalPart, "Maildir", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: sender@example.test",
+		"To: admin@lanqin.local",
+		"Subject: auth import test",
+		"Message-Id: <auth-import@example.test>",
+		"Date: Sat, 13 Jun 2026 13:00:00 +0000",
+		"Authentication-Results: mx.lanqin.local; spf=pass smtp.mailfrom=example.test; dkim=fail header.d=example.test; dmarc=temperror",
+		"Received-SPF: pass (mx.lanqin.local: domain of sender@example.test designates 192.0.2.1 as permitted sender)",
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"auth body",
+	}, "\r\n")
+	if err := os.WriteFile(filepath.Join(dir, "1749819601.M1P1.auth"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := a.syncMaildirOnce(ctx); err != nil || count != 1 {
+		t.Fatalf("sync count=%d err=%v", count, err)
+	}
+
+	client := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	var list struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := client.do("GET", "/api/mail/messages?folder=Inbox&q=auth%20import", nil, &list); code != http.StatusOK || len(list.Items) != 1 {
+		t.Fatalf("list code=%d items=%+v", code, list.Items)
+	}
+	var detail MailMessage
+	if code := client.do("GET", "/api/mail/messages/"+list.Items[0].ID+"?markRead=0", nil, &detail); code != http.StatusOK {
+		t.Fatalf("detail code=%d detail=%+v", code, detail)
+	}
+	if detail.Authentication.SPF != "pass" || detail.Authentication.DKIM != "fail" || detail.Authentication.DMARC != "temperror" {
+		t.Fatalf("unexpected auth detail: %+v", detail.Authentication)
+	}
+	if !strings.Contains(detail.Authentication.AuthenticationResults, "spf=pass") || !strings.Contains(detail.Authentication.ReceivedSPF, "sender@example.test") {
+		t.Fatalf("raw auth headers missing: %+v", detail.Authentication)
+	}
+}
+
 func TestMaildirSyncHealthDisabled(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -3199,6 +3578,112 @@ func TestMaildirSyncDeletesMissingMessage(t *testing.T) {
 	}
 	if remaining != 0 {
 		t.Fatalf("message remaining=%d, want deleted", remaining)
+	}
+}
+
+func TestMailboxQuotaRejectsNewMessage(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+	if _, err := a.db.ExecContext(ctx, `UPDATE mailboxes SET quota_mb=1 WHERE id=?`, mb.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err := a.sendMailNow(ctx, user, mb, mailComposeInput{
+		MailboxID: mb.ID,
+		To:        []string{"person@example.test"},
+		Subject:   "quota overflow",
+		Text:      strings.Repeat("x", 1024*1024+1),
+	})
+	if !errors.Is(err, errMailboxQuotaExceeded) {
+		t.Fatalf("sendMailNow error=%v, want quota exceeded", err)
+	}
+
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	var errBody map[string]any
+	if code := client.do("POST", "/api/mail/send", map[string]any{
+		"mailboxId": mb.ID,
+		"to":        []string{"person@example.test"},
+		"subject":   "quota overflow api",
+		"text":      strings.Repeat("y", 1024*1024+1),
+	}, &errBody); code != http.StatusInsufficientStorage {
+		t.Fatalf("quota api code=%d body=%v", code, errBody)
+	}
+}
+
+func TestMailStatsQuotaAndCleanupIsolation(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	aliceMB := createTestMailbox(t, admin, domainID, "quota-alice", "Quota Alice", "Password123!", map[string]any{"quotaMb": 2})
+	bobMB := createTestMailbox(t, admin, domainID, "quota-bob", "Quota Bob", "Password123!", map[string]any{"quotaMb": 2})
+	aliceUser, _, err := a.userByEmail(ctx, aliceMB.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobUser, _, err := a.userByEmail(ctx, bobMB.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliceTrash, err := a.ensureFolder(ctx, aliceMB.ID, "Trash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobTrash, err := a.ensureFolder(ctx, bobMB.ID, "Trash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachment := AttachmentInput{Filename: "note.txt", ContentType: "text/plain", ContentBase64: base64.StdEncoding.EncodeToString([]byte("hello attachment"))}
+	if _, err := a.insertMessage(ctx, storedMessage{MailboxID: aliceMB.ID, FolderID: aliceTrash, MessageUID: newID("uid"), MessageID: "<alice-trash@example.test>", Subject: "alice trash", From: "sender@example.test", To: []string{aliceMB.Address}, SentAt: a.now().UTC(), ReceivedAt: a.now().UTC(), Snippet: "body", BodyText: "body"}, []AttachmentInput{attachment}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.insertMessage(ctx, storedMessage{MailboxID: bobMB.ID, FolderID: bobTrash, MessageUID: newID("uid"), MessageID: "<bob-trash@example.test>", Subject: "bob trash", From: "sender@example.test", To: []string{bobMB.Address}, SentAt: a.now().UTC(), ReceivedAt: a.now().UTC(), Snippet: "body", BodyText: "body"}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	alice := &testClient{t: t, server: ts}
+	if code := alice.do("POST", "/api/auth/login", map[string]string{"email": aliceMB.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("alice login code=%d", code)
+	}
+	var stats MailStats
+	if code := alice.do("GET", "/api/me/stats?mailboxId="+aliceMB.ID, nil, &stats); code != http.StatusOK {
+		t.Fatalf("stats code=%d stats=%+v", code, stats)
+	}
+	if stats.QuotaBytes != int64(aliceMB.QuotaMB)*1024*1024 || stats.AttachmentBytes == 0 || stats.QuotaUsedPct <= 0 {
+		t.Fatalf("stats quota/attachment not populated: %+v", stats)
+	}
+	var cleanup struct {
+		OK       bool  `json:"ok"`
+		Affected int64 `json:"affected"`
+	}
+	if code := alice.do("POST", "/api/me/cleanup", map[string]any{"mailboxId": aliceMB.ID, "target": "empty-trash"}, &cleanup); code != http.StatusOK || cleanup.Affected != 1 {
+		t.Fatalf("cleanup code=%d body=%+v", code, cleanup)
+	}
+	var aliceRemaining, bobRemaining int
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE mailbox_id=?`, aliceMB.ID).Scan(&aliceRemaining); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM messages WHERE mailbox_id=?`, bobMB.ID).Scan(&bobRemaining); err != nil {
+		t.Fatal(err)
+	}
+	if aliceRemaining != 0 || bobRemaining != 1 {
+		t.Fatalf("cleanup isolation alice=%d bob=%d, want 0/1", aliceRemaining, bobRemaining)
+	}
+	if aliceUser.ID == "" || bobUser.ID == "" {
+		t.Fatal("test users were not created")
 	}
 }
 

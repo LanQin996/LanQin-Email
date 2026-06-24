@@ -2,7 +2,7 @@ import * as React from "react"
 import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { ArrowRight, BookOpen, CheckCircle2, Circle, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
+import { ArrowRight, BookOpen, CheckCircle2, Circle, ClipboardList, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
 import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -25,7 +25,7 @@ import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
 import type { PermissionKey } from "@/lib/api-types"
 
-type Section = "overview" | "users" | "permissionGroups" | "domains" | "mailboxes" | "aliases" | "messages" | "settings"
+type Section = "overview" | "users" | "permissionGroups" | "domains" | "mailboxes" | "aliases" | "messages" | "sendAudit" | "settings"
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 
 const sectionLabels: Record<Section, string> = {
@@ -36,6 +36,7 @@ const sectionLabels: Record<Section, string> = {
   mailboxes: "邮箱账号",
   aliases: "别名转发",
   messages: "全部邮件",
+  sendAudit: "发送审计",
   settings: "系统设置",
 }
 const sectionKeys = Object.keys(sectionLabels) as Section[]
@@ -47,6 +48,7 @@ const sectionPermissions: Record<Section, PermissionKey[]> = {
   mailboxes: ["admin.mailboxes.view"],
   aliases: ["admin.aliases.view"],
   messages: ["admin.messages.view"],
+  sendAudit: ["admin.messages.view"],
   settings: ["admin.settings.view", "admin.templates.view"],
 }
 const projectRepositoryUrl = "https://github.com/LanQin996/LanQin-Email"
@@ -108,6 +110,7 @@ export function AdminPage() {
         {section === "mailboxes" && <MailboxesSection mailboxes={mailboxItems} users={userItems} domains={domainItems} />}
         {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
         {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
+        {section === "sendAudit" && <AdminSendAuditSection mailboxes={mailboxItems} />}
         {section === "settings" && <SystemSettingsSection settings={settings.data} domains={domainItems} />}
       </main>
     </ScrollArea>
@@ -851,6 +854,119 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   )
 }
 
+function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
+  const qc = useQueryClient()
+  const [mailboxId, setMailboxId] = React.useState("all")
+  const [event, setEvent] = React.useState("all")
+  const [messageId, setMessageId] = React.useState("")
+  const [from, setFrom] = React.useState("")
+  const [to, setTo] = React.useState("")
+  const audit = useInfiniteQuery({
+    queryKey: ["admin", "send-audit", mailboxId, event, messageId, from, to],
+    queryFn: ({ pageParam }) => api.adminSendAudit({
+      mailboxId: mailboxId === "all" ? "" : mailboxId,
+      event: event === "all" ? "" : event,
+      messageId: messageId.trim(),
+      from,
+      to,
+      cursor: typeof pageParam === "string" ? pageParam : "",
+    }),
+    initialPageParam: "",
+    getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
+  })
+  const items = audit.data?.pages.flatMap((page) => page.items || []) || []
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <CardTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5" />发送审计</CardTitle>
+          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["admin", "send-audit"] })}>
+            <RefreshCcw className="h-4 w-4" />刷新
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_160px_160px]">
+          <div className="relative">
+            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+            <Input value={messageId} onChange={(event) => setMessageId(event.target.value)} placeholder="Message-ID 或已发送邮件 ID" className="pl-9" />
+          </div>
+          <Select value={mailboxId} onValueChange={setMailboxId}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部邮箱</SelectItem>
+              {mailboxes.map((mailbox) => <SelectItem key={mailbox.id} value={mailbox.id}>{mailbox.address}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={event} onValueChange={setEvent}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部事件</SelectItem>
+              {sendAuditEvents.map((item) => <SelectItem key={item} value={item}>{sendAuditEventLabel(item)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input type="date" value={from} onChange={(event) => setFrom(event.target.value)} aria-label="开始日期" />
+          <Input type="date" value={to} onChange={(event) => setTo(event.target.value)} aria-label="结束日期" />
+        </div>
+        <div className="space-y-3 md:hidden">
+          {items.map((item) => (
+            <div key={item.id} className="rounded-lg border p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium">{sendAuditEventLabel(item.event || "")}</div>
+                  <div className="mt-1 truncate text-xs text-muted-foreground">{item.mailboxAddress || item.mailboxId || "-"}</div>
+                </div>
+                <Badge variant={sendAuditBadgeVariant(item.event)}>{item.status || item.event || "-"}</Badge>
+              </div>
+              <div className="mt-3 space-y-2 text-sm text-muted-foreground">
+                <div className="truncate">收件人：{(item.recipients || []).join(", ") || "-"}</div>
+                <div className="truncate">Message-ID：{item.messageId || item.sentMessageId || "-"}</div>
+                {item.error && <div className="line-clamp-2 text-destructive">错误：{item.error}</div>}
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground">{formatDate(item.createdAt)}</div>
+            </div>
+          ))}
+        </div>
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>事件</TableHead>
+                <TableHead>邮箱</TableHead>
+                <TableHead>收件人</TableHead>
+                <TableHead>Message-ID</TableHead>
+                <TableHead>错误</TableHead>
+                <TableHead>时间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell><Badge variant={sendAuditBadgeVariant(item.event)}>{sendAuditEventLabel(item.event || "")}</Badge></TableCell>
+                  <TableCell className="max-w-[220px] truncate">{item.mailboxAddress || item.mailboxId || "-"}</TableCell>
+                  <TableCell className="max-w-[260px] truncate" title={(item.recipients || []).join(", ")}>{(item.recipients || []).join(", ") || "-"}</TableCell>
+                  <TableCell className="max-w-[240px] truncate" title={item.messageId || item.sentMessageId || ""}>{item.messageId || item.sentMessageId || "-"}</TableCell>
+                  <TableCell className="max-w-[260px] truncate text-destructive" title={item.error || ""}>{item.error || "-"}</TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+        {audit.isLoading && <Empty text="加载中..." />}
+        {!audit.isLoading && items.length === 0 && <Empty text="暂无发送审计" />}
+        {!audit.isLoading && audit.hasNextPage && (
+          <div className="flex justify-center">
+            <Button variant="outline" size="sm" disabled={audit.isFetchingNextPage} onClick={() => audit.fetchNextPage()}>
+              {audit.isFetchingNextPage ? "加载中..." : "加载更多"}
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 function SystemSettingsSection({ settings, domains }: { settings?: SystemSettings; domains: Domain[] }) {
   const me = useMe()
   const user = me.data?.user
@@ -1469,6 +1585,26 @@ function adminSenderTitle(message: MailMessage) {
   const name = decodeMimeHeader(message.fromName?.trim() || "")
   const from = decodeMimeHeader(message.from)
   return name ? `${name} <${from}>` : from
+}
+
+const sendAuditEvents = ["accepted", "queued", "retry", "delivered", "failed", "canceled"]
+
+function sendAuditEventLabel(event: string) {
+  switch (event) {
+    case "accepted": return "已接受"
+    case "queued": return "已入队"
+    case "retry": return "重试"
+    case "delivered": return "已投递"
+    case "failed": return "失败"
+    case "canceled": return "已取消"
+    default: return event || "-"
+  }
+}
+
+function sendAuditBadgeVariant(event?: string) {
+  if (event === "failed") return "destructive"
+  if (event === "delivered" || event === "accepted") return "default"
+  return "secondary"
 }
 
 function Stat({ icon, label, value }: { icon: React.ReactNode; label: string; value: React.ReactNode }) {

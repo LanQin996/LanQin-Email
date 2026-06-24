@@ -59,9 +59,11 @@ export type Alias = { id: string; domainId: string; source: string; destination:
 export type MailFolder = { id: string; name: string; role: string; unreadCount: number; totalCount: number; uidValidity: number; uidNext: number; highestModseq: number }
 export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
 export type MailLabel = { id: string; mailboxId?: string; name: string; color: string; messageCount?: number }
+export type MailAuthentication = { authenticationResults: string; receivedSpf: string; spf: string; dkim: string; dmarc: string }
 export type MailMessage = {
   id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
   labels?: MailLabel[]
+  authentication?: MailAuthentication
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
 export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }
@@ -96,7 +98,9 @@ export type SendQueueAuditEvent = {
   id: string
   queueId?: string
   mailboxId?: string
+  mailboxAddress?: string
   sentMessageId?: string
+  messageId?: string
   source?: string
   status?: SendQueueStatus
   event?: string
@@ -111,11 +115,13 @@ export type SendQueueAuditEvent = {
 }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
-export type MailRuleCondition = { field: "from" | "to" | "subject" | "body"; operator: "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with"; value: string }
+export type MailRuleConditionField = "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"
+export type MailRuleConditionOperator = "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with" | "gt" | "gte" | "lt" | "lte" | "before" | "after" | "on"
+export type MailRuleCondition = { field?: MailRuleConditionField; operator?: MailRuleConditionOperator; value?: string; matchMode?: "all" | "any"; conditions?: MailRuleCondition[] }
 export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; value?: string; labelId?: string }
 export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; enabled: boolean; createdAt: string; appliedExistingCount?: number }
 export type BlockedSender = { id: string; mailboxId: string; email: string; reason: string; createdAt: string }
-export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; storageBytes: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
+export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; attachmentBytes: number; storageBytes: number; quotaBytes: number; quotaUsedPct: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
 export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
 export type MaildirSyncCounts = { filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }

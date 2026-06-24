@@ -833,6 +833,116 @@ func (a *App) handleAdminMessage(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, msg)
 }
 
+func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
+	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
+	messageID := strings.TrimSpace(r.URL.Query().Get("messageId"))
+	event := strings.TrimSpace(r.URL.Query().Get("event"))
+	from, err := adminAuditTimeParam(r.URL.Query().Get("from"), false)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	to, err := adminAuditTimeParam(r.URL.Query().Get("to"), true)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
+	if offset < 0 {
+		offset = 0
+	}
+	limit := 50
+
+	where := []string{"1=1"}
+	args := []any{}
+	if mailboxID != "" && mailboxID != "all" {
+		where = append(where, "sae.mailbox_id=?")
+		args = append(args, mailboxID)
+	}
+	if messageID != "" {
+		where = append(where, "(sq.message_id=? OR m.message_id=? OR sae.sent_message_id=?)")
+		args = append(args, messageID, messageID, messageID)
+	}
+	if event != "" && event != "all" {
+		if !isSendAuditEvent(event) {
+			badRequest(w, errors.New("invalid event"))
+			return
+		}
+		where = append(where, "sae.event=?")
+		args = append(args, event)
+	}
+	if from != "" {
+		where = append(where, "sae.created_at>=?")
+		args = append(args, from)
+	}
+	if to != "" {
+		where = append(where, "sae.created_at<=?")
+		args = append(args, to)
+	}
+	args = append(args, limit+1, offset)
+
+	rows, err := a.db.QueryContext(r.Context(), `SELECT sae.id,sae.queue_id,sae.mailbox_id,COALESCE(mb.address,''),sae.sent_message_id,COALESCE(sq.message_id,m.message_id,''),sae.source,sae.event,sae.status,sae.mail_from,sae.header_from,sae.recipients_json,sae.error,sae.created_at
+		FROM send_audit_events sae
+		LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id
+		LEFT JOIN send_queue sq ON sq.id=sae.queue_id
+		LEFT JOIN messages m ON m.id=sae.sent_message_id
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY sae.created_at DESC, sae.id DESC LIMIT ? OFFSET ?`, args...)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send audit")
+		return
+	}
+	defer rows.Close()
+	items := []SendAuditEvent{}
+	for rows.Next() {
+		var item SendAuditEvent
+		var recipientsJSON, createdAt string
+		if err := rows.Scan(&item.ID, &item.QueueID, &item.MailboxID, &item.MailboxAddress, &item.SentMessageID, &item.MessageID, &item.Source, &item.Event, &item.Status, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &item.Error, &createdAt); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to scan send audit")
+			return
+		}
+		item.Recipients = jsonDecodeSlice(recipientsJSON)
+		item.CreatedAt = parseTime(createdAt)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load send audit")
+		return
+	}
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		next = strconv.Itoa(offset + limit)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+}
+
+func adminAuditTimeParam(value string, endOfDay bool) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return t.UTC().Format(time.RFC3339Nano), nil
+	}
+	if t, err := time.Parse("2006-01-02", value); err == nil {
+		if endOfDay {
+			t = t.Add(24*time.Hour - time.Nanosecond)
+		}
+		return t.UTC().Format(time.RFC3339Nano), nil
+	}
+	return "", errors.New("invalid time filter")
+}
+
+func isSendAuditEvent(event string) bool {
+	switch event {
+	case sendAuditAccepted, sendAuditQueued, sendAuditRetry, sendAuditDelivered, sendAuditFailed, sendAuditCanceled:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *App) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DomainID    string `json:"domainId"`

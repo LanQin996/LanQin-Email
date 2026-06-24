@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/textproto"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -28,25 +29,26 @@ type AttachmentInput struct {
 }
 
 type storedMessage struct {
-	MailboxID     string
-	FolderID      string
-	RecipientAddr string
-	MessageUID    string
-	MessageID     string
-	Subject       string
-	From          string
-	FromName      string
-	To            []string
-	CC            []string
-	BCC           []string
-	SentAt        time.Time
-	ReceivedAt    time.Time
-	Snippet       string
-	BodyText      string
-	BodyHTML      string
-	IsRead        bool
-	IsStarred     bool
-	RawPath       string
+	MailboxID      string
+	FolderID       string
+	RecipientAddr  string
+	MessageUID     string
+	MessageID      string
+	Subject        string
+	From           string
+	FromName       string
+	To             []string
+	CC             []string
+	BCC            []string
+	SentAt         time.Time
+	ReceivedAt     time.Time
+	Snippet        string
+	BodyText       string
+	BodyHTML       string
+	IsRead         bool
+	IsStarred      bool
+	RawPath        string
+	Authentication MailAuthentication
 }
 
 func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
@@ -429,6 +431,10 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusForbidden, err.Error())
 			return
 		}
+		if errors.Is(err, errMailboxQuotaExceeded) {
+			respondError(w, http.StatusInsufficientStorage, err.Error())
+			return
+		}
 		respondError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -440,6 +446,7 @@ var errInvalidMIME = errors.New("invalid mime message")
 var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
 var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
 var errSenderNotAuthorized = errors.New("sender address is not authorized")
+var errMailboxQuotaExceeded = errors.New("mailbox quota exceeded")
 
 func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
 	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {
@@ -1580,7 +1587,7 @@ func (a *App) loadMessageForRequest(r *http.Request, id string, includeBody bool
 }
 
 func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*MailMessage, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,COALESCE(m.auth_results,''),COALESCE(m.auth_spf,'unknown'),COALESCE(m.auth_dkim,'unknown'),COALESCE(m.auth_dmarc,'unknown'),COALESCE(m.received_spf,'')
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.id=?`, id)
 	msg, err := scanMessageFull(row, includeBody)
 	if err != nil {
@@ -1623,6 +1630,9 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 			size += int64(len(decoded))
 		}
 	}
+	if err := a.ensureMailboxQuotaAvailable(ctx, db, msg.MailboxID, size); err != nil {
+		return "", err
+	}
 	var mailboxID, folderID any
 	if strings.TrimSpace(msg.MailboxID) != "" {
 		mailboxID = msg.MailboxID
@@ -1639,8 +1649,9 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 		imapUID, imapModSeq = meta.UID, meta.ModSeq
 	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
-	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,imap_uid,imap_modseq,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, msg.RawPath, imapUID, imapModSeq, now, now)
+	auth := normalizeMailAuthentication(msg.Authentication)
+	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,auth_results,auth_spf,auth_dkim,auth_dmarc,received_spf,raw_path,imap_uid,imap_modseq,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, auth.AuthenticationResults, auth.SPF, auth.DKIM, auth.DMARC, auth.ReceivedSPF, msg.RawPath, imapUID, imapModSeq, now, now)
 	if err != nil {
 		return "", err
 	}
@@ -1651,6 +1662,33 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 		}
 	}
 	return id, nil
+}
+
+func (a *App) ensureMailboxQuotaAvailable(ctx context.Context, db dbExecutor, mailboxID string, addBytes int64) error {
+	mailboxID = strings.TrimSpace(mailboxID)
+	if mailboxID == "" || addBytes <= 0 {
+		return nil
+	}
+	rowDB, ok := db.(dbQueryer)
+	if !ok {
+		return nil
+	}
+	var quotaMB int64
+	if err := rowDB.QueryRowContext(ctx, `SELECT quota_mb FROM mailboxes WHERE id=? AND status='active'`, mailboxID).Scan(&quotaMB); err != nil {
+		return err
+	}
+	if quotaMB <= 0 {
+		return nil
+	}
+	var used int64
+	if err := rowDB.QueryRowContext(ctx, `SELECT COALESCE(SUM(size_bytes),0) FROM messages WHERE mailbox_id=?`, mailboxID).Scan(&used); err != nil {
+		return err
+	}
+	quotaBytes := quotaMB * 1024 * 1024
+	if used+addBytes > quotaBytes {
+		return fmt.Errorf("%w: used %d bytes, adding %d bytes exceeds %d bytes", errMailboxQuotaExceeded, used, addBytes, quotaBytes)
+	}
+	return nil
 }
 
 func (a *App) storeAttachment(ctx context.Context, messageID string, input AttachmentInput) error {
@@ -1893,17 +1931,109 @@ func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 func scanMessageFull(row messageSummaryScanner, includeBody bool) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
+	var auth MailAuthentication
 	var read, starred, hasAtt int
 	var bodyText, bodyHTML string
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes, &auth.AuthenticationResults, &auth.SPF, &auth.DKIM, &auth.DMARC, &auth.ReceivedSPF)
 	if err != nil {
 		return msg, err
 	}
 	msg.To, msg.CC, msg.BCC = jsonDecodeSlice(toJSON), jsonDecodeSlice(ccJSON), jsonDecodeSlice(bccJSON)
 	msg.SentAt, msg.ReceivedAt = parseTime(sent), parseTime(received)
 	msg.IsRead, msg.IsStarred, msg.HasAttachments = intBool(read), intBool(starred), intBool(hasAtt)
+	msg.Authentication = normalizeMailAuthentication(auth)
 	if includeBody {
 		msg.BodyText, msg.BodyHTML = bodyText, bodyHTML
 	}
 	return msg, nil
+}
+
+func parseMailAuthentication(header textproto.MIMEHeader) MailAuthentication {
+	authResults := strings.Join(header.Values("Authentication-Results"), "\n")
+	receivedSPF := strings.Join(header.Values("Received-SPF"), "\n")
+	auth := MailAuthentication{
+		AuthenticationResults: strings.TrimSpace(authResults),
+		ReceivedSPF:           strings.TrimSpace(receivedSPF),
+		SPF:                   "unknown",
+		DKIM:                  "unknown",
+		DMARC:                 "unknown",
+	}
+	for _, value := range header.Values("Authentication-Results") {
+		for _, field := range strings.FieldsFunc(value, func(r rune) bool {
+			return r == ';' || r == '\r' || r == '\n'
+		}) {
+			key, result, ok := authMethodResult(field)
+			if !ok {
+				continue
+			}
+			switch key {
+			case "spf":
+				auth.SPF = result
+			case "dkim":
+				auth.DKIM = result
+			case "dmarc":
+				auth.DMARC = result
+			}
+		}
+	}
+	if auth.SPF == "unknown" {
+		for _, value := range header.Values("Received-SPF") {
+			if result := firstAuthStatus(value); result != "unknown" {
+				auth.SPF = result
+				break
+			}
+		}
+	}
+	return normalizeMailAuthentication(auth)
+}
+
+func authMethodResult(value string) (string, string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(value, "=", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	method := strings.ToLower(strings.TrimSpace(parts[0]))
+	if method != "spf" && method != "dkim" && method != "dmarc" {
+		return "", "", false
+	}
+	return method, firstAuthStatus(parts[1]), true
+}
+
+func firstAuthStatus(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	value = strings.ToLower(strings.Fields(value)[0])
+	if idx := strings.IndexAny(value, "();,"); idx >= 0 {
+		value = value[:idx]
+	}
+	switch value {
+	case "pass", "fail", "softfail", "neutral", "temperror", "permerror", "none":
+		return value
+	default:
+		return "unknown"
+	}
+}
+
+func normalizeMailAuthentication(auth MailAuthentication) MailAuthentication {
+	auth.AuthenticationResults = strings.TrimSpace(auth.AuthenticationResults)
+	auth.ReceivedSPF = strings.TrimSpace(auth.ReceivedSPF)
+	auth.SPF = normalizeAuthStatus(auth.SPF)
+	auth.DKIM = normalizeAuthStatus(auth.DKIM)
+	auth.DMARC = normalizeAuthStatus(auth.DMARC)
+	return auth
+}
+
+func normalizeAuthStatus(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "pass", "fail", "softfail", "neutral", "temperror", "permerror", "none":
+		return strings.ToLower(strings.TrimSpace(value))
+	default:
+		return "unknown"
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -466,14 +467,12 @@ func (a *App) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	matchMode := strings.TrimSpace(req.MatchMode)
-	if matchMode == "" {
-		matchMode = "all"
-	}
-	if matchMode != "all" && matchMode != "any" {
+	rawMatchMode := strings.ToLower(strings.TrimSpace(req.MatchMode))
+	if rawMatchMode != "" && rawMatchMode != "all" && rawMatchMode != "and" && rawMatchMode != "any" && rawMatchMode != "or" {
 		badRequest(w, errors.New("invalid match mode"))
 		return
 	}
+	matchMode := normalizeRuleMatchMode(rawMatchMode)
 	conditions := normalizeRuleConditions(req.Conditions, req.FromContains, req.SubjectContains)
 	if len(conditions) == 0 {
 		badRequest(w, errors.New("rule condition is required"))
@@ -639,9 +638,20 @@ func (a *App) handleMailStats(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to load stats")
 		return
 	}
-	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(a.id) FROM attachments a JOIN messages m ON m.id=a.message_id JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...).Scan(&stats.AttachmentCount); err != nil {
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(a.id),COALESCE(SUM(a.size_bytes),0) FROM attachments a JOIN messages m ON m.id=a.message_id JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...).Scan(&stats.AttachmentCount, &stats.AttachmentBytes); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load attachment stats")
 		return
+	}
+	if mailboxID != "" {
+		var quotaMB int64
+		if err := a.db.QueryRowContext(r.Context(), `SELECT quota_mb FROM mailboxes WHERE id=? AND user_id=?`, mailboxID, user.ID).Scan(&quotaMB); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to load quota")
+			return
+		}
+		stats.QuotaBytes = quotaMB * 1024 * 1024
+		if stats.QuotaBytes > 0 {
+			stats.QuotaUsedPct = float64(stats.StorageBytes) / float64(stats.QuotaBytes) * 100
+		}
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT f.name,f.role,COUNT(m.id),COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0),COALESCE(SUM(m.size_bytes),0)
 		FROM mailboxes mb JOIN folders f ON f.mailbox_id=mb.id LEFT JOIN messages m ON m.folder_id=f.id
@@ -853,9 +863,7 @@ func scanRule(row messageSummaryScanner) (MailRule, error) {
 	if err == nil {
 		item.Conditions = decodeRuleConditions(conditionsJSON, item.FromContains, item.SubjectContains)
 		item.Actions = decodeRuleActions(actionsJSON, item.Action)
-		if item.MatchMode == "" {
-			item.MatchMode = "all"
-		}
+		item.MatchMode = normalizeRuleMatchMode(item.MatchMode)
 	}
 	item.ApplyToExisting = intBool(applyToExisting)
 	item.StopProcessing = intBool(stopProcessing)
@@ -877,13 +885,8 @@ func (a *App) applyInboundControls(ctx context.Context, messageID, mailboxID, fr
 	if err := a.db.QueryRowContext(ctx, `SELECT user_id FROM mailboxes WHERE id=?`, mailboxID).Scan(&userID); err != nil {
 		return
 	}
-	from = normalizeEmail(from)
-	var blocked int
-	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM blocked_senders WHERE user_id=? AND (mailbox_id='' OR mailbox_id=?) AND email=?`, userID, mailboxID, from).Scan(&blocked)
-	if blocked > 0 {
-		if spamID, err := a.ensureFolder(ctx, mailboxID, "Spam"); err == nil {
-			_ = a.moveMessageMaildir(ctx, messageID, spamID)
-		}
+	if a.senderBlocked(ctx, userID, mailboxID, from) {
+		a.moveBlockedMessageToSpam(ctx, messageID, mailboxID)
 		return
 	}
 	rows, err := a.db.QueryContext(ctx, `SELECT id,user_id,mailbox_id,name,match_mode,conditions_json,actions_json,from_contains,subject_contains,action,apply_to_existing,stop_processing,enabled,created_at FROM mail_rules WHERE user_id=? AND (mailbox_id='' OR mailbox_id=?) AND enabled=1 ORDER BY created_at`, userID, mailboxID)
@@ -899,26 +902,94 @@ func (a *App) applyInboundControls(ctx context.Context, messageID, mailboxID, fr
 	}
 	rows.Close()
 	msg := ruleMessage{ID: messageID, MailboxID: mailboxID, From: from, Subject: subject}
-	_ = a.db.QueryRowContext(ctx, `SELECT trim(from_addr || ' ' || COALESCE(from_name,'')),to_addrs,subject,snippet,body_text FROM messages WHERE id=?`, messageID).Scan(&msg.From, &msg.To, &msg.Subject, &msg.Snippet, &msg.BodyText)
+	msg, ok := a.ruleMessageByID(ctx, messageID)
+	if !ok {
+		msg = ruleMessage{ID: messageID, MailboxID: mailboxID, From: from, Subject: subject}
+	}
 	for _, rule := range rules {
 		if !ruleMatches(rule, msg) {
 			continue
 		}
 		_ = a.applyRuleActions(ctx, mailboxID, messageID, rule.Actions)
 		if rule.StopProcessing {
-			return
+			break
 		}
+	}
+	if a.senderBlocked(ctx, userID, mailboxID, from) {
+		a.moveBlockedMessageToSpam(ctx, messageID, mailboxID)
 	}
 }
 
+func (a *App) senderBlocked(ctx context.Context, userID, mailboxID, from string) bool {
+	from = normalizeEmail(from)
+	if from == "" {
+		return false
+	}
+	var blocked int
+	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM blocked_senders WHERE user_id=? AND (mailbox_id='' OR mailbox_id=?) AND email=?`, userID, mailboxID, from).Scan(&blocked)
+	return blocked > 0
+}
+
+func (a *App) moveBlockedMessageToSpam(ctx context.Context, messageID, mailboxID string) {
+	spamID, err := a.ensureFolder(ctx, mailboxID, "Spam")
+	if err != nil {
+		return
+	}
+	_ = a.moveMessageMaildir(ctx, messageID, spamID)
+}
+
 type ruleMessage struct {
-	ID        string
-	MailboxID string
-	From      string
-	To        string
-	Subject   string
-	Snippet   string
-	BodyText  string
+	ID              string
+	MailboxID       string
+	From            string
+	To              string
+	CC              string
+	Subject         string
+	Snippet         string
+	BodyText        string
+	AttachmentNames string
+	SizeBytes       int64
+	ReceivedAt      time.Time
+}
+
+func (a *App) ruleMessageByID(ctx context.Context, messageID string) (ruleMessage, bool) {
+	var msg ruleMessage
+	var toAddrs, ccAddrs, receivedAt string
+	err := a.db.QueryRowContext(ctx, `SELECT id,COALESCE(mailbox_id,''),trim(from_addr || ' ' || COALESCE(from_name,'')),to_addrs,cc_addrs,subject,snippet,body_text,size_bytes,received_at FROM messages WHERE id=?`, messageID).
+		Scan(&msg.ID, &msg.MailboxID, &msg.From, &toAddrs, &ccAddrs, &msg.Subject, &msg.Snippet, &msg.BodyText, &msg.SizeBytes, &receivedAt)
+	if err != nil {
+		return ruleMessage{}, false
+	}
+	msg.To = ruleAddressText(toAddrs)
+	msg.CC = ruleAddressText(ccAddrs)
+	msg.ReceivedAt = parseTime(receivedAt)
+	msg.AttachmentNames = a.ruleAttachmentNames(ctx, messageID)
+	return msg, true
+}
+
+func ruleAddressText(raw string) string {
+	var items []string
+	if strings.TrimSpace(raw) != "" && json.Unmarshal([]byte(raw), &items) == nil {
+		return strings.Join(items, " ")
+	}
+	return raw
+}
+
+func (a *App) ruleAttachmentNames(ctx context.Context, messageID string) string {
+	rows, err := a.db.QueryContext(ctx, `SELECT filename,content_type FROM attachments WHERE message_id=? ORDER BY filename`, messageID)
+	if err != nil {
+		return ""
+	}
+	defer rows.Close()
+	parts := []string{}
+	for rows.Next() {
+		var filename, contentType string
+		if err := rows.Scan(&filename, &contentType); err != nil {
+			return strings.Join(parts, " ")
+		}
+		parts = append(parts, filename, contentType)
+	}
+	return strings.Join(parts, " ")
 }
 
 func normalizeRuleConditions(items []MailRuleCondition, legacyFrom, legacySubject string) []MailRuleCondition {
@@ -932,24 +1003,54 @@ func normalizeRuleConditions(items []MailRuleCondition, legacyFrom, legacySubjec
 	}
 	out := []MailRuleCondition{}
 	for _, item := range items {
-		field := strings.TrimSpace(item.Field)
-		operator := strings.TrimSpace(item.Operator)
-		value := strings.TrimSpace(item.Value)
-		if value == "" {
-			continue
+		if normalized, ok := normalizeRuleCondition(item); ok {
+			out = append(out, normalized)
 		}
-		if field != "from" && field != "to" && field != "subject" && field != "body" {
-			continue
-		}
-		if operator == "" {
-			operator = "contains"
-		}
-		if operator != "contains" && operator != "not-contains" && operator != "equals" && operator != "not-equals" && operator != "starts-with" && operator != "ends-with" {
-			continue
-		}
-		out = append(out, MailRuleCondition{Field: field, Operator: operator, Value: value})
 	}
 	return out
+}
+
+func normalizeRuleCondition(item MailRuleCondition) (MailRuleCondition, bool) {
+	matchMode := normalizeRuleMatchMode(item.MatchMode)
+	if len(item.Conditions) > 0 {
+		children := normalizeRuleConditions(item.Conditions, "", "")
+		if len(children) == 0 {
+			return MailRuleCondition{}, false
+		}
+		return MailRuleCondition{MatchMode: matchMode, Conditions: children}, true
+	}
+	field := strings.ToLower(strings.TrimSpace(item.Field))
+	operator := strings.ToLower(strings.TrimSpace(item.Operator))
+	value := strings.TrimSpace(item.Value)
+	if value == "" {
+		return MailRuleCondition{}, false
+	}
+	switch field {
+	case "from", "to", "cc", "subject", "body", "attachment", "size", "date":
+	default:
+		return MailRuleCondition{}, false
+	}
+	if operator == "" {
+		operator = "contains"
+	}
+	switch operator {
+	case "contains", "not-contains", "equals", "not-equals", "starts-with", "ends-with":
+	case "gt", "gte", "lt", "lte", "before", "after", "on":
+	default:
+		return MailRuleCondition{}, false
+	}
+	return MailRuleCondition{Field: field, Operator: operator, Value: value}, true
+}
+
+func normalizeRuleMatchMode(matchMode string) string {
+	switch strings.ToLower(strings.TrimSpace(matchMode)) {
+	case "any", "or":
+		return "any"
+	case "all", "and":
+		return "all"
+	default:
+		return "all"
+	}
 }
 
 func normalizeRuleActions(items []MailRuleAction, legacyAction string) []MailRuleAction {
@@ -1008,10 +1109,11 @@ func ruleMatches(rule MailRule, msg ruleMessage) bool {
 	if len(conditions) == 0 {
 		return false
 	}
-	matchMode := rule.MatchMode
-	if matchMode == "" {
-		matchMode = "all"
-	}
+	matchMode := normalizeRuleMatchMode(rule.MatchMode)
+	return ruleConditionsMatch(conditions, matchMode, msg)
+}
+
+func ruleConditionsMatch(conditions []MailRuleCondition, matchMode string, msg ruleMessage) bool {
 	matched := 0
 	for _, condition := range conditions {
 		if ruleConditionMatches(condition, msg) {
@@ -1027,12 +1129,17 @@ func ruleMatches(rule MailRule, msg ruleMessage) bool {
 }
 
 func ruleConditionMatches(condition MailRuleCondition, msg ruleMessage) bool {
+	if len(condition.Conditions) > 0 {
+		return ruleConditionsMatch(condition.Conditions, normalizeRuleMatchMode(condition.MatchMode), msg)
+	}
 	var source string
-	switch condition.Field {
+	switch strings.ToLower(strings.TrimSpace(condition.Field)) {
 	case "from":
 		source = msg.From
 	case "to":
 		source = msg.To
+	case "cc":
+		source = msg.CC
 	case "subject":
 		source = msg.Subject
 	case "body":
@@ -1040,12 +1147,18 @@ func ruleConditionMatches(condition MailRuleCondition, msg ruleMessage) bool {
 		if source == "" {
 			source = msg.Snippet
 		}
+	case "attachment":
+		source = msg.AttachmentNames
+	case "size":
+		return ruleNumericConditionMatches(condition, msg.SizeBytes)
+	case "date":
+		return ruleDateConditionMatches(condition, msg.ReceivedAt)
 	default:
 		return false
 	}
 	source = strings.ToLower(source)
 	value := strings.ToLower(condition.Value)
-	switch condition.Operator {
+	switch strings.ToLower(strings.TrimSpace(condition.Operator)) {
 	case "contains":
 		return strings.Contains(source, value)
 	case "not-contains":
@@ -1061,6 +1174,94 @@ func ruleConditionMatches(condition MailRuleCondition, msg ruleMessage) bool {
 	default:
 		return strings.Contains(source, value)
 	}
+}
+
+func ruleNumericConditionMatches(condition MailRuleCondition, source int64) bool {
+	value, ok := parseRuleSizeValue(condition.Value)
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(condition.Operator)) {
+	case "gt":
+		return source > value
+	case "gte":
+		return source >= value
+	case "lt":
+		return source < value
+	case "lte":
+		return source <= value
+	case "equals":
+		return source == value
+	case "not-equals":
+		return source != value
+	default:
+		return false
+	}
+}
+
+func parseRuleSizeValue(raw string) (int64, bool) {
+	value := strings.ToLower(strings.TrimSpace(raw))
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		text       string
+		multiplier int64
+	}{
+		{"kb", 1024},
+		{"k", 1024},
+		{"mb", 1024 * 1024},
+		{"m", 1024 * 1024},
+		{"gb", 1024 * 1024 * 1024},
+		{"g", 1024 * 1024 * 1024},
+		{"b", 1},
+	} {
+		if strings.HasSuffix(value, suffix.text) {
+			multiplier = suffix.multiplier
+			value = strings.TrimSpace(strings.TrimSuffix(value, suffix.text))
+			break
+		}
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n * multiplier, true
+}
+
+func ruleDateConditionMatches(condition MailRuleCondition, source time.Time) bool {
+	if source.IsZero() {
+		return false
+	}
+	target, ok := parseRuleDateValue(condition.Value)
+	if !ok {
+		return false
+	}
+	source = source.UTC()
+	switch strings.ToLower(strings.TrimSpace(condition.Operator)) {
+	case "before", "lt":
+		return source.Before(target)
+	case "after", "gt":
+		return source.After(target)
+	case "on", "equals":
+		y1, m1, d1 := source.Date()
+		y2, m2, d2 := target.Date()
+		return y1 == y2 && m1 == m2 && d1 == d2
+	case "not-equals":
+		y1, m1, d1 := source.Date()
+		y2, m2, d2 := target.Date()
+		return y1 != y2 || m1 != m2 || d1 != d2
+	default:
+		return false
+	}
+}
+
+func parseRuleDateValue(raw string) (time.Time, bool) {
+	value := strings.TrimSpace(raw)
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02"} {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t.UTC(), true
+		}
+	}
+	return time.Time{}, false
 }
 
 func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string, actions []MailRuleAction) error {
@@ -1165,19 +1366,21 @@ func (a *App) applyRuleToExistingMessages(ctx context.Context, userID, mailboxID
 		where += ` AND m.mailbox_id=?`
 		args = append(args, mailboxID)
 	}
-	rows, err := a.db.QueryContext(ctx, `SELECT m.id,m.mailbox_id,trim(m.from_addr || ' ' || COALESCE(m.from_name,'')),m.to_addrs,m.subject,m.snippet,m.body_text FROM messages m JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...)
+	rows, err := a.db.QueryContext(ctx, `SELECT m.id FROM messages m JOIN mailboxes mb ON mb.id=m.mailbox_id WHERE `+where, args...)
 	if err != nil {
 		return 0, err
 	}
 	messages := []ruleMessage{}
 	var count int64
 	for rows.Next() {
-		var msg ruleMessage
-		var toAddrs sql.NullString
-		if err := rows.Scan(&msg.ID, &msg.MailboxID, &msg.From, &toAddrs, &msg.Subject, &msg.Snippet, &msg.BodyText); err != nil {
+		var messageID string
+		if err := rows.Scan(&messageID); err != nil {
 			return count, err
 		}
-		msg.To = toAddrs.String
+		msg, ok := a.ruleMessageByID(ctx, messageID)
+		if !ok {
+			continue
+		}
 		if !ruleMatches(rule, msg) {
 			continue
 		}

@@ -641,19 +641,20 @@ func (a *App) parseMaildirMessage(raw []byte, fallbackTo string) (storedMessage,
 		receivedAt = sentAt
 	}
 	return storedMessage{
-		MessageUID: newID("uid"),
-		MessageID:  strings.TrimSpace(m.Header.Get("Message-Id")),
-		Subject:    subject,
-		From:       from,
-		FromName:   fromName,
-		To:         to,
-		CC:         cc,
-		SentAt:     sentAt,
-		ReceivedAt: receivedAt,
-		Snippet:    snippetFrom(bodyText, bodyHTML),
-		BodyText:   bodyText,
-		BodyHTML:   bodyHTML,
-		IsRead:     false,
+		MessageUID:     newID("uid"),
+		MessageID:      strings.TrimSpace(m.Header.Get("Message-Id")),
+		Subject:        subject,
+		From:           from,
+		FromName:       fromName,
+		To:             to,
+		CC:             cc,
+		SentAt:         sentAt,
+		ReceivedAt:     receivedAt,
+		Snippet:        snippetFrom(bodyText, bodyHTML),
+		BodyText:       bodyText,
+		BodyHTML:       bodyHTML,
+		IsRead:         false,
+		Authentication: parseMailAuthentication(textproto.MIMEHeader(m.Header)),
 	}, parsed.Attachments, nil
 }
 

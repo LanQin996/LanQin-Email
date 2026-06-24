@@ -119,6 +119,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionAliasesUpdate)).Post("/admin/aliases/{id}", a.handleUpdateAlias)
 			r.With(a.requirePermission(PermissionAliasesDelete)).Delete("/admin/aliases/{id}", a.handleDeleteAlias)
 			r.With(a.requirePermission(PermissionMessagesView)).Get("/admin/messages", a.handleAdminMessages)
+			r.With(a.requirePermission(PermissionMessagesView)).Get("/admin/send-audit", a.handleAdminSendAudit)
 			r.With(a.requirePermission(PermissionMessagesRead)).Get("/admin/messages/{id}", a.handleAdminMessage)
 			r.With(a.requirePermission(PermissionMessagesAttachment)).Get("/admin/attachments/{id}", a.handleAdminAttachment)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings", a.handleGetSystemSettings)

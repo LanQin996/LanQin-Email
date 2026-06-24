@@ -812,8 +812,14 @@ type RuleCreatePayload = {
   enabled: boolean
 }
 
-const conditionFieldLabels: Record<MailRuleCondition["field"], string> = { from: "发件人地址", to: "收件人地址", subject: "邮件主题", body: "邮件正文" }
-const conditionOperatorLabels: Record<MailRuleCondition["operator"], string> = { contains: "包含", "not-contains": "不包含", equals: "等于", "not-equals": "不等于", "starts-with": "开头是", "ends-with": "结尾是" }
+type RuleConditionField = NonNullable<MailRuleCondition["field"]>
+type RuleConditionOperator = NonNullable<MailRuleCondition["operator"]>
+const conditionFieldLabels: Record<RuleConditionField, string> = { from: "发件人地址", to: "收件人地址", cc: "抄送地址", subject: "邮件主题", body: "邮件正文", attachment: "附件名称", size: "邮件大小", date: "收信日期" }
+const conditionOperatorLabels: Record<RuleConditionOperator, string> = { contains: "包含", "not-contains": "不包含", equals: "等于", "not-equals": "不等于", "starts-with": "开头是", "ends-with": "结尾是", gt: "大于", gte: "大于等于", lt: "小于", lte: "小于等于", before: "早于", after: "晚于", on: "当天" }
+const textConditionOperators: RuleConditionOperator[] = ["contains", "not-contains", "equals", "not-equals", "starts-with", "ends-with"]
+const sizeConditionOperators: RuleConditionOperator[] = ["gt", "gte", "lt", "lte", "equals", "not-equals"]
+const dateConditionOperators: RuleConditionOperator[] = ["before", "after", "on", "equals", "not-equals"]
+const conditionFields = Object.keys(conditionFieldLabels) as RuleConditionField[]
 const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到" }
 
 function RulesSection({ items, mailboxes, labels, open, onOpenChange, onCreate, onDelete, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; pending: boolean }) {
@@ -860,7 +866,14 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
   }, [open, labels])
 
   function updateCondition(index: number, patch: Partial<MailRuleCondition>) {
-    setConditions((items) => items.map((item, i) => i === index ? { ...item, ...patch } : item))
+    setConditions((items) => items.map((item, i) => {
+      if (i !== index) return item
+      const next = { ...item, ...patch }
+      if (patch.field && !conditionOperatorsForField(patch.field).includes(next.operator || "contains")) {
+        next.operator = defaultConditionOperator(patch.field)
+      }
+      return next
+    }))
   }
   function updateAction(index: number, patch: Partial<MailRuleAction>) {
     setActions((items) => items.map((item, i) => i === index ? normalizeDraftAction({ ...item, ...patch }, availableLabels) : item))
@@ -870,7 +883,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
   function removeCondition(index: number) { setConditions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
   function removeAction(index: number) { setActions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
 
-  const validConditions = conditions.map((item) => ({ ...item, value: item.value.trim() })).filter((item) => item.value)
+  const validConditions = conditions.map((item) => ({ ...item, value: (item.value || "").trim() })).filter((item) => item.field && item.operator && item.value)
   const validActions = actions.map((item) => normalizeDraftAction(item, availableLabels)).filter((item) => item.type !== "label" || item.value || item.labelId).filter((item) => item.type !== "move" || item.value)
   const canCreate = validConditions.length > 0 && validActions.length > 0 && !pending
 
@@ -902,15 +915,15 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
               <div className="space-y-3">
                 {conditions.map((condition, index) => (
                   <div key={index} className="grid gap-3 md:grid-cols-[220px_150px_minmax(0,1fr)_auto_auto]">
-                    <Select value={condition.field} onValueChange={(value) => updateCondition(index, { field: value as MailRuleCondition["field"] })}>
+                    <Select value={condition.field || "from"} onValueChange={(value) => updateCondition(index, { field: value as RuleConditionField })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>{(Object.keys(conditionFieldLabels) as MailRuleCondition["field"][]).map((value) => <SelectItem key={value} value={value}>{conditionFieldLabels[value]}</SelectItem>)}</SelectContent>
+                      <SelectContent>{conditionFields.map((value) => <SelectItem key={value} value={value}>{conditionFieldLabels[value]}</SelectItem>)}</SelectContent>
                     </Select>
-                    <Select value={condition.operator} onValueChange={(value) => updateCondition(index, { operator: value as MailRuleCondition["operator"] })}>
+                    <Select value={condition.operator || defaultConditionOperator(condition.field)} onValueChange={(value) => updateCondition(index, { operator: value as RuleConditionOperator })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>{(Object.keys(conditionOperatorLabels) as MailRuleCondition["operator"][]).map((value) => <SelectItem key={value} value={value}>{conditionOperatorLabels[value]}</SelectItem>)}</SelectContent>
+                      <SelectContent>{conditionOperatorsForField(condition.field).map((value) => <SelectItem key={value} value={value}>{conditionOperatorLabels[value]}</SelectItem>)}</SelectContent>
                     </Select>
-                    <Input value={condition.value} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder="输入值" />
+                    <Input type={condition.field === "date" ? "date" : "text"} value={condition.value || ""} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder={conditionPlaceholder(condition.field)} />
                     <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeCondition(index)} disabled={conditions.length === 1}><X className="h-4 w-4" /></Button>
                     <Button type="button" variant="ghost" size="icon" onClick={addCondition}><Plus className="h-4 w-4" /></Button>
                   </div>
@@ -1012,9 +1025,38 @@ function normalizeDraftAction(action: MailRuleAction, labels: MailLabel[]): Mail
   return { type: action.type }
 }
 
+function conditionOperatorsForField(field?: MailRuleCondition["field"]) {
+  if (field === "size") return sizeConditionOperators
+  if (field === "date") return dateConditionOperators
+  return textConditionOperators
+}
+
+function defaultConditionOperator(field?: MailRuleCondition["field"]): RuleConditionOperator {
+  if (field === "size") return "gte"
+  if (field === "date") return "on"
+  return "contains"
+}
+
+function conditionPlaceholder(field?: MailRuleCondition["field"]) {
+  if (field === "size") return "例如 10mb"
+  if (field === "date") return "选择日期"
+  if (field === "attachment") return "输入附件名或扩展名"
+  return "输入值"
+}
+
 function conditionSummary(conditions: MailRuleCondition[] = [], fromContains = "", subjectContains = "") {
   const items = conditions.length > 0 ? conditions : [fromContains ? { field: "from", operator: "contains", value: fromContains } as MailRuleCondition : undefined, subjectContains ? { field: "subject", operator: "contains", value: subjectContains } as MailRuleCondition : undefined].filter(Boolean) as MailRuleCondition[]
-  return items.map((item) => `${conditionFieldLabels[item.field]} ${conditionOperatorLabels[item.operator]} ${item.value}`).join("；") || "无条件"
+  return items.map(conditionItemSummary).join("；") || "无条件"
+}
+
+function conditionItemSummary(item: MailRuleCondition): string {
+  if (item.conditions?.length) {
+    const mode = item.matchMode === "any" ? "任一" : "全部"
+    return `${mode}(${item.conditions.map(conditionItemSummary).join("；")})`
+  }
+  const field = item.field || "from"
+  const operator = item.operator || defaultConditionOperator(field)
+  return `${conditionFieldLabels[field]} ${conditionOperatorLabels[operator]} ${item.value || ""}`
 }
 
 function actionSummary(action: MailRuleAction) {
@@ -1063,7 +1105,8 @@ function StatsSection({ stats, mailbox, onRefresh }: { stats?: MailStats; mailbo
 }
 
 function StatsSummary({ stats }: { stats?: MailStats }) {
-  const cards = [{ label: "总邮件", value: stats?.totalMessages || 0 }, { label: "未读", value: stats?.unreadMessages || 0 }, { label: "星标", value: stats?.starredMessages || 0 }, { label: "附件", value: stats?.attachmentCount || 0 }, { label: "容量", value: formatBytes(stats?.storageBytes || 0) }]
+  const quotaLabel = stats?.quotaBytes ? `${formatBytes(stats.storageBytes || 0)} / ${formatBytes(stats.quotaBytes)}` : formatBytes(stats?.storageBytes || 0)
+  const cards = [{ label: "总邮件", value: stats?.totalMessages || 0 }, { label: "未读", value: stats?.unreadMessages || 0 }, { label: "星标", value: stats?.starredMessages || 0 }, { label: "附件", value: `${stats?.attachmentCount || 0} / ${formatBytes(stats?.attachmentBytes || 0)}` }, { label: stats?.quotaBytes ? `容量 ${Math.min(stats.quotaUsedPct || 0, 999).toFixed(1)}%` : "容量", value: quotaLabel }]
   return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{cards.map((c) => <Card key={c.label}><CardContent className="p-4"><div className="text-2xl font-semibold tracking-tight">{c.value}</div><div className="text-xs text-muted-foreground">{c.label}</div></CardContent></Card>)}</div>
 }
 

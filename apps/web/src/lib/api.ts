@@ -94,6 +94,17 @@ export const api = {
     return request<ListResponse<MailMessage>>(`/api/admin/messages${suffix ? `?${suffix}` : ""}`)
   },
   adminMessage: (id: string) => request<MailMessage>(`/api/admin/messages/${id}`),
+  adminSendAudit: (params: { mailboxId?: string; messageId?: string; event?: string; from?: string; to?: string; cursor?: string } = {}) => {
+    const query = new URLSearchParams()
+    if (params.mailboxId) query.set("mailboxId", params.mailboxId)
+    if (params.messageId) query.set("messageId", params.messageId)
+    if (params.event) query.set("event", params.event)
+    if (params.from) query.set("from", params.from)
+    if (params.to) query.set("to", params.to)
+    if (params.cursor) query.set("cursor", params.cursor)
+    const suffix = query.toString()
+    return request<ListResponse<SendQueueAuditEvent>>(`/api/admin/send-audit${suffix ? `?${suffix}` : ""}`)
+  },
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   maildirSyncHealth: () => request<MaildirSyncHealth>("/api/admin/maildir-sync/health"),
   updateSystemSettings: (payload: SystemSettingsPayload) => request<SystemSettings>("/api/admin/settings", { method: "POST", body: JSON.stringify(payload) }),

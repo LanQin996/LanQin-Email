@@ -230,6 +230,11 @@ func (a *App) migrate(ctx context.Context) error {
 			is_starred INTEGER NOT NULL DEFAULT 0,
 			has_attachments INTEGER NOT NULL DEFAULT 0,
 			size_bytes INTEGER NOT NULL DEFAULT 0,
+			auth_results TEXT NOT NULL DEFAULT '',
+			auth_spf TEXT NOT NULL DEFAULT 'unknown',
+			auth_dkim TEXT NOT NULL DEFAULT 'unknown',
+			auth_dmarc TEXT NOT NULL DEFAULT 'unknown',
+			received_spf TEXT NOT NULL DEFAULT '',
 			raw_path TEXT NOT NULL DEFAULT '',
 			imap_uid INTEGER NOT NULL DEFAULT 0,
 			imap_modseq INTEGER NOT NULL DEFAULT 1,
@@ -419,6 +424,9 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateMessagesFromName(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateMessageAuthentication(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
 		return err
 	}
@@ -439,6 +447,47 @@ func (a *App) migrate(ctx context.Context) error {
 	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (a *App) migrateMessageAuthentication(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	alter := []struct {
+		name string
+		sql  string
+	}{
+		{"auth_results", `ALTER TABLE messages ADD COLUMN auth_results TEXT NOT NULL DEFAULT ''`},
+		{"auth_spf", `ALTER TABLE messages ADD COLUMN auth_spf TEXT NOT NULL DEFAULT 'unknown'`},
+		{"auth_dkim", `ALTER TABLE messages ADD COLUMN auth_dkim TEXT NOT NULL DEFAULT 'unknown'`},
+		{"auth_dmarc", `ALTER TABLE messages ADD COLUMN auth_dmarc TEXT NOT NULL DEFAULT 'unknown'`},
+		{"received_spf", `ALTER TABLE messages ADD COLUMN received_spf TEXT NOT NULL DEFAULT ''`},
+	}
+	for _, item := range alter {
+		if !columns[item.name] {
+			if _, err := a.db.ExecContext(ctx, item.sql); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
