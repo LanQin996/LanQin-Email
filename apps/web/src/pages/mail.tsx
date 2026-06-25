@@ -324,6 +324,19 @@ export function MailPage() {
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["folders", activeMailboxId] }),
   })
+  const deleteFolder = useMutation({
+    mutationFn: (item: Extract<MailMenuItem, { type: "folder" }>) => api.deleteFolder(item.folderId, activeMailboxId),
+    onSuccess: async (result, item) => {
+      setPendingConfirm(null)
+      if (mailView === "folder" && folder === item.folderName) {
+        setFolder("Inbox")
+        setSelectedId(null)
+      }
+      await refreshMailData()
+      toast({ title: "文件夹已删除", description: result.moved > 0 ? `已将 ${result.moved} 封邮件移回收件箱` : undefined })
+    },
+    onError: (error) => toast({ title: "删除文件夹失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+  })
   const retrySendQueue = useMutation({
     mutationFn: (item: SendQueueItem) => api.retrySendQueue(item.id),
     onMutate: (item) => setSendQueuePendingId(item.id),
@@ -736,6 +749,15 @@ export function MailPage() {
     const target = mailMenuItems[targetIndex]
     if (!target) return
     reorderCustomFolder(item.folderId, { key: target.key, edge: action === "up" ? "before" : "after" })
+  }
+  function confirmDeleteFolder(item: MailMenuItem) {
+    if (item.type !== "folder" || !item.custom) return
+    setPendingConfirm({
+      title: `删除文件夹“${item.label}”？`,
+      description: "文件夹内的邮件会移回收件箱，不会被删除。",
+      confirmText: "删除文件夹",
+      onConfirm: () => deleteFolder.mutate(item),
+    })
   }
   function handleFolderDragStart(event: React.DragEvent, item: MailMenuItem) {
     if (item.type !== "folder" || !item.custom || sidebarCollapsed || !canOrganizeMail) return
@@ -1296,6 +1318,10 @@ export function MailPage() {
           closeSidebarContextMenu()
           moveSidebarFolder(item, action)
         }}
+        onDelete={(item) => {
+          closeSidebarContextMenu()
+          confirmDeleteFolder(item)
+        }}
       />
       <CreateFolderDialog
         open={folderDialogOpen}
@@ -1721,7 +1747,7 @@ function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (ac
   )
 }
 
-function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRefresh, onCreateFolder, onMove }: { state: SidebarContextMenuState | null; canOrganize: boolean; pending: boolean; onClose: () => void; onOpen: (item: MailMenuItem) => void; onRefresh: () => void; onCreateFolder: () => void; onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void }) {
+function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRefresh, onCreateFolder, onMove, onDelete }: { state: SidebarContextMenuState | null; canOrganize: boolean; pending: boolean; onClose: () => void; onOpen: (item: MailMenuItem) => void; onRefresh: () => void; onCreateFolder: () => void; onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void; onDelete: (item: MailMenuItem) => void }) {
   React.useEffect(() => {
     if (!state) return
     const close = () => onClose()
@@ -1777,6 +1803,10 @@ function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRe
           </button>
           <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "bottom")}>
             <ArrowLeft className="h-4 w-4 -rotate-90" />移到最下
+          </button>
+          <div className="my-1 h-px bg-border" />
+          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onDelete(item)}>
+            <Trash2 className="h-4 w-4" />删除文件夹
           </button>
         </>
       )}

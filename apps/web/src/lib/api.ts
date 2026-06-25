@@ -124,6 +124,7 @@ export const api = {
     const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""
     return request<{ ok: boolean }>(`/api/mail/folders/reorder${query}`, { method: "POST", body: JSON.stringify(payload.folders ? { folders: payload.folders } : { folderIds: payload.folderIds }) })
   },
+  deleteFolder: (id: string, mailboxId?: string) => request<{ ok: boolean; moved: number }>(`/api/mail/folders/${id}${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`, { method: "DELETE" }),
   labels: (mailboxId?: string) => request<ListResponse<MailLabel>>(`/api/mail/labels${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   createLabel: (payload: { mailboxId?: string; name: string; color?: string }) => {
     const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""

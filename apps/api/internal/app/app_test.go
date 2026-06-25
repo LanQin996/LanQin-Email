@@ -1047,6 +1047,59 @@ func TestCustomMailFoldersCreateAndMove(t *testing.T) {
 	}
 }
 
+func TestCustomMailFoldersDeleteMovesMessagesToInbox(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	var custom MailFolder
+	if code := admin.do("POST", "/api/mail/folders", map[string]string{"name": "临时项目"}, &custom); code != http.StatusCreated {
+		t.Fatalf("create custom folder code=%d folder=%+v", code, custom)
+	}
+	var sent MailMessage
+	if code := admin.do("POST", "/api/mail/send", map[string]any{"to": []string{"person@example.test"}, "subject": "delete folder keeps message", "text": "body"}, &sent); code != http.StatusCreated {
+		t.Fatalf("send code=%d msg=%+v", code, sent)
+	}
+	var ok map[string]any
+	if code := admin.do("POST", "/api/mail/messages/"+sent.ID+"/move", map[string]string{"folder": "临时项目"}, &ok); code != http.StatusOK {
+		t.Fatalf("move to custom folder code=%d body=%v", code, ok)
+	}
+	if code := admin.do("DELETE", "/api/mail/folders/"+custom.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete custom folder code=%d body=%v", code, ok)
+	}
+	var folders struct {
+		Items []MailFolder `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/folders", nil, &folders); code != http.StatusOK || folderListContains(folders.Items, "临时项目") {
+		t.Fatalf("folder should be deleted code=%d items=%+v", code, folders.Items)
+	}
+	var inbox struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/messages?folder=Inbox&q="+url.QueryEscape("delete folder keeps message"), nil, &inbox); code != http.StatusOK || len(inbox.Items) == 0 || inbox.Items[0].ID != sent.ID {
+		t.Fatalf("message should be moved to inbox code=%d items=%+v", code, inbox.Items)
+	}
+	var bad map[string]any
+	var inboxID string
+	for _, item := range folders.Items {
+		if item.Name == "Inbox" {
+			inboxID = item.ID
+			break
+		}
+	}
+	if inboxID == "" {
+		t.Fatalf("inbox id not found")
+	}
+	if code := admin.do("DELETE", "/api/mail/folders/"+inboxID, nil, &bad); code != http.StatusBadRequest {
+		t.Fatalf("delete system folder should be rejected code=%d body=%v", code, bad)
+	}
+}
+
 func TestCustomMailFoldersReorder(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
