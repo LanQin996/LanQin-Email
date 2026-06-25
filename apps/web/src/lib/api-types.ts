@@ -64,6 +64,7 @@ export type MailMessage = {
   labels?: MailLabel[]
   sendQueueId?: string
   sendQueueStatus?: SendQueueStatus
+  externalAccountId?: string
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
 export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }
@@ -122,6 +123,12 @@ export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" 
 export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; enabled: boolean; createdAt: string; appliedExistingCount?: number }
 export type BlockedSender = { id: string; mailboxId: string; email: string; reason: string; createdAt: string }
 export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; attachmentBytes: number; storageBytes: number; quotaBytes: number; quotaUsedPct: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
+export type ExternalImapStorageMode = "local" | "remote"
+export type ExternalImapTlsMode = "tls" | "starttls" | "plain"
+export type ExternalImapAccount = { id: string; mailboxId: string; name: string; host: string; port: number; tlsMode: ExternalImapTlsMode; username: string; storageMode: ExternalImapStorageMode; syncReadState: boolean; enabled: boolean; lastSyncAt?: string; lastStatus: string; lastError?: string; createdAt: string; updatedAt: string }
+export type ExternalImapAccountPayload = { mailboxId: string; name: string; host: string; port: number; tlsMode: ExternalImapTlsMode; username: string; password?: string; storageMode: ExternalImapStorageMode; syncReadState: boolean; enabled: boolean }
+export type ExternalImapFolder = { name: string; role: string; unreadCount: number; totalCount: number }
+export type ExternalImapSyncRun = { id: string; accountId: string; status: string; imported: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
 export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
 export type MaildirSyncCounts = { filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }

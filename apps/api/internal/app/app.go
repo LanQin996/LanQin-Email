@@ -29,6 +29,7 @@ type App struct {
 	policy        *HTMLPolicy
 	workerCancel  context.CancelFunc
 	maildirHealth *maildirSyncHealthTracker
+	externalIMAP  externalIMAPClientFactory
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -49,6 +50,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	db.SetMaxOpenConns(1)
 
 	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
+	a.externalIMAP = a
 	if err := a.configureSQLite(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -76,6 +78,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		go a.maildirWorker(workerCtx)
 	}
 	go a.sendQueueWorker(workerCtx)
+	go a.externalIMAPWorker(workerCtx)
 	go a.smtpEventsCleanupWorker(workerCtx)
 	return a, nil
 }
@@ -344,6 +347,63 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_pop3_events_user_created ON pop3_events(user_id, created_at)`,
+		`CREATE TABLE IF NOT EXISTS external_imap_accounts (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			host TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			tls_mode TEXT NOT NULL CHECK(tls_mode IN ('tls','starttls','plain')),
+			username TEXT NOT NULL,
+			password_ciphertext TEXT NOT NULL,
+			storage_mode TEXT NOT NULL DEFAULT 'local' CHECK(storage_mode IN ('local','remote')),
+			sync_read_state INTEGER NOT NULL DEFAULT 1,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_sync_at TEXT,
+			last_status TEXT NOT NULL DEFAULT 'idle',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_external_imap_accounts_user_mailbox ON external_imap_accounts(user_id, mailbox_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_external_imap_accounts_enabled ON external_imap_accounts(enabled, updated_at)`,
+		`CREATE TABLE IF NOT EXISTS external_imap_folder_states (
+			account_id TEXT NOT NULL REFERENCES external_imap_accounts(id) ON DELETE CASCADE,
+			remote_folder TEXT NOT NULL,
+			local_folder_id TEXT NOT NULL DEFAULT '',
+			uid_validity INTEGER NOT NULL DEFAULT 0,
+			last_uid INTEGER NOT NULL DEFAULT 0,
+			last_sync_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(account_id, remote_folder)
+		)`,
+		`CREATE TABLE IF NOT EXISTS external_imap_messages (
+			account_id TEXT NOT NULL REFERENCES external_imap_accounts(id) ON DELETE CASCADE,
+			remote_folder TEXT NOT NULL,
+			uid_validity INTEGER NOT NULL,
+			uid INTEGER NOT NULL,
+			message_id TEXT NOT NULL DEFAULT '',
+			local_message_id TEXT NOT NULL DEFAULT '',
+			is_read INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(account_id, remote_folder, uid_validity, uid)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_external_imap_messages_local ON external_imap_messages(local_message_id) WHERE local_message_id <> ''`,
+		`CREATE TABLE IF NOT EXISTS external_imap_sync_runs (
+			id TEXT PRIMARY KEY,
+			account_id TEXT NOT NULL REFERENCES external_imap_accounts(id) ON DELETE CASCADE,
+			status TEXT NOT NULL,
+			imported INTEGER NOT NULL DEFAULT 0,
+			skipped INTEGER NOT NULL DEFAULT 0,
+			failed INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			started_at TEXT NOT NULL,
+			finished_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_external_imap_sync_runs_account_started ON external_imap_sync_runs(account_id, started_at DESC)`,
 
 		`CREATE TABLE IF NOT EXISTS contacts (
 			id TEXT PRIMARY KEY,

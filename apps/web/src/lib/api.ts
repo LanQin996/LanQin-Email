@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -61,6 +61,12 @@ export const api = {
   cleanupMail: (payload: { mailboxId: string; target: "empty-trash" | "empty-spam" | "archive-read-inbox" }) => request<{ ok: boolean; affected: number }>("/api/me/cleanup", { method: "POST", body: JSON.stringify(payload) }),
   mailboxApplyOptions: () => request<MailboxApplyOptions>("/api/me/mailbox-apply-options"),
   applyMailbox: (payload: { domainId: string; localPart: string; displayName: string }) => request<Mailbox>("/api/me/mailboxes/apply", { method: "POST", body: JSON.stringify(payload) }),
+  externalImapAccounts: (mailboxId?: string) => request<ListResponse<ExternalImapAccount>>(`/api/me/external-imap-accounts${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  createExternalImapAccount: (payload: ExternalImapAccountPayload) => request<ExternalImapAccount>("/api/me/external-imap-accounts", { method: "POST", body: JSON.stringify(payload) }),
+  updateExternalImapAccount: (id: string, payload: ExternalImapAccountPayload) => request<ExternalImapAccount>(`/api/me/external-imap-accounts/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteExternalImapAccount: (id: string) => request<{ ok: boolean }>(`/api/me/external-imap-accounts/${id}`, { method: "DELETE" }),
+  testExternalImapAccount: (id: string) => request<{ ok: boolean; folders: number }>(`/api/me/external-imap-accounts/${id}/test`, { method: "POST", timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  syncExternalImapAccount: (id: string) => request<ExternalImapSyncRun>(`/api/me/external-imap-accounts/${id}/sync`, { method: "POST", timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
   users: () => request<ListResponse<AdminUser>>("/api/admin/users"),
   permissionGroups: () => request<ListResponse<PermissionGroup> & { catalog: PermissionInfo[] }>("/api/admin/permission-groups"),
@@ -115,6 +121,14 @@ export const api = {
   dnsRecords: (domainId: string) => request<{ items: DNSRecord[] }>(`/api/admin/domains/${domainId}/dns-records`),
   checkDns: (domainId: string) => request<DNSCheckResult>(`/api/admin/domains/${domainId}/check-dns`, { method: "POST" }),
   myMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes"),
+  externalMailAccounts: () => request<ListResponse<ExternalImapAccount>>("/api/mail/external-accounts"),
+  externalFolders: (id: string) => request<ListResponse<ExternalImapFolder>>(`/api/mail/external-accounts/${id}/folders`),
+  externalMessages: (id: string, folder: string, cursor = "") => {
+    const params = new URLSearchParams({ folder, cursor })
+    return request<ListResponse<MailMessage>>(`/api/mail/external-accounts/${id}/messages?${params.toString()}`)
+  },
+  externalMessage: (id: string, remoteId: string) => request<MailMessage>(`/api/mail/external-accounts/${id}/messages/${encodeURIComponent(remoteId)}`),
+  markExternalRead: (id: string, remoteId: string, read: boolean) => request<{ ok: boolean }>(`/api/mail/external-accounts/${id}/messages/${encodeURIComponent(remoteId)}/mark-read`, { method: "POST", body: JSON.stringify({ read }) }),
   folders: (mailboxId?: string) => request<ListResponse<MailFolder>>(`/api/mail/folders${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   createFolder: (payload: { mailboxId?: string; name: string }) => {
     const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""

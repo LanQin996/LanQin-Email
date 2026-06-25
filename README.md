@@ -154,6 +154,9 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 | `LANQIN_MAILDIR_ROOT` | Maildir 根目录 | `/var/mail/vhosts` |
 | `LANQIN_CATCH_ALL_ENABLED` | 未注册收件地址是否进入全部邮件 | `false` |
 | `LANQIN_USER_MAILBOX_APPLY_ENABLED` | 是否允许用户自助申请邮箱 | `false` |
+| `LANQIN_EXTERNAL_IMAP_SECRET_KEY` | 外部 IMAP 密码加密密钥，启用接入前必须设置 | 随机长字符串 |
+| `LANQIN_EXTERNAL_IMAP_SYNC_SECONDS` | 外部 IMAP 本地存储模式同步间隔 | `300` |
+| `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | 是否允许外部 IMAP 连接内网/localhost 主机 | `false` |
 
 ## 架构
 
@@ -179,6 +182,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 2. **发件**：Webmail 调用 API → API 构造 MIME → SMTP 提交给 Postfix 或外部 SMTP → 投递到目标地址。
 3. **本地投递**：开发环境中，系统内邮箱互发可直接写入对方 Inbox；未配置 `LANQIN_SMTP_HOST` 时不会真正投递外部收件人。
 4. **第三方客户端**：可通过 SMTP 465/587、IMAP 993、POP3 995 连接；生产环境请配置匹配 `LANQIN_PUBLIC_HOSTNAME` 的证书。
+5. **外部邮箱接入**：个人邮箱管理可添加外部 IMAP 账号。本地存储模式会同步入库；远端直连模式每次读取远端，不写入本地邮件表。
 
 ## 开发与验证
 

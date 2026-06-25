@@ -77,37 +77,38 @@ type MailLabel struct {
 }
 
 type MailMessage struct {
-	ID              string             `json:"id"`
-	MailboxID       string             `json:"mailboxId,omitempty"`
-	MailboxAddress  string             `json:"mailboxAddress,omitempty"`
-	OwnerEmail      string             `json:"ownerEmail,omitempty"`
-	RecipientAddr   string             `json:"recipientAddress,omitempty"`
-	FolderID        string             `json:"folderId"`
-	Folder          string             `json:"folder"`
-	MessageUID      string             `json:"messageUid"`
-	IMAPUID         int64              `json:"imapUid"`
-	IMAPModSeq      int64              `json:"imapModseq"`
-	MessageID       string             `json:"messageId"`
-	Subject         string             `json:"subject"`
-	From            string             `json:"from"`
-	FromName        string             `json:"fromName,omitempty"`
-	To              []string           `json:"to"`
-	CC              []string           `json:"cc"`
-	BCC             []string           `json:"bcc,omitempty"`
-	SentAt          time.Time          `json:"sentAt"`
-	ReceivedAt      time.Time          `json:"receivedAt"`
-	Snippet         string             `json:"snippet"`
-	BodyText        string             `json:"bodyText,omitempty"`
-	BodyHTML        string             `json:"bodyHtml,omitempty"`
-	IsRead          bool               `json:"isRead"`
-	IsStarred       bool               `json:"isStarred"`
-	HasAttachments  bool               `json:"hasAttachments"`
-	SizeBytes       int64              `json:"sizeBytes"`
-	Labels          []MailLabel        `json:"labels,omitempty"`
-	Attachments     []Attachment       `json:"attachments,omitempty"`
-	Authentication  MailAuthentication `json:"authentication"`
-	SendQueueID     string             `json:"sendQueueId,omitempty"`
-	SendQueueStatus string             `json:"sendQueueStatus,omitempty"`
+	ID                string             `json:"id"`
+	MailboxID         string             `json:"mailboxId,omitempty"`
+	MailboxAddress    string             `json:"mailboxAddress,omitempty"`
+	OwnerEmail        string             `json:"ownerEmail,omitempty"`
+	RecipientAddr     string             `json:"recipientAddress,omitempty"`
+	FolderID          string             `json:"folderId"`
+	Folder            string             `json:"folder"`
+	MessageUID        string             `json:"messageUid"`
+	IMAPUID           int64              `json:"imapUid"`
+	IMAPModSeq        int64              `json:"imapModseq"`
+	MessageID         string             `json:"messageId"`
+	Subject           string             `json:"subject"`
+	From              string             `json:"from"`
+	FromName          string             `json:"fromName,omitempty"`
+	To                []string           `json:"to"`
+	CC                []string           `json:"cc"`
+	BCC               []string           `json:"bcc,omitempty"`
+	SentAt            time.Time          `json:"sentAt"`
+	ReceivedAt        time.Time          `json:"receivedAt"`
+	Snippet           string             `json:"snippet"`
+	BodyText          string             `json:"bodyText,omitempty"`
+	BodyHTML          string             `json:"bodyHtml,omitempty"`
+	IsRead            bool               `json:"isRead"`
+	IsStarred         bool               `json:"isStarred"`
+	HasAttachments    bool               `json:"hasAttachments"`
+	SizeBytes         int64              `json:"sizeBytes"`
+	Labels            []MailLabel        `json:"labels,omitempty"`
+	Attachments       []Attachment       `json:"attachments,omitempty"`
+	Authentication    MailAuthentication `json:"authentication"`
+	SendQueueID       string             `json:"sendQueueId,omitempty"`
+	SendQueueStatus   string             `json:"sendQueueStatus,omitempty"`
+	ExternalAccountID string             `json:"externalAccountId,omitempty"`
 }
 
 type MailAuthentication struct {
@@ -225,6 +226,44 @@ type MailStatsFolderCount struct {
 	Count  int64  `json:"count"`
 	Unread int64  `json:"unread"`
 	Bytes  int64  `json:"bytes"`
+}
+
+type ExternalIMAPAccount struct {
+	ID            string     `json:"id"`
+	UserID        string     `json:"userId,omitempty"`
+	MailboxID     string     `json:"mailboxId"`
+	Name          string     `json:"name"`
+	Host          string     `json:"host"`
+	Port          int        `json:"port"`
+	TLSMode       string     `json:"tlsMode"`
+	Username      string     `json:"username"`
+	StorageMode   string     `json:"storageMode"`
+	SyncReadState bool       `json:"syncReadState"`
+	Enabled       bool       `json:"enabled"`
+	LastSyncAt    *time.Time `json:"lastSyncAt,omitempty"`
+	LastStatus    string     `json:"lastStatus"`
+	LastError     string     `json:"lastError,omitempty"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
+}
+
+type ExternalIMAPFolder struct {
+	Name        string `json:"name"`
+	Role        string `json:"role"`
+	UnreadCount int    `json:"unreadCount"`
+	TotalCount  int    `json:"totalCount"`
+}
+
+type ExternalIMAPSyncRun struct {
+	ID         string     `json:"id"`
+	AccountID  string     `json:"accountId"`
+	Status     string     `json:"status"`
+	Imported   int        `json:"imported"`
+	Skipped    int        `json:"skipped"`
+	Failed     int        `json:"failed"`
+	Error      string     `json:"error,omitempty"`
+	StartedAt  time.Time  `json:"startedAt"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 type SendQueueEntry struct {

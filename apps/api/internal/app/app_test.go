@@ -48,6 +48,11 @@ func newTestApp(t *testing.T) *App {
 		PublicBaseURL:     "http://localhost:5173",
 		AllowInsecureHTTP: true,
 	}
+	return newTestAppWithConfig(t, cfg)
+}
+
+func newTestAppWithConfig(t *testing.T, cfg Config) *App {
+	t.Helper()
 	a, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
@@ -421,6 +426,127 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	}
 	if code := bob.do("DELETE", "/api/mail/messages/"+detail.ID, nil, &ok); code != http.StatusOK {
 		t.Fatalf("delete code=%d", code)
+	}
+}
+
+func TestExternalIMAPAccountEncryptsPasswordAndDoesNotReturnSecret(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppWithConfig(t, Config{
+		Addr:                          ":0",
+		DBPath:                        filepath.Join(dir, "lanqin.db"),
+		DataDir:                       filepath.Join(dir, "data"),
+		CookieName:                    "lanqin_test",
+		SessionTTLHours:               24,
+		AdminEmail:                    "admin@lanqin.local",
+		AdminPassword:                 "ChangeMe123!",
+		PublicHostname:                "mail.example.test",
+		PublicBaseURL:                 "http://localhost:5173",
+		AllowInsecureHTTP:             true,
+		ExternalIMAPSecretKey:         "test-secret",
+		ExternalIMAPAllowPrivateHosts: true,
+	})
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	var created ExternalIMAPAccount
+	payload := map[string]any{"mailboxId": mb.ID, "name": "Gmail", "host": "imap.gmail.com", "port": 993, "tlsMode": "tls", "username": "user@gmail.com", "password": "app-password", "storageMode": "remote", "syncReadState": true, "enabled": true}
+	if code := admin.do("POST", "/api/me/external-imap-accounts", payload, &created); code != http.StatusCreated {
+		t.Fatalf("create external imap code=%d account=%+v", code, created)
+	}
+	raw, err := json.Marshal(created)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "app-password") {
+		t.Fatalf("external account response leaked password: %s", string(raw))
+	}
+	var ciphertext string
+	if err := a.db.QueryRow(`SELECT password_ciphertext FROM external_imap_accounts WHERE id=?`, created.ID).Scan(&ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	if ciphertext == "" || ciphertext == "app-password" {
+		t.Fatalf("password was not encrypted: %q", ciphertext)
+	}
+	plain, err := a.decryptExternalIMAPPassword(ciphertext)
+	if err != nil || plain != "app-password" {
+		t.Fatalf("decrypt password=%q err=%v", plain, err)
+	}
+	var list struct {
+		Items []map[string]any `json:"items"`
+	}
+	if code := admin.do("GET", "/api/me/external-imap-accounts?mailboxId="+mb.ID, nil, &list); code != http.StatusOK || len(list.Items) != 1 {
+		t.Fatalf("list external imap code=%d items=%+v", code, list.Items)
+	}
+	if _, ok := list.Items[0]["password"]; ok {
+		t.Fatalf("list response exposed password field: %+v", list.Items[0])
+	}
+}
+
+func TestExternalIMAPRejectsPrivateHostsByDefault(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.ExternalIMAPSecretKey = "test-secret"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	var out map[string]any
+	payload := map[string]any{"mailboxId": mb.ID, "name": "Local", "host": "127.0.0.1", "port": 143, "tlsMode": "plain", "username": "local", "password": "secret", "storageMode": "remote"}
+	if code := admin.do("POST", "/api/me/external-imap-accounts", payload, &out); code != http.StatusBadRequest {
+		t.Fatalf("private host should be rejected code=%d body=%v", code, out)
+	}
+}
+
+func TestExternalIMAPAccountOwnershipIsolation(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppWithConfig(t, Config{
+		Addr:                          ":0",
+		DBPath:                        filepath.Join(dir, "lanqin.db"),
+		DataDir:                       filepath.Join(dir, "data"),
+		CookieName:                    "lanqin_test",
+		SessionTTLHours:               24,
+		AdminEmail:                    "admin@lanqin.local",
+		AdminPassword:                 "ChangeMe123!",
+		PublicHostname:                "mail.example.test",
+		PublicBaseURL:                 "http://localhost:5173",
+		AllowInsecureHTTP:             true,
+		ExternalIMAPSecretKey:         "test-secret",
+		ExternalIMAPAllowPrivateHosts: true,
+	})
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login admin code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	owner := createTestMailbox(t, admin, domainID, "ximap-owner", "Owner", "Password123!", nil)
+	other := createTestMailbox(t, admin, domainID, "ximap-other", "Other", "Password123!", nil)
+	ownerClient := &testClient{t: t, server: ts}
+	if code := ownerClient.do("POST", "/api/auth/login", map[string]string{"email": owner.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login owner code=%d", code)
+	}
+	otherClient := &testClient{t: t, server: ts}
+	if code := otherClient.do("POST", "/api/auth/login", map[string]string{"email": other.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login other code=%d", code)
+	}
+	var created ExternalIMAPAccount
+	payload := map[string]any{"mailboxId": owner.ID, "name": "Owner external", "host": "imap.example.com", "port": 993, "tlsMode": "tls", "username": "owner@example.com", "password": "secret", "storageMode": "remote"}
+	if code := ownerClient.do("POST", "/api/me/external-imap-accounts", payload, &created); code != http.StatusCreated {
+		t.Fatalf("create code=%d account=%+v", code, created)
+	}
+	var denied map[string]any
+	if code := otherClient.do("POST", "/api/me/external-imap-accounts/"+created.ID, map[string]any{"mailboxId": other.ID, "name": "steal", "host": "imap.example.com", "port": 993, "tlsMode": "tls", "username": "other@example.com", "storageMode": "remote"}, &denied); code != http.StatusNotFound {
+		t.Fatalf("cross-user update should be hidden code=%d body=%v", code, denied)
+	}
+	if code := otherClient.do("DELETE", "/api/me/external-imap-accounts/"+created.ID, nil, &denied); code != http.StatusNotFound {
+		t.Fatalf("cross-user delete should be hidden code=%d body=%v", code, denied)
 	}
 }
 
