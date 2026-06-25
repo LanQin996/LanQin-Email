@@ -394,7 +394,24 @@ export function MailPage() {
     const firstSender = senderDisplayName(first)
     const title = newMessages.length > 1 ? `收到 ${newMessages.length} 封新邮件` : `新邮件：${first.subject || "(无主题)"}`
     const description = newMessages.length > 1 ? `${firstSender} 等发来新邮件` : `${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`
-    toast({ title, description })
+    const openFirstMessage = () => {
+      setMailView("folder")
+      setFolder("Inbox")
+      setSelectedId(first.id)
+    }
+    toast({
+      title,
+      description,
+      onClick: openFirstMessage,
+      onKeyDown: (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          openFirstMessage()
+        }
+      },
+      role: "button",
+      tabIndex: 0,
+    })
     playIncomingMailSound(mailAudioContextRef)
     if ("Notification" in window && Notification.permission === "granted") {
       const notification = new Notification(title, {
@@ -403,9 +420,7 @@ export function MailPage() {
       })
       notification.onclick = () => {
         window.focus()
-        setMailView("folder")
-        setFolder("Inbox")
-        setSelectedId(first.id)
+        openFirstMessage()
         notification.close()
       }
     }
@@ -1963,7 +1978,6 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
           <MessageMetaRow label="接收时间">
             <span>{formatDateTime(message.receivedAt)}</span>
           </MessageMetaRow>
-          <AuthenticationResultRow message={message} />
           {availableLabels && onAddLabel && onRemoveLabel && (
             <MessageMetaRow label="标签">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -2023,41 +2037,6 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
       </div>
     </div>
   )
-}
-
-function AuthenticationResultRow({ message }: { message: MailMessage }) {
-  const auth = message.authentication || { authenticationResults: "", receivedSpf: "", spf: "unknown", dkim: "unknown", dmarc: "unknown" }
-  const title = [auth.authenticationResults, auth.receivedSpf].filter(Boolean).join("\n\n")
-  return (
-    <MessageMetaRow label="Auth">
-      <div className="flex flex-wrap gap-1.5" title={title || undefined}>
-        <AuthStatusBadge label="SPF" value={auth.spf} />
-        <AuthStatusBadge label="DKIM" value={auth.dkim} />
-        <AuthStatusBadge label="DMARC" value={auth.dmarc} />
-      </div>
-    </MessageMetaRow>
-  )
-}
-
-function AuthStatusBadge({ label, value }: { label: string; value?: string }) {
-  const status = normalizeAuthStatus(value)
-  return (
-    <Badge variant="outline" className={cn("rounded-md font-mono text-[11px] font-normal", authStatusClassName(status))}>
-      {label}:{status}
-    </Badge>
-  )
-}
-
-function normalizeAuthStatus(value?: string) {
-  const status = (value || "").trim().toLowerCase()
-  if (["pass", "fail", "softfail", "neutral", "temperror", "permerror", "none"].includes(status)) return status
-  return "unknown"
-}
-
-function authStatusClassName(status: string) {
-  if (status === "pass") return "border-emerald-300 bg-emerald-50 text-emerald-700"
-  if (["fail", "softfail", "permerror"].includes(status)) return "border-red-300 bg-red-50 text-red-700"
-  return "border-slate-300 bg-slate-50 text-slate-600"
 }
 
 function MessageMetaRow({ label, children }: { label: string; children: React.ReactNode }) {
