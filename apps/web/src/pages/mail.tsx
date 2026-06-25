@@ -1822,6 +1822,7 @@ function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRe
   const item = state.item
   const customFolder = item.type === "folder" && item.custom
   const position = contextMenuPosition(state.x, state.y)
+  const itemClass = "h-auto w-full justify-start rounded px-2 py-1.5 text-left font-normal"
   return (
     <div
       className="fixed z-[110] w-48 rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md"
@@ -1830,36 +1831,36 @@ function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRe
       onContextMenu={(event) => event.preventDefault()}
       role="menu"
     >
-      <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={() => onOpen(item)}>
+      <Button type="button" variant="ghost" className={itemClass} onClick={() => onOpen(item)}>
         <Inbox className="h-4 w-4" />打开
-      </button>
-      <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={onRefresh}>
+      </Button>
+      <Button type="button" variant="ghost" className={itemClass} onClick={onRefresh}>
         <RefreshCcw className="h-4 w-4" />刷新
-      </button>
+      </Button>
       {canOrganize && (
-        <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={onCreateFolder}>
+        <Button type="button" variant="ghost" className={itemClass} onClick={onCreateFolder}>
           <Plus className="h-4 w-4" />新建文件夹
-        </button>
+        </Button>
       )}
       {canOrganize && customFolder && (
         <>
           <div className="my-1 h-px bg-border" />
-          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "top")}>
+          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "top")}>
             <ArrowLeft className="h-4 w-4 rotate-90" />移到最上
-          </button>
-          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "up")}>
+          </Button>
+          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "up")}>
             <ChevronDown className="h-4 w-4 rotate-180" />上移一位
-          </button>
-          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "down")}>
+          </Button>
+          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "down")}>
             <ChevronDown className="h-4 w-4" />下移一位
-          </button>
-          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "bottom")}>
+          </Button>
+          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "bottom")}>
             <ArrowLeft className="h-4 w-4 -rotate-90" />移到最下
-          </button>
+          </Button>
           <div className="my-1 h-px bg-border" />
-          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onDelete(item)}>
+          <Button type="button" variant="ghost" className={cn(itemClass, "text-destructive hover:bg-destructive/10 hover:text-destructive")} onClick={() => onDelete(item)}>
             <Trash2 className="h-4 w-4" />删除文件夹
-          </button>
+          </Button>
         </>
       )}
     </div>
@@ -1889,14 +1890,14 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
   const { message } = state
   const position = contextMenuPosition(state.x, state.y)
   const draft = message.folder === "Drafts"
-  const itemClass = "flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-50"
+  const itemClass = "h-auto w-full justify-start rounded-sm px-3 py-2 text-left font-normal"
 
   function item(label: string, icon: React.ReactNode, action: Parameters<typeof onAction>[0], destructive = false) {
     return (
-      <button type="button" className={cn(itemClass, destructive && "text-destructive hover:text-destructive")} onClick={() => onAction(action, message)}>
+      <Button type="button" variant="ghost" className={cn(itemClass, destructive && "text-destructive hover:text-destructive")} onClick={() => onAction(action, message)}>
         {icon}
         <span>{label}</span>
-      </button>
+      </Button>
     )
   }
   function toggleLabel(label: MailLabel) {
@@ -1941,11 +1942,11 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
           <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">移动到</div>
           <div className="max-h-44 overflow-y-auto">
             {movableFolders.map((folder) => (
-              <button key={folder.id} type="button" className={itemClass} onClick={() => moveToFolder(folder.name)}>
+              <Button key={folder.id} type="button" variant="ghost" className={itemClass} onClick={() => moveToFolder(folder.name)}>
                 {folderIcons[folder.role] || <Inbox className="h-4 w-4" />}
                 <span className="min-w-0 flex-1 truncate text-left">{folderLabels[folder.name] || folder.name}</span>
                 {folder.totalCount > 0 && <span className="text-xs text-muted-foreground">{folder.totalCount}</span>}
-              </button>
+              </Button>
             ))}
           </div>
         </>
@@ -1959,11 +1960,11 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
               const active = (message.labels || []).some((item) => item.id === label.id)
               const colors = generateLabelColor(label.name)
               return (
-                <button key={label.id} type="button" className={itemClass} disabled={labelPending} onClick={() => toggleLabel(label)}>
+                <Button key={label.id} type="button" variant="ghost" className={itemClass} disabled={labelPending} onClick={() => toggleLabel(label)}>
                   <Check className={cn("h-4 w-4", active ? "opacity-100" : "opacity-0")} />
                   <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
                   <span className="min-w-0 flex-1 truncate text-left">{active ? `移除 ${label.name}` : label.name}</span>
-                </button>
+                </Button>
               )
             })}
           </div>
