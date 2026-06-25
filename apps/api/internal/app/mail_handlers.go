@@ -22,6 +22,8 @@ import (
 // mailMessagesPageSize is the max number of messages returned per page in mail listing.
 const mailMessagesPageSize = 30
 
+const customFolderDefaultSortOrderBase = 100000
+
 type AttachmentInput struct {
 	Filename      string `json:"filename"`
 	ContentType   string `json:"contentType"`
@@ -87,10 +89,18 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(), `SELECT f.id,f.name,f.role,
 		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
 		COUNT(m.id) AS total,
-		f.uid_validity,f.uid_next,f.highest_modseq
+		f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
 		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
-		WHERE f.mailbox_id=? GROUP BY f.id,f.name,f.role
-		ORDER BY CASE f.role WHEN 'inbox' THEN 1 WHEN 'sent' THEN 2 WHEN 'drafts' THEN 3 WHEN 'archive' THEN 4 WHEN 'spam' THEN 5 WHEN 'trash' THEN 6 ELSE 99 END, f.name`, mb.ID)
+		WHERE f.mailbox_id=? GROUP BY f.id,f.name,f.role,f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
+		ORDER BY CASE
+			WHEN lower(f.name)='inbox' THEN 1000
+			WHEN lower(f.name)='sent' THEN 5000
+			WHEN lower(f.name)='drafts' THEN 6000
+			WHEN lower(f.name)='archive' THEN 7000
+			WHEN lower(f.name)='spam' THEN 8000
+			WHEN lower(f.name)='trash' THEN 9000
+			ELSE f.sort_order
+		END, f.created_at,f.name`, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load folders")
 		return
@@ -99,13 +109,109 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	items := []MailFolder{}
 	for rows.Next() {
 		var f MailFolder
-		if err := rows.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
+		if err := rows.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.SortOrder, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to scan folders")
 			return
 		}
 		items = append(items, f)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *App) handleReorderMailFolders(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	var req struct {
+		FolderIDs []string `json:"folderIds"`
+		Folders   []struct {
+			ID        string `json:"id"`
+			SortOrder int    `json:"sortOrder"`
+		} `json:"folders"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	seen := map[string]bool{}
+	if len(req.Folders) == 0 {
+		for i, id := range req.FolderIDs {
+			id = strings.TrimSpace(id)
+			req.Folders = append(req.Folders, struct {
+				ID        string `json:"id"`
+				SortOrder int    `json:"sortOrder"`
+			}{ID: id, SortOrder: customFolderDefaultSortOrderBase + i + 1})
+		}
+	}
+	for i := range req.Folders {
+		req.Folders[i].ID = strings.TrimSpace(req.Folders[i].ID)
+		if req.Folders[i].ID == "" || req.Folders[i].SortOrder <= 0 || seen[req.Folders[i].ID] {
+			badRequest(w, errors.New("invalid folder order"))
+			return
+		}
+		seen[req.Folders[i].ID] = true
+	}
+	if len(req.Folders) == 0 {
+		badRequest(w, errors.New("folderIds is required"))
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name FROM folders WHERE mailbox_id=?`, mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load folders")
+		return
+	}
+	customIDs := map[string]bool{}
+	for rows.Next() {
+		var id, name string
+		if err := rows.Scan(&id, &name); err != nil {
+			rows.Close()
+			respondError(w, http.StatusInternalServerError, "failed to scan folders")
+			return
+		}
+		if !isSystemFolderName(name) {
+			customIDs[id] = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		respondError(w, http.StatusInternalServerError, "failed to scan folders")
+		return
+	}
+	rows.Close()
+	if len(customIDs) != len(req.Folders) {
+		badRequest(w, errors.New("invalid folder order"))
+		return
+	}
+	for _, item := range req.Folders {
+		if !customIDs[item.ID] {
+			badRequest(w, errors.New("invalid folder order"))
+			return
+		}
+	}
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reorder folders")
+		return
+	}
+	defer tx.Rollback()
+	for _, item := range req.Folders {
+		res, err := tx.ExecContext(r.Context(), `UPDATE folders SET sort_order=? WHERE id=? AND mailbox_id=?`, item.SortOrder, item.ID, mb.ID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to reorder folders")
+			return
+		}
+		if affected, err := res.RowsAffected(); err != nil || affected != 1 {
+			badRequest(w, errors.New("invalid folder order"))
+			return
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reorder folders")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (a *App) handleCreateMailFolder(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +236,7 @@ func (a *App) handleCreateMailFolder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("system folder already exists"))
 		return
 	}
-	folderID, err := a.ensureFolder(r.Context(), mb.ID, name)
+	folderID, err := a.ensureCustomFolder(r.Context(), mb.ID, name)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create folder")
 		return
@@ -141,6 +247,21 @@ func (a *App) handleCreateMailFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusCreated, folder)
+}
+
+func (a *App) ensureCustomFolder(ctx context.Context, mailboxID, name string) (string, error) {
+	return a.ensureFolder(ctx, mailboxID, name)
+}
+
+func (a *App) nextCustomFolderSortOrder(ctx context.Context, mailboxID string) (int, error) {
+	var maxOrder int
+	if err := a.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(sort_order),0) FROM folders WHERE mailbox_id=? AND lower(name) NOT IN ('inbox','sent','drafts','archive','spam','trash')`, mailboxID).Scan(&maxOrder); err != nil {
+		return 0, err
+	}
+	if maxOrder < customFolderDefaultSortOrderBase {
+		maxOrder = customFolderDefaultSortOrderBase
+	}
+	return maxOrder + 1, nil
 }
 
 func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
@@ -1491,11 +1612,11 @@ func (a *App) folderByID(ctx context.Context, folderID, mailboxID string) (*Mail
 	row := a.db.QueryRowContext(ctx, `SELECT f.id,f.name,f.role,
 		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
 		COUNT(m.id) AS total,
-		f.uid_validity,f.uid_next,f.highest_modseq
+		f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
 		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
-		WHERE f.id=? AND f.mailbox_id=? GROUP BY f.id,f.name,f.role`, folderID, mailboxID)
+		WHERE f.id=? AND f.mailbox_id=? GROUP BY f.id,f.name,f.role,f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq`, folderID, mailboxID)
 	var f MailFolder
-	if err := row.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
+	if err := row.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.SortOrder, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
 		return nil, err
 	}
 	return &f, nil

@@ -67,11 +67,12 @@ type PendingConfirm = { title: string; description?: string; confirmText: string
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
 type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
 type MessageContextMenuState = { message: MailMessage; x: number; y: number }
+type FolderDropTarget = { key: string; edge: "before" | "after" | "end" }
 type MailMenuItem =
-  | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number }
-  | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number }
-  | { type: "sendQueue"; key: string; label: string; icon: React.ReactNode; count: number }
-  | { type: "folder"; key: string; folderName: string; label: string; icon: React.ReactNode; count: number }
+  | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
+  | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
+  | { type: "sendQueue"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
+  | { type: "folder"; key: string; folderId: string; folderName: string; label: string; icon: React.ReactNode; count: number; custom: boolean; order: number }
 
 const filterLabels: Record<MailFilter, string> = {
   all: "全部邮件",
@@ -113,6 +114,8 @@ export function MailPage() {
   const [newLabelEditing, setNewLabelEditing] = React.useState(false)
   const [messageContextMenu, setMessageContextMenu] = React.useState<MessageContextMenuState | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
+  const [draggingFolderId, setDraggingFolderId] = React.useState("")
+  const [folderDropTarget, setFolderDropTarget] = React.useState<FolderDropTarget | null>(null)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
   const themeMountedRef = React.useRef(false)
   const mailNotifyStateRef = React.useRef<Record<string, MailNotificationState>>({})
@@ -295,6 +298,29 @@ export function MailPage() {
       toast({ title: "文件夹已创建" })
     },
     onError: (error) => toast({ title: "创建文件夹失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+  })
+  const reorderFolders = useMutation({
+    mutationFn: (items: { id: string; sortOrder: number }[]) => api.reorderFolders({ mailboxId: activeMailboxId, folderIds: items.map((item) => item.id), folders: items }),
+    onMutate: async (items) => {
+      await qc.cancelQueries({ queryKey: ["folders", activeMailboxId] })
+      const previous = qc.getQueryData<ListResponse<MailFolder>>(["folders", activeMailboxId])
+      qc.setQueryData<ListResponse<MailFolder>>(["folders", activeMailboxId], (current) => {
+        if (!current?.items) return current
+        const order = new Map(items.map((item) => [item.id, item.sortOrder]))
+        return {
+          ...current,
+          items: current.items
+            .map((item) => order.has(item.id) ? { ...item, sortOrder: order.get(item.id) || item.sortOrder } : item)
+            .sort(compareMailFolders),
+        }
+      })
+      return { previous }
+    },
+    onError: (error, _items, context) => {
+      if (context?.previous) qc.setQueryData(["folders", activeMailboxId], context.previous)
+      toast({ title: "文件夹排序失败", description: error instanceof Error ? error.message : "请稍后重试" })
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["folders", activeMailboxId] }),
   })
   const retrySendQueue = useMutation({
     mutationFn: (item: SendQueueItem) => api.retrySendQueue(item.id),
@@ -650,6 +676,69 @@ export function MailPage() {
   function closeMessageContextMenu() {
     setMessageContextMenu(null)
   }
+  function reorderCustomFolder(draggedId: string, target: FolderDropTarget) {
+    if (!canOrganizeMail || reorderFolders.isPending) return
+    const foldersByID = new Map((folders.data?.items || []).map((item) => [item.id, item]))
+    const dragged = foldersByID.get(draggedId)
+    if (!dragged || !isCustomMailFolder(dragged)) return
+    const menuWithoutDragged = mailMenuItems.filter((item) => !(item.type === "folder" && item.folderId === draggedId))
+    let insertIndex = menuWithoutDragged.length
+    if (target.edge !== "end") {
+      const targetIndex = menuWithoutDragged.findIndex((item) => item.key === target.key)
+      if (targetIndex < 0) return
+      insertIndex = target.edge === "before" ? targetIndex : targetIndex + 1
+    }
+    const draggedMenuItem: MailMenuItem = {
+      type: "folder",
+      key: dragged.id,
+      folderId: dragged.id,
+      folderName: dragged.name,
+      label: folderLabels[dragged.name] || dragged.name,
+      icon: folderIcons[dragged.role] || <Inbox className="h-4 w-4" />,
+      count: dragged.name === "Drafts" ? dragged.totalCount : dragged.unreadCount,
+      custom: true,
+      order: dragged.sortOrder,
+    }
+    const nextMenu = [...menuWithoutDragged]
+    nextMenu.splice(insertIndex, 0, draggedMenuItem)
+    const nextFolders = assignCustomFolderOrders(nextMenu)
+    reorderFolders.mutate(nextFolders)
+  }
+  function handleFolderDragStart(event: React.DragEvent, item: MailMenuItem) {
+    if (item.type !== "folder" || !item.custom || sidebarCollapsed || !canOrganizeMail) return
+    event.dataTransfer.effectAllowed = "move"
+    event.dataTransfer.setData("text/plain", item.folderId)
+    setDraggingFolderId(item.folderId)
+  }
+  function handleFolderDragOver(event: React.DragEvent, item: MailMenuItem) {
+    if (!draggingFolderId || item.key === draggingFolderId) return
+    event.preventDefault()
+    event.dataTransfer.dropEffect = "move"
+    const rect = event.currentTarget.getBoundingClientRect()
+    setFolderDropTarget({ key: item.key, edge: event.clientY < rect.top + rect.height / 2 ? "before" : "after" })
+  }
+  function handleFolderDrop(event: React.DragEvent, item: MailMenuItem) {
+    if (!draggingFolderId) return
+    event.preventDefault()
+    const draggedId = event.dataTransfer.getData("text/plain") || draggingFolderId
+    const rect = event.currentTarget.getBoundingClientRect()
+    const edge = event.clientY < rect.top + rect.height / 2 ? "before" : "after"
+    setDraggingFolderId("")
+    setFolderDropTarget(null)
+    reorderCustomFolder(draggedId, { key: item.key, edge })
+  }
+  function handleFolderDropEnd(event: React.DragEvent) {
+    if (!draggingFolderId) return
+    event.preventDefault()
+    const draggedId = event.dataTransfer.getData("text/plain") || draggingFolderId
+    setDraggingFolderId("")
+    setFolderDropTarget(null)
+    reorderCustomFolder(draggedId, { key: "__end__", edge: "end" })
+  }
+  function clearFolderDragState() {
+    setDraggingFolderId("")
+    setFolderDropTarget(null)
+  }
   function runMessageContextAction(action: "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete", message: MailMessage) {
     closeMessageContextMenu()
     if (action === "open") {
@@ -778,10 +867,25 @@ export function MailPage() {
           <SidebarGroupContent>
             <SidebarMenu>
               {mailMenuItems.map((item) => (
-                <SidebarMenuItem key={item.key}>
+                <SidebarMenuItem
+                  key={item.key}
+                  draggable={item.type === "folder" && item.custom && canOrganizeMail && !sidebarCollapsed}
+                  onDragStart={(event) => handleFolderDragStart(event, item)}
+                  onDragOver={(event) => handleFolderDragOver(event, item)}
+                  onDragLeave={() => { if (folderDropTarget?.key === item.key) setFolderDropTarget(null) }}
+                  onDrop={(event) => handleFolderDrop(event, item)}
+                  onDragEnd={clearFolderDragState}
+                >
                   <SidebarMenuButton
                     isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : item.type === "sendQueue" ? mailView === "sendQueue" : mailView === "folder" && folder === item.folderName}
-                    className={cn(sidebarCollapsed && "justify-center px-0")}
+                    className={cn(
+                      sidebarCollapsed && "justify-center px-0",
+                      item.type === "folder" && item.custom && canOrganizeMail && !sidebarCollapsed && "cursor-grab active:cursor-grabbing",
+                      item.type === "folder" && item.custom && draggingFolderId === item.folderId && "opacity-50",
+                      folderDropTarget?.key === item.key && "bg-accent/60",
+                      folderDropTarget?.key === item.key && folderDropTarget.edge === "before" && "border-t-2 border-t-primary",
+                      folderDropTarget?.key === item.key && folderDropTarget.edge === "after" && "border-b-2 border-b-primary"
+                    )}
                     onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : item.type === "sendQueue" ? openSendQueue() : openFolder(item.folderName)}
                   >
                     {item.icon}
@@ -790,6 +894,19 @@ export function MailPage() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
+              {!sidebarCollapsed && canOrganizeMail && (
+                <div
+                  className={cn("mx-2 h-4 rounded-sm border border-dashed border-transparent", folderDropTarget?.edge === "end" && "border-primary bg-accent/60")}
+                  onDragOver={(event) => {
+                    if (!draggingFolderId) return
+                    event.preventDefault()
+                    event.dataTransfer.dropEffect = "move"
+                    setFolderDropTarget({ key: "__end__", edge: "end" })
+                  }}
+                  onDragLeave={() => { if (folderDropTarget?.edge === "end") setFolderDropTarget(null) }}
+                  onDrop={handleFolderDropEnd}
+                />
+              )}
             </SidebarMenu>
             {folders.isLoading && <FolderSkeleton />}
           </SidebarGroupContent>
@@ -1146,27 +1263,84 @@ export function MailPage() {
 
 function buildMailMenuItems(folders: MailFolder[], starredCount: number, scheduledCount: number, includeScheduled: boolean, sendQueueCount: number, includeSendQueue: boolean): MailMenuItem[] {
   const byName = new Map(folders.map((item) => [item.name, item]))
-  const normalizedFolders = ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map((name) => byName.get(name) || { id: `virtual-${name}`, name, role: name.toLowerCase(), unreadCount: 0, totalCount: 0 })
+  const normalizedFolders = ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map((name) => byName.get(name) || { id: `virtual-${name}`, name, role: name.toLowerCase(), sortOrder: 0, unreadCount: 0, totalCount: 0, uidValidity: 0, uidNext: 1, highestModseq: 1 })
   for (const item of folders) {
     if (!normalizedFolders.some((folder) => folder.name === item.name)) normalizedFolders.push(item)
   }
   const folderItems: MailMenuItem[] = normalizedFolders.map((item) => ({
     type: "folder",
     key: item.id,
+    folderId: item.id,
     folderName: item.name,
     label: folderLabels[item.name] || item.name,
     icon: folderIcons[item.role] || <Inbox className="h-4 w-4" />,
     count: item.name === "Drafts" ? item.totalCount : item.unreadCount,
+    custom: isCustomMailFolder(item),
+    order: isCustomMailFolder(item) ? item.sortOrder || 100000 : menuAnchorOrder(item.name),
   }))
-  const starredItem: MailMenuItem = { type: "starred", key: "starred", label: "星标邮件", icon: <Star className="h-4 w-4" />, count: starredCount }
-  const scheduledItem: MailMenuItem = { type: "scheduled", key: "scheduled", label: "待发送", icon: <Clock3 className="h-4 w-4" />, count: scheduledCount }
-  const sendQueueItem: MailMenuItem = { type: "sendQueue", key: "send-queue", label: "发送队列", icon: <History className="h-4 w-4" />, count: sendQueueCount }
-  const inboxIndex = folderItems.findIndex((item) => item.type === "folder" && item.folderName === "Inbox")
-  const insertAt = inboxIndex >= 0 ? inboxIndex + 1 : 0
+  const starredItem: MailMenuItem = { type: "starred", key: "starred", label: "星标邮件", icon: <Star className="h-4 w-4" />, count: starredCount, order: 2000 }
+  const scheduledItem: MailMenuItem = { type: "scheduled", key: "scheduled", label: "待发送", icon: <Clock3 className="h-4 w-4" />, count: scheduledCount, order: 3000 }
+  const sendQueueItem: MailMenuItem = { type: "sendQueue", key: "send-queue", label: "发送队列", icon: <History className="h-4 w-4" />, count: sendQueueCount, order: 4000 }
   const specialItems: MailMenuItem[] = [starredItem]
   if (includeScheduled) specialItems.push(scheduledItem)
   if (includeSendQueue) specialItems.push(sendQueueItem)
-  return [...folderItems.slice(0, insertAt), ...specialItems, ...folderItems.slice(insertAt)]
+  return [...folderItems, ...specialItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
+}
+
+function isCustomMailFolder(folder: Pick<MailFolder, "name" | "id">) {
+  return !folder.id.startsWith("virtual-") && !["inbox", "sent", "drafts", "archive", "spam", "trash"].includes(folder.name.trim().toLowerCase())
+}
+
+function compareMailFolders(a: MailFolder, b: MailFolder) {
+  return (isCustomMailFolder(a) ? a.sortOrder || 100000 : menuAnchorOrder(a.name)) - (isCustomMailFolder(b) ? b.sortOrder || 100000 : menuAnchorOrder(b.name)) || a.name.localeCompare(b.name)
+}
+
+function assignCustomFolderOrders(items: MailMenuItem[]) {
+  const out: { id: string; sortOrder: number }[] = []
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    if (!isCustomMenuFolder(item)) continue
+    let start = 0
+    for (let j = i - 1; j >= 0; j--) {
+      if (!isCustomMenuFolder(items[j])) {
+        start = items[j].order
+        break
+      }
+    }
+    const groupStart = i
+    let groupEnd = i
+    while (groupEnd + 1 < items.length && isCustomMenuFolder(items[groupEnd + 1])) groupEnd++
+    let end = start + (groupEnd - groupStart + 2) * 1000
+    for (let j = groupEnd + 1; j < items.length; j++) {
+      if (!isCustomMenuFolder(items[j])) {
+        end = items[j].order
+        break
+      }
+    }
+    const step = Math.max(1, Math.floor((end - start) / (groupEnd - groupStart + 2)))
+    for (let j = groupStart; j <= groupEnd; j++) {
+      const folder = items[j] as Extract<MailMenuItem, { type: "folder" }>
+      out.push({ id: folder.folderId, sortOrder: start + step * (j - groupStart + 1) })
+    }
+    i = groupEnd
+  }
+  return out
+}
+
+function isCustomMenuFolder(item: MailMenuItem): item is Extract<MailMenuItem, { type: "folder" }> {
+  return item.type === "folder" && item.custom
+}
+
+function menuAnchorOrder(name: string) {
+  switch (name) {
+    case "Inbox": return 1000
+    case "Sent": return 5000
+    case "Drafts": return 6000
+    case "Archive": return 7000
+    case "Spam": return 8000
+    case "Trash": return 9000
+    default: return 100000
+  }
 }
 
 function FolderSkeleton() { return <div className="space-y-2 p-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-4/5" /><Skeleton className="h-8 w-3/4" /></div> }

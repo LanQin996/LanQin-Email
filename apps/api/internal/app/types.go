@@ -60,6 +60,7 @@ type MailFolder struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
 	Role          string `json:"role"`
+	SortOrder     int    `json:"sortOrder"`
 	UnreadCount   int    `json:"unreadCount"`
 	TotalCount    int    `json:"totalCount"`
 	UIDValidity   int64  `json:"uidValidity"`

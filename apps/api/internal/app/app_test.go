@@ -1047,6 +1047,80 @@ func TestCustomMailFoldersCreateAndMove(t *testing.T) {
 	}
 }
 
+func TestCustomMailFoldersReorder(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+
+	createFolder := func(name string) MailFolder {
+		t.Helper()
+		var folder MailFolder
+		if code := admin.do("POST", "/api/mail/folders", map[string]string{"name": name}, &folder); code != http.StatusCreated {
+			t.Fatalf("create folder %s code=%d folder=%+v", name, code, folder)
+		}
+		return folder
+	}
+	customer := createFolder("客户")
+	bills := createFolder("账单")
+	project := createFolder("项目")
+
+	var ok map[string]any
+	if code := admin.do("POST", "/api/mail/folders/reorder", map[string]any{"folderIds": []string{project.ID, customer.ID, bills.ID}}, &ok); code != http.StatusOK {
+		t.Fatalf("reorder code=%d body=%v", code, ok)
+	}
+	if code := admin.do("POST", "/api/mail/folders/reorder", map[string]any{"folders": []map[string]any{
+		{"id": customer.ID, "sortOrder": 500},
+		{"id": project.ID, "sortOrder": 2500},
+		{"id": bills.ID, "sortOrder": 3500},
+	}}, &ok); code != http.StatusOK {
+		t.Fatalf("reorder with explicit sort order code=%d body=%v", code, ok)
+	}
+	var folders struct {
+		Items []MailFolder `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/folders", nil, &folders); code != http.StatusOK {
+		t.Fatalf("list folders code=%d items=%+v", code, folders.Items)
+	}
+	got := customFolderNames(folders.Items)
+	want := []string{"客户", "项目", "账单"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("custom folder order=%v want=%v", got, want)
+	}
+	if folders.Items[0].ID != customer.ID {
+		t.Fatalf("customer folder should be before inbox after explicit sort order, first=%+v", folders.Items[0])
+	}
+	var inboxID string
+	for _, item := range folders.Items {
+		if item.Name == "Inbox" {
+			inboxID = item.ID
+			break
+		}
+	}
+	if inboxID == "" {
+		t.Fatalf("inbox not found in folders: %+v", folders.Items)
+	}
+	var bad map[string]any
+	if code := admin.do("POST", "/api/mail/folders/reorder", map[string]any{"folderIds": []string{project.ID, inboxID, customer.ID, bills.ID}}, &bad); code != http.StatusBadRequest {
+		t.Fatalf("reorder with system folder should be rejected code=%d body=%v", code, bad)
+	}
+
+	domain := createTestDomain(t, admin, "folders.test")
+	other := createTestMailbox(t, admin, domain.ID, "other", "Other", "Password123!", nil)
+	otherFolderID, err := a.ensureFolder(context.Background(), other.ID, "其他")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code := admin.do("POST", "/api/mail/folders/reorder", map[string]any{"folderIds": []string{project.ID, customer.ID, otherFolderID}}, &bad); code != http.StatusBadRequest {
+		t.Fatalf("reorder with other mailbox folder should be rejected code=%d body=%v", code, bad)
+	}
+}
+
 func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -3801,6 +3875,16 @@ func folderListContains(items []MailFolder, name string) bool {
 		}
 	}
 	return false
+}
+
+func customFolderNames(items []MailFolder) []string {
+	names := []string{}
+	for _, item := range items {
+		if !isSystemFolderName(item.Name) {
+			names = append(names, item.Name)
+		}
+	}
+	return names
 }
 
 func withoutPermissions(items []string, removed ...string) []string {

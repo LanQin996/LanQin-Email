@@ -1149,6 +1149,14 @@ func (a *App) ensureFolder(ctx context.Context, mailboxID, folder string) (strin
 	}
 	role := strings.ToLower(folder)
 	id = newID("fld")
-	_, err := a.db.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?)`, id, mailboxID, folder, role, a.newUIDValidity(), 1, 1, a.now().UTC().Format(time.RFC3339Nano))
+	sortOrder := 0
+	if !isSystemFolderName(folder) {
+		var err error
+		sortOrder, err = a.nextCustomFolderSortOrder(ctx, mailboxID)
+		if err != nil {
+			return "", err
+		}
+	}
+	_, err := a.db.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,sort_order,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, mailboxID, folder, role, sortOrder, a.newUIDValidity(), 1, 1, a.now().UTC().Format(time.RFC3339Nano))
 	return id, err
 }

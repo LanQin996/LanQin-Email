@@ -202,6 +202,7 @@ func (a *App) migrate(ctx context.Context) error {
 			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
 			name TEXT NOT NULL,
 			role TEXT NOT NULL,
+			sort_order INTEGER NOT NULL DEFAULT 0,
 			uid_validity INTEGER NOT NULL DEFAULT 0,
 			uid_next INTEGER NOT NULL DEFAULT 1,
 			highest_modseq INTEGER NOT NULL DEFAULT 1,
@@ -446,6 +447,9 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := a.migrateIMAPMetadata(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateFolderSortOrder(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
@@ -1131,7 +1135,7 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		return "", err
 	}
 	for _, f := range defaultFolderDefs() {
-		_, err = tx.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?)`, newID("fld"), id, f.name, f.role, a.newUIDValidity(), 1, 1, now)
+		_, err = tx.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,sort_order,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, newID("fld"), id, f.name, f.role, 0, a.newUIDValidity(), 1, 1, now)
 		if err != nil {
 			return "", err
 		}

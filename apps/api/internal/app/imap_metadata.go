@@ -44,6 +44,38 @@ func (a *App) migrateIMAPMetadata(ctx context.Context) error {
 	return err
 }
 
+func (a *App) migrateFolderSortOrder(ctx context.Context) error {
+	if err := a.ensureTableColumn(ctx, "folders", "sort_order", `ALTER TABLE folders ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`); err != nil {
+		return err
+	}
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM folders WHERE lower(name) NOT IN ('inbox','sent','drafts','archive','spam','trash') ORDER BY mailbox_id, created_at, name, id`)
+	if err != nil {
+		return err
+	}
+	var folderIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		folderIDs = append(folderIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	order := customFolderDefaultSortOrderBase + 1
+	for _, id := range folderIDs {
+		if _, err := a.db.ExecContext(ctx, `UPDATE folders SET sort_order=? WHERE id=? AND sort_order=0`, order, id); err != nil {
+			return err
+		}
+		order++
+	}
+	return nil
+}
+
 func (a *App) ensureTableColumn(ctx context.Context, table, column, alterSQL string) error {
 	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(`+table+`)`)
 	if err != nil {
