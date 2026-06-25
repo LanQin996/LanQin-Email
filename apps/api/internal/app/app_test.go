@@ -31,6 +31,7 @@ import (
 	"github.com/emersion/go-sasl"
 	smtpclient "github.com/emersion/go-smtp"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/oauth2"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -501,6 +502,102 @@ func TestExternalIMAPRejectsPrivateHostsByDefault(t *testing.T) {
 	if code := admin.do("POST", "/api/me/external-imap-accounts", payload, &out); code != http.StatusBadRequest {
 		t.Fatalf("private host should be rejected code=%d body=%v", code, out)
 	}
+}
+
+func TestExternalIMAPOAuthStateDoesNotDefaultToLocalMailbox(t *testing.T) {
+	dir := t.TempDir()
+	a := newTestAppWithConfig(t, Config{
+		Addr:                            ":0",
+		DBPath:                          filepath.Join(dir, "lanqin.db"),
+		DataDir:                         filepath.Join(dir, "data"),
+		CookieName:                      "lanqin_test",
+		SessionTTLHours:                 24,
+		AdminEmail:                      "admin@lanqin.local",
+		AdminPassword:                   "ChangeMe123!",
+		PublicHostname:                  "mail.example.test",
+		PublicBaseURL:                   "http://localhost:5173",
+		AllowInsecureHTTP:               true,
+		ExternalIMAPSecretKey:           "test-secret",
+		ExternalIMAPOutlookClientID:     "client-id",
+		ExternalIMAPOutlookClientSecret: "client-secret",
+	})
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mb := defaultAdminUserAndMailbox(t, a)
+
+	var start struct {
+		URL string `json:"url"`
+	}
+	if code := admin.do("POST", "/api/me/external-imap-oauth/outlook/start", map[string]any{"mailboxId": mb.ID, "storageMode": "local", "syncReadState": true, "enabled": true}, &start); code != http.StatusOK {
+		t.Fatalf("start oauth code=%d url=%q", code, start.URL)
+	}
+	stateValue := mustOAuthStateFromURL(t, start.URL)
+	state, err := a.decryptExternalIMAPOAuthState(stateValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Email != "" {
+		t.Fatalf("oauth state defaulted to local mailbox email: %q", state.Email)
+	}
+
+	if code := admin.do("POST", "/api/me/external-imap-oauth/outlook/start", map[string]any{"mailboxId": mb.ID, "email": "User@Example.COM", "storageMode": "remote", "syncReadState": true, "enabled": true}, &start); code != http.StatusOK {
+		t.Fatalf("start oauth with email code=%d url=%q", code, start.URL)
+	}
+	stateValue = mustOAuthStateFromURL(t, start.URL)
+	state, err = a.decryptExternalIMAPOAuthState(stateValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Email != "user@example.com" {
+		t.Fatalf("oauth state did not preserve requested external email, got %q", state.Email)
+	}
+}
+
+func TestExternalIMAPOAuthEmailFromIDToken(t *testing.T) {
+	token := (&oauth2.Token{AccessToken: "access"}).WithExtra(map[string]any{
+		"id_token": testIDToken(map[string]any{"preferred_username": "User@Example.COM"}),
+	})
+	email, err := externalIMAPOAuthEmail(externalIMAPOAuthOutlook, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if email != "user@example.com" {
+		t.Fatalf("unexpected outlook oauth email %q", email)
+	}
+
+	token = (&oauth2.Token{AccessToken: "access"}).WithExtra(map[string]any{
+		"id_token": testIDToken(map[string]any{"email": "Person@Gmail.COM"}),
+	})
+	email, err = externalIMAPOAuthEmail(externalIMAPOAuthGmail, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if email != "person@gmail.com" {
+		t.Fatalf("unexpected gmail oauth email %q", email)
+	}
+}
+
+func mustOAuthStateFromURL(t *testing.T, rawURL string) string {
+	t.Helper()
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := u.Query().Get("state")
+	if state == "" {
+		t.Fatalf("oauth url missing state: %s", rawURL)
+	}
+	return state
+}
+
+func testIDToken(claims map[string]any) string {
+	header, _ := json.Marshal(map[string]any{"alg": "none"})
+	payload, _ := json.Marshal(claims)
+	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + "."
 }
 
 func TestExternalIMAPAccountOwnershipIsolation(t *testing.T) {

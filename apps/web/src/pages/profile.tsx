@@ -239,7 +239,7 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "同步失败", description: error.message }),
   })
   const startExternalOAuth = useMutation({
-    mutationFn: ({ provider, mailboxId }: { provider: ExternalImapOAuthProvider; mailboxId: string }) => api.startExternalImapOAuth(provider, { mailboxId, storageMode: "local", syncReadState: true, enabled: true }),
+    mutationFn: ({ provider, mailboxId, email, storageMode }: { provider: ExternalImapOAuthProvider; mailboxId: string; email: string; storageMode: ExternalImapStorageMode }) => api.startExternalImapOAuth(provider, { mailboxId, email, storageMode, syncReadState: true, enabled: true }),
     onSuccess: (res) => { window.location.href = res.url },
     onError: (error) => toast({ title: "授权失败", description: error.message }),
   })
@@ -353,7 +353,7 @@ export function ProfilePage() {
         onOpen={(id) => { if (!canAccessMail) return; setMailboxId(id); navigate("/") }}
         onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)}
         onCreateExternal={(payload) => createExternalImap.mutate(payload)}
-        onStartExternalOAuth={(provider, mailboxId) => startExternalOAuth.mutate({ provider, mailboxId })}
+        onStartExternalOAuth={(provider, payload) => startExternalOAuth.mutate({ provider, ...payload })}
         onUpdateExternal={(id, payload) => updateExternalImap.mutate({ id, payload })}
         onDeleteExternal={(id) => deleteExternalImap.mutate(id)}
         onTestExternal={(id) => testExternalImap.mutate(id)}
@@ -592,7 +592,7 @@ function MailboxManagement({
   onOpen: (id: string) => void
   onApply: (payload: { domainId: string; localPart: string; displayName: string }) => Promise<void>
   onCreateExternal: (payload: ExternalImapAccountPayload) => void
-  onStartExternalOAuth: (provider: ExternalImapOAuthProvider, mailboxId: string) => void
+  onStartExternalOAuth: (provider: ExternalImapOAuthProvider, payload: { mailboxId: string; email: string; storageMode: ExternalImapStorageMode }) => void
   onUpdateExternal: (id: string, payload: ExternalImapAccountPayload) => void
   onDeleteExternal: (id: string) => void
   onTestExternal: (id: string) => void
@@ -618,8 +618,8 @@ function MailboxManagement({
               <div className="mt-1 text-sm text-muted-foreground">接入其他邮箱，可选择同步到本地，或每次打开时直接从远端读取。</div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" disabled={!selectedMailbox || externalPending} onClick={() => onStartExternalOAuth("gmail", selectedMailboxId)}>Gmail OAuth</Button>
-              <Button type="button" variant="outline" disabled={!selectedMailbox || externalPending} onClick={() => onStartExternalOAuth("outlook", selectedMailboxId)}>Outlook OAuth</Button>
+              <ExternalImapOAuthDialog provider="gmail" selectedMailbox={selectedMailbox} disabled={!selectedMailbox} pending={externalPending} onStart={onStartExternalOAuth} />
+              <ExternalImapOAuthDialog provider="outlook" selectedMailbox={selectedMailbox} disabled={!selectedMailbox} pending={externalPending} onStart={onStartExternalOAuth} />
               <ExternalImapDialog mailboxId={selectedMailboxId} disabled={!selectedMailbox} pending={externalPending} onSubmit={onCreateExternal} />
             </div>
           </div>
@@ -638,7 +638,7 @@ function MailboxManagement({
                       <Badge variant={account.enabled ? "secondary" : "outline"}>{account.enabled ? "已启用" : "已停用"}</Badge>
                       <Badge variant="outline">{account.storageMode === "local" ? "本地存储" : "远端直连"}</Badge>
                     </div>
-                    <div className="mt-1 truncate text-xs text-muted-foreground">{account.username} · {account.host}:{account.port} · {account.tlsMode.toUpperCase()}</div>
+                    <div className="mt-1 truncate text-xs text-muted-foreground">{account.username} · {account.host}:{account.port} · {account.tlsMode.toUpperCase()}{account.authMode === "oauth2" ? ` · ${externalOAuthProviderLabel(account.oauthProvider)}` : ""}</div>
                     <div className="mt-1 text-xs text-muted-foreground">状态：{externalStatusLabel(account.lastStatus)}{account.lastSyncAt ? ` · 最近同步 ${formatDateTime(account.lastSyncAt)}` : ""}{account.lastError ? ` · ${account.lastError}` : ""}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
@@ -699,6 +699,50 @@ function ApplyMailboxDialog({ options, pending, onApply }: { options: MailboxApp
           <DialogFooter className="gap-2 [&>button]:w-full sm:[&>button]:w-auto">
             <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
             <Button disabled={pending || !domainId}>{pending ? "申请中..." : "申请"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+
+function ExternalImapOAuthDialog({ provider, selectedMailbox, disabled, pending, onStart }: { provider: ExternalImapOAuthProvider; selectedMailbox?: Mailbox; disabled?: boolean; pending: boolean; onStart: (provider: ExternalImapOAuthProvider, payload: { mailboxId: string; email: string; storageMode: ExternalImapStorageMode }) => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [storageMode, setStorageMode] = React.useState<ExternalImapStorageMode>("local")
+  const label = provider === "gmail" ? "Gmail OAuth" : "Microsoft 365 / Outlook OAuth"
+
+  function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedMailbox) return
+    const form = new FormData(event.currentTarget)
+    onStart(provider, {
+      mailboxId: selectedMailbox.id,
+      email: String(form.get("email") || ""),
+      storageMode,
+    })
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <Button type="button" variant="outline" disabled={disabled || pending} onClick={() => setOpen(true)}>{label}</Button>
+      <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-lg">
+        <DialogHeader><DialogTitle>{label}</DialogTitle></DialogHeader>
+        <form className="space-y-4" onSubmit={submit}>
+          <div className="rounded-lg border bg-muted/30 p-3 text-sm text-muted-foreground">
+            OAuth 只适用于 {provider === "gmail" ? "Google Gmail" : "Microsoft 365 / Outlook / Exchange Online"} 托管邮箱。自建域名邮箱请使用“添加外部邮箱”的普通 IMAP 方式。
+          </div>
+          <Field label="外部邮箱地址（可选）"><Input name="email" type="email" placeholder={selectedMailbox?.address || "name@example.com"} /></Field>
+          <div className="text-xs text-muted-foreground">留空时会以 OAuth 服务商返回的真实授权邮箱为准；填写后，回调时会校验它和真实授权邮箱一致。</div>
+          <Field label="存储模式">
+            <Select value={storageMode} onValueChange={(value) => setStorageMode(value as ExternalImapStorageMode)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="local">同步到本地</SelectItem><SelectItem value="remote">远端直连</SelectItem></SelectContent>
+            </Select>
+          </Field>
+          <DialogFooter className="gap-2 [&>button]:w-full sm:[&>button]:w-auto">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>取消</Button>
+            <Button disabled={pending || !selectedMailbox}>{pending ? "跳转中..." : "前往授权"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -786,6 +830,10 @@ function externalPayloadFromAccount(account: ExternalImapAccount): ExternalImapA
 
 function externalStatusLabel(status: string) {
   return ({ idle: "未同步", ok: "正常", partial: "部分成功", error: "错误", running: "同步中" } as Record<string, string>)[status] || status || "未知"
+}
+
+function externalOAuthProviderLabel(provider?: ExternalImapOAuthProvider) {
+  return provider === "gmail" ? "Gmail OAuth" : provider === "outlook" ? "Microsoft 365 / Outlook OAuth" : "OAuth"
 }
 
 function ExternalImapSyncPanel({ account, folders, runs, pending, onSyncFolder }: { account: ExternalImapAccount; folders: ExternalImapFolder[]; runs: ExternalImapSyncRun[]; pending: boolean; onSyncFolder: (id: string, folder: string) => void }) {

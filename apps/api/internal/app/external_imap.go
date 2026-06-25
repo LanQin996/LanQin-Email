@@ -418,9 +418,10 @@ func (a *App) handleStartExternalIMAPOAuth(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	email := strings.TrimSpace(req.Email)
-	if email == "" {
-		email = mb.Address
+	email := normalizeEmail(req.Email)
+	if email != "" && !strings.Contains(email, "@") {
+		badRequest(w, errors.New("invalid oauth email"))
+		return
 	}
 	req.StorageMode = strings.ToLower(strings.TrimSpace(req.StorageMode))
 	if req.StorageMode == "" {
@@ -511,9 +512,18 @@ func (a *App) handleExternalIMAPOAuthCallback(w http.ResponseWriter, r *http.Req
 	if !token.Expiry.IsZero() {
 		expiry = token.Expiry.UTC().Format(time.RFC3339Nano)
 	}
+	authorizedEmail, err := externalIMAPOAuthEmail(provider, token)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if state.Email != "" && !strings.EqualFold(normalizeEmail(state.Email), authorizedEmail) {
+		respondError(w, http.StatusBadRequest, "oauth account email does not match requested external email")
+		return
+	}
 	id := newID("ximap")
 	_, err = a.db.ExecContext(r.Context(), `INSERT INTO external_imap_accounts(id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_status,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, state.UserID, state.MailboxID, name, profile.Host, profile.Port, externalIMAPTLS, state.Email, "", externalIMAPAuthOAuth2, provider, state.Email, accessCipher, refreshCipher, expiry, state.StorageMode, boolInt(state.SyncReadState), boolInt(state.Enabled), "idle", now, now)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, state.UserID, state.MailboxID, name, profile.Host, profile.Port, externalIMAPTLS, authorizedEmail, "", externalIMAPAuthOAuth2, provider, authorizedEmail, accessCipher, refreshCipher, expiry, state.StorageMode, boolInt(state.SyncReadState), boolInt(state.Enabled), "idle", now, now)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save oauth account")
 		return
@@ -871,7 +881,7 @@ func (a *App) externalIMAPOAuthConfig(provider string) (*oauth2.Config, external
 			ClientID:     a.cfg.ExternalIMAPGmailClientID,
 			ClientSecret: a.cfg.ExternalIMAPGmailClientSecret,
 			RedirectURL:  callback,
-			Scopes:       []string{"https://mail.google.com/"},
+			Scopes:       []string{"openid", "email", "profile", "https://mail.google.com/"},
 			Endpoint: oauth2.Endpoint{
 				AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
 				TokenURL: "https://oauth2.googleapis.com/token",
@@ -885,7 +895,7 @@ func (a *App) externalIMAPOAuthConfig(provider string) (*oauth2.Config, external
 			ClientID:     a.cfg.ExternalIMAPOutlookClientID,
 			ClientSecret: a.cfg.ExternalIMAPOutlookClientSecret,
 			RedirectURL:  callback,
-			Scopes:       []string{"offline_access", "https://outlook.office.com/IMAP.AccessAsUser.All"},
+			Scopes:       []string{"openid", "email", "profile", "offline_access", "https://outlook.office.com/IMAP.AccessAsUser.All"},
 			Endpoint: oauth2.Endpoint{
 				AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
 				TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
@@ -894,6 +904,45 @@ func (a *App) externalIMAPOAuthConfig(provider string) (*oauth2.Config, external
 	default:
 		return nil, externalIMAPOAuthProvider{}, errors.New("unsupported oauth provider")
 	}
+}
+
+func externalIMAPOAuthEmail(provider string, token *oauth2.Token) (string, error) {
+	if token == nil {
+		return "", errors.New("oauth token is missing")
+	}
+	idToken, _ := token.Extra("id_token").(string)
+	claims, err := externalIMAPOIDCClaims(idToken)
+	if err != nil {
+		return "", err
+	}
+	fields := []string{"email"}
+	if provider == externalIMAPOAuthOutlook {
+		fields = []string{"email", "preferred_username", "upn"}
+	}
+	for _, field := range fields {
+		value, _ := claims[field].(string)
+		email := normalizeEmail(value)
+		if email != "" && strings.Contains(email, "@") {
+			return email, nil
+		}
+	}
+	return "", errors.New("oauth provider did not return an email address")
+}
+
+func externalIMAPOIDCClaims(idToken string) (map[string]any, error) {
+	parts := strings.Split(idToken, ".")
+	if len(parts) < 2 {
+		return nil, errors.New("oauth provider did not return an id token")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return nil, errors.New("invalid oauth id token")
+	}
+	var claims map[string]any
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return nil, errors.New("invalid oauth id token")
+	}
+	return claims, nil
 }
 
 func (a *App) encryptExternalIMAPOAuthState(state externalIMAPOAuthState) (string, error) {
