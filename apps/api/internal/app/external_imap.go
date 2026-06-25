@@ -24,7 +24,6 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
-	"github.com/emersion/go-sasl"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/oauth2"
 )
@@ -1498,7 +1497,7 @@ func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAc
 			c.Close()
 			return nil, err
 		}
-		if err := c.Authenticate(sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{Username: account.Username, Token: token, Host: account.Host, Port: account.Port})); err != nil {
+		if err := c.Authenticate(newExternalIMAPXOAUTH2Client(account.Username, token)); err != nil {
 			c.Close()
 			return nil, err
 		}
@@ -1514,6 +1513,23 @@ func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAc
 		}
 	}
 	return &goExternalIMAPClient{client: c}, nil
+}
+
+type externalIMAPXOAUTH2Client struct {
+	username string
+	token    string
+}
+
+func newExternalIMAPXOAUTH2Client(username, token string) externalIMAPXOAUTH2Client {
+	return externalIMAPXOAUTH2Client{username: username, token: token}
+}
+
+func (c externalIMAPXOAUTH2Client) Start() (string, []byte, error) {
+	return "XOAUTH2", []byte("user=" + c.username + "\x01auth=Bearer " + c.token + "\x01\x01"), nil
+}
+
+func (c externalIMAPXOAUTH2Client) Next(challenge []byte) ([]byte, error) {
+	return []byte{}, nil
 }
 
 func (a *App) externalIMAPOAuthAccessToken(ctx context.Context, account externalIMAPAccountRecord) (string, error) {

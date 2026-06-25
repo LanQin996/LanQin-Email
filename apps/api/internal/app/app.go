@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -28,6 +29,7 @@ type App struct {
 	now           func() time.Time
 	policy        *HTMLPolicy
 	workerCancel  context.CancelFunc
+	workerWG      sync.WaitGroup
 	maildirHealth *maildirSyncHealthTracker
 	externalIMAP  externalIMAPClientFactory
 }
@@ -73,14 +75,22 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	}
 	workerCtx, cancel := context.WithCancel(context.Background())
 	a.workerCancel = cancel
-	go a.scheduledSendWorker(workerCtx)
+	a.startWorker(func() { a.scheduledSendWorker(workerCtx) })
 	if strings.TrimSpace(a.cfg.MaildirRoot) != "" {
-		go a.maildirWorker(workerCtx)
+		a.startWorker(func() { a.maildirWorker(workerCtx) })
 	}
-	go a.sendQueueWorker(workerCtx)
-	go a.externalIMAPWorker(workerCtx)
-	go a.smtpEventsCleanupWorker(workerCtx)
+	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
+	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
+	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
 	return a, nil
+}
+
+func (a *App) startWorker(fn func()) {
+	a.workerWG.Add(1)
+	go func() {
+		defer a.workerWG.Done()
+		fn()
+	}()
 }
 
 func (a *App) Close() error {
@@ -90,6 +100,7 @@ func (a *App) Close() error {
 	if a.workerCancel != nil {
 		a.workerCancel()
 	}
+	a.workerWG.Wait()
 	return a.db.Close()
 }
 

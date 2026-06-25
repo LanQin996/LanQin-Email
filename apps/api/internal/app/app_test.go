@@ -62,6 +62,13 @@ func newTestAppWithConfig(t *testing.T, cfg Config) *App {
 	return a
 }
 
+func stopTestWorkers(a *App) {
+	if a != nil && a.workerCancel != nil {
+		a.workerCancel()
+		a.workerWG.Wait()
+	}
+}
+
 func defaultAdminUserAndMailbox(t *testing.T, a *App) (*User, *Mailbox) {
 	t.Helper()
 	ctx := context.Background()
@@ -578,6 +585,21 @@ func TestExternalIMAPOAuthEmailFromIDToken(t *testing.T) {
 	}
 	if email != "person@gmail.com" {
 		t.Fatalf("unexpected gmail oauth email %q", email)
+	}
+}
+
+func TestExternalIMAPXOAUTH2ClientFormat(t *testing.T) {
+	client := newExternalIMAPXOAUTH2Client("user@example.com", "access-token")
+	mech, initialResponse, err := client.Start()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mech != "XOAUTH2" {
+		t.Fatalf("mechanism=%q, want XOAUTH2", mech)
+	}
+	want := "user=user@example.com\x01auth=Bearer access-token\x01\x01"
+	if string(initialResponse) != want {
+		t.Fatalf("initial response=%q, want %q", string(initialResponse), want)
 	}
 }
 
@@ -1588,6 +1610,7 @@ func TestMailSendRollsBackSentCopyWhenQueueInsertFails(t *testing.T) {
 
 func TestSendQueueRecoversStaleSendingItems(t *testing.T) {
 	a := newTestApp(t)
+	stopTestWorkers(a)
 	host, port, received := startCapturingSMTP(t, 1)
 	a.cfg.SMTPHost = host
 	a.cfg.SMTPPort = port
@@ -1637,6 +1660,7 @@ func TestSendQueueRecoversStaleSendingItems(t *testing.T) {
 
 func TestSendQueueStaleDeliveredMarkerDoesNotRedeliver(t *testing.T) {
 	a := newTestApp(t)
+	stopTestWorkers(a)
 	host, port, received := startCapturingSMTP(t, 1)
 	a.cfg.SMTPHost = host
 	a.cfg.SMTPPort = port

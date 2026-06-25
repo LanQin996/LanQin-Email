@@ -126,6 +126,12 @@ func (a *App) sendQueueWorker(ctx context.Context) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 	for {
+		select {
+		case <-ctx.Done():
+			a.log.Info("send queue worker stopped")
+			return
+		default:
+		}
 		if err := a.processDueSendQueue(ctx); err != nil {
 			a.log.Warn("send queue worker failed", "error", err)
 		}
@@ -232,12 +238,12 @@ func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 			}
 			continue
 		}
-		res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND status=?`, sendQueueStatusFailed, now, "send attempt interrupted", now, item.ID, sendQueueStatusSending)
+		res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND status=?`, sendQueueStatusQueued, now, "send attempt interrupted", now, item.ID, sendQueueStatusSending)
 		if err != nil {
 			return err
 		}
 		if n, _ := res.RowsAffected(); n > 0 {
-			a.recordSendAudit(ctx, sendAuditRetry, sendQueueStatusFailed, sendAuditInputFromQueue(item, "send attempt interrupted"))
+			a.recordSendAudit(ctx, sendAuditRetry, sendQueueStatusQueued, sendAuditInputFromQueue(item, "send attempt interrupted"))
 		}
 	}
 	return nil
