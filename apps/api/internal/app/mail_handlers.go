@@ -1164,9 +1164,10 @@ func (a *App) handleSendQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
-	cursor, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if cursor < 0 {
-		cursor = 0
+	cursorCreatedAt, cursorID, offsetCursor, err := parseSendQueueCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
 	limit := 30
 	args := []any{user.ID, mb.ID}
@@ -1179,9 +1180,44 @@ func (a *App) handleSendQueue(w http.ResponseWriter, r *http.Request) {
 		where += ` AND sq.status=?`
 		args = append(args, status)
 	}
-	args = append(args, limit+1, cursor)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT sq.id,sq.mailbox_id,sq.sent_message_id,sq.message_id,COALESCE(m.subject,''),sq.source,sq.mail_from,sq.header_from,sq.recipients_json,sq.status,sq.attempt_count,sq.max_attempts,sq.next_attempt_at,sq.last_error,sq.created_at,sq.updated_at,sq.delivered_at
-		FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id LEFT JOIN messages m ON m.id=sq.sent_message_id WHERE `+where+` ORDER BY sq.created_at DESC, sq.id DESC LIMIT ? OFFSET ?`, args...)
+	if messageID := strings.TrimSpace(r.URL.Query().Get("messageId")); messageID != "" {
+		where += ` AND (sq.message_id=? OR sq.sent_message_id=? OR m.message_id=?)`
+		args = append(args, messageID, messageID, messageID)
+	}
+	if recipient := normalizeEmail(r.URL.Query().Get("recipient")); recipient != "" {
+		where += ` AND sq.recipients_json LIKE ?`
+		args = append(args, "%"+recipient+"%")
+	}
+	if from := strings.TrimSpace(r.URL.Query().Get("from")); from != "" {
+		t, err := parseTimeQuery(from)
+		if err != nil {
+			badRequest(w, errors.New("invalid from time"))
+			return
+		}
+		where += ` AND sq.created_at>=?`
+		args = append(args, t.UTC().Format(time.RFC3339Nano))
+	}
+	if to := strings.TrimSpace(r.URL.Query().Get("to")); to != "" {
+		t, err := parseTimeQuery(to)
+		if err != nil {
+			badRequest(w, errors.New("invalid to time"))
+			return
+		}
+		where += ` AND sq.created_at<=?`
+		args = append(args, t.UTC().Format(time.RFC3339Nano))
+	}
+	if cursorCreatedAt != "" && cursorID != "" {
+		where += ` AND (sq.created_at < ? OR (sq.created_at = ? AND sq.id < ?))`
+		args = append(args, cursorCreatedAt, cursorCreatedAt, cursorID)
+	}
+	args = append(args, limit+1)
+	query := `SELECT sq.id,sq.mailbox_id,sq.sent_message_id,sq.message_id,COALESCE(m.subject,''),sq.source,sq.mail_from,sq.header_from,sq.recipients_json,sq.status,sq.attempt_count,sq.max_attempts,sq.next_attempt_at,sq.last_error,sq.created_at,sq.updated_at,sq.delivered_at
+		FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id LEFT JOIN messages m ON m.id=sq.sent_message_id WHERE ` + where + ` ORDER BY sq.created_at DESC, sq.id DESC LIMIT ?`
+	if offsetCursor > 0 {
+		args = append(args, offsetCursor)
+		query += ` OFFSET ?`
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load send queue")
 		return
@@ -1203,7 +1239,8 @@ func (a *App) handleSendQueue(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(cursor + limit)
+		last := items[len(items)-1]
+		next = encodeSendQueueCursor(last.CreatedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
@@ -1349,10 +1386,60 @@ func (a *App) loadSendQueueEntryForUser(ctx context.Context, id, userID string) 
 	return scanSendQueueEntry(row)
 }
 
+type sendQueueCursor struct {
+	CreatedAt string `json:"createdAt"`
+	ID        string `json:"id"`
+}
+
+func encodeSendQueueCursor(createdAt time.Time, id string) string {
+	payload, _ := json.Marshal(sendQueueCursor{CreatedAt: createdAt.UTC().Format(time.RFC3339Nano), ID: id})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func parseSendQueueCursor(raw string) (createdAt string, id string, offset int, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", 0, nil
+	}
+	if n, convErr := strconv.Atoi(raw); convErr == nil {
+		if n < 0 {
+			return "", "", 0, errors.New("invalid cursor")
+		}
+		return "", "", n, nil
+	}
+	data, decodeErr := base64.RawURLEncoding.DecodeString(raw)
+	if decodeErr != nil {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	var cursor sendQueueCursor
+	if err := json.Unmarshal(data, &cursor); err != nil {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	t, err := parseTimeQuery(cursor.CreatedAt)
+	if err != nil || strings.TrimSpace(cursor.ID) == "" {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	return t.UTC().Format(time.RFC3339Nano), strings.TrimSpace(cursor.ID), 0, nil
+}
+
 func (a *App) sendQueueBelongsToUser(ctx context.Context, id, userID string) bool {
 	var count int
 	_ = a.db.QueryRowContext(ctx, `SELECT COUNT(1) FROM send_queue sq JOIN mailboxes mb ON mb.id=sq.mailbox_id WHERE sq.id=? AND mb.user_id=?`, id, userID).Scan(&count)
 	return count > 0
+}
+
+func parseTimeQuery(raw string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, errors.New("time is required")
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", raw); err == nil {
+		return t, nil
+	}
+	return time.Time{}, errors.New("invalid time")
 }
 
 func validSendQueueStatus(status string) bool {
@@ -1915,6 +2002,9 @@ func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*Ma
 		return nil, err
 	}
 	msg.Labels = labels
+	if includeBody {
+		_ = a.db.QueryRowContext(ctx, `SELECT id,status FROM send_queue WHERE sent_message_id=? ORDER BY created_at DESC,id DESC LIMIT 1`, id).Scan(&msg.SendQueueID, &msg.SendQueueStatus)
+	}
 	return &msg, nil
 }
 

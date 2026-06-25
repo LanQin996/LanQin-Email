@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"math/big"
@@ -1538,6 +1539,137 @@ func TestSendQueueAPIPermissionIsolation(t *testing.T) {
 		Items []SendAuditEvent `json:"items"`
 	}{}); code != http.StatusOK {
 		t.Fatalf("own audit code=%d", code)
+	}
+}
+
+func TestSendQueueAPIFiltersStableCursorAndMessageDetailLink(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	now := a.now().UTC()
+	sentFolderID, err := a.ensureFolder(context.Background(), mb.ID, "Sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sentMsg := storedMessage{
+		MailboxID:  mb.ID,
+		FolderID:   sentFolderID,
+		MessageUID: "uid-queue-detail",
+		MessageID:  "<queue-detail@example.test>",
+		Subject:    "queue detail",
+		From:       mb.Address,
+		To:         []string{"detail@example.test"},
+		SentAt:     now,
+		ReceivedAt: now,
+		Snippet:    "detail",
+		BodyText:   "detail",
+		IsRead:     true,
+	}
+	sentID, err := a.insertMessage(context.Background(), sentMsg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:        user.ID,
+		MailboxID:     mb.ID,
+		SentMessageID: sentID,
+		MessageID:     "<queue-detail@example.test>",
+		Source:        sendSourceWebmail,
+		MailFrom:      mb.Address,
+		HeaderFrom:    mb.Address,
+		Recipients:    []string{"detail@example.test"},
+		MIMEBytes:     []byte("Subject: detail\r\n\r\nbody"),
+		Now:           now.Add(-2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		MessageID:  "<queue-other@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"other@example.test"},
+		MIMEBytes:  []byte("Subject: other\r\n\r\nbody"),
+		Now:        now.Add(-1 * time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thirdID, err := a.enqueueSend(context.Background(), sendQueueInput{
+		UserID:     user.ID,
+		MailboxID:  mb.ID,
+		MessageID:  "<queue-latest@example.test>",
+		Source:     sendSourceWebmail,
+		MailFrom:   mb.Address,
+		HeaderFrom: mb.Address,
+		Recipients: []string{"latest@example.test"},
+		MIMEBytes:  []byte("Subject: latest\r\n\r\nbody"),
+		Now:        now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 28; i++ {
+		if _, err := a.enqueueSend(context.Background(), sendQueueInput{
+			UserID:     user.ID,
+			MailboxID:  mb.ID,
+			MessageID:  fmt.Sprintf("<queue-extra-%02d@example.test>", i),
+			Source:     sendSourceWebmail,
+			MailFrom:   mb.Address,
+			HeaderFrom: mb.Address,
+			Recipients: []string{fmt.Sprintf("extra-%02d@example.test", i)},
+			MIMEBytes:  []byte("Subject: extra\r\n\r\nbody"),
+			Now:        now.Add(time.Duration(-24-i) * time.Hour),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var byMessage struct {
+		Items []SendQueueEntry `json:"items"`
+	}
+	if code := client.do("GET", "/api/mail/send-queue?messageId="+url.QueryEscape("<queue-detail@example.test>"), nil, &byMessage); code != http.StatusOK || len(byMessage.Items) != 1 || byMessage.Items[0].ID != firstID {
+		t.Fatalf("message filter code=%d items=%+v", code, byMessage.Items)
+	}
+	var byRecipient struct {
+		Items []SendQueueEntry `json:"items"`
+	}
+	if code := client.do("GET", "/api/mail/send-queue?recipient="+url.QueryEscape("other@example.test"), nil, &byRecipient); code != http.StatusOK || len(byRecipient.Items) != 1 || byRecipient.Items[0].ID != secondID {
+		t.Fatalf("recipient filter code=%d items=%+v", code, byRecipient.Items)
+	}
+	var byTime struct {
+		Items []SendQueueEntry `json:"items"`
+	}
+	from := now.Add(-90 * time.Minute).Format(time.RFC3339Nano)
+	to := now.Add(30 * time.Minute).Format(time.RFC3339Nano)
+	if code := client.do("GET", "/api/mail/send-queue?from="+url.QueryEscape(from)+"&to="+url.QueryEscape(to), nil, &byTime); code != http.StatusOK || len(byTime.Items) != 2 || byTime.Items[0].ID != thirdID || byTime.Items[1].ID != secondID {
+		t.Fatalf("time filter code=%d items=%+v", code, byTime.Items)
+	}
+	var firstPage struct {
+		Items      []SendQueueEntry `json:"items"`
+		NextCursor string           `json:"nextCursor"`
+	}
+	if code := client.do("GET", "/api/mail/send-queue?cursor=0", nil, &firstPage); code != http.StatusOK || len(firstPage.Items) != 30 || firstPage.NextCursor == "" {
+		t.Fatalf("first page code=%d cursor=%q items=%+v", code, firstPage.NextCursor, firstPage.Items)
+	}
+	if _, _, _, err := parseSendQueueCursor(firstPage.NextCursor); err != nil {
+		t.Fatalf("next cursor is not stable cursor: %q err=%v", firstPage.NextCursor, err)
+	}
+	var detail MailMessage
+	if code := client.do("GET", "/api/mail/messages/"+sentID+"?markRead=0", nil, &detail); code != http.StatusOK || detail.SendQueueID != firstID || detail.SendQueueStatus == "" {
+		t.Fatalf("message detail queue link code=%d detail=%+v", code, detail)
 	}
 }
 

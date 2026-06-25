@@ -62,6 +62,8 @@ export type MailLabel = { id: string; mailboxId?: string; name: string; color: s
 export type MailMessage = {
   id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
   labels?: MailLabel[]
+  sendQueueId?: string
+  sendQueueStatus?: SendQueueStatus
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
 export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }

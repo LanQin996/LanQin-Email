@@ -151,11 +151,15 @@ export const api = {
   scheduledSends: (mailboxId?: string) => request<ListResponse<ScheduledSend>>(`/api/mail/scheduled-sends${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   scheduleSend: (payload: ScheduleSendPayload) => request<ScheduledSend>("/api/mail/schedule-send", { method: "POST", body: JSON.stringify(payload), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   cancelScheduledSend: (id: string) => request<{ ok: boolean }>(`/api/mail/schedule-send/${id}`, { method: "DELETE" }),
-  sendQueue: (params: { mailboxId?: string; status?: SendQueueStatus | "all"; cursor?: string } = {}) => {
+  sendQueue: (params: { mailboxId?: string; status?: SendQueueStatus | "all"; cursor?: string; messageId?: string; recipient?: string; from?: string; to?: string } = {}) => {
     const query = new URLSearchParams()
     if (params.mailboxId) query.set("mailboxId", params.mailboxId)
     if (params.status && params.status !== "all") query.set("status", params.status)
     if (params.cursor) query.set("cursor", params.cursor)
+    if (params.messageId) query.set("messageId", params.messageId)
+    if (params.recipient) query.set("recipient", params.recipient)
+    if (params.from) query.set("from", params.from)
+    if (params.to) query.set("to", params.to)
     const suffix = query.toString()
     return request<ListResponse<SendQueueItem>>(`/api/mail/send-queue${suffix ? `?${suffix}` : ""}`)
   },

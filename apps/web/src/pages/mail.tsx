@@ -108,6 +108,10 @@ export function MailPage() {
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const [cancelingScheduledId, setCancelingScheduledId] = React.useState("")
   const [sendQueueStatus, setSendQueueStatus] = React.useState<SendQueueStatus | "all">("all")
+  const [sendQueueMessageId, setSendQueueMessageId] = React.useState("")
+  const [sendQueueRecipient, setSendQueueRecipient] = React.useState("")
+  const [sendQueueFrom, setSendQueueFrom] = React.useState("")
+  const [sendQueueTo, setSendQueueTo] = React.useState("")
   const [sendQueueAuditId, setSendQueueAuditId] = React.useState("")
   const [sendQueuePendingId, setSendQueuePendingId] = React.useState("")
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
@@ -143,7 +147,12 @@ export function MailPage() {
   const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && hasPermission(user, "mail.stats.view") })
   const scheduledSends = useQuery({ queryKey: ["scheduled-sends", activeMailboxId], queryFn: () => api.scheduledSends(activeMailboxId), enabled: !!activeMailboxId && canScheduleMail, refetchInterval: 30000 })
   const canViewSendQueue = canReadMail
-  const sendQueue = useQuery({ queryKey: ["send-queue", activeMailboxId, sendQueueStatus], queryFn: () => api.sendQueue({ mailboxId: activeMailboxId, status: sendQueueStatus }), enabled: !!activeMailboxId && canViewSendQueue, refetchInterval: 15000 })
+  const sendQueue = useQuery({
+    queryKey: ["send-queue", activeMailboxId, sendQueueStatus, sendQueueMessageId, sendQueueRecipient, sendQueueFrom, sendQueueTo],
+    queryFn: () => api.sendQueue({ mailboxId: activeMailboxId, status: sendQueueStatus, messageId: sendQueueMessageId.trim(), recipient: sendQueueRecipient.trim(), from: datetimeLocalToISO(sendQueueFrom), to: datetimeLocalToISO(sendQueueTo) }),
+    enabled: !!activeMailboxId && canViewSendQueue,
+    refetchInterval: 15000,
+  })
   const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: !!sendQueueAuditId && canViewSendQueue })
   const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
   const inboxProbe = useQuery({
@@ -530,10 +539,7 @@ export function MailPage() {
     : scheduledItems
   const sendQueueItems = sendQueue.data?.items || []
   const sendQueueCount = sendQueueItems.filter((item) => item.status === "failed" || item.status === "queued" || item.status === "sending").length
-  const sendQueueQuery = query.trim().toLowerCase()
-  const visibleSendQueueItems = sendQueueQuery
-    ? sendQueueItems.filter((item) => [item.subject, item.source, item.lastError, item.error, item.failureReason, ...(item.recipients || [])].join(" ").toLowerCase().includes(sendQueueQuery))
-    : sendQueueItems
+  const visibleSendQueueItems = sendQueueItems
   const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, canScheduleMail ? scheduledCount : 0, canScheduleMail, canViewSendQueue ? sendQueueCount : 0, canViewSendQueue)
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
@@ -837,6 +843,10 @@ export function MailPage() {
     setMailFilter("all")
     setMobileSidebarOpen(false)
   }
+  function openMessageSendTimeline(message: MailMessage) {
+    if (!message.sendQueueId) return
+    setSendQueueAuditId(message.sendQueueId)
+  }
   function openLabel(labelId: string) {
     setSelectedLabelId(labelId)
     setMailView("label")
@@ -1077,10 +1087,18 @@ export function MailPage() {
       items={visibleSendQueueItems}
       total={sendQueueItems.length}
       loading={sendQueue.isLoading}
-      query={query}
       status={sendQueueStatus}
+      messageId={sendQueueMessageId}
+      recipient={sendQueueRecipient}
+      from={sendQueueFrom}
+      to={sendQueueTo}
       pendingId={sendQueuePendingId}
       onStatusChange={setSendQueueStatus}
+      onMessageIdChange={setSendQueueMessageId}
+      onRecipientChange={setSendQueueRecipient}
+      onFromChange={setSendQueueFrom}
+      onToChange={setSendQueueTo}
+      onClearFilters={() => { setSendQueueMessageId(""); setSendQueueRecipient(""); setSendQueueFrom(""); setSendQueueTo(""); setSendQueueStatus("all") }}
       onRetry={(item) => retrySendQueue.mutate(item)}
       onCancel={(item) => cancelSendQueue.mutate(item)}
       onAudit={(item) => setSendQueueAuditId(item.id)}
@@ -1115,6 +1133,7 @@ export function MailPage() {
       onStar={(message) => star.mutate({ id: message.id, starred: !message.isStarred })}
       onReply={openReply}
       onForward={openForward}
+      onSendTimeline={openMessageSendTimeline}
       onArchive={(message) => move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })}
       onDelete={confirmDeleteMessage}
       onToggleRead={(message) => markRead.mutate({ id: message.id, read: !message.isRead })}
@@ -1169,6 +1188,7 @@ export function MailPage() {
                 <div className="flex flex-wrap justify-end gap-2">
                   {canSendMail && <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
                   {canSendMail && <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
+                  {selected.sendQueueId && <Button variant="outline" size="sm" onClick={() => openMessageSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</Button>}
                   {canOrganizeMail && (selected.folder === "Archive" ? (
                     <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}>取消归档</Button>
                   ) : (
@@ -1563,10 +1583,18 @@ function SendQueueView({
   items,
   total,
   loading,
-  query,
   status,
+  messageId,
+  recipient,
+  from,
+  to,
   pendingId,
   onStatusChange,
+  onMessageIdChange,
+  onRecipientChange,
+  onFromChange,
+  onToChange,
+  onClearFilters,
   onRetry,
   onCancel,
   onAudit,
@@ -1576,31 +1604,49 @@ function SendQueueView({
   items: SendQueueItem[]
   total: number
   loading: boolean
-  query: string
   status: SendQueueStatus | "all"
+  messageId: string
+  recipient: string
+  from: string
+  to: string
   pendingId: string
   onStatusChange: (status: SendQueueStatus | "all") => void
+  onMessageIdChange: (value: string) => void
+  onRecipientChange: (value: string) => void
+  onFromChange: (value: string) => void
+  onToChange: (value: string) => void
+  onClearFilters: () => void
   onRetry: (item: SendQueueItem) => void
   onCancel: (item: SendQueueItem) => void
   onAudit: (item: SendQueueItem) => void
   canMutate: boolean
 }) {
-  const empty = query.trim() ? "当前搜索没有匹配的发送任务" : "发送队列为空"
+  const hasFilters = status !== "all" || messageId.trim() || recipient.trim() || from || to
+  const empty = hasFilters ? "当前筛选没有匹配的发送任务" : "发送队列为空"
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className={cn("flex shrink-0 items-center justify-between gap-3 border-b", compact ? "min-h-12 px-4 py-2" : "h-14 px-5")}>
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4" />发送队列</div>
-          <div className="text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
+      <div className={cn("shrink-0 space-y-3 border-b", compact ? "px-4 py-3" : "px-5 py-4")}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4" />发送队列</div>
+            <div className="text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
+          </div>
+          <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
+            <SelectTrigger className="h-9 w-[132px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
-          <SelectTrigger className="h-9 w-[132px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className={cn("grid gap-2", compact ? "grid-cols-1" : "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_160px_160px_auto]")}>
+          <Input value={messageId} onChange={(event) => onMessageIdChange(event.target.value)} placeholder="Message-ID" className="h-9" />
+          <Input value={recipient} onChange={(event) => onRecipientChange(event.target.value)} placeholder="收件人" className="h-9" />
+          <Input type="datetime-local" value={from} onChange={(event) => onFromChange(event.target.value)} className="h-9" />
+          <Input type="datetime-local" value={to} onChange={(event) => onToChange(event.target.value)} className="h-9" />
+          <Button type="button" variant="outline" size="sm" className="h-9" disabled={!hasFilters} onClick={onClearFilters}>清除</Button>
+        </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && <ScheduledSendSkeleton />}
@@ -1721,6 +1767,12 @@ function sendQueueSourceLabel(source: string) {
   if (normalized === "webmail") return "Webmail"
   if (normalized === "scheduled") return "定时发送"
   return source || "未知"
+}
+
+function datetimeLocalToISO(value: string) {
+  if (!value) return ""
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? "" : date.toISOString()
 }
 
 type BulkAction = "read" | "unread" | "star" | "unstar" | "archive" | "trash" | "spam" | "delete"
@@ -1995,6 +2047,7 @@ function CompactMailView({
   onStar,
   onReply,
   onForward,
+  onSendTimeline,
   onArchive,
   onDelete,
   onToggleRead,
@@ -2033,6 +2086,7 @@ function CompactMailView({
   onStar: (message: MailMessage) => void
   onReply: (message: MailMessage) => void
   onForward: (message: MailMessage) => void
+  onSendTimeline: (message: MailMessage) => void
   onArchive: (message: MailMessage) => void
   onDelete: (message: MailMessage) => void
   onToggleRead: (message: MailMessage) => void
@@ -2064,6 +2118,7 @@ function CompactMailView({
         onStar={onStar}
         onReply={onReply}
         onForward={onForward}
+        onSendTimeline={onSendTimeline}
         onArchive={onArchive}
         onDelete={onDelete}
         onToggleRead={onToggleRead}
@@ -2126,6 +2181,7 @@ function CompactMessageDetail({
   onStar,
   onReply,
   onForward,
+  onSendTimeline,
   onArchive,
   onDelete,
   onToggleRead,
@@ -2147,6 +2203,7 @@ function CompactMessageDetail({
   onStar: (message: MailMessage) => void
   onReply: (message: MailMessage) => void
   onForward: (message: MailMessage) => void
+  onSendTimeline: (message: MailMessage) => void
   onArchive: (message: MailMessage) => void
   onDelete: (message: MailMessage) => void
   onToggleRead: (message: MailMessage) => void
@@ -2185,6 +2242,7 @@ function CompactMessageDetail({
                   <>
                     {canSend && <DropdownMenuItem onSelect={() => onReply(selected)}><Reply className="h-4 w-4" />回复</DropdownMenuItem>}
                     {canSend && <DropdownMenuItem onSelect={() => onForward(selected)}><Forward className="h-4 w-4" />转发</DropdownMenuItem>}
+                    {selected.sendQueueId && <DropdownMenuItem onSelect={() => onSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</DropdownMenuItem>}
                     {canOrganize && <DropdownMenuItem onSelect={() => onArchive(selected)}><Archive className="h-4 w-4" />{selected.folder === "Archive" ? "取消归档" : "归档"}</DropdownMenuItem>}
                     {canOrganize && <DropdownMenuItem onSelect={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</DropdownMenuItem>}
                     {canOrganize && <DropdownMenuItem onSelect={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</DropdownMenuItem>}
@@ -2204,6 +2262,7 @@ function CompactMessageDetail({
               <>
                 {selected && canSend && <Button variant="outline" size="sm" onClick={() => onReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
                 {selected && canSend && <Button variant="outline" size="sm" onClick={() => onForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
+                {selected?.sendQueueId && <Button variant="outline" size="sm" onClick={() => onSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</Button>}
                 {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>{selected.folder === "Archive" ? "取消归档" : "归档"}</Button>}
                 {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</Button>}
                 {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</Button>}
