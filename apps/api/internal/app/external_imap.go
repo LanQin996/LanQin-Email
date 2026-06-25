@@ -317,7 +317,7 @@ func (a *App) handleTestExternalIMAPAccount(w http.ResponseWriter, r *http.Reque
 	folders, err := client.ListFolders(r.Context())
 	if err != nil {
 		a.updateExternalIMAPStatus(r.Context(), account.ID, "error", err.Error())
-		respondError(w, http.StatusBadRequest, "connection failed: "+err.Error())
+		respondError(w, http.StatusBadRequest, "list folders failed: "+err.Error())
 		return
 	}
 	a.updateExternalIMAPStatus(r.Context(), account.ID, "ok", "")
@@ -1499,7 +1499,7 @@ func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAc
 		}
 		if err := c.Authenticate(newExternalIMAPXOAUTH2Client(account.Username, token)); err != nil {
 			c.Close()
-			return nil, err
+			return nil, fmt.Errorf("oauth xoauth2 authenticate failed: %w", err)
 		}
 	} else {
 		password, err := a.decryptExternalIMAPPassword(account.PasswordCiphertext)
@@ -1525,11 +1525,15 @@ func newExternalIMAPXOAUTH2Client(username, token string) externalIMAPXOAUTH2Cli
 }
 
 func (c externalIMAPXOAUTH2Client) Start() (string, []byte, error) {
-	return "XOAUTH2", []byte("user=" + c.username + "\x01auth=Bearer " + c.token + "\x01\x01"), nil
+	return "XOAUTH2", externalIMAPXOAUTH2Response(c.username, c.token), nil
 }
 
 func (c externalIMAPXOAUTH2Client) Next(challenge []byte) ([]byte, error) {
 	return []byte{}, nil
+}
+
+func externalIMAPXOAUTH2Response(username, token string) []byte {
+	return []byte("user=" + username + "\x01auth=Bearer " + token + "\x01\x01")
 }
 
 func (a *App) externalIMAPOAuthAccessToken(ctx context.Context, account externalIMAPAccountRecord) (string, error) {
@@ -1590,7 +1594,20 @@ func (c *goExternalIMAPClient) Close() error {
 }
 
 func (c *goExternalIMAPClient) ListFolders(ctx context.Context) ([]externalIMAPRemoteFolder, error) {
-	list, err := c.client.List("", "*", &imap.ListOptions{ReturnStatus: &imap.StatusOptions{NumMessages: true, NumUnseen: true}}).Collect()
+	caps := c.client.Caps()
+	var options *imap.ListOptions
+	if caps.Has(imap.CapIMAP4rev2) || caps.Has(imap.CapListStatus) {
+		options = &imap.ListOptions{ReturnStatus: &imap.StatusOptions{NumMessages: true, NumUnseen: true}}
+	}
+	list, err := c.client.List("", "*", options).Collect()
+	if err != nil && options != nil {
+		// Some Outlook/Exchange IMAP deployments advertise extended LIST
+		// capabilities but reject LIST RETURN (STATUS ...) with
+		// "BAD Command Argument Error. 12". Fall back to a plain LIST and
+		// fetch counts with STATUS separately.
+		options = nil
+		list, err = c.client.List("", "*", nil).Collect()
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -1612,6 +1629,21 @@ func (c *goExternalIMAPClient) ListFolders(ctx context.Context) ([]externalIMAPR
 			f.Name = "INBOX"
 		}
 		folders = append(folders, f)
+	}
+	if options == nil {
+		statusOptions := &imap.StatusOptions{NumMessages: true, NumUnseen: true}
+		for i := range folders {
+			status, err := c.client.Status(folders[i].Name, statusOptions).Wait()
+			if err != nil {
+				continue
+			}
+			if status.NumMessages != nil {
+				folders[i].TotalCount = int(*status.NumMessages)
+			}
+			if status.NumUnseen != nil {
+				folders[i].UnreadCount = int(*status.NumUnseen)
+			}
+		}
 	}
 	if len(folders) == 0 {
 		folders = append(folders, externalIMAPRemoteFolder{Name: "INBOX", Role: "Inbox"})
