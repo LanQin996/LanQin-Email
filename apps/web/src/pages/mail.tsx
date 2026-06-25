@@ -138,12 +138,13 @@ export function MailPage() {
   const canManageLabels = hasPermission(user, "mail.labels.manage")
   const canDownloadAttachments = hasPermission(user, "mail.attachments.download")
   const canManageSignatures = hasPermission(user, "mail.signatures.manage")
+  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const externalImapEnabled = publicSettings.data?.externalImapEnabled ?? false
 
   const mailboxList = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes, enabled: canAccessMail })
-  const externalMailAccounts = useQuery({ queryKey: ["mail-external-accounts"], queryFn: api.externalMailAccounts, enabled: canAccessMail && canReadMail })
-  const selectedExternalAccount = React.useMemo(() => externalMailAccounts.data?.items.find((item) => item.id === selectedExternalAccountId), [externalMailAccounts.data?.items, selectedExternalAccountId])
-  const externalFolders = useQuery({ queryKey: ["mail-external-folders", selectedExternalAccountId], queryFn: () => api.externalFolders(selectedExternalAccountId), enabled: !!selectedExternalAccountId && canReadMail })
-  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const externalMailAccounts = useQuery({ queryKey: ["mail-external-accounts"], queryFn: api.externalMailAccounts, enabled: canAccessMail && canReadMail && externalImapEnabled })
+  const selectedExternalAccount = React.useMemo(() => externalImapEnabled ? externalMailAccounts.data?.items.find((item) => item.id === selectedExternalAccountId) : undefined, [externalImapEnabled, externalMailAccounts.data?.items, selectedExternalAccountId])
+  const externalFolders = useQuery({ queryKey: ["mail-external-folders", selectedExternalAccountId], queryFn: () => api.externalFolders(selectedExternalAccountId), enabled: !!selectedExternalAccountId && canReadMail && externalImapEnabled })
   const selectedMailbox = React.useMemo(() => mailboxList.data?.items.find((item) => item.id === selectedMailboxId), [mailboxList.data?.items, selectedMailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const hasMailboxes = (mailboxList.data?.items.length || 0) > 0
@@ -160,6 +161,11 @@ export function MailPage() {
   })
   const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: !!sendQueueAuditId && canViewSendQueue })
   const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
+  React.useEffect(() => {
+    if (externalImapEnabled) return
+    setSelectedExternalAccountId("")
+    if (mailView === "external") setMailView("folder")
+  }, [externalImapEnabled, mailView])
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
     queryFn: () => api.messages("Inbox", "", "", activeMailboxId),
@@ -184,9 +190,9 @@ export function MailPage() {
     queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : "", query),
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!selectedExternalAccountId && canReadMail && mailView === "external",
+    enabled: !!selectedExternalAccountId && canReadMail && mailView === "external" && externalImapEnabled,
   })
-  const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || !!selectedExternalAccountId) })
+  const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)) })
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
     qc.setQueryData(["message", id], (current: MailMessage | undefined) => current ? { ...current, ...patch } : current)
     qc.setQueriesData({ queryKey: ["messages"] }, (current: InfiniteData<MailListResponse> | undefined) => {
@@ -573,8 +579,8 @@ export function MailPage() {
   const sendQueueCount = sendQueueItems.filter((item) => item.status === "failed" || item.status === "queued" || item.status === "sending").length
   const visibleSendQueueItems = sendQueueItems
   const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, canScheduleMail ? scheduledCount : 0, canScheduleMail, canViewSendQueue ? sendQueueCount : 0, canViewSendQueue)
-  const externalAccountItems = externalMailAccounts.data?.items || []
-  const externalFolderItems = externalFolders.data?.items || []
+  const externalAccountItems = externalImapEnabled ? externalMailAccounts.data?.items || [] : []
+  const externalFolderItems = externalImapEnabled ? externalFolders.data?.items || [] : []
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
   const viewTitle = mailView === "external" ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}` : mailView === "sendQueue" ? "发送队列" : mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder

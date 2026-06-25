@@ -129,7 +129,7 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
 - 第三方客户端可通过 LanQin API 提供的 SMTP `465/587` 发信；Webmail/API 和第三方客户端的“已发送”都由 API 写入，外发投递进入发送队列并由 API worker relay/retry，客户端后续 IMAP APPEND 到 Sent 会按 `Message-ID` 去重。
-- 用户可在个人邮箱管理中接入外部 IMAP 账号；本地存储模式会同步到 LanQin，远端直连模式每次从远端读取。启用前必须配置 `LANQIN_EXTERNAL_IMAP_SECRET_KEY`，默认不允许连接 localhost / 内网 / link-local IMAP 主机。Gmail / Microsoft 365 / Outlook OAuth2 需要在对应控制台配置回调地址：`/api/external-imap-oauth/gmail/callback` 或 `/api/external-imap-oauth/outlook/callback`。
+- 用户可在个人邮箱管理中接入外部 IMAP 账号；默认关闭，可在后台“系统设置 > 外部 IMAP”开启并配置密钥/OAuth。本地存储模式会同步到 LanQin，远端直连模式每次从远端读取。启用前必须配置外部 IMAP 密码加密密钥，默认不允许连接 localhost / 内网 / link-local IMAP 主机。Gmail / Microsoft 365 / Outlook OAuth2 需要在对应控制台配置回调地址：`/api/external-imap-oauth/gmail/callback` 或 `/api/external-imap-oauth/outlook/callback`。
 - send-as v1 支持本人邮箱、启用的别名转发 source 指向本人邮箱，或数据库表 `send_as_grants` 中显式授权的地址。
 
 ## 邮件客户端 TLS 证书

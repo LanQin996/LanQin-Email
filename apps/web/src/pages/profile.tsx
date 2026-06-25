@@ -102,15 +102,16 @@ export function ProfilePage() {
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders, enabled: canManageBlocked })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
-  const externalImapAccounts = useQuery({ queryKey: ["external-imap-accounts", activeMailboxId], queryFn: () => api.externalImapAccounts(activeMailboxId), enabled: !!activeMailboxId && canAccessMail })
+  const externalImapEnabled = publicSettings.data?.externalImapEnabled ?? false
+  const externalImapAccounts = useQuery({ queryKey: ["external-imap-accounts", activeMailboxId], queryFn: () => api.externalImapAccounts(activeMailboxId), enabled: !!activeMailboxId && canAccessMail && externalImapEnabled })
   React.useEffect(() => {
     if (!externalRunAccountId) return
     if (externalImapAccounts.data?.items.some((item) => item.id === externalRunAccountId)) return
     setExternalRunAccountId("")
   }, [externalImapAccounts.data?.items, externalRunAccountId])
   const selectedExternalRunAccount = externalImapAccounts.data?.items.find((item) => item.id === externalRunAccountId)
-  const externalRunFolders = useQuery({ queryKey: ["external-imap-run-folders", externalRunAccountId], queryFn: () => api.externalFolders(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail })
-  const externalSyncRuns = useQuery({ queryKey: ["external-imap-sync-runs", externalRunAccountId], queryFn: () => api.externalImapSyncRuns(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail })
+  const externalRunFolders = useQuery({ queryKey: ["external-imap-run-folders", externalRunAccountId], queryFn: () => api.externalFolders(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail && externalImapEnabled })
+  const externalSyncRuns = useQuery({ queryKey: ["external-imap-sync-runs", externalRunAccountId], queryFn: () => api.externalImapSyncRuns(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail && externalImapEnabled })
   const ruleLabels = useQuery({ queryKey: ["labels", "rules", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && canManageRules && (canReadMail || canManageLabels) })
   const stats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && canViewStats })
 
@@ -342,6 +343,7 @@ export function ProfilePage() {
         applyOptions={mailboxApplyOptions.data}
         applyPending={applyMailbox.isPending}
         selectedMailboxId={mailboxId}
+        externalImapEnabled={externalImapEnabled}
         externalAccounts={externalImapAccounts.data?.items || []}
         externalPending={createExternalImap.isPending || updateExternalImap.isPending || deleteExternalImap.isPending || testExternalImap.isPending || syncExternalImap.isPending || syncExternalImapFolder.isPending || startExternalOAuth.isPending}
         selectedExternalRunAccountId={externalRunAccountId}
@@ -559,6 +561,7 @@ function MailboxManagement({
   applyOptions,
   applyPending,
   selectedMailboxId,
+  externalImapEnabled,
   externalAccounts,
   externalPending,
   selectedExternalRunAccountId,
@@ -581,6 +584,7 @@ function MailboxManagement({
   applyOptions?: MailboxApplyOptions
   applyPending: boolean
   selectedMailboxId: string
+  externalImapEnabled: boolean
   externalAccounts: ExternalImapAccount[]
   externalPending: boolean
   selectedExternalRunAccountId: string
@@ -610,7 +614,7 @@ function MailboxManagement({
         {mailboxes.map((m) => <Card key={m.id} className={cn(selectedMailboxId === m.id && "border-primary")}><CardHeader><div className="flex items-start justify-between gap-3"><div className="min-w-0"><CardTitle className="truncate text-base">{m.address}</CardTitle></div>{selectedMailboxId === m.id && <Badge>当前</Badge>}</div></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => onSelect(m.id)}>设为当前</Button><Button variant="outline" size="sm" onClick={() => onCopy(m.address)}><Copy className="h-4 w-4" />复制</Button><Button size="sm" onClick={() => onOpen(m.id)}>进入邮箱</Button></CardContent></Card>)}
         {mailboxes.length === 0 && <EmptyState text={canApply ? "暂无邮箱账号，点击申请邮箱创建" : "暂无邮箱账号"} />}
       </div>
-      <Card>
+      {externalImapEnabled && <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -655,7 +659,7 @@ function MailboxManagement({
             )
           })}
         </CardContent>
-      </Card>
+      </Card>}
     </div>
   )
 }

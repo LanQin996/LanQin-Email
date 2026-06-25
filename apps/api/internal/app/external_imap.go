@@ -148,6 +148,9 @@ func (a *App) externalIMAPWorker(ctx context.Context) {
 }
 
 func (a *App) syncDueExternalIMAPAccounts(ctx context.Context) {
+	if !a.cfg.ExternalIMAPEnabled {
+		return
+	}
 	rows, err := a.db.QueryContext(ctx, `SELECT id FROM external_imap_accounts WHERE enabled=1 AND storage_mode=? ORDER BY COALESCE(last_sync_at, created_at) ASC LIMIT 10`, externalIMAPStorageLocal)
 	if err != nil {
 		a.log.Warn("failed to list external imap accounts", "error", err)
@@ -163,6 +166,16 @@ func (a *App) syncDueExternalIMAPAccounts(ctx context.Context) {
 		_, _ = a.syncExternalIMAPAccount(runCtx, id)
 		cancel()
 	}
+}
+
+func (a *App) requireExternalIMAPEnabled(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.cfg.ExternalIMAPEnabled {
+			respondError(w, http.StatusForbidden, "external imap is disabled")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (a *App) handleListExternalIMAPAccounts(w http.ResponseWriter, r *http.Request) {

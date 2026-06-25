@@ -980,7 +980,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const canUpdateTemplates = hasPermission(user, "admin.templates.update")
   const canResetTemplates = hasPermission(user, "admin.templates.reset")
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates, enabled: canViewTemplates })
-  const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "templates" | "security" | "about">("base")
+  const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "externalImap" | "templates" | "security" | "about">("base")
   const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage" })
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
@@ -991,6 +991,8 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const [mailAutoRefresh, setMailAutoRefresh] = React.useState(true)
   const [userMailboxApplyEnabled, setUserMailboxApplyEnabled] = React.useState(false)
   const [userMailboxDomainIds, setUserMailboxDomainIds] = React.useState<string[]>([])
+  const [externalImapEnabled, setExternalImapEnabled] = React.useState(false)
+  const [externalImapAllowPrivateHosts, setExternalImapAllowPrivateHosts] = React.useState(false)
   React.useEffect(() => {
     if (!settings) return
     setSmtpRequireTls(settings.smtpRequireTls)
@@ -1002,6 +1004,8 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     setMailAutoRefresh(settings.mailAutoRefresh)
     setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
     setUserMailboxDomainIds(settings.userMailboxDomainIds || [])
+    setExternalImapEnabled(settings.externalImapEnabled)
+    setExternalImapAllowPrivateHosts(settings.externalImapAllowPrivateHosts)
   }, [settings])
   const save = useMutation({
     mutationFn: (form: FormData) => api.updateSystemSettings({
@@ -1027,6 +1031,14 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       userMailboxApplyEnabled,
       userMailboxDomainIds,
       reservedMailboxPrefixes: fieldValue(form, "reservedMailboxPrefixes", settings?.reservedMailboxPrefixes || ""),
+      externalImapEnabled,
+      externalImapSecretKey: fieldValue(form, "externalImapSecretKey", ""),
+      externalImapSyncSeconds: fieldNumber(form, "externalImapSyncSeconds", settings?.externalImapSyncSeconds || 300),
+      externalImapAllowPrivateHosts,
+      externalImapGmailClientId: fieldValue(form, "externalImapGmailClientId", settings?.externalImapGmailClientId || ""),
+      externalImapGmailClientSecret: fieldValue(form, "externalImapGmailClientSecret", ""),
+      externalImapOutlookClientId: fieldValue(form, "externalImapOutlookClientId", settings?.externalImapOutlookClientId || ""),
+      externalImapOutlookClientSecret: fieldValue(form, "externalImapOutlookClientSecret", ""),
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["admin", "settings"] })
@@ -1060,6 +1072,14 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     settings.userMailboxApplyEnabled,
     (settings.userMailboxDomainIds || []).join(","),
     settings.reservedMailboxPrefixes,
+    settings.externalImapEnabled,
+    settings.externalImapSecretSet,
+    settings.externalImapSyncSeconds,
+    settings.externalImapAllowPrivateHosts,
+    settings.externalImapGmailClientId,
+    settings.externalImapGmailClientSecretSet,
+    settings.externalImapOutlookClientId,
+    settings.externalImapOutlookClientSecretSet,
   ].join("|") : "loading"
   const tabs: { key: typeof settingsTab; label: string }[] = [
     ...(canSettingsView ? [
@@ -1067,6 +1087,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       { key: "smtp" as const, label: "SMTP" },
       { key: "storage" as const, label: "存储" },
       { key: "mail" as const, label: "邮件" },
+      { key: "externalImap" as const, label: "外部 IMAP" },
     ] : []),
     ...(canViewTemplates ? [{ key: "templates" as const, label: "模板" }] : []),
     ...(canSettingsView ? [{ key: "security" as const, label: "安全" }] : []),
@@ -1170,6 +1191,49 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
           {mailAutoRefresh && (
             <div className="border-t pt-5">
               <Field name="mailRefreshSeconds" label="刷新间隔秒数" type="number" min={5} defaultValue={String(settings?.mailRefreshSeconds || 30)} />
+            </div>
+          )}
+        </CardContent>
+      </Card>}
+
+      {settingsTab === "externalImap" && <Card>
+        <CardHeader>
+          <CardTitle>外部 IMAP 接入</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
+            默认关闭。关闭后用户端会隐藏外部 IMAP 接入，相关后端接口也会返回禁用。
+          </div>
+          <SwitchRow label="启用外部 IMAP" checked={externalImapEnabled} onCheckedChange={setExternalImapEnabled} />
+          {externalImapEnabled && (
+            <div className="space-y-5 border-t pt-5">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Field name="externalImapSecretKey" label={settings?.externalImapSecretSet ? "密码加密密钥（留空不变）" : "密码加密密钥"} type="password" required={!settings?.externalImapSecretSet} />
+                <Field name="externalImapSyncSeconds" label="后台同步间隔秒数" type="number" min={30} defaultValue={String(settings?.externalImapSyncSeconds || 300)} />
+              </div>
+              <SwitchRow label="允许 localhost / 内网 / link-local IMAP 主机" checked={externalImapAllowPrivateHosts} onCheckedChange={setExternalImapAllowPrivateHosts} />
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <div className="font-medium">Gmail OAuth2</div>
+                  <div className="text-xs text-muted-foreground">回调地址：{(settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, "")}/api/external-imap-oauth/gmail/callback</div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field name="externalImapGmailClientId" label="Gmail Client ID" defaultValue={settings?.externalImapGmailClientId || ""} required={false} />
+                  <Field name="externalImapGmailClientSecret" label={settings?.externalImapGmailClientSecretSet ? "Gmail Client Secret（留空不变）" : "Gmail Client Secret"} type="password" required={false} />
+                </div>
+              </div>
+              <Separator />
+              <div className="space-y-3">
+                <div>
+                  <div className="font-medium">Microsoft 365 / Outlook OAuth2</div>
+                  <div className="text-xs text-muted-foreground">回调地址：{(settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, "")}/api/external-imap-oauth/outlook/callback</div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <Field name="externalImapOutlookClientId" label="Outlook Client ID" defaultValue={settings?.externalImapOutlookClientId || ""} required={false} />
+                  <Field name="externalImapOutlookClientSecret" label={settings?.externalImapOutlookClientSecretSet ? "Outlook Client Secret（留空不变）" : "Outlook Client Secret"} type="password" required={false} />
+                </div>
+              </div>
             </div>
           )}
         </CardContent>

@@ -308,28 +308,36 @@ func updateRegularPermissionGroupWithLimits(t *testing.T, admin *testClient, per
 
 func systemSettingsPayload(settings SystemSettings) map[string]any {
 	return map[string]any{
-		"publicHostname":          settings.PublicHostname,
-		"publicBaseUrl":           settings.PublicBaseURL,
-		"smtpHost":                settings.SMTPHost,
-		"smtpPort":                settings.SMTPPort,
-		"smtpUsername":            settings.SMTPUsername,
-		"smtpPassword":            "",
-		"smtpRequireTls":          settings.SMTPRequireTLS,
-		"maildirRoot":             settings.MaildirRoot,
-		"maildirScanSeconds":      settings.MaildirScanSeconds,
-		"sessionTtlHours":         settings.SessionTTLHours,
-		"allowInsecureHttp":       settings.AllowInsecureHTTP,
-		"openRegistration":        settings.OpenRegistration,
-		"twoFactorEnabled":        settings.TwoFactorEnabled,
-		"turnstileEnabled":        settings.TurnstileEnabled,
-		"turnstileSiteKey":        settings.TurnstileSiteKey,
-		"turnstileSecretKey":      "",
-		"catchAllEnabled":         settings.CatchAllEnabled,
-		"mailAutoRefresh":         settings.MailAutoRefresh,
-		"mailRefreshSeconds":      settings.MailRefreshSeconds,
-		"userMailboxApplyEnabled": settings.UserMailboxApplyEnabled,
-		"userMailboxDomainIds":    settings.UserMailboxDomainIDs,
-		"reservedMailboxPrefixes": settings.ReservedMailboxPrefixes,
+		"publicHostname":                  settings.PublicHostname,
+		"publicBaseUrl":                   settings.PublicBaseURL,
+		"smtpHost":                        settings.SMTPHost,
+		"smtpPort":                        settings.SMTPPort,
+		"smtpUsername":                    settings.SMTPUsername,
+		"smtpPassword":                    "",
+		"smtpRequireTls":                  settings.SMTPRequireTLS,
+		"maildirRoot":                     settings.MaildirRoot,
+		"maildirScanSeconds":              settings.MaildirScanSeconds,
+		"sessionTtlHours":                 settings.SessionTTLHours,
+		"allowInsecureHttp":               settings.AllowInsecureHTTP,
+		"openRegistration":                settings.OpenRegistration,
+		"twoFactorEnabled":                settings.TwoFactorEnabled,
+		"turnstileEnabled":                settings.TurnstileEnabled,
+		"turnstileSiteKey":                settings.TurnstileSiteKey,
+		"turnstileSecretKey":              "",
+		"catchAllEnabled":                 settings.CatchAllEnabled,
+		"mailAutoRefresh":                 settings.MailAutoRefresh,
+		"mailRefreshSeconds":              settings.MailRefreshSeconds,
+		"userMailboxApplyEnabled":         settings.UserMailboxApplyEnabled,
+		"userMailboxDomainIds":            settings.UserMailboxDomainIDs,
+		"reservedMailboxPrefixes":         settings.ReservedMailboxPrefixes,
+		"externalImapEnabled":             settings.ExternalIMAPEnabled,
+		"externalImapSecretKey":           "",
+		"externalImapSyncSeconds":         settings.ExternalIMAPSyncSeconds,
+		"externalImapAllowPrivateHosts":   settings.ExternalIMAPAllowPrivateHosts,
+		"externalImapGmailClientId":       settings.ExternalIMAPGmailClientID,
+		"externalImapGmailClientSecret":   "",
+		"externalImapOutlookClientId":     settings.ExternalIMAPOutlookClientID,
+		"externalImapOutlookClientSecret": "",
 	}
 }
 
@@ -450,6 +458,7 @@ func TestExternalIMAPAccountEncryptsPasswordAndDoesNotReturnSecret(t *testing.T)
 		PublicHostname:                "mail.example.test",
 		PublicBaseURL:                 "http://localhost:5173",
 		AllowInsecureHTTP:             true,
+		ExternalIMAPEnabled:           true,
 		ExternalIMAPSecretKey:         "test-secret",
 		ExternalIMAPAllowPrivateHosts: true,
 	})
@@ -494,8 +503,57 @@ func TestExternalIMAPAccountEncryptsPasswordAndDoesNotReturnSecret(t *testing.T)
 	}
 }
 
+func TestExternalIMAPDisabledByDefaultAndAdminSettings(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	payload := map[string]any{"mailboxId": mb.ID, "name": "Disabled", "host": "imap.example.com", "port": 993, "tlsMode": "tls", "username": "user@example.com", "password": "secret", "storageMode": "remote"}
+	var body map[string]any
+	if code := admin.do("POST", "/api/me/external-imap-accounts", payload, &body); code != http.StatusForbidden {
+		t.Fatalf("external imap should be disabled by default code=%d body=%v", code, body)
+	}
+	var public PublicSettings
+	if code := admin.do("GET", "/api/public/settings", nil, &public); code != http.StatusOK || public.ExternalIMAPEnabled {
+		t.Fatalf("public settings should expose disabled external imap code=%d settings=%+v", code, public)
+	}
+	var settings SystemSettings
+	if code := admin.do("GET", "/api/admin/settings", nil, &settings); code != http.StatusOK {
+		t.Fatalf("get settings code=%d", code)
+	}
+	update := systemSettingsPayload(settings)
+	update["externalImapEnabled"] = true
+	if code := admin.do("POST", "/api/admin/settings", update, &body); code != http.StatusBadRequest {
+		t.Fatalf("enable without secret should fail code=%d body=%v", code, body)
+	}
+	update["externalImapSecretKey"] = "test-secret"
+	update["externalImapSyncSeconds"] = 120
+	update["externalImapAllowPrivateHosts"] = true
+	update["externalImapGmailClientId"] = "gmail-client"
+	update["externalImapGmailClientSecret"] = "gmail-secret"
+	update["externalImapOutlookClientId"] = "outlook-client"
+	update["externalImapOutlookClientSecret"] = "outlook-secret"
+	if code := admin.do("POST", "/api/admin/settings", update, &settings); code != http.StatusOK || !settings.ExternalIMAPEnabled || !settings.ExternalIMAPSecretSet || settings.ExternalIMAPSyncSeconds != 120 || !settings.ExternalIMAPAllowPrivateHosts || !settings.ExternalIMAPGmailClientSecretSet || !settings.ExternalIMAPOutlookClientSecretSet {
+		t.Fatalf("enable external imap code=%d settings=%+v", code, settings)
+	}
+	if settings.ExternalIMAPGmailClientID != "gmail-client" || settings.ExternalIMAPOutlookClientID != "outlook-client" {
+		t.Fatalf("oauth client ids not saved: %+v", settings)
+	}
+	if a.cfg.ExternalIMAPSecretKey != "test-secret" || a.cfg.ExternalIMAPGmailClientSecret != "gmail-secret" || a.cfg.ExternalIMAPOutlookClientSecret != "outlook-secret" {
+		t.Fatalf("secret settings not persisted in config")
+	}
+	if code := admin.do("GET", "/api/public/settings", nil, &public); code != http.StatusOK || !public.ExternalIMAPEnabled {
+		t.Fatalf("public settings should expose enabled external imap code=%d settings=%+v", code, public)
+	}
+}
+
 func TestExternalIMAPRejectsPrivateHostsByDefault(t *testing.T) {
 	a := newTestApp(t)
+	a.cfg.ExternalIMAPEnabled = true
 	a.cfg.ExternalIMAPSecretKey = "test-secret"
 	ts := httptest.NewServer(a.Router())
 	defer ts.Close()
@@ -524,6 +582,7 @@ func TestExternalIMAPOAuthStateDoesNotDefaultToLocalMailbox(t *testing.T) {
 		PublicHostname:                  "mail.example.test",
 		PublicBaseURL:                   "http://localhost:5173",
 		AllowInsecureHTTP:               true,
+		ExternalIMAPEnabled:             true,
 		ExternalIMAPSecretKey:           "test-secret",
 		ExternalIMAPOutlookClientID:     "client-id",
 		ExternalIMAPOutlookClientSecret: "client-secret",
@@ -635,6 +694,7 @@ func TestExternalIMAPAccountOwnershipIsolation(t *testing.T) {
 		PublicHostname:                "mail.example.test",
 		PublicBaseURL:                 "http://localhost:5173",
 		AllowInsecureHTTP:             true,
+		ExternalIMAPEnabled:           true,
 		ExternalIMAPSecretKey:         "test-secret",
 		ExternalIMAPAllowPrivateHosts: true,
 	})
@@ -1457,27 +1517,8 @@ func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	if code := admin.do("GET", "/api/admin/settings", nil, &settings); code != http.StatusOK {
 		t.Fatalf("get settings code=%d", code)
 	}
-	update := map[string]any{
-		"publicHostname":     settings.PublicHostname,
-		"publicBaseUrl":      settings.PublicBaseURL,
-		"smtpHost":           settings.SMTPHost,
-		"smtpPort":           settings.SMTPPort,
-		"smtpUsername":       settings.SMTPUsername,
-		"smtpPassword":       "",
-		"smtpRequireTls":     settings.SMTPRequireTLS,
-		"maildirRoot":        settings.MaildirRoot,
-		"maildirScanSeconds": settings.MaildirScanSeconds,
-		"sessionTtlHours":    settings.SessionTTLHours,
-		"allowInsecureHttp":  settings.AllowInsecureHTTP,
-		"openRegistration":   settings.OpenRegistration,
-		"twoFactorEnabled":   settings.TwoFactorEnabled,
-		"turnstileEnabled":   settings.TurnstileEnabled,
-		"turnstileSiteKey":   settings.TurnstileSiteKey,
-		"turnstileSecretKey": "",
-		"catchAllEnabled":    true,
-		"mailAutoRefresh":    settings.MailAutoRefresh,
-		"mailRefreshSeconds": settings.MailRefreshSeconds,
-	}
+	update := systemSettingsPayload(settings)
+	update["catchAllEnabled"] = true
 	if code := admin.do("POST", "/api/admin/settings", update, &settings); code != http.StatusOK || !settings.CatchAllEnabled {
 		t.Fatalf("enable catch-all code=%d settings=%+v", code, settings)
 	}
