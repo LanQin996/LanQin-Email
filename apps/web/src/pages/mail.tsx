@@ -99,6 +99,7 @@ export function MailPage() {
   const [mailFilter, setMailFilter] = React.useState<MailFilter>("all")
   const [selectedMailboxId, setSelectedMailboxId] = React.useState(() => localStorage.getItem("lanqin:selected-mailbox") || "")
   const [selectedExternalAccountId, setSelectedExternalAccountId] = React.useState("")
+  const [expandedExternalAccountIds, setExpandedExternalAccountIds] = React.useState<string[]>([])
   const [externalFolder, setExternalFolder] = React.useState("INBOX")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
   const [displayMode] = useDisplayMode()
@@ -164,8 +165,16 @@ export function MailPage() {
   React.useEffect(() => {
     if (externalImapEnabled) return
     setSelectedExternalAccountId("")
+    setExpandedExternalAccountIds([])
     if (mailView === "external") setMailView("folder")
   }, [externalImapEnabled, mailView])
+  React.useEffect(() => {
+    const ids = new Set((externalMailAccounts.data?.items || []).map((item) => item.id))
+    setExpandedExternalAccountIds((current) => {
+      const next = current.filter((id) => ids.has(id))
+      return next.length === current.length ? current : next
+    })
+  }, [externalMailAccounts.data?.items])
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
     queryFn: () => api.messages("Inbox", "", "", activeMailboxId),
@@ -761,12 +770,28 @@ export function MailPage() {
   }
   function openExternalFolder(account: ExternalImapAccount, folderName = "INBOX") {
     setSelectedExternalAccountId(account.id)
+    setExpandedExternalAccountIds([account.id])
     setExternalFolder(folderName)
     setMailView("external")
     setSelectedLabelId("")
     setSelectedId(null)
     setMailFilter("all")
     setMobileSidebarOpen(false)
+  }
+  function toggleExternalAccount(account: ExternalImapAccount) {
+    if (sidebarCollapsed) {
+      openExternalFolder(account, "INBOX")
+      return
+    }
+    const expanded = expandedExternalAccountIds.includes(account.id)
+    if (expanded) {
+      setExpandedExternalAccountIds((items) => items.filter((id) => id !== account.id))
+      return
+    }
+    setExpandedExternalAccountIds([account.id])
+    if (selectedExternalAccountId !== account.id || mailView !== "external") {
+      openExternalFolder(account, "INBOX")
+    }
   }
   function reorderCustomFolder(draggedId: string, target: FolderDropTarget) {
     if (!canOrganizeMail || reorderFolders.isPending) return
@@ -1041,20 +1066,31 @@ export function MailPage() {
           {!sidebarCollapsed && <SidebarGroupLabel>外部邮箱</SidebarGroupLabel>}
           <SidebarGroupContent>
             <SidebarMenu>
-              {externalAccountItems.map((account) => (
+              {externalAccountItems.map((account) => {
+                const expanded = expandedExternalAccountIds.includes(account.id)
+                return (
                 <React.Fragment key={account.id}>
                   <SidebarMenuItem>
                     <SidebarMenuButton
                       isActive={mailView === "external" && selectedExternalAccountId === account.id}
+                      size={sidebarCollapsed ? "default" : "lg"}
                       className={cn(sidebarCollapsed && "justify-center px-0")}
-                      onClick={() => openExternalFolder(account, "INBOX")}
+                      title={`${externalAccountLabel(account)}${account.name && account.name !== externalAccountLabel(account) ? ` · ${account.name}` : ""}`}
+                      onClick={() => toggleExternalAccount(account)}
                     >
                       <Mail className="h-4 w-4" />
-                      {!sidebarCollapsed && <span>{account.name}</span>}
-                      {!sidebarCollapsed && <Badge variant="outline" className="ml-auto">{account.storageMode === "local" ? "同步" : "直连"}</Badge>}
+                      {!sidebarCollapsed && (
+                        <>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">{externalAccountLabel(account)}</span>
+                            <span className="block truncate text-xs font-normal text-muted-foreground">{externalAccountSubtitle(account)}</span>
+                          </span>
+                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
+                        </>
+                      )}
                     </SidebarMenuButton>
                   </SidebarMenuItem>
-                  {!sidebarCollapsed && mailView === "external" && selectedExternalAccountId === account.id && externalFolderItems.map((item) => (
+                  {!sidebarCollapsed && expanded && externalFolderItems.map((item) => (
                     <SidebarMenuItem key={`${account.id}-${item.name}`}>
                       <SidebarMenuButton
                         isActive={externalFolder === item.name}
@@ -1067,8 +1103,9 @@ export function MailPage() {
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
+                  {!sidebarCollapsed && expanded && externalFolders.isLoading && <FolderSkeleton />}
                 </React.Fragment>
-              ))}
+              )})}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>}
@@ -1556,6 +1593,17 @@ function getEmptyMessage(mailView: MailView, folder: string, total: number) {
   if (folder === "Trash") return "回收站是空的"
   if (folder === "Spam") return "暂无垃圾邮件"
   return "当前文件夹没有邮件"
+}
+
+function externalAccountLabel(account: ExternalImapAccount) {
+  return account.oauthEmail || account.username || account.name || "外部邮箱"
+}
+
+function externalAccountSubtitle(account: ExternalImapAccount) {
+  const label = externalAccountLabel(account)
+  const mode = account.storageMode === "local" ? "同步" : "直连"
+  const name = account.name && account.name !== label ? account.name : ""
+  return [name, account.host, mode].filter(Boolean).join(" · ")
 }
 
 function NoMailboxState({ onOpenSettings }: { onOpenSettings: () => void }) {
