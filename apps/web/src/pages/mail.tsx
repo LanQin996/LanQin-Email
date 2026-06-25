@@ -66,6 +66,7 @@ type MailListResponse = { items?: MailMessage[]; nextCursor?: string }
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
 type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
+type MessageContextMenuState = { message: MailMessage; x: number; y: number }
 type MailMenuItem =
   | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number }
   | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number }
@@ -110,6 +111,8 @@ export function MailPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
   const [labelEditMode, setLabelEditMode] = React.useState(false)
   const [newLabelEditing, setNewLabelEditing] = React.useState(false)
+  const [messageContextMenu, setMessageContextMenu] = React.useState<MessageContextMenuState | null>(null)
+  const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
   const themeMountedRef = React.useRef(false)
   const mailNotifyStateRef = React.useRef<Record<string, MailNotificationState>>({})
@@ -282,6 +285,16 @@ export function MailPage() {
     },
     onError: (error) => toast({ title: "操作失败", description: error instanceof Error ? error.message : "请稍后重试" }),
     onSettled: () => setCancelingScheduledId(""),
+  })
+  const createFolder = useMutation({
+    mutationFn: (name: string) => api.createFolder({ mailboxId: activeMailboxId, name }),
+    onSuccess: (created) => {
+      qc.invalidateQueries({ queryKey: ["folders"] })
+      setFolderDialogOpen(false)
+      openFolder(created.name)
+      toast({ title: "文件夹已创建" })
+    },
+    onError: (error) => toast({ title: "创建文件夹失败", description: error instanceof Error ? error.message : "请稍后重试" }),
   })
   const retrySendQueue = useMutation({
     mutationFn: (item: SendQueueItem) => api.retrySendQueue(item.id),
@@ -628,6 +641,51 @@ export function MailPage() {
     setMailFilter("all")
     setMobileSidebarOpen(false)
   }
+  function openMessageContextMenu(event: React.MouseEvent, message: MailMessage) {
+    event.preventDefault()
+    event.stopPropagation()
+    if (message.folder !== "Drafts") setSelectedId(message.id)
+    setMessageContextMenu({ message, x: event.clientX, y: event.clientY })
+  }
+  function closeMessageContextMenu() {
+    setMessageContextMenu(null)
+  }
+  function runMessageContextAction(action: "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete", message: MailMessage) {
+    closeMessageContextMenu()
+    if (action === "open") {
+      openMessage(message.id)
+      return
+    }
+    if (action === "reply") {
+      openReply(message)
+      return
+    }
+    if (action === "forward") {
+      openForward(message)
+      return
+    }
+    if (action === "read") {
+      markRead.mutate({ id: message.id, read: !message.isRead })
+      return
+    }
+    if (action === "star") {
+      star.mutate({ id: message.id, starred: !message.isStarred })
+      return
+    }
+    if (action === "archive") {
+      move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })
+      return
+    }
+    if (action === "trash") {
+      move.mutate({ id: message.id, folder: "Trash" })
+      return
+    }
+    if (action === "spam") {
+      move.mutate({ id: message.id, folder: "Spam" })
+      return
+    }
+    confirmDeleteMessage(message)
+  }
   function openSendQueue() {
     setMailView("sendQueue")
     setSelectedLabelId("")
@@ -707,7 +765,16 @@ export function MailPage() {
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
-          {!sidebarCollapsed && <SidebarGroupLabel>邮件夹</SidebarGroupLabel>}
+          {!sidebarCollapsed && (
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <SidebarGroupLabel className="m-0 p-0">邮件夹</SidebarGroupLabel>
+              {canOrganizeMail && (
+                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setFolderDialogOpen(true)} disabled={!activeMailboxId}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          )}
           <SidebarGroupContent>
             <SidebarMenu>
               {mailMenuItems.map((item) => (
@@ -881,8 +948,9 @@ export function MailPage() {
       onAddLabel={(message, label) => addLabel.mutate({ id: message.id, label })}
       onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
       bulkPending={bulkPending}
-      onBulkAction={runBulkAction}
-      canSend={canSendMail}
+        onBulkAction={runBulkAction}
+        onContextMenu={openMessageContextMenu}
+        canSend={canSendMail}
       canOrganize={canOrganizeMail}
       canManageLabels={canManageLabels}
       canDownloadAttachments={canDownloadAttachments}
@@ -903,7 +971,7 @@ export function MailPage() {
           </div>
           <ScrollArea className="min-h-0 flex-1">
             {messages.isLoading && <MessageSkeleton />}
-            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} canOrganize={canOrganizeMail} />)}
+            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onContextMenu={(event) => openMessageContextMenu(event, m)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} canOrganize={canOrganizeMail} />)}
             {!messages.isLoading && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
             {!messages.isLoading && hasMoreMessages && (
               <div className="border-b p-4 text-center">
@@ -1036,6 +1104,31 @@ export function MailPage() {
         loading={sendQueueAudit.isLoading}
         events={sendQueueAudit.data?.items || []}
         onOpenChange={(open) => { if (!open) setSendQueueAuditId("") }}
+      />
+      <MessageContextMenu
+        state={messageContextMenu}
+        labels={labelItems}
+        folders={folders.data?.items || []}
+        canSend={canSendMail}
+        canOrganize={canOrganizeMail}
+        canManageLabels={canManageLabels}
+        labelPending={addLabel.isPending || removeLabel.isPending}
+        onClose={closeMessageContextMenu}
+        onAction={runMessageContextAction}
+        onMoveToFolder={(message, folderName) => {
+          closeMessageContextMenu()
+          move.mutate({ id: message.id, folder: folderName })
+        }}
+        onToggleLabel={(message, label) => {
+          const active = (message.labels || []).some((item) => item.id === label.id)
+          active ? removeLabel.mutate({ id: message.id, labelId: label.id }) : addLabel.mutate({ id: message.id, label })
+        }}
+      />
+      <CreateFolderDialog
+        open={folderDialogOpen}
+        pending={createFolder.isPending}
+        onOpenChange={setFolderDialogOpen}
+        onCreate={(name) => createFolder.mutate(name)}
       />
       <ConfirmDialog
         open={!!pendingConfirm}
@@ -1398,6 +1491,161 @@ function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (ac
   )
 }
 
+function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canManageLabels, labelPending, onClose, onAction, onMoveToFolder, onToggleLabel }: { state: MessageContextMenuState | null; labels: MailLabel[]; folders: MailFolder[]; canSend: boolean; canOrganize: boolean; canManageLabels: boolean; labelPending: boolean; onClose: () => void; onAction: (action: "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete", message: MailMessage) => void; onMoveToFolder: (message: MailMessage, folderName: string) => void; onToggleLabel: (message: MailMessage, label: MailLabel) => void }) {
+  React.useEffect(() => {
+    if (!state) return
+    const close = () => onClose()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    window.addEventListener("pointerdown", close)
+    window.addEventListener("resize", close)
+    window.addEventListener("scroll", close, true)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("pointerdown", close)
+      window.removeEventListener("resize", close)
+      window.removeEventListener("scroll", close, true)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [state, onClose])
+
+  if (!state) return null
+  const { message } = state
+  const position = contextMenuPosition(state.x, state.y)
+  const draft = message.folder === "Drafts"
+  const itemClass = "flex w-full items-center gap-2 rounded-sm px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-accent focus:bg-accent disabled:pointer-events-none disabled:opacity-50"
+
+  function item(label: string, icon: React.ReactNode, action: Parameters<typeof onAction>[0], destructive = false) {
+    return (
+      <button type="button" className={cn(itemClass, destructive && "text-destructive hover:text-destructive")} onClick={() => onAction(action, message)}>
+        {icon}
+        <span>{label}</span>
+      </button>
+    )
+  }
+  function toggleLabel(label: MailLabel) {
+    onToggleLabel(message, label)
+    onClose()
+  }
+  function moveToFolder(folderName: string) {
+    onMoveToFolder(message, folderName)
+    onClose()
+  }
+  const movableFolders = folders.filter((folder) => folder.name !== message.folder && folder.name !== "Drafts")
+
+  return (
+    <div
+      className="fixed z-[110] w-52 rounded-md border bg-popover p-1 text-popover-foreground shadow-md"
+      style={{ left: position.x, top: position.y }}
+      onClick={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+      onPointerDown={(event) => event.stopPropagation()}
+      role="menu"
+    >
+      {item(draft ? "编辑草稿" : "打开邮件", draft ? <PencilLine className="h-4 w-4" /> : <Mail className="h-4 w-4" />, "open")}
+      {!draft && canSend && (
+        <>
+          {item("回复", <Reply className="h-4 w-4" />, "reply")}
+          {item("转发", <Forward className="h-4 w-4" />, "forward")}
+        </>
+      )}
+      {!draft && canOrganize && (
+        <>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          {item(message.isRead ? "标为未读" : "标为已读", <MailCheck className="h-4 w-4" />, "read")}
+          {item(message.isStarred ? "取消星标" : "添加星标", <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />, "star")}
+          {item(message.folder === "Archive" ? "取消归档" : "归档", <Archive className="h-4 w-4" />, "archive")}
+          {message.folder !== "Trash" && item("移入回收站", <Trash2 className="h-4 w-4" />, "trash")}
+          {message.folder !== "Spam" && item("移入垃圾邮件", <Trash2 className="h-4 w-4" />, "spam")}
+        </>
+      )}
+      {!draft && canOrganize && movableFolders.length > 0 && (
+        <>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">移动到</div>
+          <div className="max-h-44 overflow-y-auto">
+            {movableFolders.map((folder) => (
+              <button key={folder.id} type="button" className={itemClass} onClick={() => moveToFolder(folder.name)}>
+                {folderIcons[folder.role] || <Inbox className="h-4 w-4" />}
+                <span className="min-w-0 flex-1 truncate text-left">{folderLabels[folder.name] || folder.name}</span>
+                {folder.totalCount > 0 && <span className="text-xs text-muted-foreground">{folder.totalCount}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      {canManageLabels && labels.length > 0 && (
+        <>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">标签</div>
+          <div className="max-h-44 overflow-y-auto">
+            {labels.map((label) => {
+              const active = (message.labels || []).some((item) => item.id === label.id)
+              const colors = generateLabelColor(label.name)
+              return (
+                <button key={label.id} type="button" className={itemClass} disabled={labelPending} onClick={() => toggleLabel(label)}>
+                  <Check className={cn("h-4 w-4", active ? "opacity-100" : "opacity-0")} />
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                  <span className="min-w-0 flex-1 truncate text-left">{active ? `移除 ${label.name}` : label.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
+      {canOrganize && (
+        <>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          {item("删除", <Trash2 className="h-4 w-4" />, "delete", true)}
+        </>
+      )}
+    </div>
+  )
+}
+
+function contextMenuPosition(x: number, y: number) {
+  const width = 208
+  const height = 312
+  const padding = 8
+  const maxX = Math.max(padding, window.innerWidth - width - padding)
+  const maxY = Math.max(padding, window.innerHeight - height - padding)
+  return { x: Math.min(Math.max(x, padding), maxX), y: Math.min(Math.max(y, padding), maxY) }
+}
+
+function CreateFolderDialog({ open, pending, onOpenChange, onCreate }: { open: boolean; pending: boolean; onOpenChange: (open: boolean) => void; onCreate: (name: string) => void }) {
+  const [name, setName] = React.useState("")
+  React.useEffect(() => {
+    if (open) setName("")
+  }, [open])
+  const trimmed = name.trim()
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="w-[min(92vw,28rem)] max-w-none">
+        <DialogHeader>
+          <DialogTitle>新建文件夹</DialogTitle>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            if (trimmed) onCreate(trimmed)
+          }}
+        >
+          <div className="space-y-2">
+            <Label htmlFor="new-folder-name">文件夹名称</Label>
+            <Input id="new-folder-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：客户、账单、项目归档" />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button disabled={!trimmed || pending}>{pending ? "创建中..." : "创建"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function CompactMailView({
   title,
   icon,
@@ -1431,6 +1679,7 @@ function CompactMailView({
   onRemoveLabel,
   bulkPending,
   onBulkAction,
+  onContextMenu,
   canSend,
   canOrganize,
   canManageLabels,
@@ -1468,6 +1717,7 @@ function CompactMailView({
   onRemoveLabel: (message: MailMessage, labelId: string) => void
   bulkPending: boolean
   onBulkAction: (action: BulkAction) => void
+  onContextMenu: (event: React.MouseEvent, message: MailMessage) => void
   canSend: boolean
   canOrganize: boolean
   canManageLabels: boolean
@@ -1527,7 +1777,7 @@ function CompactMailView({
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && <MessageSkeleton />}
-        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onStar={() => onStar(message)} canOrganize={canOrganize} />)}
+        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onContextMenu={(event) => onContextMenu(event, message)} onStar={() => onStar(message)} canOrganize={canOrganize} />)}
         {!loading && messages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
         {!loading && hasMore && (
           <div className="border-b p-4 text-center">
@@ -1728,12 +1978,12 @@ function MailHtmlFrame({ message }: { message: MailMessage }) {
   )
 }
 
-function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onStar, canOrganize }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onStar: () => void; canOrganize: boolean }) {
+function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onContextMenu, onStar, canOrganize }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onContextMenu: (event: React.MouseEvent) => void; onStar: () => void; canOrganize: boolean }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
   return (
-    <div onClick={onClick} className={cn("cursor-pointer border-b px-3 py-3 text-sm transition-colors hover:bg-accent/50 sm:grid sm:grid-cols-[32px_28px_minmax(140px,220px)_minmax(0,1fr)_104px_36px] sm:items-center sm:gap-2 sm:px-4 sm:py-2", active && "bg-accent", !message.isRead && "font-semibold")}>
+    <div onClick={onClick} onContextMenu={onContextMenu} className={cn("cursor-pointer border-b px-3 py-3 text-sm transition-colors hover:bg-accent/50 sm:grid sm:grid-cols-[32px_28px_minmax(140px,220px)_minmax(0,1fr)_104px_36px] sm:items-center sm:gap-2 sm:px-4 sm:py-2", active && "bg-accent", !message.isRead && "font-semibold")}>
       <div className="flex gap-3 sm:contents">
         <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} className="mt-0.5 shrink-0 sm:mt-0" />
         {message.isRead ? (
@@ -2068,6 +2318,7 @@ function MessageRow({
   scheduled,
   onCheckedChange,
   onClick,
+  onContextMenu,
   onStar,
   canOrganize,
 }: {
@@ -2077,13 +2328,14 @@ function MessageRow({
   scheduled?: boolean
   onCheckedChange: (checked: boolean) => void
   onClick: () => void
+  onContextMenu: (event: React.MouseEvent) => void
   onStar: () => void
   canOrganize: boolean
 }) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
-  return <div onClick={onClick} className={cn("cursor-pointer border-b p-4 transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
+  return <div onClick={onClick} onContextMenu={onContextMenu} className={cn("cursor-pointer border-b p-4 transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
     <div className="flex gap-3">
       <Checkbox
         aria-label="选择邮件"

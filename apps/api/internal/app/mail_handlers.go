@@ -108,6 +108,41 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+func (a *App) handleCreateMailFolder(w http.ResponseWriter, r *http.Request) {
+	mb, err := a.mailboxForCurrentUser(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	name, err := normalizeCustomFolderName(req.Name)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	if isSystemFolderName(name) {
+		badRequest(w, errors.New("system folder already exists"))
+		return
+	}
+	folderID, err := a.ensureFolder(r.Context(), mb.ID, name)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create folder")
+		return
+	}
+	folder, err := a.folderByID(r.Context(), folderID, mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load folder")
+		return
+	}
+	respondJSON(w, http.StatusCreated, folder)
+}
+
 func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	mb, err := a.mailboxForCurrentUser(r)
 	if err != nil {
@@ -125,6 +160,12 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	folder := r.URL.Query().Get("folder")
 	if folder == "" {
 		folder = "Inbox"
+	}
+	if normalized, err := normalizeFolderNameForUser(folder); err != nil {
+		badRequest(w, err)
+		return
+	} else {
+		folder = normalized
 	}
 	folderID, err := a.ensureFolder(r.Context(), mb.ID, folder)
 	if err != nil {
@@ -1429,7 +1470,12 @@ func (a *App) handleMove(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	folderID, err := a.ensureFolder(r.Context(), msg.MailboxID, req.Folder)
+	folder, err := normalizeFolderNameForUser(req.Folder)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	folderID, err := a.ensureFolder(r.Context(), msg.MailboxID, folder)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load folder")
 		return
@@ -1439,6 +1485,69 @@ func (a *App) handleMove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (a *App) folderByID(ctx context.Context, folderID, mailboxID string) (*MailFolder, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT f.id,f.name,f.role,
+		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
+		COUNT(m.id) AS total,
+		f.uid_validity,f.uid_next,f.highest_modseq
+		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
+		WHERE f.id=? AND f.mailbox_id=? GROUP BY f.id,f.name,f.role`, folderID, mailboxID)
+	var f MailFolder
+	if err := row.Scan(&f.ID, &f.Name, &f.Role, &f.UnreadCount, &f.TotalCount, &f.UIDValidity, &f.UIDNext, &f.HighestModSeq); err != nil {
+		return nil, err
+	}
+	return &f, nil
+}
+
+func normalizeCustomFolderName(raw string) (string, error) {
+	name := strings.Join(strings.Fields(raw), " ")
+	if name == "" {
+		return "", errors.New("folder name is required")
+	}
+	if len([]rune(name)) > 48 {
+		return "", errors.New("folder name is too long")
+	}
+	if strings.ContainsAny(name, `/\:`) || strings.Contains(name, "..") {
+		return "", errors.New("folder name contains invalid characters")
+	}
+	for _, r := range name {
+		if r < 32 || r == 127 {
+			return "", errors.New("folder name contains invalid characters")
+		}
+	}
+	return name, nil
+}
+
+func normalizeFolderNameForUser(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	if isSystemFolderName(name) {
+		switch strings.ToLower(name) {
+		case "inbox":
+			return "Inbox", nil
+		case "sent":
+			return "Sent", nil
+		case "drafts":
+			return "Drafts", nil
+		case "archive":
+			return "Archive", nil
+		case "spam":
+			return "Spam", nil
+		case "trash":
+			return "Trash", nil
+		}
+	}
+	return normalizeCustomFolderName(raw)
+}
+
+func isSystemFolderName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "inbox", "sent", "drafts", "archive", "spam", "trash":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {

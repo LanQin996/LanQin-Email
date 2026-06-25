@@ -820,6 +820,7 @@ const textConditionOperators: RuleConditionOperator[] = ["contains", "not-contai
 const sizeConditionOperators: RuleConditionOperator[] = ["gt", "gte", "lt", "lte", "equals", "not-equals"]
 const dateConditionOperators: RuleConditionOperator[] = ["before", "after", "on", "equals", "not-equals"]
 const conditionFields = Object.keys(conditionFieldLabels) as RuleConditionField[]
+const commonRuleFolders = ["Inbox", "Archive", "Spam", "Trash"]
 const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到" }
 
 function RulesSection({ items, mailboxes, labels, open, onOpenChange, onCreate, onDelete, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; pending: boolean }) {
@@ -982,11 +983,21 @@ function RuleActionValue({ action, labels, onChange }: { action: MailRuleAction;
     return <Input value={action.value || ""} onChange={(event) => onChange({ value: event.target.value, labelId: "" })} placeholder="标签名称" />
   }
   if (action.type === "move") {
+    const value = action.value || "Archive"
     return (
-      <Select value={action.value || "Archive"} onValueChange={(value) => onChange({ value })}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
-        <SelectContent><SelectItem value="Inbox">收件箱</SelectItem><SelectItem value="Archive">归档</SelectItem><SelectItem value="Spam">垃圾邮件</SelectItem><SelectItem value="Trash">回收站</SelectItem></SelectContent>
-      </Select>
+      <div className="grid gap-2 md:grid-cols-[180px_minmax(0,1fr)]">
+        <Select value={commonRuleFolders.includes(value) ? value : "__custom"} onValueChange={(next) => onChange({ value: next === "__custom" ? "" : next })}>
+          <SelectTrigger><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="Inbox">收件箱</SelectItem>
+            <SelectItem value="Archive">归档</SelectItem>
+            <SelectItem value="Spam">垃圾邮件</SelectItem>
+            <SelectItem value="Trash">回收站</SelectItem>
+            <SelectItem value="__custom">自定义文件夹</SelectItem>
+          </SelectContent>
+        </Select>
+        <Input value={value} onChange={(event) => onChange({ value: event.target.value })} placeholder="输入或选择文件夹名" />
+      </div>
     )
   }
   return <Input value="无需填写" readOnly />

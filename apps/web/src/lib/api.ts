@@ -116,6 +116,10 @@ export const api = {
   checkDns: (domainId: string) => request<DNSCheckResult>(`/api/admin/domains/${domainId}/check-dns`, { method: "POST" }),
   myMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes"),
   folders: (mailboxId?: string) => request<ListResponse<MailFolder>>(`/api/mail/folders${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  createFolder: (payload: { mailboxId?: string; name: string }) => {
+    const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""
+    return request<MailFolder>(`/api/mail/folders${query}`, { method: "POST", body: JSON.stringify({ name: payload.name }) })
+  },
   labels: (mailboxId?: string) => request<ListResponse<MailLabel>>(`/api/mail/labels${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   createLabel: (payload: { mailboxId?: string; name: string; color?: string }) => {
     const query = payload.mailboxId ? `?mailboxId=${encodeURIComponent(payload.mailboxId)}` : ""

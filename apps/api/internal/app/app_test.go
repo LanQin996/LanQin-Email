@@ -998,6 +998,55 @@ func TestUserCanSelectMultipleMailboxes(t *testing.T) {
 	}
 }
 
+func TestCustomMailFoldersCreateAndMove(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+
+	var bad map[string]any
+	if code := admin.do("POST", "/api/mail/folders", map[string]string{"name": "Inbox"}, &bad); code != http.StatusBadRequest {
+		t.Fatalf("system folder create should be rejected code=%d body=%v", code, bad)
+	}
+	if code := admin.do("POST", "/api/mail/folders", map[string]string{"name": "../bad"}, &bad); code != http.StatusBadRequest {
+		t.Fatalf("invalid folder create should be rejected code=%d body=%v", code, bad)
+	}
+
+	var custom MailFolder
+	if code := admin.do("POST", "/api/mail/folders", map[string]string{"name": "客户归档"}, &custom); code != http.StatusCreated || custom.Name != "客户归档" || custom.Role != "客户归档" {
+		t.Fatalf("custom folder create code=%d folder=%+v", code, custom)
+	}
+	var folders struct {
+		Items []MailFolder `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/folders", nil, &folders); code != http.StatusOK || !folderListContains(folders.Items, "客户归档") {
+		t.Fatalf("folder list code=%d items=%+v", code, folders.Items)
+	}
+
+	var sent MailMessage
+	if code := admin.do("POST", "/api/mail/send", map[string]any{"to": []string{"person@example.test"}, "subject": "custom folder", "text": "body"}, &sent); code != http.StatusCreated {
+		t.Fatalf("send code=%d msg=%+v", code, sent)
+	}
+	var ok map[string]any
+	if code := admin.do("POST", "/api/mail/messages/"+sent.ID+"/move", map[string]string{"folder": "客户归档"}, &ok); code != http.StatusOK {
+		t.Fatalf("move to custom folder code=%d body=%v", code, ok)
+	}
+	var list struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/messages?folder="+url.QueryEscape("客户归档"), nil, &list); code != http.StatusOK || len(list.Items) != 1 || list.Items[0].ID != sent.ID {
+		t.Fatalf("custom folder messages code=%d items=%+v", code, list.Items)
+	}
+	if code := admin.do("POST", "/api/mail/messages/"+sent.ID+"/move", map[string]string{"folder": "bad/name"}, &bad); code != http.StatusBadRequest {
+		t.Fatalf("invalid move folder should be rejected code=%d body=%v", code, bad)
+	}
+}
+
 func TestCatchAllStoresUnregisteredMailForAdminOnly(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -3739,6 +3788,15 @@ func mustDefaultDomainID(t *testing.T, a *App) string {
 func containsString(items []string, needle string) bool {
 	for _, item := range items {
 		if item == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func folderListContains(items []MailFolder, name string) bool {
+	for _, item := range items {
+		if item.Name == name {
 			return true
 		}
 	}

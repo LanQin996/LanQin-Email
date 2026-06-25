@@ -65,6 +65,7 @@ func (a *App) Router() http.Handler {
 			r.Use(a.requireAuth)
 			r.With(a.requirePermission(PermissionMailAccess)).Get("/mail/mailboxes", a.handleMyMailboxes)
 			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/folders", a.handleMailFolders)
+			r.With(a.requirePermission(PermissionMailOrganize)).Post("/mail/folders", a.handleCreateMailFolder)
 			r.With(a.requireAnyPermission(PermissionMailRead, PermissionMailLabels)).Get("/mail/labels", a.handleMailLabels)
 			r.With(a.requirePermission(PermissionMailLabels)).Post("/mail/labels", a.handleCreateMailLabel)
 			r.With(a.requirePermission(PermissionMailLabels)).Delete("/mail/labels/{id}", a.handleDeleteMailLabel)
