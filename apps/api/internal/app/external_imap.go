@@ -9,17 +9,24 @@ import (
 	"crypto/tls"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-sasl"
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/oauth2"
 )
 
 const (
@@ -29,6 +36,10 @@ const (
 	externalIMAPStartTLS      = "starttls"
 	externalIMAPPlain         = "plain"
 	externalIMAPMaxFetch      = 30
+	externalIMAPAuthPassword  = "password"
+	externalIMAPAuthOAuth2    = "oauth2"
+	externalIMAPOAuthGmail    = "gmail"
+	externalIMAPOAuthOutlook  = "outlook"
 )
 
 type externalIMAPClientFactory interface {
@@ -38,15 +49,19 @@ type externalIMAPClientFactory interface {
 type externalIMAPClient interface {
 	Close() error
 	ListFolders(ctx context.Context) ([]externalIMAPRemoteFolder, error)
-	FetchSummaries(ctx context.Context, folder string, cursor uint32, limit int) ([]externalIMAPRemoteMessage, string, error)
+	FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, error)
 	FetchNew(ctx context.Context, folder string, afterUID uint32, limit int) ([]externalIMAPRemoteMessage, error)
 	FetchRaw(ctx context.Context, folder string, uid uint32) ([]byte, externalIMAPRemoteMessage, error)
+	FetchAttachments(ctx context.Context, folder string, uid uint32) ([]Attachment, error)
+	FetchPart(ctx context.Context, folder string, uid uint32, partID string) ([]byte, Attachment, error)
 	SetRead(ctx context.Context, folder string, uid uint32, read bool) error
 }
 
 type externalIMAPAccountRecord struct {
 	ExternalIMAPAccount
-	PasswordCiphertext string
+	PasswordCiphertext          string
+	OAuthAccessTokenCiphertext  string
+	OAuthRefreshTokenCiphertext string
 }
 
 type externalIMAPRemoteFolder struct {
@@ -73,6 +88,12 @@ type externalIMAPRemoteMessage struct {
 	IsRead      bool
 	SizeBytes   int64
 	Raw         []byte
+	Attachments []Attachment
+}
+
+type externalIMAPAttachmentPart struct {
+	Attachment
+	Encoding string
 }
 
 type externalIMAPPayload struct {
@@ -86,6 +107,28 @@ type externalIMAPPayload struct {
 	StorageMode   string `json:"storageMode"`
 	SyncReadState *bool  `json:"syncReadState"`
 	Enabled       *bool  `json:"enabled"`
+}
+
+type externalIMAPOAuthStartPayload struct {
+	MailboxID     string `json:"mailboxId"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	StorageMode   string `json:"storageMode"`
+	SyncReadState *bool  `json:"syncReadState"`
+	Enabled       *bool  `json:"enabled"`
+}
+
+type externalIMAPOAuthState struct {
+	UserID        string `json:"userId"`
+	MailboxID     string `json:"mailboxId"`
+	Provider      string `json:"provider"`
+	Name          string `json:"name"`
+	Email         string `json:"email"`
+	StorageMode   string `json:"storageMode"`
+	SyncReadState bool   `json:"syncReadState"`
+	Enabled       bool   `json:"enabled"`
+	Nonce         string `json:"nonce"`
+	ExpiresAt     int64  `json:"expiresAt"`
 }
 
 func (a *App) externalIMAPWorker(ctx context.Context) {
@@ -136,7 +179,7 @@ func (a *App) handleListExternalIMAPAccounts(w http.ResponseWriter, r *http.Requ
 		where += " AND mailbox_id=?"
 		args = append(args, mailboxID)
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE `+where+` ORDER BY created_at DESC`, args...)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE `+where+` ORDER BY created_at DESC`, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load external accounts")
 		return
@@ -301,9 +344,186 @@ func (a *App) handleSyncExternalIMAPAccount(w http.ResponseWriter, r *http.Reque
 	respondJSON(w, http.StatusOK, run)
 }
 
+func (a *App) handleExternalIMAPSyncRuns(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	account, err := a.externalIMAPAccountForUser(r.Context(), user.ID, chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusNotFound, "external account not found")
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,account_id,folder,status,imported,skipped,failed,error,started_at,finished_at FROM external_imap_sync_runs WHERE account_id=? ORDER BY started_at DESC LIMIT 20`, account.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load sync runs")
+		return
+	}
+	defer rows.Close()
+	items := []ExternalIMAPSyncRun{}
+	for rows.Next() {
+		run, err := scanExternalIMAPSyncRun(rows)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to scan sync runs")
+			return
+		}
+		items = append(items, run)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *App) handleSyncExternalIMAPFolder(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	account, err := a.externalIMAPAccountForUser(r.Context(), user.ID, chi.URLParam(r, "id"))
+	if err != nil {
+		respondError(w, http.StatusNotFound, "external account not found")
+		return
+	}
+	if account.StorageMode != externalIMAPStorageLocal {
+		badRequest(w, errors.New("remote storage accounts do not sync into local mailbox"))
+		return
+	}
+	var req struct {
+		Folder string `json:"folder"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	folder := strings.TrimSpace(req.Folder)
+	if folder == "" {
+		badRequest(w, errors.New("folder is required"))
+		return
+	}
+	run, err := a.syncExternalIMAPAccountFolder(r.Context(), account.ID, folder)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, run)
+}
+
+func (a *App) handleStartExternalIMAPOAuth(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	provider := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "provider")))
+	conf, profile, err := a.externalIMAPOAuthConfig(provider)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	var req externalIMAPOAuthStartPayload
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	mb, err := a.mailboxForUserByID(r.Context(), user.ID, strings.TrimSpace(req.MailboxID))
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		email = mb.Address
+	}
+	req.StorageMode = strings.ToLower(strings.TrimSpace(req.StorageMode))
+	if req.StorageMode == "" {
+		req.StorageMode = externalIMAPStorageLocal
+	}
+	if req.StorageMode != externalIMAPStorageLocal && req.StorageMode != externalIMAPStorageRemote {
+		badRequest(w, errors.New("invalid storage mode"))
+		return
+	}
+	syncRead := true
+	if req.SyncReadState != nil {
+		syncRead = *req.SyncReadState
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	state := externalIMAPOAuthState{
+		UserID:        user.ID,
+		MailboxID:     mb.ID,
+		Provider:      provider,
+		Name:          strings.Join(strings.Fields(req.Name), " "),
+		Email:         email,
+		StorageMode:   req.StorageMode,
+		SyncReadState: syncRead,
+		Enabled:       enabled,
+		Nonce:         newID("oauth"),
+		ExpiresAt:     a.now().Add(10 * time.Minute).Unix(),
+	}
+	if state.Name == "" {
+		state.Name = profile.Name
+	}
+	stateValue, err := a.encryptExternalIMAPOAuthState(state)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"url": conf.AuthCodeURL(stateValue, oauth2.AccessTypeOffline)})
+}
+
+func (a *App) handleExternalIMAPOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	provider := strings.ToLower(strings.TrimSpace(chi.URLParam(r, "provider")))
+	conf, profile, err := a.externalIMAPOAuthConfig(provider)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	state, err := a.decryptExternalIMAPOAuthState(r.URL.Query().Get("state"))
+	if err != nil || state.Provider != provider || state.ExpiresAt < a.now().Unix() {
+		respondError(w, http.StatusBadRequest, "invalid oauth state")
+		return
+	}
+	if oauthErr := strings.TrimSpace(r.URL.Query().Get("error")); oauthErr != "" {
+		respondError(w, http.StatusBadRequest, "oauth failed: "+oauthErr)
+		return
+	}
+	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	if code == "" {
+		respondError(w, http.StatusBadRequest, "missing oauth code")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	token, err := conf.Exchange(ctx, code)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "oauth exchange failed")
+		return
+	}
+	accessCipher, err := a.encryptExternalIMAPPassword(token.AccessToken)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	refreshCipher := ""
+	if token.RefreshToken != "" {
+		refreshCipher, err = a.encryptExternalIMAPPassword(token.RefreshToken)
+		if err != nil {
+			respondError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	name := state.Name
+	if name == "" {
+		name = profile.Name
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	expiry := ""
+	if !token.Expiry.IsZero() {
+		expiry = token.Expiry.UTC().Format(time.RFC3339Nano)
+	}
+	id := newID("ximap")
+	_, err = a.db.ExecContext(r.Context(), `INSERT INTO external_imap_accounts(id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_status,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, state.UserID, state.MailboxID, name, profile.Host, profile.Port, externalIMAPTLS, state.Email, "", externalIMAPAuthOAuth2, provider, state.Email, accessCipher, refreshCipher, expiry, state.StorageMode, boolInt(state.SyncReadState), boolInt(state.Enabled), "idle", now, now)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save oauth account")
+		return
+	}
+	http.Redirect(w, r, strings.TrimRight(a.cfg.PublicBaseURL, "/")+"/profile?tab=mailboxes", http.StatusFound)
+}
+
 func (a *App) handleMailExternalAccounts(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE user_id=? AND enabled=1 ORDER BY name`, user.ID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE user_id=? AND enabled=1 ORDER BY name`, user.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load external accounts")
 		return
@@ -353,14 +573,15 @@ func (a *App) handleExternalIMAPMessages(w http.ResponseWriter, r *http.Request)
 	if folder == "" {
 		folder = "INBOX"
 	}
-	cursor, _ := strconv.ParseUint(strings.TrimSpace(r.URL.Query().Get("cursor")), 10, 32)
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 	client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "connection failed: "+err.Error())
 		return
 	}
 	defer client.Close()
-	remote, next, err := client.FetchSummaries(r.Context(), folder, uint32(cursor), externalIMAPMaxFetch)
+	remote, next, err := client.FetchSummaries(r.Context(), folder, query, cursor, externalIMAPMaxFetch)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "failed to load remote messages")
 		return
@@ -398,10 +619,19 @@ func (a *App) handleExternalIMAPMessage(w http.ResponseWriter, r *http.Request) 
 		msg.BodyText = stored.BodyText
 		msg.BodyHTML = stored.BodyHTML
 		msg.Snippet = stored.Snippet
-		msg.Attachments = []Attachment{{ID: "raw", MessageID: msg.ID, Filename: safeExternalEMLFilename(msg.Subject), ContentType: "message/rfc822", SizeBytes: int64(len(raw)), CreatedAt: a.now().UTC()}}
 		if len(attachments) > 0 {
 			msg.HasAttachments = true
 		}
+	}
+	if parts, err := client.FetchAttachments(r.Context(), folder, uid); err == nil {
+		for i := range parts {
+			parts[i].MessageID = msg.ID
+		}
+		msg.Attachments = parts
+		msg.HasAttachments = len(parts) > 0
+	}
+	if len(msg.Attachments) == 0 {
+		msg.Attachments = []Attachment{{ID: "raw", MessageID: msg.ID, Filename: safeExternalEMLFilename(msg.Subject), ContentType: "message/rfc822", SizeBytes: int64(len(raw)), CreatedAt: a.now().UTC()}}
 	}
 	respondJSON(w, http.StatusOK, msg)
 }
@@ -411,10 +641,7 @@ func (a *App) handleExternalIMAPAttachment(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	if chi.URLParam(r, "partId") != "raw" {
-		respondError(w, http.StatusNotFound, "attachment not found")
-		return
-	}
+	partID := chi.URLParam(r, "partId")
 	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
 	if !ok {
 		return
@@ -425,6 +652,18 @@ func (a *App) handleExternalIMAPAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer client.Close()
+	if partID != "raw" {
+		data, att, err := client.FetchPart(r.Context(), folder, uid, partID)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "attachment not found")
+			return
+		}
+		w.Header().Set("Content-Type", att.ContentType)
+		w.Header().Set("Content-Disposition", `attachment; filename="`+escapeDownloadFilename(att.Filename)+`"`)
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		_, _ = w.Write(data)
+		return
+	}
 	raw, remote, err := client.FetchRaw(r.Context(), folder, uid)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "failed to load remote message")
@@ -615,8 +854,76 @@ func (a *App) externalIMAPKey() ([]byte, error) {
 	return sum[:], nil
 }
 
+type externalIMAPOAuthProvider struct {
+	Name string
+	Host string
+	Port int
+}
+
+func (a *App) externalIMAPOAuthConfig(provider string) (*oauth2.Config, externalIMAPOAuthProvider, error) {
+	callback := strings.TrimRight(a.cfg.PublicBaseURL, "/") + "/api/external-imap-oauth/" + provider + "/callback"
+	switch provider {
+	case externalIMAPOAuthGmail:
+		if a.cfg.ExternalIMAPGmailClientID == "" || a.cfg.ExternalIMAPGmailClientSecret == "" {
+			return nil, externalIMAPOAuthProvider{}, errors.New("gmail oauth is not configured")
+		}
+		return &oauth2.Config{
+			ClientID:     a.cfg.ExternalIMAPGmailClientID,
+			ClientSecret: a.cfg.ExternalIMAPGmailClientSecret,
+			RedirectURL:  callback,
+			Scopes:       []string{"https://mail.google.com/"},
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://accounts.google.com/o/oauth2/v2/auth",
+				TokenURL: "https://oauth2.googleapis.com/token",
+			},
+		}, externalIMAPOAuthProvider{Name: "Gmail", Host: "imap.gmail.com", Port: 993}, nil
+	case externalIMAPOAuthOutlook:
+		if a.cfg.ExternalIMAPOutlookClientID == "" || a.cfg.ExternalIMAPOutlookClientSecret == "" {
+			return nil, externalIMAPOAuthProvider{}, errors.New("outlook oauth is not configured")
+		}
+		return &oauth2.Config{
+			ClientID:     a.cfg.ExternalIMAPOutlookClientID,
+			ClientSecret: a.cfg.ExternalIMAPOutlookClientSecret,
+			RedirectURL:  callback,
+			Scopes:       []string{"offline_access", "https://outlook.office.com/IMAP.AccessAsUser.All"},
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+				TokenURL: "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+			},
+		}, externalIMAPOAuthProvider{Name: "Outlook", Host: "outlook.office365.com", Port: 993}, nil
+	default:
+		return nil, externalIMAPOAuthProvider{}, errors.New("unsupported oauth provider")
+	}
+}
+
+func (a *App) encryptExternalIMAPOAuthState(state externalIMAPOAuthState) (string, error) {
+	raw, err := json.Marshal(state)
+	if err != nil {
+		return "", err
+	}
+	ciphertext, err := a.encryptExternalIMAPPassword(string(raw))
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(ciphertext)), nil
+}
+
+func (a *App) decryptExternalIMAPOAuthState(value string) (externalIMAPOAuthState, error) {
+	var state externalIMAPOAuthState
+	raw, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(value))
+	if err != nil {
+		return state, err
+	}
+	plain, err := a.decryptExternalIMAPPassword(string(raw))
+	if err != nil {
+		return state, err
+	}
+	err = json.Unmarshal([]byte(plain), &state)
+	return state, err
+}
+
 func (a *App) externalIMAPAccountForUser(ctx context.Context, userID, id string) (externalIMAPAccountRecord, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE id=? AND user_id=?`, id, userID)
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE id=? AND user_id=?`, id, userID)
 	return scanExternalIMAPAccount(row)
 }
 
@@ -637,12 +944,16 @@ type externalIMAPScanner interface {
 func scanExternalIMAPAccount(row externalIMAPScanner) (externalIMAPAccountRecord, error) {
 	var item externalIMAPAccountRecord
 	var syncRead, enabled int
-	var lastSync sql.NullString
+	var lastSync, oauthExpiry sql.NullString
 	var created, updated string
-	err := row.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.Name, &item.Host, &item.Port, &item.TLSMode, &item.Username, &item.PasswordCiphertext, &item.StorageMode, &syncRead, &enabled, &lastSync, &item.LastStatus, &item.LastError, &created, &updated)
+	err := row.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.Name, &item.Host, &item.Port, &item.TLSMode, &item.Username, &item.PasswordCiphertext, &item.AuthMode, &item.OAuthProvider, &item.OAuthEmail, &item.OAuthAccessTokenCiphertext, &item.OAuthRefreshTokenCiphertext, &oauthExpiry, &item.StorageMode, &syncRead, &enabled, &lastSync, &item.LastStatus, &item.LastError, &created, &updated)
 	if err != nil {
 		return item, err
 	}
+	if item.AuthMode == "" {
+		item.AuthMode = externalIMAPAuthPassword
+	}
+	item.OAuthConfigured = item.AuthMode == externalIMAPAuthOAuth2 && item.OAuthAccessTokenCiphertext != ""
 	item.SyncReadState = syncRead != 0
 	item.Enabled = enabled != 0
 	if lastSync.Valid && strings.TrimSpace(lastSync.String) != "" {
@@ -658,6 +969,28 @@ func (a *App) updateExternalIMAPStatus(ctx context.Context, accountID, status, e
 	_, _ = a.db.ExecContext(ctx, `UPDATE external_imap_accounts SET last_status=?,last_error=?,updated_at=? WHERE id=?`, status, trimExternalIMAPError(errText), a.now().UTC().Format(time.RFC3339Nano), accountID)
 }
 
+func (a *App) migrateExternalIMAP(ctx context.Context) error {
+	columns := []struct {
+		table string
+		name  string
+		sql   string
+	}{
+		{"external_imap_sync_runs", "folder", `ALTER TABLE external_imap_sync_runs ADD COLUMN folder TEXT NOT NULL DEFAULT ''`},
+		{"external_imap_accounts", "auth_mode", `ALTER TABLE external_imap_accounts ADD COLUMN auth_mode TEXT NOT NULL DEFAULT 'password'`},
+		{"external_imap_accounts", "oauth_provider", `ALTER TABLE external_imap_accounts ADD COLUMN oauth_provider TEXT NOT NULL DEFAULT ''`},
+		{"external_imap_accounts", "oauth_email", `ALTER TABLE external_imap_accounts ADD COLUMN oauth_email TEXT NOT NULL DEFAULT ''`},
+		{"external_imap_accounts", "oauth_access_token_ciphertext", `ALTER TABLE external_imap_accounts ADD COLUMN oauth_access_token_ciphertext TEXT NOT NULL DEFAULT ''`},
+		{"external_imap_accounts", "oauth_refresh_token_ciphertext", `ALTER TABLE external_imap_accounts ADD COLUMN oauth_refresh_token_ciphertext TEXT NOT NULL DEFAULT ''`},
+		{"external_imap_accounts", "oauth_expiry", `ALTER TABLE external_imap_accounts ADD COLUMN oauth_expiry TEXT`},
+	}
+	for _, column := range columns {
+		if err := a.ensureTableColumn(ctx, column.table, column.name, column.sql); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *App) syncExternalIMAPAccount(ctx context.Context, accountID string) (ExternalIMAPSyncRun, error) {
 	account, err := a.externalIMAPAccountByID(ctx, accountID)
 	if err != nil {
@@ -667,7 +1000,7 @@ func (a *App) syncExternalIMAPAccount(ctx context.Context, accountID string) (Ex
 		return ExternalIMAPSyncRun{}, errors.New("account is not configured for local storage")
 	}
 	run := ExternalIMAPSyncRun{ID: newID("ximrun"), AccountID: account.ID, Status: "running", StartedAt: a.now().UTC()}
-	_, _ = a.db.ExecContext(ctx, `INSERT INTO external_imap_sync_runs(id,account_id,status,started_at) VALUES(?,?,?,?)`, run.ID, run.AccountID, run.Status, run.StartedAt.Format(time.RFC3339Nano))
+	_, _ = a.db.ExecContext(ctx, `INSERT INTO external_imap_sync_runs(id,account_id,folder,status,started_at) VALUES(?,?,?,?,?)`, run.ID, run.AccountID, run.Folder, run.Status, run.StartedAt.Format(time.RFC3339Nano))
 	client, err := a.externalIMAP.openExternalIMAPClient(ctx, account)
 	if err != nil {
 		return a.finishExternalIMAPRun(ctx, run, "failed", err)
@@ -694,8 +1027,51 @@ func (a *App) syncExternalIMAPAccount(ctx context.Context, accountID string) (Ex
 	return a.finishExternalIMAPRun(ctx, run, status, nil)
 }
 
+func (a *App) syncExternalIMAPAccountFolder(ctx context.Context, accountID, folderName string) (ExternalIMAPSyncRun, error) {
+	account, err := a.externalIMAPAccountByID(ctx, accountID)
+	if err != nil {
+		return ExternalIMAPSyncRun{}, err
+	}
+	if account.StorageMode != externalIMAPStorageLocal {
+		return ExternalIMAPSyncRun{}, errors.New("account is not configured for local storage")
+	}
+	run := ExternalIMAPSyncRun{ID: newID("ximrun"), AccountID: account.ID, Folder: folderName, Status: "running", StartedAt: a.now().UTC()}
+	_, _ = a.db.ExecContext(ctx, `INSERT INTO external_imap_sync_runs(id,account_id,folder,status,started_at) VALUES(?,?,?,?,?)`, run.ID, run.AccountID, run.Folder, run.Status, run.StartedAt.Format(time.RFC3339Nano))
+	client, err := a.externalIMAP.openExternalIMAPClient(ctx, account)
+	if err != nil {
+		return a.finishExternalIMAPRun(ctx, run, "failed", err)
+	}
+	defer client.Close()
+	folders, err := client.ListFolders(ctx)
+	if err != nil {
+		return a.finishExternalIMAPRun(ctx, run, "failed", err)
+	}
+	var selected externalIMAPRemoteFolder
+	for _, folder := range folders {
+		if strings.EqualFold(folder.Name, folderName) {
+			selected = folder
+			break
+		}
+	}
+	if strings.TrimSpace(selected.Name) == "" {
+		return a.finishExternalIMAPRun(ctx, run, "failed", errors.New("remote folder not found"))
+	}
+	imported, skipped, failed, err := a.syncExternalIMAPFolder(ctx, account, client, selected)
+	run.Imported = imported
+	run.Skipped = skipped
+	run.Failed = failed
+	status := "ok"
+	if failed > 0 {
+		status = "partial"
+	}
+	if err != nil {
+		status = "failed"
+	}
+	return a.finishExternalIMAPRun(ctx, run, status, err)
+}
+
 func (a *App) externalIMAPAccountByID(ctx context.Context, id string) (externalIMAPAccountRecord, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE id=? AND enabled=1`, id)
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,name,host,port,tls_mode,username,password_ciphertext,auth_mode,oauth_provider,oauth_email,oauth_access_token_ciphertext,oauth_refresh_token_ciphertext,oauth_expiry,storage_mode,sync_read_state,enabled,last_sync_at,last_status,last_error,created_at,updated_at FROM external_imap_accounts WHERE id=? AND enabled=1`, id)
 	return scanExternalIMAPAccount(row)
 }
 
@@ -822,6 +1198,22 @@ func (a *App) finishExternalIMAPRun(ctx context.Context, run ExternalIMAPSyncRun
 	return run, err
 }
 
+func scanExternalIMAPSyncRun(row externalIMAPScanner) (ExternalIMAPSyncRun, error) {
+	var run ExternalIMAPSyncRun
+	var started, finished sql.NullString
+	if err := row.Scan(&run.ID, &run.AccountID, &run.Folder, &run.Status, &run.Imported, &run.Skipped, &run.Failed, &run.Error, &started, &finished); err != nil {
+		return run, err
+	}
+	if started.Valid && strings.TrimSpace(started.String) != "" {
+		run.StartedAt = parseTime(started.String)
+	}
+	if finished.Valid && strings.TrimSpace(finished.String) != "" {
+		t := parseTime(finished.String)
+		run.FinishedAt = &t
+	}
+	return run, nil
+}
+
 func trimExternalIMAPError(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) > 500 {
@@ -923,12 +1315,114 @@ func safeExternalEMLFilename(subject string) string {
 	return name + ".eml"
 }
 
+func externalIMAPAttachmentsFromBodyStructure(body imap.BodyStructure) []Attachment {
+	parts := externalIMAPAttachmentPartsFromBodyStructure(body)
+	items := make([]Attachment, 0, len(parts))
+	for _, part := range parts {
+		items = append(items, part.Attachment)
+	}
+	return items
+}
+
+func externalIMAPAttachmentPartsFromBodyStructure(body imap.BodyStructure) []externalIMAPAttachmentPart {
+	now := time.Now().UTC()
+	items := []externalIMAPAttachmentPart{}
+	body.Walk(func(path []int, part imap.BodyStructure) bool {
+		single, ok := part.(*imap.BodyStructureSinglePart)
+		if !ok {
+			return true
+		}
+		filename := strings.TrimSpace(single.Filename())
+		disposition := ""
+		if disp := single.Disposition(); disp != nil {
+			disposition = strings.ToLower(strings.TrimSpace(disp.Value))
+		}
+		if filename == "" && disposition != "attachment" {
+			return true
+		}
+		if filename == "" {
+			filename = "attachment"
+		}
+		contentType := single.MediaType()
+		if contentType == "/" || contentType == "" {
+			contentType = "application/octet-stream"
+		}
+		items = append(items, externalIMAPAttachmentPart{
+			Attachment: Attachment{
+				ID:          encodeExternalIMAPPartID(path),
+				Filename:    filename,
+				ContentType: contentType,
+				SizeBytes:   int64(single.Size),
+				CreatedAt:   now,
+			},
+			Encoding: strings.ToLower(strings.TrimSpace(single.Encoding)),
+		})
+		return true
+	})
+	return items
+}
+
+func encodeExternalIMAPPartID(path []int) string {
+	parts := make([]string, 0, len(path))
+	for _, n := range path {
+		parts = append(parts, strconv.Itoa(n))
+	}
+	return strings.Join(parts, ".")
+}
+
+func decodeExternalIMAPPartID(value string) ([]int, error) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == "raw" {
+		return nil, errors.New("invalid part id")
+	}
+	rawParts := strings.Split(value, ".")
+	path := make([]int, 0, len(rawParts))
+	for _, part := range rawParts {
+		n, err := strconv.Atoi(part)
+		if err != nil || n <= 0 {
+			return nil, errors.New("invalid part id")
+		}
+		path = append(path, n)
+	}
+	return path, nil
+}
+
+func decodeExternalIMAPPartData(data []byte, encoding string) ([]byte, error) {
+	switch strings.ToLower(strings.TrimSpace(encoding)) {
+	case "base64":
+		compact := strings.NewReplacer("\r", "", "\n", "", " ", "", "\t", "").Replace(string(data))
+		decoded := make([]byte, base64.StdEncoding.DecodedLen(len(compact)))
+		n, err := base64.StdEncoding.Decode(decoded, []byte(compact))
+		if err != nil {
+			return nil, err
+		}
+		return decoded[:n], nil
+	case "quoted-printable":
+		return io.ReadAll(quotedprintable.NewReader(strings.NewReader(string(data))))
+	default:
+		return data, nil
+	}
+}
+
+func escapeDownloadFilename(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = "attachment"
+	}
+	name = strings.Map(func(r rune) rune {
+		if r < 32 || r == '"' || r == '\\' {
+			return '-'
+		}
+		return r
+	}, name)
+	if len([]rune(name)) > 120 {
+		name = string([]rune(name)[:120])
+	}
+	return mime.QEncoding.Encode("utf-8", name)
+}
+
 func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAccountRecord) (externalIMAPClient, error) {
 	if err := a.validateExternalIMAPHost(ctx, account.Host); err != nil {
-		return nil, err
-	}
-	password, err := a.decryptExternalIMAPPassword(account.PasswordCiphertext)
-	if err != nil {
 		return nil, err
 	}
 	addr := net.JoinHostPort(account.Host, strconv.Itoa(account.Port))
@@ -937,6 +1431,7 @@ func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAc
 		TLSConfig: &tls.Config{ServerName: account.Host, MinVersion: tls.VersionTLS12},
 	}
 	var c *imapclient.Client
+	var err error
 	switch account.TLSMode {
 	case externalIMAPTLS:
 		c, err = imapclient.DialTLS(addr, options)
@@ -948,11 +1443,73 @@ func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAc
 	if err != nil {
 		return nil, err
 	}
-	if err := c.Login(account.Username, password).Wait(); err != nil {
-		c.Close()
-		return nil, err
+	if account.AuthMode == externalIMAPAuthOAuth2 {
+		token, err := a.externalIMAPOAuthAccessToken(ctx, account)
+		if err != nil {
+			c.Close()
+			return nil, err
+		}
+		if err := c.Authenticate(sasl.NewOAuthBearerClient(&sasl.OAuthBearerOptions{Username: account.Username, Token: token, Host: account.Host, Port: account.Port})); err != nil {
+			c.Close()
+			return nil, err
+		}
+	} else {
+		password, err := a.decryptExternalIMAPPassword(account.PasswordCiphertext)
+		if err != nil {
+			c.Close()
+			return nil, err
+		}
+		if err := c.Login(account.Username, password).Wait(); err != nil {
+			c.Close()
+			return nil, err
+		}
 	}
 	return &goExternalIMAPClient{client: c}, nil
+}
+
+func (a *App) externalIMAPOAuthAccessToken(ctx context.Context, account externalIMAPAccountRecord) (string, error) {
+	access, err := a.decryptExternalIMAPPassword(account.OAuthAccessTokenCiphertext)
+	if err != nil {
+		return "", err
+	}
+	var expiry time.Time
+	var expiryRaw sql.NullString
+	_ = a.db.QueryRowContext(ctx, `SELECT oauth_expiry FROM external_imap_accounts WHERE id=?`, account.ID).Scan(&expiryRaw)
+	if expiryRaw.Valid && strings.TrimSpace(expiryRaw.String) != "" {
+		expiry = parseTime(expiryRaw.String)
+	}
+	if expiry.IsZero() || expiry.After(a.now().Add(2*time.Minute)) || account.OAuthRefreshTokenCiphertext == "" {
+		return access, nil
+	}
+	refresh, err := a.decryptExternalIMAPPassword(account.OAuthRefreshTokenCiphertext)
+	if err != nil {
+		return "", err
+	}
+	conf, _, err := a.externalIMAPOAuthConfig(account.OAuthProvider)
+	if err != nil {
+		return "", err
+	}
+	token, err := conf.TokenSource(ctx, &oauth2.Token{AccessToken: access, RefreshToken: refresh, Expiry: expiry}).Token()
+	if err != nil {
+		return "", err
+	}
+	accessCipher, err := a.encryptExternalIMAPPassword(token.AccessToken)
+	if err != nil {
+		return "", err
+	}
+	refreshCipher := account.OAuthRefreshTokenCiphertext
+	if token.RefreshToken != "" && token.RefreshToken != refresh {
+		refreshCipher, err = a.encryptExternalIMAPPassword(token.RefreshToken)
+		if err != nil {
+			return "", err
+		}
+	}
+	expiryText := ""
+	if !token.Expiry.IsZero() {
+		expiryText = token.Expiry.UTC().Format(time.RFC3339Nano)
+	}
+	_, _ = a.db.ExecContext(ctx, `UPDATE external_imap_accounts SET oauth_access_token_ciphertext=?,oauth_refresh_token_ciphertext=?,oauth_expiry=?,updated_at=? WHERE id=?`, accessCipher, refreshCipher, expiryText, a.now().UTC().Format(time.RFC3339Nano), account.ID)
+	return token.AccessToken, nil
 }
 
 type goExternalIMAPClient struct {
@@ -1006,42 +1563,65 @@ func mailboxHasNoSelect(attrs []imap.MailboxAttr) bool {
 	return false
 }
 
-func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string, cursor uint32, limit int) ([]externalIMAPRemoteMessage, string, error) {
+func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, error) {
 	selected, err := c.client.Select(folder, nil).Wait()
 	if err != nil {
 		return nil, "", err
 	}
-	if selected.NumMessages == 0 {
-		return nil, "", nil
-	}
 	if limit <= 0 || limit > 100 {
 		limit = externalIMAPMaxFetch
 	}
-	start := selected.NumMessages
-	if cursor > 0 {
-		start = cursor
-	}
-	if start == 0 {
+	if selected.NumMessages == 0 {
 		return nil, "", nil
 	}
-	stop := uint32(1)
-	if start > uint32(limit) {
-		stop = start - uint32(limit) + 1
+	maxUID := uint32(0)
+	if strings.TrimSpace(cursor) != "" {
+		parsed, _ := strconv.ParseUint(strings.TrimPrefix(cursor, "uid:"), 10, 32)
+		maxUID = uint32(parsed)
 	}
-	var set imap.SeqSet
-	set.AddRange(stop, start)
+	if maxUID == 0 {
+		if selected.UIDNext == 0 {
+			return nil, "", nil
+		}
+		maxUID = uint32(selected.UIDNext - 1)
+	}
+	criteria := &imap.SearchCriteria{}
+	var uidRange imap.UIDSet
+	uidRange.AddRange(1, imap.UID(maxUID))
+	criteria.UID = []imap.UIDSet{uidRange}
+	if q := strings.TrimSpace(query); q != "" {
+		criteria.Text = []string{q}
+	}
+	data, err := c.client.UIDSearch(criteria, nil).Wait()
+	if err != nil {
+		return nil, "", err
+	}
+	uids := data.AllUIDs()
+	if len(uids) == 0 {
+		return nil, "", nil
+	}
+	sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
+	if len(uids) > limit {
+		uids = uids[:limit]
+	}
+	var set imap.UIDSet
+	set.AddNum(uids...)
 	bodySection := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader, Peek: true}
 	messages, err := c.client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true, Envelope: true, InternalDate: true, RFC822Size: true, BodySection: []*imap.FetchItemBodySection{bodySection}}).Collect()
 	if err != nil {
 		return nil, "", err
 	}
 	out := []externalIMAPRemoteMessage{}
-	for i := len(messages) - 1; i >= 0 && len(out) < limit; i-- {
-		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, messages[i], nil))
+	for _, message := range messages {
+		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, message, nil))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UID > out[j].UID })
 	next := ""
-	if stop > 1 {
-		next = strconv.FormatUint(uint64(stop-1), 10)
+	if len(uids) == limit {
+		last := uint32(uids[len(uids)-1])
+		if last > 1 {
+			next = "uid:" + strconv.FormatUint(uint64(last-1), 10)
+		}
 	}
 	return out, next, nil
 }
@@ -1086,6 +1666,77 @@ func (c *goExternalIMAPClient) FetchRaw(ctx context.Context, folder string, uid 
 	}
 	raw := messages[0].FindBodySection(bodySection)
 	return raw, fetchBufferToExternalMessage(folder, selected.UIDValidity, messages[0], raw), nil
+}
+
+func (c *goExternalIMAPClient) FetchAttachments(ctx context.Context, folder string, uid uint32) ([]Attachment, error) {
+	parts, err := c.fetchAttachmentParts(ctx, folder, uid)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Attachment, 0, len(parts))
+	for _, part := range parts {
+		out = append(out, part.Attachment)
+	}
+	return out, nil
+}
+
+func (c *goExternalIMAPClient) fetchAttachmentParts(ctx context.Context, folder string, uid uint32) ([]externalIMAPAttachmentPart, error) {
+	if _, err := c.client.Select(folder, nil).Wait(); err != nil {
+		return nil, err
+	}
+	messages, err := c.client.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{
+		UID:           true,
+		BodyStructure: &imap.FetchItemBodyStructure{Extended: true},
+	}).Collect()
+	if err != nil {
+		return nil, err
+	}
+	if len(messages) == 0 || messages[0].BodyStructure == nil {
+		return nil, sql.ErrNoRows
+	}
+	return externalIMAPAttachmentPartsFromBodyStructure(messages[0].BodyStructure), nil
+}
+
+func (c *goExternalIMAPClient) FetchPart(ctx context.Context, folder string, uid uint32, partID string) ([]byte, Attachment, error) {
+	path, err := decodeExternalIMAPPartID(partID)
+	if err != nil {
+		return nil, Attachment{}, err
+	}
+	if _, err := c.client.Select(folder, nil).Wait(); err != nil {
+		return nil, Attachment{}, err
+	}
+	attachments, err := c.fetchAttachmentParts(ctx, folder, uid)
+	if err != nil {
+		return nil, Attachment{}, err
+	}
+	var att externalIMAPAttachmentPart
+	for _, item := range attachments {
+		if item.ID == partID {
+			att = item
+			break
+		}
+	}
+	if att.ID == "" {
+		return nil, Attachment{}, sql.ErrNoRows
+	}
+	bodySection := &imap.FetchItemBodySection{Part: path, Peek: true}
+	messages, err := c.client.Fetch(imap.UIDSetNum(imap.UID(uid)), &imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{bodySection}}).Collect()
+	if err != nil {
+		return nil, Attachment{}, err
+	}
+	if len(messages) == 0 {
+		return nil, Attachment{}, sql.ErrNoRows
+	}
+	data := messages[0].FindBodySection(bodySection)
+	if data == nil {
+		return nil, Attachment{}, sql.ErrNoRows
+	}
+	data, err = decodeExternalIMAPPartData(data, att.Encoding)
+	if err != nil {
+		return nil, Attachment{}, err
+	}
+	att.SizeBytes = int64(len(data))
+	return data, att.Attachment, nil
 }
 
 func (c *goExternalIMAPClient) SetRead(ctx context.Context, folder string, uid uint32, read bool) error {

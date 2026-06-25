@@ -64,7 +64,11 @@ func (a *App) Router() http.Handler {
 		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Post("/me/external-imap-accounts/{id}", a.handleUpdateExternalIMAPAccount)
 		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Delete("/me/external-imap-accounts/{id}", a.handleDeleteExternalIMAPAccount)
 		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Post("/me/external-imap-accounts/{id}/test", a.handleTestExternalIMAPAccount)
+		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Get("/me/external-imap-accounts/{id}/runs", a.handleExternalIMAPSyncRuns)
 		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Post("/me/external-imap-accounts/{id}/sync", a.handleSyncExternalIMAPAccount)
+		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Post("/me/external-imap-accounts/{id}/sync-folder", a.handleSyncExternalIMAPFolder)
+		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess)).Post("/me/external-imap-oauth/{provider}/start", a.handleStartExternalIMAPOAuth)
+		r.Get("/external-imap-oauth/{provider}/callback", a.handleExternalIMAPOAuthCallback)
 		r.With(a.requireAuth).Get("/events", a.handleEvents)
 
 		r.Group(func(r chi.Router) {

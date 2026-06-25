@@ -357,6 +357,12 @@ func (a *App) migrate(ctx context.Context) error {
 			tls_mode TEXT NOT NULL CHECK(tls_mode IN ('tls','starttls','plain')),
 			username TEXT NOT NULL,
 			password_ciphertext TEXT NOT NULL,
+			auth_mode TEXT NOT NULL DEFAULT 'password' CHECK(auth_mode IN ('password','oauth2')),
+			oauth_provider TEXT NOT NULL DEFAULT '',
+			oauth_email TEXT NOT NULL DEFAULT '',
+			oauth_access_token_ciphertext TEXT NOT NULL DEFAULT '',
+			oauth_refresh_token_ciphertext TEXT NOT NULL DEFAULT '',
+			oauth_expiry TEXT,
 			storage_mode TEXT NOT NULL DEFAULT 'local' CHECK(storage_mode IN ('local','remote')),
 			sync_read_state INTEGER NOT NULL DEFAULT 1,
 			enabled INTEGER NOT NULL DEFAULT 1,
@@ -395,6 +401,7 @@ func (a *App) migrate(ctx context.Context) error {
 		`CREATE TABLE IF NOT EXISTS external_imap_sync_runs (
 			id TEXT PRIMARY KEY,
 			account_id TEXT NOT NULL REFERENCES external_imap_accounts(id) ON DELETE CASCADE,
+			folder TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL,
 			imported INTEGER NOT NULL DEFAULT 0,
 			skipped INTEGER NOT NULL DEFAULT 0,
@@ -510,6 +517,9 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := a.migrateFolderSortOrder(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateExternalIMAP(ctx); err != nil {
 		return err
 	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {

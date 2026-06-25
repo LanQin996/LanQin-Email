@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -65,8 +65,11 @@ export const api = {
   createExternalImapAccount: (payload: ExternalImapAccountPayload) => request<ExternalImapAccount>("/api/me/external-imap-accounts", { method: "POST", body: JSON.stringify(payload) }),
   updateExternalImapAccount: (id: string, payload: ExternalImapAccountPayload) => request<ExternalImapAccount>(`/api/me/external-imap-accounts/${id}`, { method: "POST", body: JSON.stringify(payload) }),
   deleteExternalImapAccount: (id: string) => request<{ ok: boolean }>(`/api/me/external-imap-accounts/${id}`, { method: "DELETE" }),
+  startExternalImapOAuth: (provider: ExternalImapOAuthProvider, payload: ExternalImapOAuthStartPayload) => request<{ url: string }>(`/api/me/external-imap-oauth/${provider}/start`, { method: "POST", body: JSON.stringify(payload) }),
   testExternalImapAccount: (id: string) => request<{ ok: boolean; folders: number }>(`/api/me/external-imap-accounts/${id}/test`, { method: "POST", timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  externalImapSyncRuns: (id: string) => request<ListResponse<ExternalImapSyncRun>>(`/api/me/external-imap-accounts/${id}/runs`),
   syncExternalImapAccount: (id: string) => request<ExternalImapSyncRun>(`/api/me/external-imap-accounts/${id}/sync`, { method: "POST", timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
+  syncExternalImapFolder: (id: string, folder: string) => request<ExternalImapSyncRun>(`/api/me/external-imap-accounts/${id}/sync-folder`, { method: "POST", body: JSON.stringify({ folder }), timeoutMs: MAIL_DELIVERY_TIMEOUT_MS }),
   adminOverview: () => request<AdminOverview>("/api/admin/overview"),
   users: () => request<ListResponse<AdminUser>>("/api/admin/users"),
   permissionGroups: () => request<ListResponse<PermissionGroup> & { catalog: PermissionInfo[] }>("/api/admin/permission-groups"),
@@ -123,8 +126,8 @@ export const api = {
   myMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes"),
   externalMailAccounts: () => request<ListResponse<ExternalImapAccount>>("/api/mail/external-accounts"),
   externalFolders: (id: string) => request<ListResponse<ExternalImapFolder>>(`/api/mail/external-accounts/${id}/folders`),
-  externalMessages: (id: string, folder: string, cursor = "") => {
-    const params = new URLSearchParams({ folder, cursor })
+  externalMessages: (id: string, folder: string, cursor = "", q = "") => {
+    const params = new URLSearchParams({ folder, cursor, q })
     return request<ListResponse<MailMessage>>(`/api/mail/external-accounts/${id}/messages?${params.toString()}`)
   },
   externalMessage: (id: string, remoteId: string) => request<MailMessage>(`/api/mail/external-accounts/${id}/messages/${encodeURIComponent(remoteId)}`),

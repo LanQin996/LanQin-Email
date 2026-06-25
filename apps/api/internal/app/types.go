@@ -229,22 +229,26 @@ type MailStatsFolderCount struct {
 }
 
 type ExternalIMAPAccount struct {
-	ID            string     `json:"id"`
-	UserID        string     `json:"userId,omitempty"`
-	MailboxID     string     `json:"mailboxId"`
-	Name          string     `json:"name"`
-	Host          string     `json:"host"`
-	Port          int        `json:"port"`
-	TLSMode       string     `json:"tlsMode"`
-	Username      string     `json:"username"`
-	StorageMode   string     `json:"storageMode"`
-	SyncReadState bool       `json:"syncReadState"`
-	Enabled       bool       `json:"enabled"`
-	LastSyncAt    *time.Time `json:"lastSyncAt,omitempty"`
-	LastStatus    string     `json:"lastStatus"`
-	LastError     string     `json:"lastError,omitempty"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
+	ID              string     `json:"id"`
+	UserID          string     `json:"userId,omitempty"`
+	MailboxID       string     `json:"mailboxId"`
+	Name            string     `json:"name"`
+	Host            string     `json:"host"`
+	Port            int        `json:"port"`
+	TLSMode         string     `json:"tlsMode"`
+	Username        string     `json:"username"`
+	AuthMode        string     `json:"authMode"`
+	OAuthProvider   string     `json:"oauthProvider,omitempty"`
+	OAuthEmail      string     `json:"oauthEmail,omitempty"`
+	OAuthConfigured bool       `json:"oauthConfigured,omitempty"`
+	StorageMode     string     `json:"storageMode"`
+	SyncReadState   bool       `json:"syncReadState"`
+	Enabled         bool       `json:"enabled"`
+	LastSyncAt      *time.Time `json:"lastSyncAt,omitempty"`
+	LastStatus      string     `json:"lastStatus"`
+	LastError       string     `json:"lastError,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	UpdatedAt       time.Time  `json:"updatedAt"`
 }
 
 type ExternalIMAPFolder struct {
@@ -257,6 +261,7 @@ type ExternalIMAPFolder struct {
 type ExternalIMAPSyncRun struct {
 	ID         string     `json:"id"`
 	AccountID  string     `json:"accountId"`
+	Folder     string     `json:"folder,omitempty"`
 	Status     string     `json:"status"`
 	Imported   int        `json:"imported"`
 	Skipped    int        `json:"skipped"`

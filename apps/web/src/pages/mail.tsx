@@ -180,8 +180,8 @@ export function MailPage() {
     enabled: !!activeMailboxId && canReadMail && mailView !== "scheduled" && mailView !== "sendQueue" && (mailView !== "label" || !!selectedLabelId),
   })
   const externalMessages = useInfiniteQuery({
-    queryKey: ["external-messages", selectedExternalAccountId, externalFolder],
-    queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : ""),
+    queryKey: ["external-messages", selectedExternalAccountId, externalFolder, query],
+    queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : "", query),
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!selectedExternalAccountId && canReadMail && mailView === "external",
@@ -1326,7 +1326,7 @@ export function MailPage() {
                 {canSendMail && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
                 <div className="relative basis-full">
                   <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input value={query} onChange={(e) => setQuery(e.target.value)} disabled={mailView === "external"} placeholder={mailView === "external" ? "远端直连暂不支持搜索" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
+                  <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
                 </div>
               </header>
             )}
@@ -1370,7 +1370,7 @@ export function MailPage() {
                   </div>
                   <div className="relative w-full max-w-md">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input value={query} onChange={(e) => setQuery(e.target.value)} disabled={mailView === "external"} placeholder={mailView === "external" ? "远端直连暂不支持搜索" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
+                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
                   </div>
                 </header>
                 {contentView}

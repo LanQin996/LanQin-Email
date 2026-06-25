@@ -4,7 +4,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapStorageMode, ExternalImapTlsMode, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits } from "@/lib/api"
+import { api, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -64,6 +64,7 @@ export function ProfilePage() {
   const [blockedMailboxId, setBlockedMailboxId] = React.useState("all")
   const [ruleDialogOpen, setRuleDialogOpen] = React.useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
+  const [externalRunAccountId, setExternalRunAccountId] = React.useState("")
   const isMobile = useIsMobile()
   const themeMountedRef = React.useRef(false)
 
@@ -102,6 +103,14 @@ export function ProfilePage() {
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const externalImapAccounts = useQuery({ queryKey: ["external-imap-accounts", activeMailboxId], queryFn: () => api.externalImapAccounts(activeMailboxId), enabled: !!activeMailboxId && canAccessMail })
+  React.useEffect(() => {
+    if (!externalRunAccountId) return
+    if (externalImapAccounts.data?.items.some((item) => item.id === externalRunAccountId)) return
+    setExternalRunAccountId("")
+  }, [externalImapAccounts.data?.items, externalRunAccountId])
+  const selectedExternalRunAccount = externalImapAccounts.data?.items.find((item) => item.id === externalRunAccountId)
+  const externalRunFolders = useQuery({ queryKey: ["external-imap-run-folders", externalRunAccountId], queryFn: () => api.externalFolders(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail })
+  const externalSyncRuns = useQuery({ queryKey: ["external-imap-sync-runs", externalRunAccountId], queryFn: () => api.externalImapSyncRuns(externalRunAccountId), enabled: !!externalRunAccountId && !!selectedExternalRunAccount && canAccessMail })
   const ruleLabels = useQuery({ queryKey: ["labels", "rules", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && canManageRules && (canReadMail || canManageLabels) })
   const stats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && canViewStats })
 
@@ -221,8 +230,18 @@ export function ProfilePage() {
   })
   const syncExternalImap = useMutation({
     mutationFn: api.syncExternalImapAccount,
-    onSuccess: (run) => { qc.invalidateQueries({ queryKey: ["external-imap-accounts"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["messages"] }); toast({ title: `同步完成：导入 ${run.imported}，跳过 ${run.skipped}` }) },
+    onSuccess: (run) => { qc.invalidateQueries({ queryKey: ["external-imap-accounts"] }); qc.invalidateQueries({ queryKey: ["external-imap-sync-runs"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["messages"] }); toast({ title: `同步完成：导入 ${run.imported}，跳过 ${run.skipped}` }) },
     onError: (error) => toast({ title: "同步失败", description: error.message }),
+  })
+  const syncExternalImapFolder = useMutation({
+    mutationFn: ({ id, folder }: { id: string; folder: string }) => api.syncExternalImapFolder(id, folder),
+    onSuccess: (run) => { qc.invalidateQueries({ queryKey: ["external-imap-accounts"] }); qc.invalidateQueries({ queryKey: ["external-imap-sync-runs"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["messages"] }); toast({ title: `${run.folder || "文件夹"} 同步完成：导入 ${run.imported}，跳过 ${run.skipped}` }) },
+    onError: (error) => toast({ title: "同步失败", description: error.message }),
+  })
+  const startExternalOAuth = useMutation({
+    mutationFn: ({ provider, mailboxId }: { provider: ExternalImapOAuthProvider; mailboxId: string }) => api.startExternalImapOAuth(provider, { mailboxId, storageMode: "local", syncReadState: true, enabled: true }),
+    onSuccess: (res) => { window.location.href = res.url },
+    onError: (error) => toast({ title: "授权失败", description: error.message }),
   })
 
   React.useEffect(() => {
@@ -317,7 +336,31 @@ export function ProfilePage() {
     </div>
   )
   function renderTab() {
-    if (tab === "mailboxes") return <MailboxManagement mailboxes={canAccessMail ? mailboxes.data?.items || [] : []} applyOptions={mailboxApplyOptions.data} applyPending={applyMailbox.isPending} selectedMailboxId={mailboxId} externalAccounts={externalImapAccounts.data?.items || []} externalPending={createExternalImap.isPending || updateExternalImap.isPending || deleteExternalImap.isPending || testExternalImap.isPending || syncExternalImap.isPending} onSelect={setMailboxId} onCopy={copy} onOpen={(id) => { if (!canAccessMail) return; setMailboxId(id); navigate("/") }} onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)} onCreateExternal={(payload) => createExternalImap.mutate(payload)} onUpdateExternal={(id, payload) => updateExternalImap.mutate({ id, payload })} onDeleteExternal={(id) => deleteExternalImap.mutate(id)} onTestExternal={(id) => testExternalImap.mutate(id)} onSyncExternal={(id) => syncExternalImap.mutate(id)} />
+    if (tab === "mailboxes") return (
+      <MailboxManagement
+        mailboxes={canAccessMail ? mailboxes.data?.items || [] : []}
+        applyOptions={mailboxApplyOptions.data}
+        applyPending={applyMailbox.isPending}
+        selectedMailboxId={mailboxId}
+        externalAccounts={externalImapAccounts.data?.items || []}
+        externalPending={createExternalImap.isPending || updateExternalImap.isPending || deleteExternalImap.isPending || testExternalImap.isPending || syncExternalImap.isPending || syncExternalImapFolder.isPending || startExternalOAuth.isPending}
+        selectedExternalRunAccountId={externalRunAccountId}
+        externalRunFolders={externalRunFolders.data?.items || []}
+        externalSyncRuns={externalSyncRuns.data?.items || []}
+        onSelectExternalRunAccount={setExternalRunAccountId}
+        onSelect={setMailboxId}
+        onCopy={copy}
+        onOpen={(id) => { if (!canAccessMail) return; setMailboxId(id); navigate("/") }}
+        onApply={(payload) => applyMailbox.mutateAsync(payload).then(() => undefined)}
+        onCreateExternal={(payload) => createExternalImap.mutate(payload)}
+        onStartExternalOAuth={(provider, mailboxId) => startExternalOAuth.mutate({ provider, mailboxId })}
+        onUpdateExternal={(id, payload) => updateExternalImap.mutate({ id, payload })}
+        onDeleteExternal={(id) => deleteExternalImap.mutate(id)}
+        onTestExternal={(id) => testExternalImap.mutate(id)}
+        onSyncExternal={(id) => syncExternalImap.mutate(id)}
+        onSyncExternalFolder={(id, folder) => syncExternalImapFolder.mutate({ id, folder })}
+      />
+    )
     if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
@@ -518,15 +561,21 @@ function MailboxManagement({
   selectedMailboxId,
   externalAccounts,
   externalPending,
+  selectedExternalRunAccountId,
+  externalRunFolders,
+  externalSyncRuns,
+  onSelectExternalRunAccount,
   onSelect,
   onCopy,
   onOpen,
   onApply,
   onCreateExternal,
+  onStartExternalOAuth,
   onUpdateExternal,
   onDeleteExternal,
   onTestExternal,
   onSyncExternal,
+  onSyncExternalFolder,
 }: {
   mailboxes: Mailbox[]
   applyOptions?: MailboxApplyOptions
@@ -534,15 +583,21 @@ function MailboxManagement({
   selectedMailboxId: string
   externalAccounts: ExternalImapAccount[]
   externalPending: boolean
+  selectedExternalRunAccountId: string
+  externalRunFolders: ExternalImapFolder[]
+  externalSyncRuns: ExternalImapSyncRun[]
+  onSelectExternalRunAccount: (id: string) => void
   onSelect: (id: string) => void
   onCopy: (text: string) => void
   onOpen: (id: string) => void
   onApply: (payload: { domainId: string; localPart: string; displayName: string }) => Promise<void>
   onCreateExternal: (payload: ExternalImapAccountPayload) => void
+  onStartExternalOAuth: (provider: ExternalImapOAuthProvider, mailboxId: string) => void
   onUpdateExternal: (id: string, payload: ExternalImapAccountPayload) => void
   onDeleteExternal: (id: string) => void
   onTestExternal: (id: string) => void
   onSyncExternal: (id: string) => void
+  onSyncExternalFolder: (id: string, folder: string) => void
 }) {
   const canApply = !!applyOptions?.enabled && (applyOptions.domains || []).length > 0
   const selectedMailbox = mailboxes.find((item) => item.id === selectedMailboxId)
@@ -562,32 +617,43 @@ function MailboxManagement({
               <CardTitle>外部 IMAP 接入</CardTitle>
               <div className="mt-1 text-sm text-muted-foreground">接入其他邮箱，可选择同步到本地，或每次打开时直接从远端读取。</div>
             </div>
-            <ExternalImapDialog mailboxId={selectedMailboxId} disabled={!selectedMailbox} pending={externalPending} onSubmit={onCreateExternal} />
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" disabled={!selectedMailbox || externalPending} onClick={() => onStartExternalOAuth("gmail", selectedMailboxId)}>Gmail OAuth</Button>
+              <Button type="button" variant="outline" disabled={!selectedMailbox || externalPending} onClick={() => onStartExternalOAuth("outlook", selectedMailboxId)}>Outlook OAuth</Button>
+              <ExternalImapDialog mailboxId={selectedMailboxId} disabled={!selectedMailbox} pending={externalPending} onSubmit={onCreateExternal} />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
           {!selectedMailbox && <EmptyState text="请先选择一个本地邮箱" />}
           {selectedMailbox && externalAccounts.length === 0 && <EmptyState text="暂无外部 IMAP 账号" />}
-          {selectedMailbox && externalAccounts.map((account) => (
-            <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
-              <div className="min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="truncate font-medium">{account.name}</div>
-                  <Badge variant={account.enabled ? "secondary" : "outline"}>{account.enabled ? "已启用" : "已停用"}</Badge>
-                  <Badge variant="outline">{account.storageMode === "local" ? "本地存储" : "远端直连"}</Badge>
+          {selectedMailbox && externalAccounts.map((account) => {
+            const selectedForRuns = selectedExternalRunAccountId === account.id
+            return (
+              <div key={account.id} className="space-y-3 rounded-lg border p-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="truncate font-medium">{account.name}</div>
+                      <Badge variant={account.enabled ? "secondary" : "outline"}>{account.enabled ? "已启用" : "已停用"}</Badge>
+                      <Badge variant="outline">{account.storageMode === "local" ? "本地存储" : "远端直连"}</Badge>
+                    </div>
+                    <div className="mt-1 truncate text-xs text-muted-foreground">{account.username} · {account.host}:{account.port} · {account.tlsMode.toUpperCase()}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">状态：{externalStatusLabel(account.lastStatus)}{account.lastSyncAt ? ` · 最近同步 ${formatDateTime(account.lastSyncAt)}` : ""}{account.lastError ? ` · ${account.lastError}` : ""}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onTestExternal(account.id)}><Link2 className="h-4 w-4" />测试</Button>
+                    {account.storageMode === "local" && <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onSyncExternal(account.id)}><RefreshCcw className="h-4 w-4" />同步</Button>}
+                    {account.storageMode === "local" && <Button type="button" variant="ghost" size="sm" onClick={() => onSelectExternalRunAccount(selectedForRuns ? "" : account.id)}>历史</Button>}
+                    <ExternalImapDialog account={account} mailboxId={selectedMailboxId} pending={externalPending} onSubmit={(payload) => onUpdateExternal(account.id, payload)} />
+                    <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onUpdateExternal(account.id, { ...externalPayloadFromAccount(account), enabled: !account.enabled })}>{account.enabled ? "停用" : "启用"}</Button>
+                    <Button type="button" variant="destructive" size="sm" disabled={externalPending} onClick={() => onDeleteExternal(account.id)}>删除</Button>
+                  </div>
                 </div>
-                <div className="mt-1 truncate text-xs text-muted-foreground">{account.username} · {account.host}:{account.port} · {account.tlsMode.toUpperCase()}</div>
-                <div className="mt-1 text-xs text-muted-foreground">状态：{externalStatusLabel(account.lastStatus)}{account.lastSyncAt ? ` · 最近同步 ${formatDateTime(account.lastSyncAt)}` : ""}{account.lastError ? ` · ${account.lastError}` : ""}</div>
+                {selectedForRuns && <ExternalImapSyncPanel account={account} folders={externalRunFolders} runs={externalSyncRuns} pending={externalPending} onSyncFolder={onSyncExternalFolder} />}
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onTestExternal(account.id)}><Link2 className="h-4 w-4" />测试</Button>
-                {account.storageMode === "local" && <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onSyncExternal(account.id)}><RefreshCcw className="h-4 w-4" />同步</Button>}
-                <ExternalImapDialog account={account} mailboxId={selectedMailboxId} pending={externalPending} onSubmit={(payload) => onUpdateExternal(account.id, payload)} />
-                <Button type="button" variant="outline" size="sm" disabled={externalPending} onClick={() => onUpdateExternal(account.id, { ...externalPayloadFromAccount(account), enabled: !account.enabled })}>{account.enabled ? "停用" : "启用"}</Button>
-                <Button type="button" variant="destructive" size="sm" disabled={externalPending} onClick={() => onDeleteExternal(account.id)}>删除</Button>
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </CardContent>
       </Card>
     </div>
@@ -720,6 +786,46 @@ function externalPayloadFromAccount(account: ExternalImapAccount): ExternalImapA
 
 function externalStatusLabel(status: string) {
   return ({ idle: "未同步", ok: "正常", partial: "部分成功", error: "错误", running: "同步中" } as Record<string, string>)[status] || status || "未知"
+}
+
+function ExternalImapSyncPanel({ account, folders, runs, pending, onSyncFolder }: { account: ExternalImapAccount; folders: ExternalImapFolder[]; runs: ExternalImapSyncRun[]; pending: boolean; onSyncFolder: (id: string, folder: string) => void }) {
+  const [folder, setFolder] = React.useState("")
+  React.useEffect(() => {
+    if (folder && folders.some((item) => item.name === folder)) return
+    setFolder(folders[0]?.name || "INBOX")
+  }, [folder, folders])
+  return (
+    <div className="rounded-lg bg-muted/40 p-3">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+        <Field label="单文件夹同步">
+          <Select value={folder} onValueChange={setFolder}>
+            <SelectTrigger><SelectValue placeholder="选择远端文件夹" /></SelectTrigger>
+            <SelectContent>{folders.map((item) => <SelectItem key={item.name} value={item.name}>{folderLabel(item.name)}</SelectItem>)}</SelectContent>
+          </Select>
+        </Field>
+        <Button type="button" variant="outline" disabled={pending || !folder} onClick={() => onSyncFolder(account.id, folder)}><RefreshCcw className="h-4 w-4" />同步文件夹</Button>
+      </div>
+      <div className="mt-3 space-y-2">
+        <div className="text-xs font-medium text-muted-foreground">最近同步记录</div>
+        {runs.length === 0 && <div className="rounded-md border bg-background p-3 text-sm text-muted-foreground">暂无同步记录</div>}
+        {runs.slice(0, 6).map((run) => (
+          <div key={run.id} className="grid gap-2 rounded-md border bg-background p-3 text-sm md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant={run.status === "ok" ? "secondary" : run.status === "failed" ? "destructive" : "outline"}>{externalStatusLabel(run.status)}</Badge>
+                <span className="truncate">{run.folder ? folderLabel(run.folder) : "全部文件夹"}</span>
+              </div>
+              {run.error && <div className="mt-1 truncate text-xs text-destructive">{run.error}</div>}
+            </div>
+            <div className="text-xs text-muted-foreground md:text-right">
+              <div>导入 {run.imported} · 跳过 {run.skipped} · 失败 {run.failed}</div>
+              <div>{formatDateTime(run.startedAt)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 function formatDateTime(value: string) {
