@@ -67,6 +67,7 @@ type PendingConfirm = { title: string; description?: string; confirmText: string
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
 type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
 type MessageContextMenuState = { message: MailMessage; x: number; y: number }
+type SidebarContextMenuState = { item: MailMenuItem; x: number; y: number }
 type FolderDropTarget = { key: string; edge: "before" | "after" | "end" }
 type MailMenuItem =
   | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
@@ -113,6 +114,7 @@ export function MailPage() {
   const [labelEditMode, setLabelEditMode] = React.useState(false)
   const [newLabelEditing, setNewLabelEditing] = React.useState(false)
   const [messageContextMenu, setMessageContextMenu] = React.useState<MessageContextMenuState | null>(null)
+  const [sidebarContextMenu, setSidebarContextMenu] = React.useState<SidebarContextMenuState | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
   const [draggingFolderId, setDraggingFolderId] = React.useState("")
   const [folderDropTarget, setFolderDropTarget] = React.useState<FolderDropTarget | null>(null)
@@ -676,6 +678,20 @@ export function MailPage() {
   function closeMessageContextMenu() {
     setMessageContextMenu(null)
   }
+  function openSidebarContextMenu(event: React.MouseEvent, item: MailMenuItem) {
+    event.preventDefault()
+    event.stopPropagation()
+    setSidebarContextMenu({ item, x: event.clientX, y: event.clientY })
+  }
+  function closeSidebarContextMenu() {
+    setSidebarContextMenu(null)
+  }
+  function activateSidebarItem(item: MailMenuItem) {
+    if (item.type === "starred") openStarred()
+    else if (item.type === "scheduled") openScheduled()
+    else if (item.type === "sendQueue") openSendQueue()
+    else openFolder(item.folderName)
+  }
   function reorderCustomFolder(draggedId: string, target: FolderDropTarget) {
     if (!canOrganizeMail || reorderFolders.isPending) return
     const foldersByID = new Map((folders.data?.items || []).map((item) => [item.id, item]))
@@ -703,6 +719,23 @@ export function MailPage() {
     nextMenu.splice(insertIndex, 0, draggedMenuItem)
     const nextFolders = assignCustomFolderOrders(nextMenu)
     reorderFolders.mutate(nextFolders)
+  }
+  function moveSidebarFolder(item: MailMenuItem, action: "top" | "up" | "down" | "bottom") {
+    if (item.type !== "folder" || !item.custom) return
+    const currentIndex = mailMenuItems.findIndex((entry) => entry.key === item.key)
+    if (currentIndex < 0) return
+    if (action === "top") {
+      reorderCustomFolder(item.folderId, { key: mailMenuItems[0]?.key || "__end__", edge: "before" })
+      return
+    }
+    if (action === "bottom") {
+      reorderCustomFolder(item.folderId, { key: "__end__", edge: "end" })
+      return
+    }
+    const targetIndex = action === "up" ? currentIndex - 1 : currentIndex + 1
+    const target = mailMenuItems[targetIndex]
+    if (!target) return
+    reorderCustomFolder(item.folderId, { key: target.key, edge: action === "up" ? "before" : "after" })
   }
   function handleFolderDragStart(event: React.DragEvent, item: MailMenuItem) {
     if (item.type !== "folder" || !item.custom || sidebarCollapsed || !canOrganizeMail) return
@@ -875,6 +908,7 @@ export function MailPage() {
                   onDragLeave={() => { if (folderDropTarget?.key === item.key) setFolderDropTarget(null) }}
                   onDrop={(event) => handleFolderDrop(event, item)}
                   onDragEnd={clearFolderDragState}
+                  onContextMenu={(event) => openSidebarContextMenu(event, item)}
                 >
                   <SidebarMenuButton
                     isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : item.type === "sendQueue" ? mailView === "sendQueue" : mailView === "folder" && folder === item.folderName}
@@ -886,7 +920,7 @@ export function MailPage() {
                       folderDropTarget?.key === item.key && folderDropTarget.edge === "before" && "border-t-2 border-t-primary",
                       folderDropTarget?.key === item.key && folderDropTarget.edge === "after" && "border-b-2 border-b-primary"
                     )}
-                    onClick={() => item.type === "starred" ? openStarred() : item.type === "scheduled" ? openScheduled() : item.type === "sendQueue" ? openSendQueue() : openFolder(item.folderName)}
+                    onClick={() => activateSidebarItem(item)}
                   >
                     {item.icon}
                     {!sidebarCollapsed && <span>{item.label}</span>}
@@ -1239,6 +1273,28 @@ export function MailPage() {
         onToggleLabel={(message, label) => {
           const active = (message.labels || []).some((item) => item.id === label.id)
           active ? removeLabel.mutate({ id: message.id, labelId: label.id }) : addLabel.mutate({ id: message.id, label })
+        }}
+      />
+      <SidebarContextMenu
+        state={sidebarContextMenu}
+        canOrganize={canOrganizeMail}
+        pending={reorderFolders.isPending}
+        onClose={closeSidebarContextMenu}
+        onOpen={(item) => {
+          closeSidebarContextMenu()
+          activateSidebarItem(item)
+        }}
+        onRefresh={() => {
+          closeSidebarContextMenu()
+          void refreshMailData()
+        }}
+        onCreateFolder={() => {
+          closeSidebarContextMenu()
+          setFolderDialogOpen(true)
+        }}
+        onMove={(item, action) => {
+          closeSidebarContextMenu()
+          moveSidebarFolder(item, action)
         }}
       />
       <CreateFolderDialog
@@ -1662,6 +1718,69 @@ function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (ac
         <DropdownMenuItem onSelect={() => onAction("delete")} className="text-destructive">删除</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRefresh, onCreateFolder, onMove }: { state: SidebarContextMenuState | null; canOrganize: boolean; pending: boolean; onClose: () => void; onOpen: (item: MailMenuItem) => void; onRefresh: () => void; onCreateFolder: () => void; onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void }) {
+  React.useEffect(() => {
+    if (!state) return
+    const close = () => onClose()
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose()
+    }
+    window.addEventListener("pointerdown", close)
+    window.addEventListener("resize", close)
+    window.addEventListener("scroll", close, true)
+    window.addEventListener("keydown", onKeyDown)
+    return () => {
+      window.removeEventListener("pointerdown", close)
+      window.removeEventListener("resize", close)
+      window.removeEventListener("scroll", close, true)
+      window.removeEventListener("keydown", onKeyDown)
+    }
+  }, [state, onClose])
+
+  if (!state) return null
+  const item = state.item
+  const customFolder = item.type === "folder" && item.custom
+  const position = contextMenuPosition(state.x, state.y)
+  return (
+    <div
+      className="fixed z-[110] w-48 rounded-md border bg-popover p-1 text-sm text-popover-foreground shadow-md"
+      style={{ left: position.x, top: position.y }}
+      onPointerDown={(event) => event.stopPropagation()}
+      onContextMenu={(event) => event.preventDefault()}
+      role="menu"
+    >
+      <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={() => onOpen(item)}>
+        <Inbox className="h-4 w-4" />打开
+      </button>
+      <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={onRefresh}>
+        <RefreshCcw className="h-4 w-4" />刷新
+      </button>
+      {canOrganize && (
+        <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent" onClick={onCreateFolder}>
+          <Plus className="h-4 w-4" />新建文件夹
+        </button>
+      )}
+      {canOrganize && customFolder && (
+        <>
+          <div className="my-1 h-px bg-border" />
+          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "top")}>
+            <ArrowLeft className="h-4 w-4 rotate-90" />移到最上
+          </button>
+          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "up")}>
+            <ChevronDown className="h-4 w-4 rotate-180" />上移一位
+          </button>
+          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "down")}>
+            <ChevronDown className="h-4 w-4" />下移一位
+          </button>
+          <button type="button" className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50" disabled={pending} onClick={() => onMove(item, "bottom")}>
+            <ArrowLeft className="h-4 w-4 -rotate-90" />移到最下
+          </button>
+        </>
+      )}
+    </div>
   )
 }
 
