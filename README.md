@@ -1,5 +1,8 @@
 # LanQin Email
 
+[![English](https://img.shields.io/badge/English-README-blue)](./README.md)
+[![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-README-green)](./README.zh-CN.md)
+
 ![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)
@@ -9,61 +12,61 @@
 ![Dovecot](https://img.shields.io/badge/Dovecot-4B8BBE)
 ![Rspamd](https://img.shields.io/badge/Rspamd-FFD045)
 
-LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + TypeScript + shadcn/ui，后端使用 Go + SQLite，部署时可用单容器集成 API、Web、Nginx、Postfix、Dovecot、Rspamd。
+LanQin Email is a self-hosted full-stack webmail solution. The frontend is built with React + TypeScript + shadcn/ui, the backend uses Go + SQLite, and deployment can run as a single all-in-one container with API, Web, Nginx, Postfix, Dovecot, and Rspamd integrated.
 
-交流群组：[Telegram 群组](https://t.me/+EhII7MSyi3QwNDQ5)
+Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 
-## 功能特性
+## Features
 
-- **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
-- **邮箱增强**：联系人、签名、收件规则、发件人黑名单、邮件统计、归档已读、清空回收站/垃圾邮件。
-- **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、别名转发、无人收件开关。
-- **账号与权限**：登录/注册、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC。
-- **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
-- **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
-- **部署友好**：默认 all-in-one 单容器，也提供多容器 stack 方便调试 Postfix/Dovecot/Rspamd。
+- **Webmail client**: multiple mailbox switching, folders, reading and composing messages, drafts, scheduled sending, attachments, search, labels, stars, move/delete, read/unread status.
+- **Mailbox enhancements**: contacts, signatures, inbox rules, sender blacklist, mail statistics, archive read messages, empty Trash/Spam.
+- **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, alias forwarding, catch-all toggle.
+- **Accounts and permissions**: login/registration, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
+- **Admin panel**: overview checklist, user/permission group/domain/mailbox/alias/all-message management, system settings, mail templates, SMTP testing.
+- **Mail service stack**: Postfix delivery, Dovecot IMAP/POP3, Rspamd anti-spam and DKIM signing, Maildir-to-SQLite sync.
+- **Deployment friendly**: default all-in-one single container, plus a multi-container stack for debugging Postfix/Dovecot/Rspamd.
 
-## 界面预览
+## UI Preview
 
-| Webmail 邮件阅读与列表 | 写邮件 · 富文本编辑工具栏 |
+| Webmail reading and list | Compose · rich-text toolbar |
 | --- | --- |
-| ![Webmail 邮件阅读与列表](./docs/screenshots/mail-preview.png) | ![写邮件富文本编辑工具栏](./docs/screenshots/compose-preview.png) |
-| 多邮箱切换、文件夹、搜索、标签、星标与邮件阅读面板。 | 富文本工具栏支持字体、标题、加粗、斜体、下划线、颜色、高亮、列表、对齐、引用、代码块、附件、表情与定时发送。 |
-| 管理后台 · 系统概览 | 第三方客户端配置 |
-| ![管理后台系统概览](./docs/screenshots/admin-preview.png) | ![第三方客户端配置](./docs/screenshots/client-preview.png) |
-| 管理用户、权限组、域名、邮箱、别名、系统设置与发送审计。 | 一键查看 IMAP / POP3 / SMTP 服务器、端口、安全方式与账号信息。 |
+| ![Webmail reading and list](./docs/screenshots/mail-preview.png) | ![Compose rich-text toolbar](./docs/screenshots/compose-preview.png) |
+| Switch mailboxes, folders, search, labels, stars, and message reading panel. | Rich-text toolbar supports fonts, headings, bold, italic, underline, colors, highlights, lists, alignment, quotes, code blocks, attachments, emoji, and scheduled sending. |
+| Admin panel · system overview | Third-party client configuration |
+| ![Admin panel system overview](./docs/screenshots/admin-preview.png) | ![Third-party client configuration](./docs/screenshots/client-preview.png) |
+| Manage users, permission groups, domains, mailboxes, aliases, system settings, and send audits. | View IMAP / POP3 / SMTP servers, ports, security modes, and account information in one place. |
 
-## 目录结构
+## Repository Structure
 
 ```text
 .
-├── apps/api              # Go API、SQLite schema、邮件同步与业务逻辑
-├── apps/web              # React/Vite Webmail 与管理后台
-├── deploy                # Docker Compose、镜像构建、Postfix/Dovecot/Rspamd 配置
-└── .github/workflows     # Docker 镜像发布流水线
+├── apps/api              # Go API, SQLite schema, mail sync, and business logic
+├── apps/web              # React/Vite Webmail and admin panel
+├── deploy                # Docker Compose, image build, Postfix/Dovecot/Rspamd config
+└── .github/workflows     # Docker image release workflows
 ```
 
-## 环境要求
+## Requirements
 
-### 开发环境
+### Development
 
 - Go 1.25+
 - Node.js 20+
-- pnpm 10.28.2（可通过 corepack 启用）
+- pnpm 10.28.2 (can be enabled through corepack)
 
-### 部署环境
+### Deployment
 
 - Docker Engine
 - Docker Compose v2
-- 可解析的邮件域名，以及可用的 25 / 465 / 587 / 993 / 995 等端口
+- A resolvable mail domain, plus available ports such as 25 / 465 / 587 / 993 / 995
 
-> 公网收发邮件还需要正确配置 MX、SPF、DKIM、DMARC，并确认云厂商未封禁 SMTP 端口。
+> Public email sending and receiving also requires correct MX, SPF, DKIM, and DMARC records, and you should confirm that your cloud provider does not block SMTP ports.
 
-## 快速开始
+## Quick Start
 
-### 本地开发
+### Local Development
 
-后端：
+Backend:
 
 ```bash
 cd apps/api
@@ -72,7 +75,7 @@ go test ./...
 go run ./cmd/server
 ```
 
-前端（新终端）：
+Frontend (new terminal):
 
 ```bash
 cd apps/web
@@ -82,40 +85,40 @@ pnpm install
 pnpm run dev
 ```
 
-访问：
+Open:
 
-- Web：`http://localhost:5173`
-- API：`http://localhost:8080`
+- Web: `http://localhost:5173`
+- API: `http://localhost:8080`
 
-默认管理员邮箱为 `admin@lanqin.local`。建议开发时显式设置 `LANQIN_ADMIN_PASSWORD`；如果未设置，后端首次启动会随机生成密码并输出到日志。
+The default admin email is `admin@lanqin.local`. For development, explicitly set `LANQIN_ADMIN_PASSWORD`; if it is not set, the backend generates a random password on first startup and prints it to the logs.
 
-### Docker 部署（单容器）
+### Docker Deployment (single container)
 
-服务器只需要 `deploy/` 下的 Compose 文件和配置，不需要源码构建：
+A server only needs the Compose files and configuration under `deploy/`; building from source is not required:
 
 ```bash
 cd deploy
 cp .env.example .env
-# 修改 .env：域名、访问地址、管理员邮箱、管理员密码等
+# Edit .env: domain, public URL, admin email, admin password, etc.
 docker compose pull
 docker compose up -d
 ```
 
-常用命令：
+Common commands:
 
 ```bash
-# 查看日志
+# View logs
 docker compose logs -f lanqin-email
 
-# 更新镜像并重启
+# Pull the latest image and restart
 docker compose pull
 docker compose up -d
 
-# 停止服务
+# Stop services
 docker compose down
 ```
 
-如需在完整源码仓库中本地构建镜像：
+To build the image locally from the full source repository:
 
 ```bash
 cd deploy
@@ -123,55 +126,55 @@ cp .env.example .env
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-更多部署细节见 [`deploy/README.md`](./deploy/README.md)。
+See [`deploy/README.md`](./deploy/README.md) for more deployment details.
 
-## 首次部署清单
+## First Deployment Checklist
 
-1. 编辑 `deploy/.env`：至少修改 `LANQIN_PUBLIC_HOSTNAME`、`LANQIN_PUBLIC_BASE_URL`、`LANQIN_ADMIN_EMAIL`、`LANQIN_ADMIN_PASSWORD`。
-2. 生产环境建议挂载真实 TLS 证书，并设置 `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`。
-3. 登录管理后台，添加邮件域名。
-4. 在域名管理中复制并配置 MX、SPF、DKIM、DMARC 记录，然后点击 DNS 检测。
-5. 创建邮箱账号、别名转发或权限组，按需开启注册、2FA、Turnstile、自助申请邮箱。
-6. 使用后台 SMTP 测试与 Webmail 收发测试确认链路正常。
+1. Edit `deploy/.env`: at minimum, change `LANQIN_PUBLIC_HOSTNAME`, `LANQIN_PUBLIC_BASE_URL`, `LANQIN_ADMIN_EMAIL`, and `LANQIN_ADMIN_PASSWORD`.
+2. In production, mount real TLS certificates and set `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`.
+3. Log in to the admin panel and add your mail domain.
+4. Copy and configure MX, SPF, DKIM, and DMARC records from domain management, then run the DNS check.
+5. Create mailbox accounts, alias forwarding, or permission groups; enable registration, 2FA, Turnstile, and self-service mailbox requests as needed.
+6. Use the admin SMTP test and Webmail send/receive tests to confirm the full path works.
 
-## 关键环境变量
+## Key Environment Variables
 
-完整配置见 [`deploy/.env.example`](./deploy/.env.example)。常用变量如下：
+See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. Common variables:
 
-| 变量 | 说明 | 默认/示例 |
+| Variable | Description | Default / Example |
 |------|------|-----------|
-| `LANQIN_IMAGE` | all-in-one 镜像 | `ghcr.io/lanqin996/lanqin-email:latest` |
-| `LANQIN_PUBLIC_HOSTNAME` | 邮件服务器主机名，影响 Postfix/DNS 展示/链接 | `mail.example.com` |
-| `LANQIN_PUBLIC_BASE_URL` | Webmail 对外访问地址 | `https://mail.example.com` |
-| `LANQIN_ADMIN_EMAIL` | 初始管理员邮箱 | `admin@example.com` |
-| `LANQIN_ADMIN_PASSWORD` | 初始管理员密码，生产必须修改 | `ChangeMe123!` |
-| `LANQIN_DB_PATH` | SQLite 数据库路径 | `/data/lanqin.db` |
-| `LANQIN_ALLOW_INSECURE_HTTP` | 是否允许非 HTTPS Cookie，本地调试可开 | `false` |
-| `LANQIN_OPEN_REGISTRATION` | 是否开放注册 | `false` |
-| `LANQIN_TWO_FACTOR_ENABLED` | 2FA 功能总开关 | `false` |
-| `LANQIN_TURNSTILE_ENABLED` | 是否启用 Turnstile | `false` |
-| `LANQIN_SMTP_HOST` / `LANQIN_SMTP_PORT` | Webmail 发信 SMTP | `127.0.0.1` / `25` |
-| `LANQIN_MAILDIR_ROOT` | Maildir 根目录 | `/var/mail/vhosts` |
-| `LANQIN_CATCH_ALL_ENABLED` | 未注册收件地址是否进入全部邮件 | `false` |
-| `LANQIN_USER_MAILBOX_APPLY_ENABLED` | 是否允许用户自助申请邮箱 | `false` |
-| `LANQIN_EXTERNAL_IMAP_ENABLED` | 是否启用外部 IMAP 接入；也可在后台“系统设置 > 外部 IMAP”配置 | `false` |
-| `LANQIN_EXTERNAL_IMAP_SECRET_KEY` | 外部 IMAP 密码加密密钥，启用接入前必须设置；也可在后台配置 | 随机长字符串 |
-| `LANQIN_EXTERNAL_IMAP_SYNC_SECONDS` | 外部 IMAP 本地存储模式同步间隔；也可在后台配置 | `300` |
-| `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | 是否允许外部 IMAP 连接内网/localhost 主机；也可在后台配置 | `false` |
-| `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/gmail/callback` | 空 |
-| `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/outlook/callback` | 空 |
+| `LANQIN_IMAGE` | All-in-one image | `ghcr.io/lanqin996/lanqin-email:latest` |
+| `LANQIN_PUBLIC_HOSTNAME` | Mail server hostname; affects Postfix/DNS display/links | `mail.example.com` |
+| `LANQIN_PUBLIC_BASE_URL` | Public Webmail URL | `https://mail.example.com` |
+| `LANQIN_ADMIN_EMAIL` | Initial admin email | `admin@example.com` |
+| `LANQIN_ADMIN_PASSWORD` | Initial admin password; must be changed in production | `ChangeMe123!` |
+| `LANQIN_DB_PATH` | SQLite database path | `/data/lanqin.db` |
+| `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging | `false` |
+| `LANQIN_OPEN_REGISTRATION` | Enable public registration | `false` |
+| `LANQIN_TWO_FACTOR_ENABLED` | Global 2FA feature toggle | `false` |
+| `LANQIN_TURNSTILE_ENABLED` | Enable Turnstile | `false` |
+| `LANQIN_SMTP_HOST` / `LANQIN_SMTP_PORT` | Webmail outbound SMTP | `127.0.0.1` / `25` |
+| `LANQIN_MAILDIR_ROOT` | Maildir root directory | `/var/mail/vhosts` |
+| `LANQIN_CATCH_ALL_ENABLED` | Whether unregistered recipient addresses go into all messages | `false` |
+| `LANQIN_USER_MAILBOX_APPLY_ENABLED` | Allow users to request mailboxes by themselves | `false` |
+| `LANQIN_EXTERNAL_IMAP_ENABLED` | Enable external IMAP access; also configurable in Admin > System Settings > External IMAP | `false` |
+| `LANQIN_EXTERNAL_IMAP_SECRET_KEY` | Encryption key for external IMAP passwords; required before enabling access; also configurable in admin | Random long string |
+| `LANQIN_EXTERNAL_IMAP_SYNC_SECONDS` | Sync interval for external IMAP local-storage mode; also configurable in admin | `300` |
+| `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | Allow external IMAP to connect to private/localhost hosts; also configurable in admin | `false` |
+| `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail external IMAP OAuth2; callback is `/api/external-imap-oauth/gmail/callback` | Empty |
+| `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook external IMAP OAuth2; callback is `/api/external-imap-oauth/outlook/callback` | Empty |
 
-## 架构
+## Architecture
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
-│                    lanqin-email 单容器                     │
+│                 lanqin-email single container              │
 │                                                            │
 │  ┌─────────┐       ┌────────────┐       ┌──────────────┐   │
 │  │  Nginx  │ ───▶  │ Go API     │ ───▶  │ SQLite /data │   │
-│  │ Web 静态│       │ Webmail API│       └──────┬───────┘   │
-│  └─────────┘       └─────┬──────┘              │           │
-│                          │ Maildir sync        │ maps      │
+│  │ Web     │       │ Webmail API│       └──────┬───────┘   │
+│  │ static  │       └─────┬──────┘              │           │
+│  └─────────┘             │ Maildir sync        │ maps      │
 │  ┌─────────┐       ┌─────▼──────┐       ┌──────▼───────┐   │
 │  │ Rspamd  │ ◀───▶ │ Postfix    │ ───▶  │ Dovecot/LMTP │   │
 │  │ DKIM/AS │       │ SMTP/MTA   │       │ IMAP/POP3    │   │
@@ -179,53 +182,52 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 └────────────────────────────────────────────────────────────┘
 ```
 
-邮件流转：
+Mail flow:
 
-1. **收件**：Postfix 接收邮件 → Rspamd 评分/标记 → Dovecot 写入 Maildir → API worker 同步到 SQLite → Webmail 展示。
-2. **发件**：Webmail 调用 API → API 构造 MIME → SMTP 提交给 Postfix 或外部 SMTP → 投递到目标地址。
-3. **本地投递**：开发环境中，系统内邮箱互发可直接写入对方 Inbox；未配置 `LANQIN_SMTP_HOST` 时不会真正投递外部收件人。
-4. **第三方客户端**：可通过 SMTP 465/587、IMAP 993、POP3 995 连接；生产环境请配置匹配 `LANQIN_PUBLIC_HOSTNAME` 的证书。
-5. **外部邮箱接入**：个人邮箱管理可添加外部 IMAP 账号。本地存储模式会同步入库；远端直连模式每次读取远端，不写入本地邮件表。
+1. **Receiving**: Postfix receives mail → Rspamd scores/marks it → Dovecot writes to Maildir → API worker syncs it into SQLite → Webmail displays it.
+2. **Sending**: Webmail calls the API → API builds MIME → SMTP submits to Postfix or an external SMTP server → mail is delivered to the destination.
+3. **Local delivery**: In development, internal mailboxes can send directly into the recipient Inbox; if `LANQIN_SMTP_HOST` is not configured, external recipients are not actually delivered.
+4. **Third-party clients**: Connect with SMTP 465/587, IMAP 993, or POP3 995; in production, configure certificates that match `LANQIN_PUBLIC_HOSTNAME`.
+5. **External mailbox access**: Users can add external IMAP accounts in personal mailbox management. Local-storage mode syncs mail into the database; remote-direct mode reads from the remote server each time and does not write into local mail tables.
 
-## 开发与验证
+## Development and Verification
 
 ```bash
-# API 测试
+# API tests
 cd apps/api
 go test ./...
 
-# Web 检查与构建
+# Web checks and build
 cd apps/web
 pnpm run check
 
-# 单容器源码构建验证
+# Single-container source build verification
 cd deploy
 docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 ```
 
-## 生产注意事项
+## Production Notes
 
-- 生产环境必须修改默认管理员密码，并妥善保管 `.env`、SQLite 数据库、Maildir 与 DKIM 私钥。
-- Web 可放在宿主机 Nginx/宝塔/边缘网关后，但 SMTP/IMAP/POP3 证书需要单独挂载给容器内 Postfix/Dovecot。
-- 云厂商常默认封禁 25 端口；无法收发公网邮件时先检查端口、安全组、防火墙与反向 DNS。
-- SQLite 适合单机部署；多节点部署前需要迁移数据库，并同步调整 Postfix/Dovecot 查询配置。
+- In production, always change the default admin password and protect `.env`, the SQLite database, Maildir, and DKIM private keys.
+- The Web UI can sit behind host Nginx / aaPanel / an edge gateway, but SMTP/IMAP/POP3 certificates must be mounted separately for Postfix/Dovecot inside the container.
+- Cloud providers often block port 25 by default; if public email does not send or receive, first check ports, security groups, firewalls, and reverse DNS.
+- SQLite is suitable for single-node deployments; before multi-node deployment, migrate the database and adjust Postfix/Dovecot query configuration accordingly.
 
-## SMTP 提交
+## SMTP Submission
 
-- 第三方客户端的 SMTP 提交 `465/587` 由 LanQin API 进程处理。
-- 启用 SMTP 提交前必须配置 `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`；API 不会用 localhost 自签证书对外提供 465/587。
-- Postfix 只保留 `25` 端口，用于公网入站邮件和内部/外部 relay。
-- Webmail/API 和第三方客户端发信都会先写入 Sent，再进入发送队列。
-- 发送队列由 LanQin API 后台 worker relay 到 `LANQIN_SMTP_HOST:LANQIN_SMTP_PORT`，失败会记录审计并按退避策略重试。
-- v1 支持本人邮箱发信；如需 send-as，可使用启用的别名转发 source 指向本人邮箱，或在数据库中配置 `send_as_grants`。
-- 如果客户端随后又通过 IMAP APPEND 写入自己的 Sent 副本，Maildir 同步会按 Sent 文件夹内的 `Message-ID` 去重。
+- Third-party client SMTP submission on `465/587` is handled by the LanQin API process.
+- Before enabling SMTP submission, configure `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`; the API will not expose 465/587 externally with a localhost self-signed certificate.
+- Postfix only keeps port `25` for public inbound mail and internal/external relay.
+- Webmail/API and third-party client sends are first written into Sent, then enter the send queue.
+- The send queue is relayed by a LanQin API background worker to `LANQIN_SMTP_HOST:LANQIN_SMTP_PORT`; failures are audited and retried with backoff.
+- v1 supports sending from the user's own mailbox. For send-as, use an enabled alias forwarding source that points to the user's mailbox, or configure `send_as_grants` in the database.
+- If the client later writes its own Sent copy through IMAP APPEND, Maildir sync deduplicates by `Message-ID` within the Sent folder.
 
 ## License
 
 [MIT](./LICENSE)
 
-
-## Star 趋势
+## Star History
 
 <a href="https://www.star-history.com/?repos=LanQin996%2FLanQin-Email&type=date&legend=top-left">
  <picture>
@@ -235,5 +237,4 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
  </picture>
 </a>
 
-友情链接：[LINUX DO](https://linux.do/) —— 新的理想型社区
-
+Friends: [LINUX DO](https://linux.do/) — a new ideal community
