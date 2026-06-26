@@ -17,6 +17,7 @@ import { api, ExternalImapAccount, ExternalImapFolder, ListResponse, Mailbox, Ma
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
+import { Language, languageOptions, useLanguage } from "@/lib/language"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -102,6 +103,7 @@ export function MailPage() {
   const [expandedExternalAccountIds, setExpandedExternalAccountIds] = React.useState<string[]>([])
   const [externalFolder, setExternalFolder] = React.useState("INBOX")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
+  const [language, setLanguage] = useLanguage()
   const [displayMode] = useDisplayMode()
   const isMobile = useIsMobile()
   const [refreshing, setRefreshing] = React.useState(false)
@@ -980,6 +982,8 @@ export function MailPage() {
           email={me.data?.user.email || selectedMailbox?.address}
           darkMode={darkMode}
           onToggleTheme={() => setDarkMode((value) => !value)}
+          language={language}
+          onLanguageChange={setLanguage}
           onSettings={openSettings}
         />
         <div className={cn("mt-2 flex gap-2", sidebarCollapsed && "justify-center")}>
@@ -2591,8 +2595,9 @@ function NewLabelButton({ collapsed, pending, onCreate, editing, onEditingChange
   )
 }
 
-function AccountHeader({ collapsed, name, email, darkMode, onToggleTheme, onSettings }: { collapsed: boolean; name: string; email?: string; darkMode: boolean; onToggleTheme: () => void; onSettings: () => void }) {
+function AccountHeader({ collapsed, name, email, darkMode, language, onToggleTheme, onLanguageChange, onSettings }: { collapsed: boolean; name: string; email?: string; darkMode: boolean; language: Language; onToggleTheme: () => void; onLanguageChange: (language: Language) => void; onSettings: () => void }) {
   const displayName = cleanAccountName(name, email)
+  const currentLanguage = languageOptions.find((item) => item.value === language) || languageOptions[0]
   if (collapsed) {
     return (
       <div className="flex justify-center">
@@ -2616,6 +2621,21 @@ function AccountHeader({ collapsed, name, email, darkMode, onToggleTheme, onSett
         <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" onClick={onToggleTheme}>
           {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" aria-label="切换语言" title="切换语言">
+              <span className="text-sm font-medium leading-none">{currentLanguage.shortLabel}</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-40">
+            {languageOptions.map((item) => (
+              <DropdownMenuItem key={item.value} onSelect={() => onLanguageChange(item.value)} className="gap-2">
+                <span className="min-w-0 flex-1">{item.label}</span>
+                <Check className={cn("h-4 w-4 text-emerald-500", item.value === language ? "opacity-100" : "opacity-0")} />
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" onClick={onSettings}>
           <Settings className="h-4 w-4" />
         </Button>
