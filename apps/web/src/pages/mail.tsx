@@ -2478,7 +2478,7 @@ function MessageTranslateBox({ message, language }: { message: MailMessage; lang
   const sourceText = React.useMemo(() => (message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")).trim(), [message.bodyHtml, message.bodyText, message.snippet])
   const shouldShow = targetLanguage && shouldOfferMessageTranslation(sourceText, language)
   const translate = useMutation({
-    mutationFn: () => api.translateMessage(message.id, targetLanguage!),
+    mutationFn: () => message.externalAccountId ? api.translateExternalMessage(message.externalAccountId, message.id, targetLanguage!) : api.translateMessage(message.id, targetLanguage!),
     onSuccess: (result) => {
       setTranslatedText(result.translatedText)
       setTruncated(result.truncated)

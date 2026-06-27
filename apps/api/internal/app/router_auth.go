@@ -89,6 +89,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Get("/mail/external-accounts/{id}/folders", a.handleExternalIMAPFolders)
 			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Get("/mail/external-accounts/{id}/messages", a.handleExternalIMAPMessages)
 			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Get("/mail/external-accounts/{id}/messages/{remoteId}", a.handleExternalIMAPMessage)
+			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Post("/mail/external-accounts/{id}/messages/{remoteId}/translate", a.handleTranslateExternalIMAPMessage)
 			r.With(a.requirePermission(PermissionMailAttachments), a.requireExternalIMAPEnabled).Get("/mail/external-accounts/{id}/attachments/{remoteId}/{partId}", a.handleExternalIMAPAttachment)
 			r.With(a.requirePermission(PermissionMailOrganize), a.requireExternalIMAPEnabled).Post("/mail/external-accounts/{id}/messages/{remoteId}/mark-read", a.handleExternalIMAPMarkRead)
 			r.With(a.requirePermission(PermissionMailSend)).Post("/mail/send", a.handleMailSend)

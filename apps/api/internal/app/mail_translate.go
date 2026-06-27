@@ -70,6 +70,69 @@ func (a *App) handleTranslateMailMessage(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
 }
 
+func (a *App) handleTranslateExternalIMAPMessage(w http.ResponseWriter, r *http.Request) {
+	if !a.cfg.MailTranslateEnabled {
+		respondError(w, http.StatusForbidden, "mail translation is disabled")
+		return
+	}
+	var req translateMailMessageRequest
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	target := normalizeTranslateTarget(req.TargetLanguage)
+	if target == "" {
+		respondError(w, http.StatusBadRequest, "unsupported target language")
+		return
+	}
+	account, ok := a.externalIMAPAccountForMailRequest(w, r)
+	if !ok {
+		return
+	}
+	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
+	if !ok {
+		return
+	}
+	client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "connection failed: "+err.Error())
+		return
+	}
+	defer client.Close()
+	raw, remote, err := client.FetchRaw(r.Context(), folder, uid)
+	if err != nil {
+		respondError(w, http.StatusBadRequest, "failed to load remote message")
+		return
+	}
+	stored, _, err := a.parseMaildirMessage(raw, account.Username)
+	text := ""
+	if err == nil {
+		text = strings.TrimSpace(stored.BodyText)
+		if text == "" {
+			text = strings.TrimSpace(stored.Snippet)
+		}
+	}
+	if text == "" {
+		text = strings.TrimSpace(remote.Snippet)
+	}
+	if text == "" {
+		respondError(w, http.StatusBadRequest, "message has no translatable text")
+		return
+	}
+	maxChars := a.cfg.MailTranslateMaxChars
+	if maxChars <= 0 {
+		maxChars = 8000
+	}
+	text, truncated := truncateRunes(text, maxChars)
+	translated, source, err := googleFreeTranslate(r.Context(), text, target)
+	if err != nil {
+		a.log.Warn("external mail translation failed", "account_id", account.ID, "remote_id", chi.URLParam(r, "remoteId"), "target", target, "error", err)
+		respondError(w, http.StatusBadGateway, "translation failed")
+		return
+	}
+	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
+}
+
 func normalizeTranslateTarget(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "zh", "zh-cn", "zh-hans", "zh_cn":
