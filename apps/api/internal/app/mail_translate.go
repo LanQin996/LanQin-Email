@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/net/html"
 )
 
 const googleTranslateEndpoint = "https://translate.googleapis.com/translate_a/single"
@@ -23,6 +25,7 @@ type translateMailMessageRequest struct {
 
 type translateMailMessageResponse struct {
 	TranslatedText string `json:"translatedText"`
+	TranslatedHTML string `json:"translatedHtml,omitempty"`
 	SourceLanguage string `json:"sourceLanguage,omitempty"`
 	TargetLanguage string `json:"targetLanguage"`
 	Truncated      bool   `json:"truncated"`
@@ -67,7 +70,11 @@ func (a *App) handleTranslateMailMessage(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusBadGateway, "translation failed")
 		return
 	}
-	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
+	translatedHTML := ""
+	if strings.TrimSpace(msg.BodyHTML) != "" {
+		translatedHTML, _ = translateHTMLTextNodes(r.Context(), a.policy, msg.BodyHTML, target, maxChars)
+	}
+	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, TranslatedHTML: translatedHTML, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
 }
 
 func (a *App) handleTranslateExternalIMAPMessage(w http.ResponseWriter, r *http.Request) {
@@ -130,7 +137,76 @@ func (a *App) handleTranslateExternalIMAPMessage(w http.ResponseWriter, r *http.
 		respondError(w, http.StatusBadGateway, "translation failed")
 		return
 	}
-	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
+	translatedHTML := ""
+	if err == nil && strings.TrimSpace(stored.BodyHTML) != "" {
+		translatedHTML, _ = translateHTMLTextNodes(r.Context(), a.policy, stored.BodyHTML, target, maxChars)
+	}
+	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, TranslatedHTML: translatedHTML, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
+}
+
+func translateHTMLTextNodes(ctx context.Context, policy *HTMLPolicy, bodyHTML, target string, maxChars int) (string, error) {
+	nodes, err := html.ParseFragment(strings.NewReader(bodyHTML), nil)
+	if err != nil {
+		return "", err
+	}
+	remaining := maxChars
+	var translateNode func(*html.Node) error
+	translateNode = func(n *html.Node) error {
+		if n.Type == html.ElementNode && shouldSkipHTMLTranslationElement(n.Data) {
+			return nil
+		}
+		if n.Type == html.TextNode {
+			text := strings.TrimSpace(n.Data)
+			if text != "" && containsTranslatableLetter(text) && remaining > 0 {
+				limited, _ := truncateRunes(text, remaining)
+				remaining -= utf8.RuneCountInString(limited)
+				translated, _, err := googleFreeTranslate(ctx, limited, target)
+				if err != nil {
+					return err
+				}
+				n.Data = strings.Replace(n.Data, text, translated, 1)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			if err := translateNode(c); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, n := range nodes {
+		if err := translateNode(n); err != nil {
+			return "", err
+		}
+	}
+	var b bytes.Buffer
+	for _, n := range nodes {
+		if err := html.Render(&b, n); err != nil {
+			return "", err
+		}
+	}
+	if policy != nil {
+		return policy.Sanitize(b.String()), nil
+	}
+	return b.String(), nil
+}
+
+func shouldSkipHTMLTranslationElement(tag string) bool {
+	switch strings.ToLower(tag) {
+	case "script", "style", "code", "pre", "textarea":
+		return true
+	default:
+		return false
+	}
+}
+
+func containsTranslatableLetter(value string) bool {
+	for _, r := range value {
+		if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') || (r >= '\u4e00' && r <= '\u9fff') {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeTranslateTarget(value string) string {
