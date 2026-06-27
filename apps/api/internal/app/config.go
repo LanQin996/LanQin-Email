@@ -49,6 +49,8 @@ type Config struct {
 	ExternalIMAPGmailClientSecret   string
 	ExternalIMAPOutlookClientID     string
 	ExternalIMAPOutlookClientSecret string
+	MailTranslateEnabled            bool
+	MailTranslateMaxChars           int
 }
 
 func LoadConfig() Config {
@@ -95,6 +97,8 @@ func LoadConfig() Config {
 		ExternalIMAPGmailClientSecret:   getenv("LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET", ""),
 		ExternalIMAPOutlookClientID:     getenv("LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID", ""),
 		ExternalIMAPOutlookClientSecret: getenv("LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET", ""),
+		MailTranslateEnabled:            getenvBool("LANQIN_MAIL_TRANSLATE_ENABLED", true),
+		MailTranslateMaxChars:           getenvInt("LANQIN_MAIL_TRANSLATE_MAX_CHARS", 8000),
 	}
 }
 

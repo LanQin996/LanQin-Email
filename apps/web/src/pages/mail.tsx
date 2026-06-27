@@ -1282,6 +1282,7 @@ export function MailPage() {
       canOrganize={canOrganizeMail && mailView !== "external"}
       canManageLabels={canManageLabels && mailView !== "external"}
       canDownloadAttachments={canDownloadAttachments}
+      language={language}
     />
   ) : (
     <ResizablePanelGroup direction="horizontal" className="min-h-0 flex-1">
@@ -1340,6 +1341,7 @@ export function MailPage() {
             </div>
             <ScrollArea className="min-h-0 flex-1">
               <div className="p-6">
+                <MessageTranslateBox message={selected} language={language} />
                 <MailHtmlFrame message={selected} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={attachmentHref(selected, a.id)} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground" key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
@@ -2216,6 +2218,7 @@ function CompactMailView({
   canOrganize,
   canManageLabels,
   canDownloadAttachments,
+  language,
 }: {
   title: string
   icon?: React.ReactNode
@@ -2255,6 +2258,7 @@ function CompactMailView({
   canOrganize: boolean
   canManageLabels: boolean
   canDownloadAttachments: boolean
+  language: Language
 }) {
   const selectedIndex = selectedId ? messages.findIndex((message) => message.id === selectedId) : -1
   const previousMessage = selectedIndex > 0 ? messages[selectedIndex - 1] : undefined
@@ -2284,6 +2288,7 @@ function CompactMailView({
         canOrganize={canOrganize}
         canManageLabels={canManageLabels}
         canDownloadAttachments={canDownloadAttachments}
+        language={language}
       />
     )
   }
@@ -2347,6 +2352,7 @@ function CompactMessageDetail({
   canOrganize,
   canManageLabels,
   canDownloadAttachments,
+  language,
 }: {
   selected?: MailMessage
   loading: boolean
@@ -2369,6 +2375,7 @@ function CompactMessageDetail({
   canOrganize: boolean
   canManageLabels: boolean
   canDownloadAttachments: boolean
+  language: Language
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -2450,6 +2457,7 @@ function CompactMessageDetail({
                 />
               </div>
               <div className="py-6 sm:py-8">
+                <MessageTranslateBox message={selected} language={language} />
                 <MailHtmlFrame message={selected} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={attachmentHref(selected, a.id)} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between" key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
@@ -2458,6 +2466,75 @@ function CompactMessageDetail({
         )}
     </div>
   )
+}
+
+
+function MessageTranslateBox({ message, language }: { message: MailMessage; language: Language }) {
+  const [translatedText, setTranslatedText] = React.useState("")
+  const [showTranslated, setShowTranslated] = React.useState(false)
+  const [truncated, setTruncated] = React.useState(false)
+  const { toast } = useToast()
+  const targetLanguage = normalizeTranslationLanguage(language)
+  const sourceText = React.useMemo(() => (message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")).trim(), [message.bodyHtml, message.bodyText, message.snippet])
+  const shouldShow = targetLanguage && shouldOfferMessageTranslation(sourceText, language)
+  const translate = useMutation({
+    mutationFn: () => api.translateMessage(message.id, targetLanguage!),
+    onSuccess: (result) => {
+      setTranslatedText(result.translatedText)
+      setTruncated(result.truncated)
+      setShowTranslated(true)
+    },
+    onError: (error) => toast({ title: "翻译失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+  })
+
+  React.useEffect(() => {
+    setTranslatedText("")
+    setShowTranslated(false)
+    setTruncated(false)
+    translate.reset()
+  }, [message.id, language])
+
+  if (!shouldShow && !translatedText) return null
+
+  return (
+    <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="text-muted-foreground">
+          {translatedText ? `已翻译为 ${translationTargetLabel(language)}` : `检测到邮件可能不是当前语言，可翻译为 ${translationTargetLabel(language)}`}
+          {truncated && <span className="ml-1">（内容较长，仅翻译前半部分）</span>}
+        </div>
+        <div className="flex items-center gap-2">
+          {translatedText && <Button type="button" variant="ghost" size="sm" onClick={() => setShowTranslated((value) => !value)}>{showTranslated ? "查看原文" : "查看译文"}</Button>}
+          <Button type="button" variant="outline" size="sm" disabled={translate.isPending} onClick={() => translate.mutate()}>{translate.isPending ? "翻译中..." : translatedText ? "重新翻译" : "翻译"}</Button>
+        </div>
+      </div>
+      {translatedText && showTranslated && (
+        <div className="mt-3 whitespace-pre-wrap rounded-md bg-background p-3 leading-7 text-foreground">{translatedText}</div>
+      )}
+    </div>
+  )
+}
+
+function normalizeTranslationLanguage(language: Language) {
+  if (language === "zh-CN") return "zh-CN"
+  if (language === "zh-TW") return "zh-TW"
+  if (language === "en") return "en"
+  return ""
+}
+
+function translationTargetLabel(language: Language) {
+  if (language === "zh-CN") return "简体中文"
+  if (language === "zh-TW") return "繁體中文"
+  return "English"
+}
+
+function shouldOfferMessageTranslation(text: string, language: Language) {
+  if (!text.trim()) return false
+  const cjkCount = (text.match(/[\u4e00-\u9fff]/g) || []).length
+  const latinCount = (text.match(/[a-zA-Z]/g) || []).length
+  if (language === "zh-CN" || language === "zh-TW") return latinCount > 80 && latinCount > cjkCount * 3
+  if (language === "en") return cjkCount > 20
+  return false
 }
 
 function MailHtmlFrame({ message }: { message: MailMessage }) {
