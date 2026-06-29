@@ -6,12 +6,22 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/release.yml"
+      - ".ai-reviewignore"
+      - "LICENSE"
       - "deploy/.env.example"
   pull_request:
     branches:
       - main
     paths-ignore:
       - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/release.yml"
+      - ".ai-reviewignore"
+      - "LICENSE"
       - "deploy/.env.example"
 
 permissions:
