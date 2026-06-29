@@ -1921,6 +1921,7 @@ function sendQueueSourceLabel(source: string) {
   const normalized = source.toLowerCase()
   if (normalized === "submission") return "SMTP Submission"
   if (normalized === "webmail") return "Webmail"
+  if (normalized === "open_api") return "Open API"
   if (normalized === "scheduled") return "定时发送"
   return source || "未知"
 }

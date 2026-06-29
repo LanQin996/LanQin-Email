@@ -13,7 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-func (a *App) handlePublicAPIListDomains(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIListDomains(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,status,dkim_selector,dkim_public_key,dns_status,dns_checked_at,created_at FROM domains ORDER BY name`)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list domains")
@@ -36,7 +36,7 @@ func (a *App) handlePublicAPIListDomains(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (a *App) handlePublicAPICreateDomain(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPICreateDomain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name string `json:"name"`
 	}
@@ -57,7 +57,7 @@ func (a *App) handlePublicAPICreateDomain(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusCreated, domain)
 }
 
-func (a *App) handlePublicAPIGetDomain(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIGetDomain(w http.ResponseWriter, r *http.Request) {
 	domain, err := a.domainByID(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		respondError(w, http.StatusNotFound, "domain not found")
@@ -66,7 +66,7 @@ func (a *App) handlePublicAPIGetDomain(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, domain)
 }
 
-func (a *App) handlePublicAPIUpdateDomain(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIUpdateDomain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Status string `json:"status"`
 	}
@@ -97,7 +97,7 @@ func (a *App) handlePublicAPIUpdateDomain(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusOK, domain)
 }
 
-func (a *App) handlePublicAPIDeleteDomain(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIDeleteDomain(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var count int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mailboxes WHERE domain_id=?`, id).Scan(&count); err != nil {
@@ -120,7 +120,7 @@ func (a *App) handlePublicAPIDeleteDomain(w http.ResponseWriter, r *http.Request
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (a *App) handlePublicAPIListMailboxes(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIListMailboxes(w http.ResponseWriter, r *http.Request) {
 	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,u.email,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at
 		FROM mailboxes mb JOIN users u ON u.id=mb.user_id ORDER BY mb.address`)
 	if err != nil {
@@ -144,7 +144,7 @@ func (a *App) handlePublicAPIListMailboxes(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (a *App) handlePublicAPICreateMailbox(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		DomainID    string `json:"domainId"`
 		LocalPart   string `json:"localPart"`
@@ -203,7 +203,7 @@ func (a *App) handlePublicAPICreateMailbox(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusCreated, mailbox)
 }
 
-func (a *App) handlePublicAPIGetMailbox(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIGetMailbox(w http.ResponseWriter, r *http.Request) {
 	mailbox, err := a.mailboxByID(r.Context(), chi.URLParam(r, "id"))
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
@@ -212,7 +212,7 @@ func (a *App) handlePublicAPIGetMailbox(w http.ResponseWriter, r *http.Request) 
 	respondJSON(w, http.StatusOK, mailbox)
 }
 
-func (a *App) handlePublicAPIUpdateMailbox(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIUpdateMailbox(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	current, err := a.mailboxByID(r.Context(), id)
 	if err != nil {
@@ -271,7 +271,7 @@ func (a *App) handlePublicAPIUpdateMailbox(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusOK, mailbox)
 }
 
-func (a *App) handlePublicAPIDeleteMailbox(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIDeleteMailbox(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var owner string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT user_id FROM mailboxes WHERE id=?`, id).Scan(&owner); err != nil {
@@ -318,7 +318,7 @@ func (a *App) handlePublicAPIDeleteMailbox(w http.ResponseWriter, r *http.Reques
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (a *App) handlePublicAPISendMail(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -329,26 +329,26 @@ func (a *App) handlePublicAPISendMail(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	msg, err := a.sendMailNow(r.Context(), currentUser(r), mb, req)
+	msg, err := a.sendMailWithSource(r.Context(), currentUser(r), mb, req, sendSourceOpenAPI)
 	if err != nil {
 		respondSendError(w, err)
 		return
 	}
-	status := publicAPISendStatusFromMessage(msg, mb.Address)
+	status := openAPISendStatusFromMessage(msg, mb.Address)
 	if msg.SendQueueID != "" {
 		if item, err := a.loadSendQueueEntryForUser(r.Context(), msg.SendQueueID, mb.UserID); err == nil {
-			status = publicAPISendStatusFromQueue(item, mb.Address)
+			status = openAPISendStatusFromQueue(item, mb.Address)
 		}
 	} else {
 		item, err := a.loadLatestSendQueueForMailboxMessage(r.Context(), msg.ID, mb.ID)
 		if err == nil {
-			status = publicAPISendStatusFromQueue(item, mb.Address)
+			status = openAPISendStatusFromQueue(item, mb.Address)
 		}
 	}
 	respondJSON(w, http.StatusCreated, status)
 }
 
-func (a *App) handlePublicAPISendStatus(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPISendStatus(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	id := strings.TrimSpace(chi.URLParam(r, "id"))
 	item, err := a.loadSendQueueEntryForUser(r.Context(), id, user.ID)
@@ -360,10 +360,10 @@ func (a *App) handlePublicAPISendStatus(w http.ResponseWriter, r *http.Request) 
 		if mb, mbErr := a.mailboxByID(r.Context(), item.MailboxID); mbErr == nil {
 			mailboxAddress = mb.Address
 		}
-		respondJSON(w, http.StatusOK, publicAPISendStatusFromQueue(item, mailboxAddress))
+		respondJSON(w, http.StatusOK, openAPISendStatusFromQueue(item, mailboxAddress))
 		return
 	}
-	msg, err := a.loadPublicAPISentMessageForUser(r.Context(), id, user.ID)
+	msg, err := a.loadOpenAPISentMessageForUser(r.Context(), id, user.ID)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "send item not found")
 		return
@@ -372,18 +372,18 @@ func (a *App) handlePublicAPISendStatus(w http.ResponseWriter, r *http.Request) 
 	if mb, mbErr := a.mailboxByID(r.Context(), msg.MailboxID); mbErr == nil {
 		mailboxAddress = mb.Address
 	}
-	respondJSON(w, http.StatusOK, publicAPISendStatusFromMessage(msg, mailboxAddress))
+	respondJSON(w, http.StatusOK, openAPISendStatusFromMessage(msg, mailboxAddress))
 }
 
-func (a *App) handlePublicAPIMailboxMessages(w http.ResponseWriter, r *http.Request) {
+func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	mailboxID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if _, err := a.mailboxForUserByID(r.Context(), user.ID, mailboxID); err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	limit := parsePublicAPILimit(r, 30, 100)
-	offset := parsePublicAPIOffset(r)
+	limit := parseOpenAPILimit(r, 30, 100)
+	offset := parseOpenAPIOffset(r)
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
 	if folder == "" {
 		folder = "Inbox"
@@ -458,7 +458,7 @@ func scanMailbox(row mailboxScanner) (Mailbox, error) {
 	return item, nil
 }
 
-type publicAPISendStatus struct {
+type openAPISendStatus struct {
 	ID             string     `json:"id"`
 	QueueID        string     `json:"queueId,omitempty"`
 	Status         string     `json:"status"`
@@ -477,8 +477,8 @@ type publicAPISendStatus struct {
 	DeliveredAt    *time.Time `json:"deliveredAt,omitempty"`
 }
 
-func publicAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) publicAPISendStatus {
-	return publicAPISendStatus{
+func openAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) openAPISendStatus {
+	return openAPISendStatus{
 		ID:             item.ID,
 		QueueID:        item.ID,
 		Status:         item.Status,
@@ -498,10 +498,10 @@ func publicAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) pu
 	}
 }
 
-func publicAPISendStatusFromMessage(msg *MailMessage, mailboxAddress string) publicAPISendStatus {
+func openAPISendStatusFromMessage(msg *MailMessage, mailboxAddress string) openAPISendStatus {
 	recipients := append(append([]string{}, msg.To...), msg.CC...)
 	recipients = append(recipients, msg.BCC...)
-	return publicAPISendStatus{
+	return openAPISendStatus{
 		ID:             msg.ID,
 		Status:         sendAuditAccepted,
 		MessageID:      msg.ID,
@@ -623,7 +623,7 @@ func (a *App) loadSendQueueEntryForSentMessage(ctx context.Context, sentMessageI
 	return a.loadLatestSendQueueForMessage(ctx, sentMessageID, userID)
 }
 
-func (a *App) loadPublicAPISentMessageForUser(ctx context.Context, id, userID string) (*MailMessage, error) {
+func (a *App) loadOpenAPISentMessageForUser(ctx context.Context, id, userID string) (*MailMessage, error) {
 	var messageID string
 	err := a.db.QueryRowContext(ctx, `SELECT m.id
 		FROM messages m JOIN mailboxes mb ON mb.id=m.mailbox_id JOIN folders f ON f.id=m.folder_id
@@ -635,7 +635,7 @@ func (a *App) loadPublicAPISentMessageForUser(ctx context.Context, id, userID st
 	return a.messageByID(ctx, messageID, false)
 }
 
-func parsePublicAPILimit(r *http.Request, defaultLimit, maxLimit int) int {
+func parseOpenAPILimit(r *http.Request, defaultLimit, maxLimit int) int {
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil || limit <= 0 {
 		return defaultLimit
@@ -646,7 +646,7 @@ func parsePublicAPILimit(r *http.Request, defaultLimit, maxLimit int) int {
 	return limit
 }
 
-func parsePublicAPIOffset(r *http.Request) int {
+func parseOpenAPIOffset(r *http.Request) int {
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
 	if cursor == "" {
 		return 0

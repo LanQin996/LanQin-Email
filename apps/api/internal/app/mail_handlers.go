@@ -691,6 +691,14 @@ var errSenderNotAuthorized = errors.New("sender address is not authorized")
 var errMailboxQuotaExceeded = errors.New("mailbox quota exceeded")
 
 func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
+	return a.sendMailWithSource(ctx, user, mb, req, sendSourceWebmail)
+}
+
+func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput, source string) (*MailMessage, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = sendSourceWebmail
+	}
 	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {
 		return nil, err
 	}
@@ -742,8 +750,8 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 		a.deleteMessage(ctx, sentID)
 		return nil, fmt.Errorf("failed to store sent message in maildir: %w", err)
 	}
-	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
-	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
+	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: source, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
+	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: source, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
 		a.deleteMessage(ctx, sentID)
 		return nil, fmt.Errorf("failed to enqueue delivery: %w", err)
 	}

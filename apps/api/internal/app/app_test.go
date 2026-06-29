@@ -1744,7 +1744,7 @@ func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
 	}
 }
 
-func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
+func TestOpenAPIDomainAndMailboxCRUD(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
 	defer ts.Close()
@@ -1764,7 +1764,7 @@ func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
 
 	var domain Domain
 	if code := openAdmin.do("POST", "/api/open/domains", map[string]string{"name": "api.example.test"}, &domain); code != http.StatusCreated {
-		t.Fatalf("create public api domain code=%d domain=%+v", code, domain)
+		t.Fatalf("create open api domain code=%d domain=%+v", code, domain)
 	}
 	if domain.Name != "api.example.test" || domain.DKIMPublicKey == "" {
 		t.Fatalf("domain=%+v", domain)
@@ -1773,20 +1773,20 @@ func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
 		Items []Domain `json:"items"`
 	}
 	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
-		t.Fatalf("list public api domains code=%d", code)
+		t.Fatalf("list open api domains code=%d", code)
 	}
 	if len(domains.Items) < 2 {
 		t.Fatalf("domains=%+v", domains.Items)
 	}
 	var disabled Domain
 	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "disabled"}, &disabled); code != http.StatusOK {
-		t.Fatalf("update public api domain code=%d domain=%+v", code, disabled)
+		t.Fatalf("update open api domain code=%d domain=%+v", code, disabled)
 	}
 	if disabled.Status != "disabled" {
 		t.Fatalf("domain status=%q", disabled.Status)
 	}
 	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "active"}, &domain); code != http.StatusOK {
-		t.Fatalf("reactivate public api domain code=%d domain=%+v", code, domain)
+		t.Fatalf("reactivate open api domain code=%d domain=%+v", code, domain)
 	}
 
 	var mailbox Mailbox
@@ -1797,7 +1797,7 @@ func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
 		"password":    "Password123!",
 		"quotaMb":     256,
 	}, &mailbox); code != http.StatusCreated {
-		t.Fatalf("create public api mailbox code=%d mailbox=%+v", code, mailbox)
+		t.Fatalf("create open api mailbox code=%d mailbox=%+v", code, mailbox)
 	}
 	if mailbox.Address != "api-user@api.example.test" || mailbox.QuotaMB != 256 {
 		t.Fatalf("mailbox=%+v", mailbox)
@@ -1806,30 +1806,32 @@ func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
 		Items []Mailbox `json:"items"`
 	}
 	if code := openAdmin.do("GET", "/api/open/mailboxes", nil, &mailboxes); code != http.StatusOK {
-		t.Fatalf("list public api mailboxes code=%d", code)
+		t.Fatalf("list open api mailboxes code=%d", code)
 	}
 	if len(mailboxes.Items) < 2 {
 		t.Fatalf("mailboxes=%+v", mailboxes.Items)
 	}
 	var updated Mailbox
 	if code := openAdmin.do("POST", "/api/open/mailboxes/"+mailbox.ID, map[string]any{"displayName": "Renamed API User", "quotaMb": 512, "status": "disabled"}, &updated); code != http.StatusOK {
-		t.Fatalf("update public api mailbox code=%d mailbox=%+v", code, updated)
+		t.Fatalf("update open api mailbox code=%d mailbox=%+v", code, updated)
 	}
 	if updated.DisplayName != "Renamed API User" || updated.QuotaMB != 512 || updated.Status != "disabled" {
 		t.Fatalf("updated mailbox=%+v", updated)
 	}
 	var ok map[string]any
 	if code := openAdmin.do("DELETE", "/api/open/mailboxes/"+mailbox.ID, nil, &ok); code != http.StatusOK {
-		t.Fatalf("delete public api mailbox code=%d body=%v", code, ok)
+		t.Fatalf("delete open api mailbox code=%d body=%v", code, ok)
 	}
 	if code := openAdmin.do("DELETE", "/api/open/domains/"+domain.ID, nil, &ok); code != http.StatusOK {
-		t.Fatalf("delete public api domain code=%d body=%v", code, ok)
+		t.Fatalf("delete open api domain code=%d body=%v", code, ok)
 	}
 }
 
-func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
+func TestOpenAPISendStatusAndMailboxMessages(t *testing.T) {
 	a := newTestApp(t)
 	stopTestWorkers(a)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
 	ts := httptest.NewServer(a.Router())
 	defer ts.Close()
 	admin := &testClient{t: t, server: ts}
@@ -1839,9 +1841,9 @@ func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
 		t.Fatalf("admin login code=%d body=%v", code, login)
 	}
 	domainID := mustDefaultDomainID(t, a)
-	sender := createTestMailbox(t, admin, domainID, "public-sender", "Public Sender", "Password123!", nil)
-	recipient := createTestMailbox(t, admin, domainID, "public-recipient", "Public Recipient", "Password123!", nil)
-	other := createTestMailbox(t, admin, domainID, "public-other", "Public Other", "Password123!", nil)
+	sender := createTestMailbox(t, admin, domainID, "open-sender", "Open API Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "open-recipient", "Open API Recipient", "Password123!", nil)
+	other := createTestMailbox(t, admin, domainID, "open-other", "Open API Other", "Password123!", nil)
 
 	senderClient := &testClient{t: t, server: ts}
 	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
@@ -1852,10 +1854,10 @@ func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
 	if code := senderClient.do("POST", "/api/open/send", map[string]any{
 		"mailboxId": sender.ID,
 		"to":        []string{recipient.Address},
-		"subject":   "cookie-only public api send",
+		"subject":   "cookie-only open api send",
 		"text":      "this should not authenticate",
 	}, &map[string]any{}); code != http.StatusUnauthorized {
-		t.Fatalf("cookie-only public api send code=%d", code)
+		t.Fatalf("cookie-only open api send code=%d", code)
 	}
 	var sent struct {
 		ID             string    `json:"id"`
@@ -1871,13 +1873,26 @@ func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
 	if code := senderOpen.do("POST", "/api/open/send", map[string]any{
 		"mailboxId": sender.ID,
 		"to":        []string{recipient.Address},
-		"subject":   "public api send",
-		"text":      "hello from public api",
+		"subject":   "open api send",
+		"text":      "hello from open api",
 	}, &sent); code != http.StatusCreated {
-		t.Fatalf("public api send code=%d body=%+v", code, sent)
+		t.Fatalf("open api send code=%d body=%+v", code, sent)
 	}
-	if sent.ID == "" || sent.Status != sendAuditAccepted || sent.MessageID == "" || sent.MailboxAddress != sender.Address {
+	if sent.ID == "" || sent.QueueID == "" || sent.Status != sendQueueStatusQueued || sent.MessageID == "" || sent.MailboxAddress != sender.Address {
 		t.Fatalf("sent response=%+v", sent)
+	}
+	var sendSource string
+	if err := a.db.QueryRow(`SELECT source FROM send_audit_events WHERE sent_message_id=? AND event=?`, sent.MessageID, sendAuditAccepted).Scan(&sendSource); err != nil {
+		t.Fatal(err)
+	}
+	if sendSource != sendSourceOpenAPI {
+		t.Fatalf("open api send audit source=%q, want %q", sendSource, sendSourceOpenAPI)
+	}
+	if err := a.db.QueryRow(`SELECT source FROM send_queue WHERE id=?`, sent.QueueID).Scan(&sendSource); err != nil {
+		t.Fatal(err)
+	}
+	if sendSource != sendSourceOpenAPI {
+		t.Fatalf("open api send queue source=%q, want %q", sendSource, sendSourceOpenAPI)
 	}
 
 	var status struct {
@@ -1891,9 +1906,9 @@ func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
 		Subject        string `json:"subject"`
 	}
 	if code := senderOpen.do("GET", "/api/open/send/"+sent.ID, nil, &status); code != http.StatusOK {
-		t.Fatalf("public api send status code=%d status=%+v", code, status)
+		t.Fatalf("open api send status code=%d status=%+v", code, status)
 	}
-	if status.ID != sent.ID || status.MessageID != sent.MessageID || status.Status != sendAuditAccepted {
+	if status.ID != sent.QueueID || status.MessageID != sent.MessageID || status.Status != sendQueueStatusQueued {
 		t.Fatalf("status=%+v sent=%+v", status, sent)
 	}
 
@@ -1908,9 +1923,9 @@ func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
 		NextCursor string        `json:"nextCursor"`
 	}
 	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+recipient.ID+"/messages?folder=Inbox", nil, &inbox); code != http.StatusOK {
-		t.Fatalf("public api mailbox messages code=%d inbox=%+v", code, inbox)
+		t.Fatalf("open api mailbox messages code=%d inbox=%+v", code, inbox)
 	}
-	if len(inbox.Items) != 1 || inbox.Items[0].Subject != "public api send" || inbox.Items[0].From != sender.Address {
+	if len(inbox.Items) != 1 || inbox.Items[0].Subject != "open api send" || inbox.Items[0].From != sender.Address {
 		t.Fatalf("inbox=%+v", inbox.Items)
 	}
 	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+other.ID+"/messages?folder=Inbox", nil, &map[string]any{}); code != http.StatusNotFound {
