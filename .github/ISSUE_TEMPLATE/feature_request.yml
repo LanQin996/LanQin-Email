@@ -1,0 +1,20 @@
+name: Feature request / 功能建议
+description: Suggest an improvement for LanQin Email. / 提出一个改进建议。
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in Chinese or English.
+
+        你可以使用中文或英文填写。
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / 详情
+      description: What do you want to improve, and why? / 你想改进什么？为什么？
+      placeholder: "Example / 示例：希望管理员可以批量创建邮箱，因为目前一个个添加比较慢。"
+    validations:
+      required: true

@@ -1,0 +1,50 @@
+name: Deployment or configuration / 部署或配置问题
+description: Get help with Docker, domains, DNS, SMTP, IMAP, or runtime configuration. / 获取 Docker、域名、DNS、SMTP、IMAP 或运行配置帮助。
+title: "[Deploy]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in Chinese or English.
+
+        你可以使用中文或英文填写。
+
+        Please do not include real passwords, tokens, API keys, private keys, full mail headers with personal data, or production mailbox lists.
+
+        请不要粘贴真实密码、Token、API Key、私钥、包含个人数据的完整邮件头，或生产邮箱列表。
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / 详情
+      description: What are you trying to do, and what failed? / 你想完成什么？哪里失败了？
+      placeholder: "Example / 示例：Docker Compose 启动后 Web 可以打开，但 SMTP 587 连接失败。"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: The LanQin Email version you are using. / 你正在使用的 LanQin Email 版本。
+      placeholder: "v1.2.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment and config / 环境与配置（可选）
+      description: Add OS, Docker version, DNS status, or sanitized `.env` lines only if helpful. / 如果有帮助，可以补充系统、Docker 版本、DNS 状态或脱敏后的 `.env` 行。
+      placeholder: |
+        OS:
+        Docker / Compose:
+        Domain or DNS status:
+        Related config, redacted:
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots / 日志或截图（可选）
+      description: Redact secrets, mailbox addresses, Message-ID values, and IPs when needed. / 请按需隐藏密钥、邮箱地址、Message-ID 和 IP。

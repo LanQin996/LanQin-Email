@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability / 安全漏洞
+    url: https://github.com/LanQin996/LanQin-Email/security/advisories/new
+    about: Please report security vulnerabilities privately. / 请通过私密渠道报告安全漏洞，不要公开提交漏洞细节。
+  - name: Community chat / 社区交流
+    url: https://t.me/+EhII7MSyi3QwNDQ5
+    about: For informal discussion and quick usage questions. / 适合非正式交流和快速使用问题。
