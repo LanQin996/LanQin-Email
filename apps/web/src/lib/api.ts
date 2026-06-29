@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -39,6 +39,10 @@ export const api = {
   me: () => request<{ user: User }>("/api/me"),
   updateProfile: (payload: { displayName: string }) => request<{ user: User }>("/api/me/profile", { method: "POST", body: JSON.stringify(payload) }),
   changePassword: (payload: { currentPassword: string; newPassword: string }) => request<{ ok: boolean }>("/api/me/password", { method: "POST", body: JSON.stringify(payload) }),
+  apiTokens: () => request<ListResponse<APIToken>>("/api/me/api-tokens"),
+  createApiToken: (payload: { name: string; expiresAt?: string }) => request<{ token: string; item: APIToken }>("/api/me/api-tokens", { method: "POST", body: JSON.stringify(payload) }),
+  updateApiToken: (id: string, payload: { name?: string; expiresAt?: string; disabled?: boolean }) => request<APIToken>(`/api/me/api-tokens/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteApiToken: (id: string) => request<{ ok: boolean }>(`/api/me/api-tokens/${id}`, { method: "DELETE" }),
   setupTwoFactor: () => request<{ secret: string; otpauthUrl: string }>("/api/me/2fa/setup", { method: "POST" }),
   enableTwoFactor: (code: string) => request<{ user: User }>("/api/me/2fa/enable", { method: "POST", body: JSON.stringify({ code }) }),
   disableTwoFactor: (code: string) => request<{ user: User }>("/api/me/2fa/disable", { method: "POST", body: JSON.stringify({ code }) }),

@@ -218,6 +218,7 @@ type testClient struct {
 	t      *testing.T
 	server *httptest.Server
 	cookie *http.Cookie
+	bearer string
 }
 
 func (c *testClient) do(method, path string, body any, out any) int {
@@ -236,6 +237,9 @@ func (c *testClient) do(method, path string, body any, out any) int {
 	}
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
+	}
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -277,6 +281,21 @@ func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, dis
 		t.Fatalf("create mailbox %s code=%d mailbox=%+v", localPart, code, mailbox)
 	}
 	return mailbox
+}
+
+func createTestAPIToken(t *testing.T, client *testClient, name string) string {
+	t.Helper()
+	var resp struct {
+		Token string   `json:"token"`
+		Item  APIToken `json:"item"`
+	}
+	if code := client.do("POST", "/api/me/api-tokens", map[string]string{"name": name}, &resp); code != http.StatusCreated {
+		t.Fatalf("create api token code=%d resp=%+v", code, resp)
+	}
+	if resp.Token == "" || resp.Item.ID == "" || resp.Item.Name != name {
+		t.Fatalf("api token response=%+v", resp)
+	}
+	return resp.Token
 }
 
 func updateRegularPermissionGroup(t *testing.T, admin *testClient, permissions []string) PermissionGroup {
@@ -1646,6 +1665,246 @@ func TestMailSendRollsBackSentCopyWhenQueueInsertFails(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("sent copy should be removed after enqueue failure, count=%d", count)
+	}
+}
+
+func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	var created struct {
+		Token string   `json:"token"`
+		Item  APIToken `json:"item"`
+	}
+	if code := admin.do("POST", "/api/me/api-tokens", map[string]string{"name": "integration-test"}, &created); code != http.StatusCreated {
+		t.Fatalf("create api token code=%d resp=%+v", code, created)
+	}
+	if !strings.HasPrefix(created.Token, "lq_") || created.Item.ID == "" || created.Item.Name != "integration-test" || created.Item.ExpiresAt == nil {
+		t.Fatalf("created token response=%+v", created)
+	}
+	if remaining := time.Until(*created.Item.ExpiresAt); remaining < 89*24*time.Hour || remaining > 91*24*time.Hour {
+		t.Fatalf("created token default expiry=%s, remaining=%s", created.Item.ExpiresAt, remaining)
+	}
+	var storedHash string
+	if err := a.db.QueryRow(`SELECT token_hash FROM api_tokens WHERE id=?`, created.Item.ID).Scan(&storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if storedHash == created.Token || storedHash != hashToken(created.Token) {
+		t.Fatalf("stored token hash=%q token=%q", storedHash, created.Token)
+	}
+
+	openAdmin := &testClient{t: t, server: ts, bearer: created.Token}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
+		t.Fatalf("open api with bearer token code=%d", code)
+	}
+	var listed struct {
+		Items []APIToken `json:"items"`
+	}
+	if code := admin.do("GET", "/api/me/api-tokens", nil, &listed); code != http.StatusOK {
+		t.Fatalf("list api tokens code=%d", code)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].ID != created.Item.ID || listed.Items[0].LastUsedAt == nil {
+		t.Fatalf("listed tokens=%+v", listed.Items)
+	}
+
+	disabled := true
+	var updated APIToken
+	if code := admin.do("POST", "/api/me/api-tokens/"+created.Item.ID, map[string]any{"disabled": disabled}, &updated); code != http.StatusOK {
+		t.Fatalf("disable api token code=%d item=%+v", code, updated)
+	}
+	if !updated.Disabled {
+		t.Fatalf("updated token should be disabled: %+v", updated)
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("disabled bearer token code=%d", code)
+	}
+	if code := admin.do("DELETE", "/api/me/api-tokens/"+created.Item.ID, nil, &map[string]any{}); code != http.StatusOK {
+		t.Fatalf("delete api token code=%d", code)
+	}
+}
+
+func TestPublicAPIDomainAndMailboxCRUD(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	adminToken := createTestAPIToken(t, admin, "admin-open-api")
+	openAdmin := &testClient{t: t, server: ts, bearer: adminToken}
+
+	var authErr map[string]any
+	if code := admin.do("GET", "/api/open/domains", nil, &authErr); code != http.StatusUnauthorized {
+		t.Fatalf("cookie-only open api code=%d body=%v", code, authErr)
+	}
+
+	var domain Domain
+	if code := openAdmin.do("POST", "/api/open/domains", map[string]string{"name": "api.example.test"}, &domain); code != http.StatusCreated {
+		t.Fatalf("create public api domain code=%d domain=%+v", code, domain)
+	}
+	if domain.Name != "api.example.test" || domain.DKIMPublicKey == "" {
+		t.Fatalf("domain=%+v", domain)
+	}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
+		t.Fatalf("list public api domains code=%d", code)
+	}
+	if len(domains.Items) < 2 {
+		t.Fatalf("domains=%+v", domains.Items)
+	}
+	var disabled Domain
+	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "disabled"}, &disabled); code != http.StatusOK {
+		t.Fatalf("update public api domain code=%d domain=%+v", code, disabled)
+	}
+	if disabled.Status != "disabled" {
+		t.Fatalf("domain status=%q", disabled.Status)
+	}
+	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "active"}, &domain); code != http.StatusOK {
+		t.Fatalf("reactivate public api domain code=%d domain=%+v", code, domain)
+	}
+
+	var mailbox Mailbox
+	if code := openAdmin.do("POST", "/api/open/mailboxes", map[string]any{
+		"domainId":    domain.ID,
+		"localPart":   "api-user",
+		"displayName": "API User",
+		"password":    "Password123!",
+		"quotaMb":     256,
+	}, &mailbox); code != http.StatusCreated {
+		t.Fatalf("create public api mailbox code=%d mailbox=%+v", code, mailbox)
+	}
+	if mailbox.Address != "api-user@api.example.test" || mailbox.QuotaMB != 256 {
+		t.Fatalf("mailbox=%+v", mailbox)
+	}
+	var mailboxes struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/mailboxes", nil, &mailboxes); code != http.StatusOK {
+		t.Fatalf("list public api mailboxes code=%d", code)
+	}
+	if len(mailboxes.Items) < 2 {
+		t.Fatalf("mailboxes=%+v", mailboxes.Items)
+	}
+	var updated Mailbox
+	if code := openAdmin.do("POST", "/api/open/mailboxes/"+mailbox.ID, map[string]any{"displayName": "Renamed API User", "quotaMb": 512, "status": "disabled"}, &updated); code != http.StatusOK {
+		t.Fatalf("update public api mailbox code=%d mailbox=%+v", code, updated)
+	}
+	if updated.DisplayName != "Renamed API User" || updated.QuotaMB != 512 || updated.Status != "disabled" {
+		t.Fatalf("updated mailbox=%+v", updated)
+	}
+	var ok map[string]any
+	if code := openAdmin.do("DELETE", "/api/open/mailboxes/"+mailbox.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete public api mailbox code=%d body=%v", code, ok)
+	}
+	if code := openAdmin.do("DELETE", "/api/open/domains/"+domain.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete public api domain code=%d body=%v", code, ok)
+	}
+}
+
+func TestPublicAPISendStatusAndMailboxMessages(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "public-sender", "Public Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "public-recipient", "Public Recipient", "Password123!", nil)
+	other := createTestMailbox(t, admin, domainID, "public-other", "Public Other", "Password123!", nil)
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login code=%d body=%v", code, login)
+	}
+	senderToken := createTestAPIToken(t, senderClient, "sender-open-api")
+	senderOpen := &testClient{t: t, server: ts, bearer: senderToken}
+	if code := senderClient.do("POST", "/api/open/send", map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "cookie-only public api send",
+		"text":      "this should not authenticate",
+	}, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("cookie-only public api send code=%d", code)
+	}
+	var sent struct {
+		ID             string    `json:"id"`
+		QueueID        string    `json:"queueId"`
+		Status         string    `json:"status"`
+		MessageID      string    `json:"messageId"`
+		RFCMessageID   string    `json:"rfcMessageId"`
+		MailboxID      string    `json:"mailboxId"`
+		MailboxAddress string    `json:"mailboxAddress"`
+		Subject        string    `json:"subject"`
+		CreatedAt      time.Time `json:"createdAt"`
+	}
+	if code := senderOpen.do("POST", "/api/open/send", map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "public api send",
+		"text":      "hello from public api",
+	}, &sent); code != http.StatusCreated {
+		t.Fatalf("public api send code=%d body=%+v", code, sent)
+	}
+	if sent.ID == "" || sent.Status != sendAuditAccepted || sent.MessageID == "" || sent.MailboxAddress != sender.Address {
+		t.Fatalf("sent response=%+v", sent)
+	}
+
+	var status struct {
+		ID             string `json:"id"`
+		QueueID        string `json:"queueId"`
+		Status         string `json:"status"`
+		MessageID      string `json:"messageId"`
+		RFCMessageID   string `json:"rfcMessageId"`
+		MailboxID      string `json:"mailboxId"`
+		MailboxAddress string `json:"mailboxAddress"`
+		Subject        string `json:"subject"`
+	}
+	if code := senderOpen.do("GET", "/api/open/send/"+sent.ID, nil, &status); code != http.StatusOK {
+		t.Fatalf("public api send status code=%d status=%+v", code, status)
+	}
+	if status.ID != sent.ID || status.MessageID != sent.MessageID || status.Status != sendAuditAccepted {
+		t.Fatalf("status=%+v sent=%+v", status, sent)
+	}
+
+	recipientClient := &testClient{t: t, server: ts}
+	if code := recipientClient.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("recipient login code=%d body=%v", code, login)
+	}
+	recipientToken := createTestAPIToken(t, recipientClient, "recipient-open-api")
+	recipientOpen := &testClient{t: t, server: ts, bearer: recipientToken}
+	var inbox struct {
+		Items      []MailMessage `json:"items"`
+		NextCursor string        `json:"nextCursor"`
+	}
+	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+recipient.ID+"/messages?folder=Inbox", nil, &inbox); code != http.StatusOK {
+		t.Fatalf("public api mailbox messages code=%d inbox=%+v", code, inbox)
+	}
+	if len(inbox.Items) != 1 || inbox.Items[0].Subject != "public api send" || inbox.Items[0].From != sender.Address {
+		t.Fatalf("inbox=%+v", inbox.Items)
+	}
+	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+other.ID+"/messages?folder=Inbox", nil, &map[string]any{}); code != http.StatusNotFound {
+		t.Fatalf("cross-user mailbox read code=%d", code)
+	}
+	if code := recipientOpen.do("GET", "/api/open/send/"+sent.ID, nil, &map[string]any{}); code != http.StatusNotFound {
+		t.Fatalf("cross-user send status code=%d", code)
 	}
 }
 

@@ -37,6 +37,10 @@ func (a *App) Router() http.Handler {
 		r.With(a.requireAuth).Get("/me", a.handleMe)
 		r.With(a.requireAuth).Post("/me/profile", a.handleUpdateProfile)
 		r.With(a.requireAuth).Post("/me/password", a.handleChangePassword)
+		r.With(a.requireAuth).Get("/me/api-tokens", a.handleListAPITokens)
+		r.With(a.requireAuth).Post("/me/api-tokens", a.handleCreateAPIToken)
+		r.With(a.requireAuth).Post("/me/api-tokens/{id}", a.handleUpdateAPIToken)
+		r.With(a.requireAuth).Delete("/me/api-tokens/{id}", a.handleDeleteAPIToken)
 		r.With(a.requireAuth, a.requirePermission(PermissionMailboxApply)).Get("/me/mailbox-apply-options", a.handleMailboxApplyOptions)
 		r.With(a.requireAuth, a.requirePermission(PermissionMailboxApply)).Post("/me/mailboxes/apply", a.handleApplyMailbox)
 		r.With(a.requireAuth).Post("/me/2fa/setup", a.handleTwoFactorSetup)
@@ -70,6 +74,23 @@ func (a *App) Router() http.Handler {
 		r.With(a.requireAuth, a.requirePermission(PermissionMailAccess), a.requireExternalIMAPEnabled).Post("/me/external-imap-oauth/{provider}/start", a.handleStartExternalIMAPOAuth)
 		r.With(a.requireExternalIMAPEnabled).Get("/external-imap-oauth/{provider}/callback", a.handleExternalIMAPOAuthCallback)
 		r.With(a.requireAuth).Get("/events", a.handleEvents)
+
+		r.Group(func(r chi.Router) {
+			r.Use(a.requireAPIToken)
+			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/open/domains", a.handlePublicAPIListDomains)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsCreate)).Post("/open/domains", a.handlePublicAPICreateDomain)
+			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/open/domains/{id}", a.handlePublicAPIGetDomain)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsUpdate)).Post("/open/domains/{id}", a.handlePublicAPIUpdateDomain)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsDelete)).Delete("/open/domains/{id}", a.handlePublicAPIDeleteDomain)
+			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/open/mailboxes", a.handlePublicAPIListMailboxes)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesCreate)).Post("/open/mailboxes", a.handlePublicAPICreateMailbox)
+			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/open/mailboxes/{id}", a.handlePublicAPIGetMailbox)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesUpdate)).Post("/open/mailboxes/{id}", a.handlePublicAPIUpdateMailbox)
+			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesDelete)).Delete("/open/mailboxes/{id}", a.handlePublicAPIDeleteMailbox)
+			r.With(a.requirePermission(PermissionMailSend)).Post("/open/send", a.handlePublicAPISendMail)
+			r.With(a.requirePermission(PermissionMailRead)).Get("/open/send/{id}", a.handlePublicAPISendStatus)
+			r.With(a.requirePermission(PermissionMailRead)).Get("/open/mailboxes/{id}/messages", a.handlePublicAPIMailboxMessages)
+		})
 
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAuth)
@@ -165,7 +186,7 @@ func (a *App) corsMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -181,6 +202,17 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 		user, err := a.authenticateRequest(r)
 		if err != nil {
 			respondError(w, http.StatusUnauthorized, "authentication required")
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, user)))
+	})
+}
+
+func (a *App) requireAPIToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, err := a.authenticateAPIToken(r)
+		if err != nil {
+			respondError(w, http.StatusUnauthorized, "api token required")
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, user)))
@@ -216,6 +248,43 @@ func (a *App) authenticateRequest(r *http.Request) (*User, error) {
 		return nil, err
 	}
 	return &u, nil
+}
+
+func (a *App) authenticateAPIToken(r *http.Request) (*User, error) {
+	token := bearerToken(r)
+	if token == "" {
+		return nil, errors.New("no api token")
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
+		FROM api_tokens at JOIN users u ON u.id=at.user_id
+		WHERE at.token_hash=? AND at.disabled=0 AND (at.expires_at IS NULL OR at.expires_at > ?)`, hashToken(token), now)
+	var tokenID string
+	var u User
+	var disabled, twoFactorEnabled int
+	var created string
+	if err := row.Scan(&tokenID, &u.ID, &u.Email, &u.DisplayName, &u.Role, &disabled, &twoFactorEnabled, &created); err != nil {
+		return nil, err
+	}
+	u.Disabled = intBool(disabled)
+	u.TwoFactorEnabled = intBool(twoFactorEnabled)
+	u.CreatedAt = parseTime(created)
+	if u.Disabled {
+		return nil, errors.New("disabled")
+	}
+	if err := a.attachUserAuthorization(r.Context(), &u); err != nil {
+		return nil, err
+	}
+	_, _ = a.db.ExecContext(r.Context(), `UPDATE api_tokens SET last_used_at=? WHERE id=?`, now, tokenID)
+	return &u, nil
+}
+
+func bearerToken(r *http.Request) string {
+	fields := strings.Fields(strings.TrimSpace(r.Header.Get("Authorization")))
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return ""
+	}
+	return fields[1]
 }
 
 func (a *App) userByEmail(ctx context.Context, email string) (*User, string, error) {

@@ -163,6 +163,19 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS api_tokens (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			last_used_at TEXT,
+			expires_at TEXT,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
 		`CREATE TABLE IF NOT EXISTS system_settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,

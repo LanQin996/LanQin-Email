@@ -4,7 +4,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BarChart3, Ban, Contact, Copy, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Settings, ShieldCheck, SlidersHorizontal, Sun, Trash2, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits } from "@/lib/api"
+import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -32,10 +32,11 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 
-type Tab = "profile" | "mailboxes" | "clients" | "signatures" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
+type Tab = "profile" | "apiTokens" | "mailboxes" | "clients" | "signatures" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
 type PendingConfirm = { title: string; description?: string; confirmText: string; destructive?: boolean; onConfirm: () => void }
 const tabs: Record<Tab, { label: string; icon: React.ReactNode }> = {
   profile: { label: "账户资料", icon: <Settings className="h-4 w-4" /> },
+  apiTokens: { label: "API Token", icon: <KeyRound className="h-4 w-4" /> },
   mailboxes: { label: "邮箱管理", icon: <Mail className="h-4 w-4" /> },
   clients: { label: "第三方客户端", icon: <Laptop className="h-4 w-4" /> },
   signatures: { label: "签名管理", icon: <KeyRound className="h-4 w-4" /> },
@@ -82,6 +83,7 @@ export function ProfilePage() {
   const canApplyMailbox = hasPermission(user, "mail.mailboxes.apply")
   const visibleTabKeys = tabKeys.filter((key) => {
     if (key === "profile") return true
+    if (key === "apiTokens") return true
     if (key === "mailboxes") return canAccessMail || canApplyMailbox
     if (key === "clients") return canAccessMail
     if (key === "signatures") return canManageSignatures
@@ -96,6 +98,7 @@ export function ProfilePage() {
   const mailboxes = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes, enabled: canAccessMail })
   const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions, enabled: canApplyMailbox })
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const apiTokens = useQuery({ queryKey: ["api-tokens"], queryFn: api.apiTokens })
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts, enabled: canManageContacts })
   const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures, enabled: canManageSignatures })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules, enabled: canManageRules })
@@ -143,6 +146,21 @@ export function ProfilePage() {
     mutationFn: (form: FormData) => api.disableTwoFactor(String(form.get("code") || "")),
     onSuccess: (data) => { qc.setQueryData(["me"], data); twoFactorFormRef.current?.reset(); toast({ title: "双因素认证已关闭" }) },
     onError: (error) => toast({ title: "关闭失败", description: error.message }),
+  })
+  const createApiToken = useMutation({
+    mutationFn: (payload: { name: string; expiresAt?: string }) => api.createApiToken(payload),
+    onSuccess: (res) => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已创建" }); return res },
+    onError: (error) => toast({ title: "创建失败", description: error.message }),
+  })
+  const updateApiToken = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: { name?: string; expiresAt?: string; disabled?: boolean } }) => api.updateApiToken(id, payload),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已更新" }) },
+    onError: (error) => toast({ title: "更新失败", description: error.message }),
+  })
+  const deleteApiToken = useMutation({
+    mutationFn: api.deleteApiToken,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已撤销" }) },
+    onError: (error) => toast({ title: "撤销失败", description: error.message }),
   })
   const createContact = useMutation({
     mutationFn: (form: FormData) => api.createContact({ name: String(form.get("name") || ""), email: String(form.get("email") || ""), note: String(form.get("note") || "") }),
@@ -363,6 +381,7 @@ export function ProfilePage() {
         onSyncExternalFolder={(id, folder) => syncExternalImapFolder.mutate({ id, folder })}
       />
     )
+    if (tab === "apiTokens") return <ApiTokensSection items={apiTokens.data?.items || []} loading={apiTokens.isLoading} pending={createApiToken.isPending || updateApiToken.isPending || deleteApiToken.isPending} onCreate={(payload) => createApiToken.mutateAsync(payload)} onUpdate={(id, payload) => updateApiToken.mutate({ id, payload })} onDelete={(id) => deleteApiToken.mutate(id)} onCopy={copy} />
     if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
@@ -886,6 +905,15 @@ function formatDateTime(value: string) {
   return date.toLocaleString()
 }
 
+function dateInputValue(date: Date) {
+  return date.toISOString().slice(0, 10)
+}
+
+function dateInputToISOString(value: string) {
+  if (!value) return undefined
+  return new Date(`${value}T23:59:59.999Z`).toISOString()
+}
+
 function ClientSettingsSection({ mailboxes, selectedMailboxId, hostname, onSelectMailbox, onCopy }: { mailboxes: Mailbox[]; selectedMailboxId: string; hostname?: string; onSelectMailbox: (id: string) => void; onCopy: (text: string) => void }) {
   const selected = mailboxes.find((item) => item.id === selectedMailboxId) || mailboxes[0]
   const server = clientServerHost(hostname, selected?.address)
@@ -969,6 +997,89 @@ function ClientConfigRow({ label, value, security, onCopy }: { label: string; va
           <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => onCopy(value)}><Copy className="h-4 w-4" /></Button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelete, onCopy }: { items: APIToken[]; loading: boolean; pending: boolean; onCreate: (payload: { name: string; expiresAt?: string }) => Promise<{ token: string; item: APIToken }>; onUpdate: (id: string, payload: { name?: string; expiresAt?: string; disabled?: boolean }) => void; onDelete: (id: string) => void; onCopy: (text: string) => void }) {
+  const [createdToken, setCreatedToken] = React.useState("")
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  const defaultExpiresAt = React.useMemo(() => dateInputValue(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)), [])
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const expiresAt = dateInputToISOString(String(form.get("expiresAt") || ""))
+    const res = await onCreate({ name: String(form.get("name") || ""), expiresAt })
+    setCreatedToken(res.token)
+    event.currentTarget.reset()
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>API Token</CardTitle>
+              <div className="mt-1 text-sm text-muted-foreground">用于服务端集成调用 `/api/open`，创建后请立即保存。</div>
+            </div>
+            <Badge variant="secondary">{items.length} 个</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {createdToken && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
+              <div className="text-sm font-medium">只显示一次</div>
+              <div className="mt-2 flex min-w-0 flex-col gap-2 sm:flex-row">
+                <code className="min-w-0 flex-1 overflow-x-auto rounded border bg-background px-3 py-2 text-xs">{createdToken}</code>
+                <Button type="button" variant="outline" onClick={() => onCopy(createdToken)}><Copy className="h-4 w-4" />复制</Button>
+              </div>
+            </div>
+          )}
+
+          <form className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end" onSubmit={submit}>
+            <Field label="名称">
+              <Input name="name" required maxLength={80} placeholder="billing-system" />
+            </Field>
+            <Field label="到期日期">
+              <Input name="expiresAt" type="date" defaultValue={defaultExpiresAt} min={dateInputValue(new Date())} required />
+            </Field>
+            <Button disabled={pending}>{pending ? "创建中..." : "创建 Token"}</Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>已创建的 Token</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {items.map((item) => {
+            const expired = item.expiresAt ? new Date(item.expiresAt).getTime() <= Date.now() : false
+            return (
+              <div key={item.id} className="grid gap-3 rounded-lg border p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="truncate font-medium">{item.name}</div>
+                    <Badge variant={item.disabled || expired ? "secondary" : "default"}>{item.disabled ? "已禁用" : expired ? "已过期" : "可用"}</Badge>
+                  </div>
+                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                    <span>创建：{formatDateTime(item.createdAt)}</span>
+                    <span>过期：{item.expiresAt ? formatDateTime(item.expiresAt) : "未设置"}</span>
+                    <span>最后使用：{item.lastUsedAt ? formatDateTime(item.lastUsedAt) : "从未使用"}</span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={pending || expired} onClick={() => onUpdate(item.id, { disabled: !item.disabled })}>{item.disabled ? "启用" : "禁用"}</Button>
+                  <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => setPendingConfirm({ title: "撤销 API Token？", description: `Token “${item.name}” 撤销后无法恢复，正在使用它的集成会立即失效。`, confirmText: "撤销 Token", destructive: true, onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}>撤销</Button>
+                </div>
+              </div>
+            )
+          })}
+          {!loading && items.length === 0 && <EmptyState text="暂无 API Token" />}
+        </CardContent>
+      </Card>
+
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "撤销"} destructive={!!pendingConfirm?.destructive} pending={pending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </div>
   )
 }

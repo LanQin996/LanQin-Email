@@ -23,6 +23,16 @@ type AdminUser struct {
 	Mailboxes    []string `json:"mailboxes"`
 }
 
+type APIToken struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+	Disabled   bool       `json:"disabled"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
 type Domain struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
