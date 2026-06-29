@@ -258,7 +258,7 @@ func (a *App) authenticateAPIToken(r *http.Request) (*User, error) {
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
 		FROM api_tokens at JOIN users u ON u.id=at.user_id
-		WHERE at.token_hash=? AND at.disabled=0 AND (at.expires_at IS NULL OR at.expires_at > ?)`, hashToken(token), now)
+		WHERE at.token_hash=? AND at.disabled=0 AND at.expires_at > ?`, hashToken(token), now)
 	var tokenID string
 	var u User
 	var disabled, twoFactorEnabled int

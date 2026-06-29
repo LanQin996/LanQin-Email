@@ -1705,6 +1705,15 @@ func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
 	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
 		t.Fatalf("open api with bearer token code=%d", code)
 	}
+	if _, err := a.db.Exec(`UPDATE api_tokens SET expires_at=? WHERE id=?`, a.now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), created.Item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("expired bearer token code=%d", code)
+	}
+	if _, err := a.db.Exec(`UPDATE api_tokens SET expires_at=? WHERE id=?`, created.Item.ExpiresAt.UTC().Format(time.RFC3339Nano), created.Item.ID); err != nil {
+		t.Fatal(err)
+	}
 	var listed struct {
 		Items []APIToken `json:"items"`
 	}
@@ -1713,6 +1722,10 @@ func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
 	}
 	if len(listed.Items) != 1 || listed.Items[0].ID != created.Item.ID || listed.Items[0].LastUsedAt == nil {
 		t.Fatalf("listed tokens=%+v", listed.Items)
+	}
+
+	if code := admin.do("POST", "/api/me/api-tokens/"+created.Item.ID, map[string]any{"expiresAt": ""}, &map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("empty api token expiry update code=%d", code)
 	}
 
 	disabled := true

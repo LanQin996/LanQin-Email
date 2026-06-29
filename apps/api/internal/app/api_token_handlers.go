@@ -124,6 +124,10 @@ func (a *App) handleUpdateAPIToken(w http.ResponseWriter, r *http.Request) {
 		expiresValue = current.ExpiresAt.UTC().Format(time.RFC3339Nano)
 	}
 	if req.ExpiresAt != nil {
+		if strings.TrimSpace(*req.ExpiresAt) == "" {
+			badRequest(w, errors.New("expiresAt must be an RFC3339 timestamp"))
+			return
+		}
 		expiresAt, err := parseOptionalFutureTime(*req.ExpiresAt, a.now().UTC())
 		if err != nil {
 			badRequest(w, err)

@@ -906,12 +906,16 @@ function formatDateTime(value: string) {
 }
 
 function dateInputValue(date: Date) {
-  return date.toISOString().slice(0, 10)
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
 }
 
 function dateInputToISOString(value: string) {
   if (!value) return undefined
-  return new Date(`${value}T23:59:59.999Z`).toISOString()
+  const [year, month, day] = value.split("-").map(Number)
+  return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString()
 }
 
 function ClientSettingsSection({ mailboxes, selectedMailboxId, hostname, onSelectMailbox, onCopy }: { mailboxes: Mailbox[]; selectedMailboxId: string; hostname?: string; onSelectMailbox: (id: string) => void; onCopy: (text: string) => void }) {
@@ -1008,11 +1012,16 @@ function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelet
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const target = event.currentTarget
+    const form = new FormData(target)
     const expiresAt = dateInputToISOString(String(form.get("expiresAt") || ""))
-    const res = await onCreate({ name: String(form.get("name") || ""), expiresAt })
-    setCreatedToken(res.token)
-    event.currentTarget.reset()
+    try {
+      const res = await onCreate({ name: String(form.get("name") || ""), expiresAt })
+      setCreatedToken(res.token)
+      target.reset()
+    } catch {
+      // Mutation-level error handling already shows the toast.
+    }
   }
 
   return (
