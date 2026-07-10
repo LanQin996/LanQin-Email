@@ -82,6 +82,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
+	a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
 	return a, nil
 }
 
@@ -171,9 +172,20 @@ func (a *App) migrate(ctx context.Context) error {
 			last_used_at TEXT,
 			expires_at TEXT NOT NULL,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			scopes_json TEXT NOT NULL DEFAULT '["*"]',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS send_idempotency_keys (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			idempotency_key TEXT NOT NULL,
+			request_hash TEXT NOT NULL,
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			queue_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(user_id, idempotency_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_idempotency_created ON send_idempotency_keys(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
 		`CREATE TABLE IF NOT EXISTS system_settings (
@@ -327,6 +339,45 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created ON send_audit_events(created_at)`,
+		`CREATE TABLE IF NOT EXISTS delivery_events (
+			id TEXT PRIMARY KEY,
+			external_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			queue_id TEXT NOT NULL DEFAULT '',
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			rfc_message_id TEXT NOT NULL DEFAULT '',
+			recipient TEXT NOT NULL,
+			status TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			occurred_at TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(provider, external_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_delivery_events_message ON delivery_events(sent_message_id, occurred_at, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_delivery_events_rfc_message ON delivery_events(rfc_message_id, occurred_at, id)`,
+		`CREATE TABLE IF NOT EXISTS status_webhook_outbox (
+			id TEXT PRIMARY KEY,
+			event_key TEXT NOT NULL UNIQUE,
+			event_type TEXT NOT NULL,
+			mailbox_id TEXT NOT NULL DEFAULT '',
+			payload_json TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_due ON status_webhook_outbox(delivered_at,next_attempt_at,created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_mailbox ON status_webhook_outbox(mailbox_id,created_at)`,
+		`CREATE TRIGGER IF NOT EXISTS trg_mailbox_delete_status_webhook_outbox
+			AFTER DELETE ON mailboxes BEGIN
+				DELETE FROM status_webhook_outbox WHERE mailbox_id=OLD.id;
+			END`,
+		`CREATE TRIGGER IF NOT EXISTS trg_send_queue_delete_delivery_events
+			AFTER DELETE ON send_queue BEGIN
+				DELETE FROM delivery_events WHERE queue_id=OLD.id;
+			END`,
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id TEXT PRIMARY KEY,
 			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -546,10 +597,43 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateExternalIMAP(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateAPITokenScopes(ctx); err != nil {
+		return err
+	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (a *App) migrateAPITokenScopes(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(api_tokens)`)
+	if err != nil {
+		return err
+	}
+	hasScopes := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "scopes_json" {
+			hasScopes = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasScopes {
+		return nil
+	}
+	_, err = a.db.ExecContext(ctx, `ALTER TABLE api_tokens ADD COLUMN scopes_json TEXT NOT NULL DEFAULT '["*"]'`)
+	return err
 }
 
 func (a *App) migrateMessageAuthentication(ctx context.Context) error {
@@ -1196,6 +1280,22 @@ func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, di
 }
 
 func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
 	localPart = normalizeLocalPart(localPart)
 	if localPart == "" {
 		return "", errors.New("invalid local part")
@@ -1207,7 +1307,7 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		status = "active"
 	}
 	var domain string
-	if err := a.db.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
 		return "", err
 	}
 	address := localPart + "@" + domain
@@ -1215,15 +1315,9 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		displayName = address
 	}
 
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
 	id := newID("mbx")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	_, err = tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
+	_, err := tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, passwordHash, quotaMB, status, now, now)
 	if err != nil {
 		return "", err
@@ -1233,9 +1327,6 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		if err != nil {
 			return "", err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
 	}
 	return id, nil
 }

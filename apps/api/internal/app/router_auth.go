@@ -15,6 +15,7 @@ import (
 type contextKey string
 
 const userContextKey contextKey = "user"
+const apiTokenScopesContextKey contextKey = "api_token_scopes"
 
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
@@ -75,22 +76,9 @@ func (a *App) Router() http.Handler {
 		r.With(a.requireExternalIMAPEnabled).Get("/external-imap-oauth/{provider}/callback", a.handleExternalIMAPOAuthCallback)
 		r.With(a.requireAuth).Get("/events", a.handleEvents)
 
-		r.Group(func(r chi.Router) {
-			r.Use(a.requireAPIToken)
-			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/open/domains", a.handleOpenAPIListDomains)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsCreate)).Post("/open/domains", a.handleOpenAPICreateDomain)
-			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/open/domains/{id}", a.handleOpenAPIGetDomain)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsUpdate)).Post("/open/domains/{id}", a.handleOpenAPIUpdateDomain)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionDomainsDelete)).Delete("/open/domains/{id}", a.handleOpenAPIDeleteDomain)
-			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/open/mailboxes", a.handleOpenAPIListMailboxes)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesCreate)).Post("/open/mailboxes", a.handleOpenAPICreateMailbox)
-			r.With(a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/open/mailboxes/{id}", a.handleOpenAPIGetMailbox)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesUpdate)).Post("/open/mailboxes/{id}", a.handleOpenAPIUpdateMailbox)
-			r.With(a.requireAdminAccess, a.requirePermission(PermissionMailboxesDelete)).Delete("/open/mailboxes/{id}", a.handleOpenAPIDeleteMailbox)
-			r.With(a.requirePermission(PermissionMailSend)).Post("/open/send", a.handleOpenAPISendMail)
-			r.With(a.requirePermission(PermissionMailRead)).Get("/open/send/{id}", a.handleOpenAPISendStatus)
-			r.With(a.requirePermission(PermissionMailRead)).Get("/open/mailboxes/{id}/messages", a.handleOpenAPIMailboxMessages)
-		})
+		r.Post("/open/v1/delivery-events", a.handleOpenAPIDeliveryWebhook)
+		r.Route("/open", func(r chi.Router) { a.registerOpenAPIRoutes(r) })
+		r.Route("/open/v1", func(r chi.Router) { a.registerOpenAPIRoutes(r) })
 
 		r.Group(func(r chi.Router) {
 			r.Use(a.requireAuth)
@@ -179,6 +167,37 @@ func (a *App) Router() http.Handler {
 	return r
 }
 
+func (a *App) registerOpenAPIRoutes(r chi.Router) {
+	r.Use(a.requireAPIToken)
+	r.With(a.requireAPITokenScope("domains:read"), a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/domains", a.handleOpenAPIListDomains)
+	r.With(a.requireAPITokenScope("domains:write"), a.requireAdminAccess, a.requirePermission(PermissionDomainsCreate)).Post("/domains", a.handleOpenAPICreateDomain)
+	r.With(a.requireAPITokenScope("domains:read"), a.requireAdminAccess, a.requireAnyPermission(PermissionDomainsView, PermissionDNSView, PermissionMailboxesView, PermissionAliasesView, PermissionSettingsView, PermissionTemplatesView)).Get("/domains/{id}", a.handleOpenAPIGetDomain)
+	r.With(a.requireAPITokenScope("domains:write"), a.requireAdminAccess, a.requirePermission(PermissionDomainsUpdate)).Post("/domains/{id}", a.handleOpenAPIUpdateDomain)
+	r.With(a.requireAPITokenScope("domains:write"), a.requireAdminAccess, a.requirePermission(PermissionDomainsDelete)).Delete("/domains/{id}", a.handleOpenAPIDeleteDomain)
+	r.With(a.requireAPITokenScope("dns:read"), a.requireAdminAccess, a.requirePermission(PermissionDNSView)).Get("/domains/{id}/dns-records", a.handleDNSRecords)
+	r.With(a.requireAPITokenScope("dns:check"), a.requireAdminAccess, a.requirePermission(PermissionDNSCheck)).Post("/domains/{id}/dns-check", a.handleDNSCheck)
+	r.With(a.requireAPITokenScope("mailboxes:read"), a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/mailboxes", a.handleOpenAPIListMailboxes)
+	r.With(a.requireAPITokenScope("mailboxes:write"), a.requireAdminAccess, a.requirePermission(PermissionMailboxesCreate)).Post("/mailboxes", a.handleOpenAPICreateMailbox)
+	r.With(a.requireAPITokenScope("mailboxes:read"), a.requireAdminAccess, a.requireAnyPermission(PermissionMailboxesView, PermissionMessagesView)).Get("/mailboxes/{id}", a.handleOpenAPIGetMailbox)
+	r.With(a.requireAPITokenScope("mailboxes:write"), a.requireAdminAccess, a.requirePermission(PermissionMailboxesUpdate)).Post("/mailboxes/{id}", a.handleOpenAPIUpdateMailbox)
+	r.With(a.requireAPITokenScope("mailboxes:write"), a.requireAdminAccess, a.requirePermission(PermissionUsersResetPassword)).Post("/mailboxes/{id}/password", a.handleOpenAPIResetMailboxPassword)
+	r.With(a.requireAPITokenScope("mailboxes:write"), a.requireAdminAccess, a.requirePermission(PermissionMailboxesDelete)).Delete("/mailboxes/{id}", a.handleOpenAPIDeleteMailbox)
+	r.With(a.requireAPITokenScope("messages:send"), a.requirePermission(PermissionMailSend)).Post("/send", a.handleOpenAPISendMail)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailRead)).Get("/send", a.handleOpenAPIListSends)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailRead)).Get("/send/{id}", a.handleOpenAPISendStatus)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailRead)).Get("/send/{id}/events", a.handleOpenAPISendEvents)
+	r.With(a.requireAPITokenScope("messages:manage"), a.requirePermission(PermissionMailSend)).Post("/send/{id}/retry", a.handleOpenAPIRetrySend)
+	r.With(a.requireAPITokenScope("messages:manage"), a.requirePermission(PermissionMailSend)).Post("/send/{id}/cancel", a.handleOpenAPICancelSend)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailRead)).Get("/mailboxes/{id}/messages", a.handleOpenAPIMailboxMessages)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailRead)).Get("/messages/{id}", a.handleOpenAPIMessage)
+	r.With(a.requireAPITokenScope("messages:read"), a.requirePermission(PermissionMailAttachments)).Get("/attachments/{id}", a.handleAttachment)
+	r.With(a.requireAPITokenScope("aliases:read"), a.requireAdminAccess, a.requirePermission(PermissionAliasesView)).Get("/aliases", a.handleOpenAPIListAliases)
+	r.With(a.requireAPITokenScope("aliases:write"), a.requireAdminAccess, a.requirePermission(PermissionAliasesCreate)).Post("/aliases", a.handleCreateAlias)
+	r.With(a.requireAPITokenScope("aliases:read"), a.requireAdminAccess, a.requirePermission(PermissionAliasesView)).Get("/aliases/{id}", a.handleOpenAPIGetAlias)
+	r.With(a.requireAPITokenScope("aliases:write"), a.requireAdminAccess, a.requirePermission(PermissionAliasesUpdate)).Post("/aliases/{id}", a.handleUpdateAlias)
+	r.With(a.requireAPITokenScope("aliases:write"), a.requireAdminAccess, a.requirePermission(PermissionAliasesDelete)).Delete("/aliases/{id}", a.handleDeleteAlias)
+}
+
 func (a *App) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
@@ -186,7 +205,7 @@ func (a *App) corsMiddleware(next http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Idempotency-Key")
 			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS")
 		}
 		if r.Method == http.MethodOptions {
@@ -210,13 +229,28 @@ func (a *App) requireAuth(next http.Handler) http.Handler {
 
 func (a *App) requireAPIToken(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, err := a.authenticateAPIToken(r)
+		user, scopes, err := a.authenticateAPIToken(r)
 		if err != nil {
 			respondError(w, http.StatusUnauthorized, "api token required")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userContextKey, user)))
+		ctx := context.WithValue(r.Context(), userContextKey, user)
+		ctx = context.WithValue(ctx, apiTokenScopesContextKey, scopes)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+func (a *App) requireAPITokenScope(scope string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			scopes, _ := r.Context().Value(apiTokenScopesContextKey).(map[string]bool)
+			if !scopes["*"] && !scopes[scope] {
+				respondError(w, http.StatusForbidden, "api token scope required: "+scope)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func currentUser(r *http.Request) *User {
@@ -250,33 +284,37 @@ func (a *App) authenticateRequest(r *http.Request) (*User, error) {
 	return &u, nil
 }
 
-func (a *App) authenticateAPIToken(r *http.Request) (*User, error) {
+func (a *App) authenticateAPIToken(r *http.Request) (*User, map[string]bool, error) {
 	token := bearerToken(r)
 	if token == "" {
-		return nil, errors.New("no api token")
+		return nil, nil, errors.New("no api token")
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
+	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,at.scopes_json,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
 		FROM api_tokens at JOIN users u ON u.id=at.user_id
 		WHERE at.token_hash=? AND at.disabled=0 AND at.expires_at > ?`, hashToken(token), now)
-	var tokenID string
+	var tokenID, scopesJSON string
 	var u User
 	var disabled, twoFactorEnabled int
 	var created string
-	if err := row.Scan(&tokenID, &u.ID, &u.Email, &u.DisplayName, &u.Role, &disabled, &twoFactorEnabled, &created); err != nil {
-		return nil, err
+	if err := row.Scan(&tokenID, &scopesJSON, &u.ID, &u.Email, &u.DisplayName, &u.Role, &disabled, &twoFactorEnabled, &created); err != nil {
+		return nil, nil, err
 	}
 	u.Disabled = intBool(disabled)
 	u.TwoFactorEnabled = intBool(twoFactorEnabled)
 	u.CreatedAt = parseTime(created)
 	if u.Disabled {
-		return nil, errors.New("disabled")
+		return nil, nil, errors.New("disabled")
 	}
 	if err := a.attachUserAuthorization(r.Context(), &u); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	_, _ = a.db.ExecContext(r.Context(), `UPDATE api_tokens SET last_used_at=? WHERE id=?`, now, tokenID)
-	return &u, nil
+	scopes := map[string]bool{}
+	for _, scope := range jsonDecodeSlice(scopesJSON) {
+		scopes[scope] = true
+	}
+	return &u, scopes, nil
 }
 
 func bearerToken(r *http.Request) string {

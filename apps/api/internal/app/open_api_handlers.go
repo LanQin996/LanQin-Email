@@ -2,7 +2,11 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,7 +18,14 @@ import (
 )
 
 func (a *App) handleOpenAPIListDomains(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,status,dkim_selector,dkim_public_key,dns_status,dns_checked_at,created_at FROM domains ORDER BY name`)
+	limit := parseOpenAPILimit(r, 50, 100)
+	sortValue, cursorID, err := parseOpenAPIListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,status,dkim_selector,dkim_public_key,dns_status,dns_checked_at,created_at FROM domains
+		WHERE (?='' OR name>? OR (name=? AND id>?)) ORDER BY name,id LIMIT ?`, sortValue, sortValue, sortValue, cursorID, limit+1)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list domains")
 		return
@@ -33,7 +44,13 @@ func (a *App) handleOpenAPIListDomains(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to list domains")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		next = encodeOpenAPIListCursor(last.Name, last.ID)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
 
 func (a *App) handleOpenAPICreateDomain(w http.ResponseWriter, r *http.Request) {
@@ -121,8 +138,15 @@ func (a *App) handleOpenAPIDeleteDomain(w http.ResponseWriter, r *http.Request) 
 }
 
 func (a *App) handleOpenAPIListMailboxes(w http.ResponseWriter, r *http.Request) {
+	limit := parseOpenAPILimit(r, 50, 100)
+	sortValue, cursorID, err := parseOpenAPIListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,u.email,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at
-		FROM mailboxes mb JOIN users u ON u.id=mb.user_id ORDER BY mb.address`)
+		FROM mailboxes mb JOIN users u ON u.id=mb.user_id
+		WHERE (?='' OR mb.address>? OR (mb.address=? AND mb.id>?)) ORDER BY mb.address,mb.id LIMIT ?`, sortValue, sortValue, sortValue, cursorID, limit+1)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list mailboxes")
 		return
@@ -141,7 +165,13 @@ func (a *App) handleOpenAPIListMailboxes(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusInternalServerError, "failed to list mailboxes")
 		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+	next := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		next = encodeOpenAPIListCursor(last.Address, last.ID)
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
 
 func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request) {
@@ -185,14 +215,29 @@ func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request)
 	if displayName == "" {
 		displayName = address
 	}
-	userID, err := a.resolveMailboxOwner(r, req.UserID, req.OwnerEmail, address, displayName, req.Password)
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+	userID, err := a.resolveMailboxOwnerTx(r.Context(), tx, req.UserID, req.OwnerEmail, address, displayName, string(passwordHash))
 	if err != nil {
 		respondMailboxOwnerError(w, err)
 		return
 	}
-	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, localPart, displayName, req.Password, req.QuotaMB, "active")
+	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), req.QuotaMB, "active")
 	if err != nil {
 		badRequest(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create mailbox")
 		return
 	}
 	mailbox, err := a.mailboxByID(r.Context(), mailboxID)
@@ -318,6 +363,52 @@ func (a *App) handleOpenAPIDeleteMailbox(w http.ResponseWriter, r *http.Request)
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		badRequest(w, err)
+		return
+	}
+	if len(req.Password) < 8 {
+		badRequest(w, errors.New("password must be at least 8 characters"))
+		return
+	}
+	var userID string
+	if err := a.db.QueryRowContext(r.Context(), `SELECT user_id FROM mailboxes WHERE id=?`, chi.URLParam(r, "id")).Scan(&userID); err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to hash password")
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE users SET password_hash=?,updated_at=? WHERE id=?`, string(hash), now, userID); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reset password")
+		return
+	}
+	res, err := tx.ExecContext(r.Context(), `UPDATE mailboxes SET password_hash=?,updated_at=? WHERE user_id=?`, string(hash), now, userID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reset mailbox passwords")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to save password")
+		return
+	}
+	affected, _ := res.RowsAffected()
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true, "affectedMailboxes": affected})
+}
+
 func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
 	if err := decodeJSON(r, &req); err != nil {
@@ -329,8 +420,31 @@ func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	requestJSON, _ := json.Marshal(req)
+	requestSum := sha256.Sum256(requestJSON)
+	requestHash := hex.EncodeToString(requestSum[:])
+	if idempotencyKey != "" {
+		if len(idempotencyKey) > 128 || strings.ContainsAny(idempotencyKey, "\r\n") {
+			badRequest(w, errors.New("invalid Idempotency-Key"))
+			return
+		}
+		status, replayed, err := a.reserveOpenAPISendIdempotency(r.Context(), currentUser(r).ID, idempotencyKey, requestHash)
+		if err != nil {
+			respondError(w, http.StatusConflict, err.Error())
+			return
+		}
+		if replayed {
+			w.Header().Set("Idempotency-Replayed", "true")
+			respondJSON(w, http.StatusOK, status)
+			return
+		}
+	}
 	msg, err := a.sendMailWithSource(r.Context(), currentUser(r), mb, req, sendSourceOpenAPI)
 	if err != nil {
+		if idempotencyKey != "" {
+			_, _ = a.db.ExecContext(r.Context(), `DELETE FROM send_idempotency_keys WHERE user_id=? AND idempotency_key=? AND sent_message_id=''`, currentUser(r).ID, idempotencyKey)
+		}
 		respondSendError(w, err)
 		return
 	}
@@ -344,6 +458,10 @@ func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 		if err == nil {
 			status = openAPISendStatusFromQueue(item, mb.Address)
 		}
+	}
+	a.applyDeliveryStatus(r.Context(), &status)
+	if idempotencyKey != "" {
+		_, _ = a.db.ExecContext(r.Context(), `UPDATE send_idempotency_keys SET sent_message_id=?,queue_id=? WHERE user_id=? AND idempotency_key=?`, status.MessageID, status.QueueID, currentUser(r).ID, idempotencyKey)
 	}
 	respondJSON(w, http.StatusCreated, status)
 }
@@ -360,7 +478,9 @@ func (a *App) handleOpenAPISendStatus(w http.ResponseWriter, r *http.Request) {
 		if mb, mbErr := a.mailboxByID(r.Context(), item.MailboxID); mbErr == nil {
 			mailboxAddress = mb.Address
 		}
-		respondJSON(w, http.StatusOK, openAPISendStatusFromQueue(item, mailboxAddress))
+		status := openAPISendStatusFromQueue(item, mailboxAddress)
+		a.applyDeliveryStatus(r.Context(), &status)
+		respondJSON(w, http.StatusOK, status)
 		return
 	}
 	msg, err := a.loadOpenAPISentMessageForUser(r.Context(), id, user.ID)
@@ -383,7 +503,11 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	limit := parseOpenAPILimit(r, 30, 100)
-	offset := parseOpenAPIOffset(r)
+	cursorReceivedAt, cursorID, offset, err := parseOpenAPIMessageCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
 	if folder == "" {
 		folder = "Inbox"
@@ -399,11 +523,20 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 		like := "%" + q + "%"
 		args = append(args, like, like, like, like, like, like)
 	}
-	args = append(args, limit+1, offset)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,f.name,m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	if cursorReceivedAt != "" {
+		where += " AND (m.received_at<? OR (m.received_at=? AND m.id<?))"
+		args = append(args, cursorReceivedAt, cursorReceivedAt, cursorID)
+	}
+	args = append(args, limit+1)
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,f.name,m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m JOIN folders f ON f.id=m.folder_id
-		WHERE `+where+`
-		ORDER BY m.received_at DESC LIMIT ? OFFSET ?`, args...)
+		WHERE ` + where + `
+		ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
+	if offset > 0 {
+		query += " OFFSET ?"
+		args = append(args, offset)
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
 		return
@@ -425,7 +558,8 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 	nextCursor := ""
 	if len(items) > limit {
 		items = items[:limit]
-		nextCursor = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		nextCursor = encodeOpenAPIMessageCursor(last.ReceivedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
@@ -459,29 +593,44 @@ func scanMailbox(row mailboxScanner) (Mailbox, error) {
 }
 
 type openAPISendStatus struct {
-	ID             string     `json:"id"`
-	QueueID        string     `json:"queueId,omitempty"`
-	Status         string     `json:"status"`
-	MessageID      string     `json:"messageId"`
-	RFCMessageID   string     `json:"rfcMessageId"`
-	MailboxID      string     `json:"mailboxId"`
-	MailboxAddress string     `json:"mailboxAddress,omitempty"`
-	Subject        string     `json:"subject,omitempty"`
-	Recipients     []string   `json:"recipients,omitempty"`
-	AttemptCount   int        `json:"attemptCount,omitempty"`
-	MaxAttempts    int        `json:"maxAttempts,omitempty"`
-	NextAttemptAt  *time.Time `json:"nextAttemptAt,omitempty"`
-	LastError      string     `json:"lastError,omitempty"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      *time.Time `json:"updatedAt,omitempty"`
-	DeliveredAt    *time.Time `json:"deliveredAt,omitempty"`
+	ID                string                   `json:"id"`
+	QueueID           string                   `json:"queueId,omitempty"`
+	Status            string                   `json:"status"`
+	QueueStatus       string                   `json:"queueStatus,omitempty"`
+	MessageID         string                   `json:"messageId"`
+	RFCMessageID      string                   `json:"rfcMessageId"`
+	MailboxID         string                   `json:"mailboxId"`
+	MailboxAddress    string                   `json:"mailboxAddress,omitempty"`
+	Subject           string                   `json:"subject,omitempty"`
+	Recipients        []string                 `json:"recipients,omitempty"`
+	AttemptCount      int                      `json:"attemptCount,omitempty"`
+	MaxAttempts       int                      `json:"maxAttempts,omitempty"`
+	NextAttemptAt     *time.Time               `json:"nextAttemptAt,omitempty"`
+	LastError         string                   `json:"lastError,omitempty"`
+	CreatedAt         time.Time                `json:"createdAt"`
+	UpdatedAt         *time.Time               `json:"updatedAt,omitempty"`
+	DeliveredAt       *time.Time               `json:"deliveredAt,omitempty"`
+	RecipientStatuses []openAPIRecipientStatus `json:"recipientStatuses,omitempty"`
+}
+
+type openAPIRecipientStatus struct {
+	Recipient  string    `json:"recipient"`
+	Status     string    `json:"status"`
+	Reason     string    `json:"reason,omitempty"`
+	Provider   string    `json:"provider,omitempty"`
+	OccurredAt time.Time `json:"occurredAt"`
 }
 
 func openAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) openAPISendStatus {
+	status := item.Status
+	if status == sendQueueStatusDelivered {
+		status = "relayed"
+	}
 	return openAPISendStatus{
-		ID:             item.ID,
+		ID:             firstNonEmpty(item.SentMessageID, item.ID),
 		QueueID:        item.ID,
-		Status:         item.Status,
+		Status:         status,
+		QueueStatus:    item.Status,
 		MessageID:      item.SentMessageID,
 		RFCMessageID:   item.MessageID,
 		MailboxID:      item.MailboxID,
@@ -496,6 +645,139 @@ func openAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) open
 		UpdatedAt:      timePtr(item.UpdatedAt),
 		DeliveredAt:    item.DeliveredAt,
 	}
+}
+
+func (a *App) reserveOpenAPISendIdempotency(ctx context.Context, userID, key, requestHash string) (openAPISendStatus, bool, error) {
+	_, _ = a.db.ExecContext(ctx, `DELETE FROM send_idempotency_keys WHERE created_at<?`, a.now().UTC().Add(-24*time.Hour).Format(time.RFC3339Nano))
+	res, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO send_idempotency_keys(user_id,idempotency_key,request_hash,created_at) VALUES(?,?,?,?)`, userID, key, requestHash, a.now().UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return openAPISendStatus{}, false, err
+	}
+	if n, _ := res.RowsAffected(); n > 0 {
+		return openAPISendStatus{}, false, nil
+	}
+	var storedHash, sentMessageID, queueID string
+	if err := a.db.QueryRowContext(ctx, `SELECT request_hash,sent_message_id,queue_id FROM send_idempotency_keys WHERE user_id=? AND idempotency_key=?`, userID, key).Scan(&storedHash, &sentMessageID, &queueID); err != nil {
+		return openAPISendStatus{}, false, err
+	}
+	if storedHash != requestHash {
+		return openAPISendStatus{}, false, errors.New("Idempotency-Key was already used with a different request")
+	}
+	if sentMessageID == "" {
+		return openAPISendStatus{}, false, errors.New("a request with this Idempotency-Key is still processing")
+	}
+	item, err := a.loadSendQueueEntryForUser(ctx, queueID, userID)
+	if err != nil {
+		return openAPISendStatus{}, false, err
+	}
+	status := openAPISendStatusFromQueue(item, item.MailFrom)
+	a.applyDeliveryStatus(ctx, &status)
+	return status, true, nil
+}
+
+func (a *App) applyDeliveryStatus(ctx context.Context, status *openAPISendStatus) {
+	rows, err := a.db.QueryContext(ctx, `SELECT recipient,status,reason,provider,occurred_at FROM delivery_events
+		WHERE sent_message_id=? ORDER BY occurred_at DESC,id DESC`, status.MessageID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	counts := map[string]int{}
+	for rows.Next() {
+		var item openAPIRecipientStatus
+		var occurredAt string
+		if rows.Scan(&item.Recipient, &item.Status, &item.Reason, &item.Provider, &occurredAt) != nil || seen[item.Recipient] {
+			continue
+		}
+		seen[item.Recipient] = true
+		item.OccurredAt = parseTime(occurredAt)
+		status.RecipientStatuses = append(status.RecipientStatuses, item)
+		counts[item.Status]++
+	}
+	if len(status.RecipientStatuses) == 0 {
+		return
+	}
+	if len(status.RecipientStatuses) < len(status.Recipients) || len(counts) > 1 {
+		status.Status = "partial"
+		return
+	}
+	for _, value := range []string{"complained", "bounced", "rejected", "deferred", "delivered"} {
+		if counts[value] > 0 {
+			status.Status = value
+			return
+		}
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+type openAPIMessageCursor struct {
+	ReceivedAt string `json:"receivedAt"`
+	ID         string `json:"id"`
+}
+
+type openAPIListCursor struct {
+	Sort string `json:"sort"`
+	ID   string `json:"id"`
+}
+
+func encodeOpenAPIMessageCursor(receivedAt time.Time, id string) string {
+	payload, _ := json.Marshal(openAPIMessageCursor{ReceivedAt: receivedAt.UTC().Format(time.RFC3339Nano), ID: id})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func parseOpenAPIMessageCursor(raw string) (receivedAt, id string, offset int, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", 0, nil
+	}
+	if n, convErr := strconv.Atoi(raw); convErr == nil {
+		if n < 0 {
+			return "", "", 0, errors.New("invalid cursor")
+		}
+		return "", "", n, nil
+	}
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	var cursor openAPIMessageCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ReceivedAt == "" || cursor.ID == "" {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, cursor.ReceivedAt); err != nil {
+		return "", "", 0, errors.New("invalid cursor")
+	}
+	return cursor.ReceivedAt, cursor.ID, 0, nil
+}
+
+func encodeOpenAPIListCursor(sortValue, id string) string {
+	payload, _ := json.Marshal(openAPIListCursor{Sort: sortValue, ID: id})
+	return base64.RawURLEncoding.EncodeToString(payload)
+}
+
+func parseOpenAPIListCursor(raw string) (sortValue, id string, err error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", "", nil
+	}
+	data, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return "", "", errors.New("invalid cursor")
+	}
+	var cursor openAPIListCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.Sort == "" || cursor.ID == "" {
+		return "", "", errors.New("invalid cursor")
+	}
+	return cursor.Sort, cursor.ID, nil
 }
 
 func openAPISendStatusFromMessage(msg *MailMessage, mailboxAddress string) openAPISendStatus {
@@ -521,11 +803,18 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-func (a *App) resolveMailboxOwner(r *http.Request, userID, ownerEmail, address, displayName, password string) (string, error) {
+func (a *App) resolveMailboxOwnerTx(ctx context.Context, tx *sql.Tx, userID, ownerEmail, address, displayName, passwordHash string) (string, error) {
 	userID = strings.TrimSpace(userID)
 	if userID != "" {
-		if err := a.ensureActiveUserExists(r.Context(), userID); err != nil {
+		var disabled int
+		if err := tx.QueryRowContext(ctx, `SELECT disabled FROM users WHERE id=?`, userID).Scan(&disabled); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return "", errNotFound
+			}
 			return "", err
+		}
+		if intBool(disabled) {
+			return "", errors.New("owner user is disabled")
 		}
 		return userID, nil
 	}
@@ -537,32 +826,21 @@ func (a *App) resolveMailboxOwner(r *http.Request, userID, ownerEmail, address, 
 		return "", errors.New("invalid owner email")
 	}
 	var existing string
-	err := a.db.QueryRowContext(r.Context(), `SELECT id FROM users WHERE email=? AND disabled=0`, email).Scan(&existing)
+	err := tx.QueryRowContext(ctx, `SELECT id FROM users WHERE email=? AND disabled=0`, email).Scan(&existing)
 	if err == nil {
 		return existing, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	return a.createMailboxOwnerUser(r, email, displayName, password)
-}
-
-func (a *App) createMailboxOwnerUser(r *http.Request, email, displayName, password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return "", err
-	}
-	userID := newID("usr")
+	userID = newID("usr")
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	if displayName == "" {
 		displayName = email
 	}
-	_, err = a.db.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(hash), 0, now, now)
-	if err != nil {
-		return "", err
-	}
-	return userID, nil
+	_, err = tx.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", passwordHash, 0, now, now)
+	return userID, err
 }
 
 func (a *App) ensureActiveUserExists(ctx context.Context, userID string) error {

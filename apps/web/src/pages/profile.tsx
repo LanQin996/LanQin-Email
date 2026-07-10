@@ -148,12 +148,12 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "关闭失败", description: error.message }),
   })
   const createApiToken = useMutation({
-    mutationFn: (payload: { name: string; expiresAt?: string }) => api.createApiToken(payload),
+    mutationFn: (payload: { name: string; expiresAt?: string; scopes: string[] }) => api.createApiToken(payload),
     onSuccess: (res) => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已创建" }); return res },
     onError: (error) => toast({ title: "创建失败", description: error.message }),
   })
   const updateApiToken = useMutation({
-    mutationFn: ({ id, payload }: { id: string; payload: { name?: string; expiresAt?: string; disabled?: boolean } }) => api.updateApiToken(id, payload),
+    mutationFn: ({ id, payload }: { id: string; payload: { name?: string; expiresAt?: string; disabled?: boolean; scopes?: string[] } }) => api.updateApiToken(id, payload),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已更新" }) },
     onError: (error) => toast({ title: "更新失败", description: error.message }),
   })
@@ -1005,9 +1005,18 @@ function ClientConfigRow({ label, value, security, onCopy }: { label: string; va
   )
 }
 
-function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelete, onCopy }: { items: APIToken[]; loading: boolean; pending: boolean; onCreate: (payload: { name: string; expiresAt?: string }) => Promise<{ token: string; item: APIToken }>; onUpdate: (id: string, payload: { name?: string; expiresAt?: string; disabled?: boolean }) => void; onDelete: (id: string) => void; onCopy: (text: string) => void }) {
+const apiTokenScopeOptions = [
+  ["messages:send", "发送邮件"], ["messages:read", "读取邮件与投递状态"], ["messages:manage", "重试或取消发送"],
+  ["domains:read", "查看域名"], ["domains:write", "管理域名"], ["mailboxes:read", "查看邮箱"], ["mailboxes:write", "管理邮箱"],
+  ["dns:read", "查看 DNS"], ["dns:check", "执行 DNS 检测"], ["aliases:read", "查看别名"], ["aliases:write", "管理别名"],
+] as const
+
+function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelete, onCopy }: { items: APIToken[]; loading: boolean; pending: boolean; onCreate: (payload: { name: string; expiresAt?: string; scopes: string[] }) => Promise<{ token: string; item: APIToken }>; onUpdate: (id: string, payload: { name?: string; expiresAt?: string; disabled?: boolean; scopes?: string[] }) => void; onDelete: (id: string) => void; onCopy: (text: string) => void }) {
   const [createdToken, setCreatedToken] = React.useState("")
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  const [scopes, setScopes] = React.useState<string[]>(["messages:send", "messages:read"])
+  const [editingToken, setEditingToken] = React.useState<APIToken | null>(null)
+  const [editingScopes, setEditingScopes] = React.useState<string[]>([])
   const defaultExpiresAt = React.useMemo(() => dateInputValue(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)), [])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -1016,9 +1025,10 @@ function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelet
     const form = new FormData(target)
     const expiresAt = dateInputToISOString(String(form.get("expiresAt") || ""))
     try {
-      const res = await onCreate({ name: String(form.get("name") || ""), expiresAt })
+      const res = await onCreate({ name: String(form.get("name") || ""), expiresAt, scopes })
       setCreatedToken(res.token)
       target.reset()
+      setScopes(["messages:send", "messages:read"])
     } catch {
       // Mutation-level error handling already shows the toast.
     }
@@ -1047,14 +1057,22 @@ function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelet
             </div>
           )}
 
-          <form className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end" onSubmit={submit}>
-            <Field label="名称">
-              <Input name="name" required maxLength={80} placeholder="billing-system" />
+          <form className="space-y-4" onSubmit={submit}>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+              <Field label="名称"><Input name="name" required maxLength={80} placeholder="billing-system" /></Field>
+              <Field label="到期日期"><Input name="expiresAt" type="date" defaultValue={defaultExpiresAt} min={dateInputValue(new Date())} required /></Field>
+              <Button disabled={pending || scopes.length === 0}>{pending ? "创建中..." : "创建 Token"}</Button>
+            </div>
+            <Field label="授权范围">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {apiTokenScopeOptions.map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                    <Checkbox checked={scopes.includes(value)} onCheckedChange={(checked) => setScopes((current) => checked === true ? [...current, value] : current.filter((scope) => scope !== value))} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
             </Field>
-            <Field label="到期日期">
-              <Input name="expiresAt" type="date" defaultValue={defaultExpiresAt} min={dateInputValue(new Date())} required />
-            </Field>
-            <Button disabled={pending}>{pending ? "创建中..." : "创建 Token"}</Button>
           </form>
         </CardContent>
       </Card>
@@ -1076,8 +1094,12 @@ function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelet
                     <span>过期：{item.expiresAt ? formatDateTime(item.expiresAt) : "未设置"}</span>
                     <span>最后使用：{item.lastUsedAt ? formatDateTime(item.lastUsedAt) : "从未使用"}</span>
                   </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(item.scopes || ["*"]).map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => { setEditingToken(item); setEditingScopes(item.scopes?.includes("*") ? ["messages:send", "messages:read"] : item.scopes || []) }}>编辑权限</Button>
                   <Button type="button" variant="outline" size="sm" disabled={pending || expired} onClick={() => onUpdate(item.id, { disabled: !item.disabled })}>{item.disabled ? "启用" : "禁用"}</Button>
                   <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => setPendingConfirm({ title: "撤销 API Token？", description: `Token “${item.name}” 撤销后无法恢复，正在使用它的集成会立即失效。`, confirmText: "撤销 Token", destructive: true, onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}>撤销</Button>
                 </div>
@@ -1087,6 +1109,24 @@ function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelet
           {!loading && items.length === 0 && <EmptyState text="暂无 API Token" />}
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingToken} onOpenChange={(open) => { if (!open) setEditingToken(null) }}>
+        <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>编辑 Token 权限</DialogTitle></DialogHeader>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {apiTokenScopeOptions.map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                <Checkbox checked={editingScopes.includes(value)} onCheckedChange={(checked) => setEditingScopes((current) => checked === true ? [...current, value] : current.filter((scope) => scope !== value))} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingToken(null)}>取消</Button>
+            <Button type="button" disabled={pending || editingScopes.length === 0} onClick={() => { if (editingToken) onUpdate(editingToken.id, { scopes: editingScopes }); setEditingToken(null) }}>保存权限</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "撤销"} destructive={!!pendingConfirm?.destructive} pending={pending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </div>

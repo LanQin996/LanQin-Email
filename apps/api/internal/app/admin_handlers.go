@@ -964,7 +964,7 @@ func (a *App) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 		source = normalizeLocalPart(source) + "@" + domain.Name
 	}
 	destination := normalizeEmail(req.Destination)
-	if source == "" || destination == "" || !strings.Contains(destination, "@") {
+	if source == "" || !strings.HasSuffix(source, "@"+domain.Name) || destination == "" || !strings.Contains(destination, "@") {
 		badRequest(w, errors.New("invalid alias"))
 		return
 	}
@@ -1009,7 +1009,7 @@ func (a *App) handleUpdateAlias(w http.ResponseWriter, r *http.Request) {
 		source = normalizeLocalPart(source) + "@" + domain.Name
 	}
 	destination := normalizeEmail(req.Destination)
-	if source == "" || destination == "" || !strings.Contains(destination, "@") {
+	if source == "" || !strings.HasSuffix(source, "@"+domain.Name) || destination == "" || !strings.Contains(destination, "@") {
 		badRequest(w, errors.New("invalid alias"))
 		return
 	}

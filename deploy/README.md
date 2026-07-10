@@ -174,6 +174,24 @@ LANQIN_SMTP_PORT=25
 LANQIN_SMTP_REQUIRE_TLS=false
 ```
 
+如需把上游服务商或 DSN 处理器的最终送达、退信、投诉、拒收事件写回开放 API，请设置：
+
+```env
+LANQIN_DELIVERY_WEBHOOK_SECRET=replace-with-a-long-random-secret
+```
+
+回调地址、签名算法和事件格式见仓库中的 `docs/API.md` 与 `docs/openapi.json`。该接口未配置密钥时返回 `503`。
+
+如需把状态变化主动推送到集成方，可额外设置：
+
+```env
+LANQIN_STATUS_WEBHOOK_URL=https://integration.example.com/hooks/lanqin
+LANQIN_STATUS_WEBHOOK_SECRET=replace-with-another-long-random-secret
+LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=false
+```
+
+事件先写入 SQLite outbox，再由后台 worker 投递；非 2xx 响应会按退避策略重试，最多 10 次。默认只允许公网 HTTPS，禁止重定向、URL 用户信息和私网/本机目标。只有可信内网或本地测试才应开启 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS`。
+
 Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
 
 如果发送队列里出现 relay 失败，通常是 Postfix 会话被中断或外部 SMTP 配置错误。优先检查：

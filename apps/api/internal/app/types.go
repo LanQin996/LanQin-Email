@@ -29,8 +29,23 @@ type APIToken struct {
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
 	Disabled   bool       `json:"disabled"`
+	Scopes     []string   `json:"scopes"`
 	CreatedAt  time.Time  `json:"createdAt"`
 	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
+type DeliveryEvent struct {
+	ID           string    `json:"id"`
+	ExternalID   string    `json:"externalId"`
+	Provider     string    `json:"provider"`
+	QueueID      string    `json:"queueId"`
+	MessageID    string    `json:"messageId"`
+	RFCMessageID string    `json:"rfcMessageId"`
+	Recipient    string    `json:"recipient"`
+	Status       string    `json:"status"`
+	Reason       string    `json:"reason,omitempty"`
+	OccurredAt   time.Time `json:"occurredAt"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type Domain struct {

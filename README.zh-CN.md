@@ -190,6 +190,10 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 4. **第三方客户端**：可通过 SMTP 465/587、IMAP 993、POP3 995 连接；生产环境请配置匹配 `LANQIN_PUBLIC_HOSTNAME` 的证书。
 5. **外部邮箱接入**：个人邮箱管理可添加外部 IMAP 账号。本地存储模式会同步入库；远端直连模式每次读取远端，不写入本地邮件表。
 
+## 开放 API
+
+外部系统应使用版本化的 `/api/open/v1` 接口和带 scope 的 API Token。详细说明见 [API 文档](docs/API.md)，机器可读契约见 [OpenAPI 3.1](docs/openapi.json)。发信支持幂等键；最终投递事件可通过签名入口写入，全部状态变化也可通过可靠的签名 webhook outbox 主动推送。
+
 ## 开发与验证
 
 ```bash

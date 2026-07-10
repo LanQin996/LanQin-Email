@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -24,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -222,6 +227,10 @@ type testClient struct {
 }
 
 func (c *testClient) do(method, path string, body any, out any) int {
+	return c.doWithHeaders(method, path, body, nil, out)
+}
+
+func (c *testClient) doWithHeaders(method, path string, body any, headers map[string]string, out any) int {
 	c.t.Helper()
 	var reader io.Reader
 	if body != nil {
@@ -240,6 +249,9 @@ func (c *testClient) do(method, path string, body any, out any) int {
 	}
 	if c.bearer != "" {
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -284,12 +296,20 @@ func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, dis
 }
 
 func createTestAPIToken(t *testing.T, client *testClient, name string) string {
+	return createTestAPITokenWithScopes(t, client, name, nil)
+}
+
+func createTestAPITokenWithScopes(t *testing.T, client *testClient, name string, scopes []string) string {
 	t.Helper()
 	var resp struct {
 		Token string   `json:"token"`
 		Item  APIToken `json:"item"`
 	}
-	if code := client.do("POST", "/api/me/api-tokens", map[string]string{"name": name}, &resp); code != http.StatusCreated {
+	payload := map[string]any{"name": name}
+	if scopes != nil {
+		payload["scopes"] = scopes
+	}
+	if code := client.do("POST", "/api/me/api-tokens", payload, &resp); code != http.StatusCreated {
 		t.Fatalf("create api token code=%d resp=%+v", code, resp)
 	}
 	if resp.Token == "" || resp.Item.ID == "" || resp.Item.Name != name {
@@ -1684,6 +1704,21 @@ func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
 	if code := admin.do("POST", "/api/me/api-tokens", map[string]string{"name": "integration-test"}, &created); code != http.StatusCreated {
 		t.Fatalf("create api token code=%d resp=%+v", code, created)
 	}
+	nullScopes := bytes.NewBufferString(`{"name":"null-scopes","scopes":null}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/me/api-tokens", nullScopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(admin.cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("null scopes create code=%d", resp.StatusCode)
+	}
 	if !strings.HasPrefix(created.Token, "lq_") || created.Item.ID == "" || created.Item.Name != "integration-test" || created.Item.ExpiresAt == nil {
 		t.Fatalf("created token response=%+v", created)
 	}
@@ -1908,7 +1943,7 @@ func TestOpenAPISendStatusAndMailboxMessages(t *testing.T) {
 	if code := senderOpen.do("GET", "/api/open/send/"+sent.ID, nil, &status); code != http.StatusOK {
 		t.Fatalf("open api send status code=%d status=%+v", code, status)
 	}
-	if status.ID != sent.QueueID || status.MessageID != sent.MessageID || status.Status != sendQueueStatusQueued {
+	if status.ID != sent.MessageID || status.QueueID != sent.QueueID || status.MessageID != sent.MessageID || status.Status != sendQueueStatusQueued {
 		t.Fatalf("status=%+v sent=%+v", status, sent)
 	}
 
@@ -1933,6 +1968,327 @@ func TestOpenAPISendStatusAndMailboxMessages(t *testing.T) {
 	}
 	if code := recipientOpen.do("GET", "/api/open/send/"+sent.ID, nil, &map[string]any{}); code != http.StatusNotFound {
 		t.Fatalf("cross-user send status code=%d", code)
+	}
+}
+
+func TestOpenAPIV1ScopesIdempotencyAndDeliveryEvents(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
+	a.cfg.DeliveryWebhookSecret = "delivery-test-secret"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "v1-sender", "V1 Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "v1-recipient", "V1 Recipient", "Password123!", nil)
+
+	adminReadToken := createTestAPITokenWithScopes(t, admin, "domain-reader", []string{"domains:read"})
+	adminRead := &testClient{t: t, server: ts, bearer: adminReadToken}
+	if code := adminRead.do("GET", "/api/open/v1/domains", nil, &map[string]any{}); code != http.StatusOK {
+		t.Fatalf("v1 scoped domain list code=%d", code)
+	}
+	if code := adminRead.do("POST", "/api/open/v1/domains", map[string]string{"name": "scope-denied.example"}, &map[string]any{}); code != http.StatusForbidden {
+		t.Fatalf("read-only token domain create code=%d", code)
+	}
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login code=%d", code)
+	}
+	sendToken := createTestAPITokenWithScopes(t, senderClient, "send-only", []string{"messages:send"})
+	sendClient := &testClient{t: t, server: ts, bearer: sendToken}
+	payload := map[string]any{"mailboxId": sender.ID, "to": []string{recipient.Address}, "subject": "idempotent send", "text": "one delivery"}
+	headers := map[string]string{"Idempotency-Key": "invoice-42"}
+	var first openAPISendStatus
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", payload, headers, &first); code != http.StatusCreated {
+		t.Fatalf("first idempotent send code=%d body=%+v", code, first)
+	}
+	if first.ID == "" || first.ID != first.MessageID || first.QueueID == "" || first.ID == first.QueueID {
+		t.Fatalf("stable send identifiers=%+v", first)
+	}
+	var replay openAPISendStatus
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", payload, headers, &replay); code != http.StatusOK {
+		t.Fatalf("idempotent replay code=%d body=%+v", code, replay)
+	}
+	if replay.ID != first.ID || replay.QueueID != first.QueueID {
+		t.Fatalf("replay=%+v first=%+v", replay, first)
+	}
+	var queueCount int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM send_queue WHERE source=? AND sent_message_id=?`, sendSourceOpenAPI, first.MessageID).Scan(&queueCount); err != nil || queueCount != 1 {
+		t.Fatalf("idempotent queue count=%d err=%v", queueCount, err)
+	}
+	changed := map[string]any{"mailboxId": sender.ID, "to": []string{recipient.Address}, "subject": "changed", "text": "different"}
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", changed, headers, &map[string]any{}); code != http.StatusConflict {
+		t.Fatalf("changed idempotency payload code=%d", code)
+	}
+	if code := sendClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &map[string]any{}); code != http.StatusForbidden {
+		t.Fatalf("send-only token read code=%d", code)
+	}
+
+	readToken := createTestAPITokenWithScopes(t, senderClient, "read-only", []string{"messages:read"})
+	readClient := &testClient{t: t, server: ts, bearer: readToken}
+	var queued openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &queued); code != http.StatusOK || queued.Status != sendQueueStatusQueued {
+		t.Fatalf("read status code=%d body=%+v", code, queued)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,updated_at=? WHERE id=?`, sendQueueStatusSending, a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var sending openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &sending); code != http.StatusOK || sending.Status != sendQueueStatusSending {
+		t.Fatalf("sending status code=%d body=%+v", code, sending)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,delivered_at=?,updated_at=? WHERE id=?`, sendQueueStatusDelivered, a.now().UTC().Format(time.RFC3339Nano), a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var relayed openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &relayed); code != http.StatusOK || relayed.Status != "relayed" || relayed.QueueStatus != sendQueueStatusDelivered {
+		t.Fatalf("relayed status code=%d body=%+v", code, relayed)
+	}
+
+	eventPayload := struct {
+		Events []deliveryWebhookEvent `json:"events"`
+	}{Events: []deliveryWebhookEvent{{ID: "provider-event-1", Provider: "test-provider", MessageID: first.MessageID, Recipient: recipient.Address, Status: "bounced", Reason: "550 mailbox unavailable", OccurredAt: a.now().UTC().Format(time.RFC3339Nano)}}}
+	body, _ := json.Marshal(eventPayload)
+	timestamp := strconv.FormatInt(a.now().UTC().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(a.cfg.DeliveryWebhookSecret))
+	_, _ = mac.Write([]byte(timestamp + "."))
+	_, _ = mac.Write(body)
+	webhookHeaders := map[string]string{"X-LanQin-Timestamp": timestamp, "X-LanQin-Signature": "sha256=" + hex.EncodeToString(mac.Sum(nil))}
+	badSignatureHeaders := map[string]string{"X-LanQin-Timestamp": timestamp, "X-LanQin-Signature": "sha256=" + strings.Repeat("0", 64)}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, badSignatureHeaders, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("invalid delivery webhook signature code=%d", code)
+	}
+	oldTimestamp := strconv.FormatInt(a.now().UTC().Add(-10*time.Minute).Unix(), 10)
+	oldMAC := hmac.New(sha256.New, []byte(a.cfg.DeliveryWebhookSecret))
+	_, _ = oldMAC.Write([]byte(oldTimestamp + "."))
+	_, _ = oldMAC.Write(body)
+	oldHeaders := map[string]string{"X-LanQin-Timestamp": oldTimestamp, "X-LanQin-Signature": "sha256=" + hex.EncodeToString(oldMAC.Sum(nil))}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, oldHeaders, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("expired delivery webhook signature code=%d", code)
+	}
+	var webhookResult struct {
+		Accepted   int `json:"accepted"`
+		Duplicates int `json:"duplicates"`
+	}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, webhookHeaders, &webhookResult); code != http.StatusOK || webhookResult.Accepted != 1 {
+		t.Fatalf("delivery webhook code=%d body=%+v", code, webhookResult)
+	}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, webhookHeaders, &webhookResult); code != http.StatusOK || webhookResult.Duplicates != 1 {
+		t.Fatalf("delivery webhook duplicate code=%d body=%+v", code, webhookResult)
+	}
+	var bounced openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &bounced); code != http.StatusOK || bounced.Status != "bounced" || len(bounced.RecipientStatuses) != 1 {
+		t.Fatalf("bounced status code=%d body=%+v", code, bounced)
+	}
+	var events struct {
+		DeliveryEvents []DeliveryEvent `json:"deliveryEvents"`
+	}
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID+"/events", nil, &events); code != http.StatusOK || len(events.DeliveryEvents) != 1 {
+		t.Fatalf("delivery events code=%d body=%+v", code, events)
+	}
+
+	manageToken := createTestAPITokenWithScopes(t, senderClient, "send-manager", []string{"messages:read", "messages:manage"})
+	manageClient := &testClient{t: t, server: ts, bearer: manageToken}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=max_attempts,last_error='test failure',updated_at=? WHERE id=?`, sendQueueStatusFailed, a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var failed openAPISendStatus
+	if code := manageClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &failed); code != http.StatusOK || failed.QueueStatus != sendQueueStatusFailed {
+		t.Fatalf("failed status code=%d body=%+v", code, failed)
+	}
+	var retried openAPISendStatus
+	if code := manageClient.do("POST", "/api/open/v1/send/"+first.ID+"/retry", nil, &retried); code != http.StatusOK || retried.QueueStatus != sendQueueStatusQueued {
+		t.Fatalf("retry code=%d body=%+v", code, retried)
+	}
+	var canceled openAPISendStatus
+	if code := manageClient.do("POST", "/api/open/v1/send/"+first.ID+"/cancel", nil, &canceled); code != http.StatusOK || canceled.QueueStatus != sendQueueStatusCanceled {
+		t.Fatalf("cancel code=%d body=%+v", code, canceled)
+	}
+}
+
+func TestOpenAPIPaginationAndMailboxCreateRollback(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	token := createTestAPITokenWithScopes(t, admin, "admin-v1", []string{"domains:read", "mailboxes:write"})
+	openAdmin := &testClient{t: t, server: ts, bearer: token}
+	createTestDomain(t, admin, "pagination-one.test")
+	createTestDomain(t, admin, "pagination-two.test")
+	var firstPage struct {
+		Items      []Domain `json:"items"`
+		NextCursor string   `json:"nextCursor"`
+	}
+	if code := openAdmin.do("GET", "/api/open/v1/domains?limit=1", nil, &firstPage); code != http.StatusOK || len(firstPage.Items) != 1 || firstPage.NextCursor == "" {
+		t.Fatalf("first domain page code=%d body=%+v", code, firstPage)
+	}
+	var secondPage struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/v1/domains?limit=1&cursor="+url.QueryEscape(firstPage.NextCursor), nil, &secondPage); code != http.StatusOK || len(secondPage.Items) != 1 || secondPage.Items[0].ID == firstPage.Items[0].ID {
+		t.Fatalf("second domain page code=%d body=%+v", code, secondPage)
+	}
+
+	domainID := mustDefaultDomainID(t, a)
+	createTestMailbox(t, admin, domainID, "rollback-address", "Existing", "Password123!", nil)
+	payload := map[string]any{"domainId": domainID, "localPart": "rollback-address", "displayName": "Should Rollback", "password": "Password123!", "ownerEmail": "orphan-owner@example.test"}
+	if code := openAdmin.do("POST", "/api/open/v1/mailboxes", payload, &map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("duplicate mailbox create code=%d", code)
+	}
+	var orphanCount int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email=?`, "orphan-owner@example.test").Scan(&orphanCount); err != nil || orphanCount != 0 {
+		t.Fatalf("orphan user count=%d err=%v", orphanCount, err)
+	}
+}
+
+func TestOpenAPIContractCoversV1Routes(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "docs", "openapi.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		OpenAPI    string                                `json:"openapi"`
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			SecuritySchemes map[string]json.RawMessage `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse openapi contract: %v", err)
+	}
+	if document.OpenAPI != "3.1.0" || document.Components.SecuritySchemes["bearerAuth"] == nil {
+		t.Fatalf("invalid openapi metadata: version=%q security=%v", document.OpenAPI, document.Components.SecuritySchemes)
+	}
+	routes := map[string][]string{
+		"/domains": {"get", "post"}, "/domains/{id}": {"get", "post", "delete"},
+		"/domains/{id}/dns-records": {"get"}, "/domains/{id}/dns-check": {"post"},
+		"/mailboxes": {"get", "post"}, "/mailboxes/{id}": {"get", "post", "delete"},
+		"/mailboxes/{id}/password": {"post"}, "/mailboxes/{id}/messages": {"get"},
+		"/messages/{id}": {"get"}, "/attachments/{id}": {"get"},
+		"/send": {"get", "post"}, "/send/{id}": {"get"}, "/send/{id}/events": {"get"},
+		"/send/{id}/retry": {"post"}, "/send/{id}/cancel": {"post"},
+		"/aliases": {"get", "post"}, "/aliases/{id}": {"get", "post", "delete"},
+		"/delivery-events": {"post"},
+	}
+	for route, methods := range routes {
+		pathItem := document.Paths[route]
+		if pathItem == nil {
+			t.Errorf("openapi missing path %s", route)
+			continue
+		}
+		for _, method := range methods {
+			if pathItem[method] == nil {
+				t.Errorf("openapi missing operation %s %s", strings.ToUpper(method), route)
+			}
+		}
+		if strings.Contains(route, "{id}") {
+			var raw map[string]any
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatal(err)
+			}
+			paths, _ := raw["paths"].(map[string]any)
+			item, _ := paths[route].(map[string]any)
+			parameters, _ := item["parameters"].([]any)
+			foundID := false
+			for _, value := range parameters {
+				parameter, _ := value.(map[string]any)
+				if parameter["$ref"] == "#/components/parameters/ResourceId" || parameter["name"] == "id" {
+					foundID = true
+				}
+			}
+			if !foundID {
+				t.Errorf("openapi path %s does not declare id parameter", route)
+			}
+		}
+	}
+}
+
+func TestStatusWebhookOutboxDeliveryRetryAndSSRFProtection(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	accept := false
+	requests := 0
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		timestamp := r.Header.Get("X-LanQin-Timestamp")
+		mac := hmac.New(sha256.New, []byte("outbound-test-secret"))
+		_, _ = mac.Write([]byte(timestamp + "."))
+		_, _ = mac.Write(body)
+		if r.Header.Get("X-LanQin-Webhook-Id") == "" || r.Header.Get("X-LanQin-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Error("invalid outbound webhook signature headers")
+		}
+		var envelope statusWebhookEnvelope
+		if err := json.Unmarshal(body, &envelope); err != nil || envelope.Type != "send.failed" {
+			t.Errorf("invalid outbound webhook payload: err=%v payload=%s", err, body)
+		}
+		if !accept {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	a.cfg.StatusWebhookURL = receiver.URL
+	a.cfg.StatusWebhookSecret = "outbound-test-secret"
+	a.cfg.StatusWebhookAllowPrivateHosts = true
+
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	a.recordSendAudit(context.Background(), sendAuditFailed, sendQueueStatusFailed, sendAuditInput{QueueID: "snd_test", UserID: user.ID, MailboxID: mb.ID, SentMessageID: "mail_test", Source: sendSourceOpenAPI, MailFrom: mb.Address, Recipients: []string{"recipient@example.test"}, Error: "test failure"})
+	var outboxID string
+	if err := a.db.QueryRow(`SELECT id FROM status_webhook_outbox WHERE event_type='send.failed'`).Scan(&outboxID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueStatusWebhooks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int
+	var deliveredAt sql.NullString
+	if err := a.db.QueryRow(`SELECT attempt_count,delivered_at FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&attempts, &deliveredAt); err != nil || attempts != 1 || deliveredAt.Valid {
+		t.Fatalf("failed delivery outbox attempts=%d delivered=%v err=%v", attempts, deliveredAt, err)
+	}
+	accept = true
+	if _, err := a.db.Exec(`UPDATE status_webhook_outbox SET next_attempt_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), outboxID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueStatusWebhooks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT attempt_count,delivered_at FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&attempts, &deliveredAt); err != nil || attempts != 2 || !deliveredAt.Valid || requests != 2 {
+		t.Fatalf("successful retry attempts=%d delivered=%v requests=%d err=%v", attempts, deliveredAt, requests, err)
+	}
+	if _, err := a.db.Exec(`DELETE FROM mailboxes WHERE id=?`, mb.ID); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("mailbox deletion should remove webhook outbox, remaining=%d err=%v", remaining, err)
+	}
+
+	privateTLS := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer privateTLS.Close()
+	a.cfg.StatusWebhookURL = privateTLS.URL
+	a.cfg.StatusWebhookAllowPrivateHosts = false
+	if _, err := a.validatedStatusWebhookURL(context.Background()); err == nil || !strings.Contains(err.Error(), "private or local") {
+		t.Fatalf("private webhook target should be rejected, err=%v", err)
 	}
 }
 

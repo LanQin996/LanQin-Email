@@ -365,10 +365,26 @@ func (a *App) recordSendAudit(ctx context.Context, event, status string, in send
 	if source == "" {
 		source = "unknown"
 	}
-	_, err := a.db.ExecContext(ctx, `INSERT INTO send_audit_events(id,queue_id,user_id,mailbox_id,sent_message_id,source,event,status,mail_from,header_from,recipients_json,error,created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, newID("audit"), in.QueueID, in.UserID, in.MailboxID, in.SentMessageID, source, event, status, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), jsonEncode(dedupeEmails(in.Recipients)), in.Error, a.now().UTC().Format(time.RFC3339Nano))
+	id := newID("audit")
+	createdAt := a.now().UTC()
+	item := SendAuditEvent{ID: id, QueueID: in.QueueID, MailboxID: in.MailboxID, SentMessageID: in.SentMessageID, Source: source, Event: event, Status: status, MailFrom: normalizeEmail(in.MailFrom), HeaderFrom: normalizeEmail(in.HeaderFrom), Recipients: dedupeEmails(in.Recipients), Error: in.Error, CreatedAt: createdAt}
+	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
+		a.log.Warn("failed to start send audit transaction", "event", event, "error", err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO send_audit_events(id,queue_id,user_id,mailbox_id,sent_message_id,source,event,status,mail_from,header_from,recipients_json,error,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, in.QueueID, in.UserID, in.MailboxID, in.SentMessageID, source, event, status, item.MailFrom, item.HeaderFrom, jsonEncode(item.Recipients), in.Error, createdAt.Format(time.RFC3339Nano)); err != nil {
 		a.log.Warn("failed to record send audit", "event", event, "error", err)
+		return
+	}
+	if err := a.enqueueStatusWebhook(ctx, tx, "audit:"+id, "send."+event, in.MailboxID, item); err != nil {
+		a.log.Warn("failed to enqueue send status webhook", "event", event, "error", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		a.log.Warn("failed to commit send audit", "event", event, "error", err)
 	}
 }
 

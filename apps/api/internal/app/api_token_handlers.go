@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,9 +15,24 @@ import (
 
 const defaultAPITokenTTL = 90 * 24 * time.Hour
 
+var validAPITokenScopes = map[string]bool{
+	"*":               true,
+	"domains:read":    true,
+	"domains:write":   true,
+	"mailboxes:read":  true,
+	"mailboxes:write": true,
+	"messages:read":   true,
+	"messages:send":   true,
+	"messages:manage": true,
+	"aliases:read":    true,
+	"aliases:write":   true,
+	"dns:read":        true,
+	"dns:check":       true,
+}
+
 func (a *App) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,last_used_at,expires_at,disabled,created_at,updated_at
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,last_used_at,expires_at,disabled,scopes_json,created_at,updated_at
 		FROM api_tokens WHERE user_id=? ORDER BY created_at DESC`, user.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list api tokens")
@@ -41,8 +58,9 @@ func (a *App) handleListAPITokens(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	var req struct {
-		Name      string `json:"name"`
-		ExpiresAt string `json:"expiresAt"`
+		Name      string          `json:"name"`
+		ExpiresAt string          `json:"expiresAt"`
+		Scopes    json.RawMessage `json:"scopes"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -66,6 +84,20 @@ func (a *App) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 		defaultExpiry := a.now().UTC().Add(defaultAPITokenTTL)
 		expiresAt = &defaultExpiry
 	}
+	var requestedScopes []string
+	if len(req.Scopes) > 0 {
+		if string(req.Scopes) == "null" || json.Unmarshal(req.Scopes, &requestedScopes) != nil {
+			badRequest(w, errors.New("scopes must be an array of strings"))
+			return
+		}
+	} else {
+		requestedScopes = nil
+	}
+	scopes, err := normalizeAPITokenScopes(requestedScopes)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
 	id := newID("apt")
 	token := "lq_" + randomToken()
 	now := a.now().UTC().Format(time.RFC3339Nano)
@@ -73,8 +105,8 @@ func (a *App) handleCreateAPIToken(w http.ResponseWriter, r *http.Request) {
 	if expiresAt != nil {
 		expiresValue = expiresAt.UTC().Format(time.RFC3339Nano)
 	}
-	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO api_tokens(id,user_id,name,token_hash,expires_at,disabled,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)`, id, user.ID, name, hashToken(token), expiresValue, 0, now, now); err != nil {
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO api_tokens(id,user_id,name,token_hash,expires_at,disabled,scopes_json,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?)`, id, user.ID, name, hashToken(token), expiresValue, 0, jsonEncode(scopes), now, now); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create api token")
 		return
 	}
@@ -94,9 +126,10 @@ func (a *App) handleUpdateAPIToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name      *string `json:"name"`
-		ExpiresAt *string `json:"expiresAt"`
-		Disabled  *bool   `json:"disabled"`
+		Name      *string   `json:"name"`
+		ExpiresAt *string   `json:"expiresAt"`
+		Disabled  *bool     `json:"disabled"`
+		Scopes    *[]string `json:"scopes"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -142,8 +175,16 @@ func (a *App) handleUpdateAPIToken(w http.ResponseWriter, r *http.Request) {
 	if req.Disabled != nil {
 		disabled = *req.Disabled
 	}
-	res, err := a.db.ExecContext(r.Context(), `UPDATE api_tokens SET name=?,expires_at=?,disabled=?,updated_at=? WHERE id=? AND user_id=?`,
-		name, expiresValue, boolInt(disabled), a.now().UTC().Format(time.RFC3339Nano), id, user.ID)
+	scopes := current.Scopes
+	if req.Scopes != nil {
+		scopes, err = normalizeAPITokenScopes(*req.Scopes)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+	}
+	res, err := a.db.ExecContext(r.Context(), `UPDATE api_tokens SET name=?,expires_at=?,disabled=?,scopes_json=?,updated_at=? WHERE id=? AND user_id=?`,
+		name, expiresValue, boolInt(disabled), jsonEncode(scopes), a.now().UTC().Format(time.RFC3339Nano), id, user.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update api token")
 		return
@@ -175,7 +216,7 @@ func (a *App) handleDeleteAPIToken(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) apiTokenByID(ctx context.Context, userID, id string) (APIToken, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT id,name,last_used_at,expires_at,disabled,created_at,updated_at
+	row := a.db.QueryRowContext(ctx, `SELECT id,name,last_used_at,expires_at,disabled,scopes_json,created_at,updated_at
 		FROM api_tokens WHERE id=? AND user_id=?`, id, userID)
 	return scanAPIToken(row)
 }
@@ -186,16 +227,42 @@ func scanAPIToken(row apiTokenScanner) (APIToken, error) {
 	var item APIToken
 	var lastUsed, expires sql.NullString
 	var disabled int
-	var created, updated string
-	if err := row.Scan(&item.ID, &item.Name, &lastUsed, &expires, &disabled, &created, &updated); err != nil {
+	var scopesJSON, created, updated string
+	if err := row.Scan(&item.ID, &item.Name, &lastUsed, &expires, &disabled, &scopesJSON, &created, &updated); err != nil {
 		return item, err
 	}
 	item.LastUsedAt = nullableTime(lastUsed)
 	item.ExpiresAt = nullableTime(expires)
 	item.Disabled = intBool(disabled)
+	item.Scopes = jsonDecodeSlice(scopesJSON)
 	item.CreatedAt = parseTime(created)
 	item.UpdatedAt = parseTime(updated)
 	return item, nil
+}
+
+func normalizeAPITokenScopes(scopes []string) ([]string, error) {
+	if scopes == nil {
+		return []string{"*"}, nil
+	}
+	if len(scopes) == 0 {
+		return nil, errors.New("at least one api token scope is required")
+	}
+	seen := map[string]bool{}
+	out := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		scope = strings.ToLower(strings.TrimSpace(scope))
+		if !validAPITokenScopes[scope] {
+			return nil, fmt.Errorf("invalid api token scope: %s", scope)
+		}
+		if !seen[scope] {
+			seen[scope] = true
+			out = append(out, scope)
+		}
+	}
+	if seen["*"] && len(out) != 1 {
+		return nil, errors.New("wildcard scope cannot be combined with other scopes")
+	}
+	return out, nil
 }
 
 func parseOptionalFutureTime(value string, now time.Time) (*time.Time, error) {
