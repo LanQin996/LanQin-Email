@@ -597,99 +597,112 @@ func (a *App) attachUserAuthorization(ctx context.Context, u *User) error {
 	if u == nil {
 		return nil
 	}
-	permissions, err := a.permissionsForUser(ctx, u.ID, u.Role)
+	authorization, err := a.authorizationForUser(ctx, u.ID, u.Role)
 	if err != nil {
 		return err
 	}
-	limits, err := a.limitsForUser(ctx, u.ID, u.Role)
-	if err != nil {
-		return err
-	}
-	groupIDs, groups, err := a.permissionGroupsForUser(ctx, u.ID, u.Role)
-	if err != nil {
-		return err
-	}
-	u.Permissions = permissions
-	u.Limits = limits
-	u.PermissionGroupIDs = groupIDs
-	u.PermissionGroups = groups
+	u.Permissions = authorization.Permissions
+	u.Limits = authorization.Limits
+	u.PermissionGroupIDs = authorization.GroupIDs
+	u.PermissionGroups = authorization.Groups
 	u.Protected = a.isDefaultAdminUser(u)
 	return nil
 }
 
-func (a *App) permissionsForUser(ctx context.Context, userID, role string) ([]string, error) {
+type userAuthorization struct {
+	Permissions []string
+	Limits      PermissionLimits
+	GroupIDs    []string
+	Groups      []PermissionGroupSummary
+}
+
+func (a *App) authorizationForUser(ctx context.Context, userID, role string) (userAuthorization, error) {
 	if role == "admin" {
-		return allPermissionKeys(), nil
+		group := PermissionGroupSummary{ID: PermissionGroupSuperAdmin, Name: "超级管理员"}
+		return userAuthorization{
+			Permissions: allPermissionKeys(),
+			GroupIDs:    []string{group.ID},
+			Groups:      []PermissionGroupSummary{group},
+		}, nil
 	}
+
 	seen := map[string]bool{}
-	if err := a.addRegularGroupPermissions(ctx, nil, seen); err != nil {
-		return nil, err
-	}
-	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.permissions_json
+	limits := defaultPermissionLimits()
+	groups := []PermissionGroupSummary{{ID: PermissionGroupRegular, Name: "普通用户"}}
+	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.name,pg.permissions_json,pg.limits_json
+		FROM permission_groups pg WHERE pg.id=?
+		UNION ALL
+		SELECT pg.id,pg.name,pg.permissions_json,pg.limits_json
 		FROM permission_groups pg
 		JOIN user_permission_groups upg ON upg.group_id=pg.id
-		WHERE upg.user_id=?`, userID)
+		WHERE upg.user_id=? AND pg.id<>?`, PermissionGroupRegular, userID, PermissionGroupRegular)
 	if err != nil {
-		return nil, err
+		return userAuthorization{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var groupID, raw string
-		if err := rows.Scan(&groupID, &raw); err != nil {
-			return nil, err
+		var groupID, name, permissionsJSON, limitsJSON string
+		if err := rows.Scan(&groupID, &name, &permissionsJSON, &limitsJSON); err != nil {
+			return userAuthorization{}, err
 		}
-		if !isAssignablePermissionGroupID(groupID) {
+		if groupID == PermissionGroupRegular {
+			groups[0].Name = name
+			limits = decodeStoredLimits(limitsJSON)
+		} else if isAssignablePermissionGroupID(groupID) {
+			groups = append(groups, PermissionGroupSummary{ID: groupID, Name: name})
+			limits = mergePermissionLimits(limits, decodeStoredLimits(limitsJSON))
+		} else {
 			continue
 		}
-		for _, permission := range decodeStoredPermissions(raw) {
+		for _, permission := range decodeStoredPermissions(permissionsJSON) {
 			seen[permission] = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return userAuthorization{}, err
 	}
-	out := make([]string, 0, len(seen))
+
+	permissions := make([]string, 0, len(seen))
 	for _, item := range allPermissionKeys() {
 		if seen[item] {
-			out = append(out, item)
+			permissions = append(permissions, item)
 		}
 	}
-	return out, nil
-}
 
-func (a *App) limitsForUser(ctx context.Context, userID, role string) (PermissionLimits, error) {
-	if role == "admin" {
-		return PermissionLimits{}, nil
-	}
-	limits, ok, err := a.regularGroupLimits(ctx, nil)
-	if err != nil {
-		return PermissionLimits{}, err
-	}
-	if !ok {
-		limits = defaultPermissionLimits()
-	}
-	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.limits_json
-		FROM permission_groups pg
-		JOIN user_permission_groups upg ON upg.group_id=pg.id
-		WHERE upg.user_id=?`, userID)
-	if err != nil {
-		return PermissionLimits{}, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var groupID, raw string
-		if err := rows.Scan(&groupID, &raw); err != nil {
-			return PermissionLimits{}, err
+	order := permissionGroupOrder()
+	sort.SliceStable(groups, func(i, j int) bool {
+		left, leftOK := order[groups[i].ID]
+		right, rightOK := order[groups[j].ID]
+		if leftOK && rightOK {
+			return left < right
 		}
-		if !isAssignablePermissionGroupID(groupID) {
-			continue
+		if leftOK != rightOK {
+			return leftOK
 		}
-		limits = mergePermissionLimits(limits, decodeStoredLimits(raw))
+		return strings.ToLower(groups[i].Name) < strings.ToLower(groups[j].Name)
+	})
+	groupIDs := make([]string, 0, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.ID)
 	}
-	if err := rows.Err(); err != nil {
-		return PermissionLimits{}, err
-	}
-	return limits, nil
+	sort.SliceStable(groupIDs, func(i, j int) bool {
+		left, leftOK := order[groupIDs[i]]
+		right, rightOK := order[groupIDs[j]]
+		if leftOK && rightOK {
+			return left < right
+		}
+		if leftOK != rightOK {
+			return leftOK
+		}
+		return groupIDs[i] < groupIDs[j]
+	})
+
+	return userAuthorization{
+		Permissions: permissions,
+		Limits:      limits,
+		GroupIDs:    groupIDs,
+		Groups:      groups,
+	}, nil
 }
 
 func (a *App) regularGroupLimits(ctx context.Context, tx *sql.Tx) (PermissionLimits, bool, error) {
@@ -765,64 +778,6 @@ func (a *App) effectiveLimitsForUserGroups(ctx context.Context, tx *sql.Tx, grou
 		return PermissionLimits{}, err
 	}
 	return mergePermissionLimits(limits, groupLimits), nil
-}
-
-func (a *App) permissionGroupsForUser(ctx context.Context, userID, role string) ([]string, []PermissionGroupSummary, error) {
-	if role == "admin" {
-		group := PermissionGroupSummary{ID: PermissionGroupSuperAdmin, Name: "超级管理员"}
-		return []string{group.ID}, []PermissionGroupSummary{group}, nil
-	}
-	ids := []string{PermissionGroupRegular}
-	groups := []PermissionGroupSummary{{ID: PermissionGroupRegular, Name: "普通用户"}}
-	if err := a.db.QueryRowContext(ctx, `SELECT name FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&groups[0].Name); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return nil, nil, err
-	}
-	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.name
-		FROM permission_groups pg
-		JOIN user_permission_groups upg ON upg.group_id=pg.id
-		WHERE upg.user_id=?`, userID)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer rows.Close()
-	order := permissionGroupOrder()
-	for rows.Next() {
-		var group PermissionGroupSummary
-		if err := rows.Scan(&group.ID, &group.Name); err != nil {
-			return nil, nil, err
-		}
-		if !isAssignablePermissionGroupID(group.ID) {
-			continue
-		}
-		ids = append(ids, group.ID)
-		groups = append(groups, group)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, nil, err
-	}
-	sort.SliceStable(groups, func(i, j int) bool {
-		left, leftOK := order[groups[i].ID]
-		right, rightOK := order[groups[j].ID]
-		if leftOK && rightOK {
-			return left < right
-		}
-		if leftOK != rightOK {
-			return leftOK
-		}
-		return strings.ToLower(groups[i].Name) < strings.ToLower(groups[j].Name)
-	})
-	sort.SliceStable(ids, func(i, j int) bool {
-		left, leftOK := order[ids[i]]
-		right, rightOK := order[ids[j]]
-		if leftOK && rightOK {
-			return left < right
-		}
-		if leftOK != rightOK {
-			return leftOK
-		}
-		return ids[i] < ids[j]
-	})
-	return ids, groups, nil
 }
 
 func userHasPermission(user *User, permission string) bool {

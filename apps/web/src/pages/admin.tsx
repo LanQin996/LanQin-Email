@@ -60,6 +60,7 @@ const defaultPermissionLimits: PermissionLimits = { maxAttachmentMb: 25, smtpDai
 export function AdminPage() {
   const me = useMe()
   const user = me.data?.user
+  const [params, setParams] = useSearchParams()
   const canOverview = hasPermission(user, "admin.overview.view")
   const canUsersView = hasPermission(user, "admin.users.view")
   const canPermissionGroupsView = hasPermission(user, "admin.permission_groups.view")
@@ -70,24 +71,23 @@ export function AdminPage() {
   const canMessagesView = hasPermission(user, "admin.messages.view")
   const canSettingsView = hasPermission(user, "admin.settings.view")
   const canTemplatesView = hasPermission(user, "admin.templates.view")
-  const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: api.adminOverview, enabled: !!user && canOverview })
-  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.users, enabled: !!user && (canUsersView || canMailboxesView) })
-  const permissionGroups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: !!user && (canPermissionGroupsView || canUsersView) })
-  const domains = useQuery({ queryKey: ["admin", "domains"], queryFn: api.domains, enabled: !!user && (canDomainsView || canDNSView || canMailboxesView || canAliasesView || canSettingsView || canTemplatesView) })
-  const mailboxes = useQuery({ queryKey: ["admin", "mailboxes"], queryFn: api.mailboxes, enabled: !!user && (canMailboxesView || canMessagesView) })
-  const aliases = useQuery({ queryKey: ["admin", "aliases"], queryFn: api.aliases, enabled: !!user && canAliasesView })
-  const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: api.systemSettings, enabled: !!user && canSettingsView })
-  const [params, setParams] = useSearchParams()
+  const visibleSections = sectionKeys.filter((key) => hasAnyPermission(user, sectionPermissions[key]))
+  const rawSection = params.get("section") as Section | null
+  const section: Section = rawSection && visibleSections.includes(rawSection) ? rawSection : visibleSections[0] || "overview"
+  const needsDomains = section === "overview" || section === "domains" || section === "mailboxes" || section === "aliases" || section === "settings"
+  const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: api.adminOverview, enabled: !!user && canOverview && section === "overview" })
+  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.users, enabled: !!user && ((section === "users" && canUsersView) || (section === "mailboxes" && canMailboxesView)) })
+  const permissionGroups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: !!user && ((section === "permissionGroups" && canPermissionGroupsView) || (section === "users" && canUsersView)) })
+  const domains = useQuery({ queryKey: ["admin", "domains"], queryFn: api.domains, enabled: !!user && needsDomains && (canDomainsView || canDNSView || canMailboxesView || canAliasesView || canSettingsView || canTemplatesView) })
+  const mailboxes = useQuery({ queryKey: ["admin", "mailboxes"], queryFn: api.mailboxes, enabled: !!user && ((section === "mailboxes" && canMailboxesView) || ((section === "messages" || section === "sendAudit") && canMessagesView)) })
+  const aliases = useQuery({ queryKey: ["admin", "aliases"], queryFn: api.aliases, enabled: !!user && canAliasesView && section === "aliases" })
+  const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: api.systemSettings, enabled: !!user && canSettingsView && (section === "overview" || section === "settings") })
 
   const domainItems = domains.data?.items || []
   const mailboxItems = mailboxes.data?.items || []
   const aliasItems = aliases.data?.items || []
   const userItems = users.data?.items || []
   const assignablePermissionGroups = (permissionGroups.data?.items || []).filter((group) => group.id !== "pg_super_admin" && group.id !== "pg_regular_user")
-  const visibleSections = sectionKeys.filter((key) => hasAnyPermission(user, sectionPermissions[key]))
-  const rawSection = params.get("section") as Section | null
-  const section: Section = rawSection && visibleSections.includes(rawSection) ? rawSection : visibleSections[0] || "overview"
-
   return (
     <ScrollArea className="h-[calc(100svh-3rem)] md:h-svh">
       <main className="p-4 sm:p-6">
