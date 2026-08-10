@@ -240,7 +240,7 @@ func postgresFreshSchema() []string {
 			id VARCHAR(64) PRIMARY KEY,
 			external_id VARCHAR(255) NOT NULL,
 			provider VARCHAR(64) NOT NULL,
-			queue_id VARCHAR(64) NOT NULL DEFAULT '',
+			queue_id VARCHAR(64) NOT NULL REFERENCES send_queue(id) ON DELETE CASCADE,
 			sent_message_id VARCHAR(64) NOT NULL DEFAULT '',
 			rfc_message_id VARCHAR(512) NOT NULL DEFAULT '',
 			recipient VARCHAR(320) NOT NULL,
@@ -256,7 +256,7 @@ func postgresFreshSchema() []string {
 			id VARCHAR(64) PRIMARY KEY,
 			event_key VARCHAR(255) NOT NULL UNIQUE,
 			event_type VARCHAR(64) NOT NULL,
-			mailbox_id VARCHAR(64) NOT NULL DEFAULT '',
+			mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
 			payload_json TEXT NOT NULL,
 			attempt_count INTEGER NOT NULL DEFAULT 0,
 			next_attempt_at VARCHAR(35) NOT NULL,
@@ -444,19 +444,5 @@ func postgresFreshSchema() []string {
 			PRIMARY KEY(message_id,label_id)
 		)`,
 		`CREATE INDEX idx_message_labels_label ON message_labels(label_id,message_id)`,
-		`CREATE FUNCTION lanqin_delete_mailbox_webhooks() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN
-			DELETE FROM status_webhook_outbox WHERE mailbox_id=OLD.id;
-			RETURN OLD;
-		END
-		$$`,
-		`CREATE TRIGGER trg_mailbox_delete_status_webhook_outbox AFTER DELETE ON mailboxes FOR EACH ROW EXECUTE FUNCTION lanqin_delete_mailbox_webhooks()`,
-		`CREATE FUNCTION lanqin_delete_queue_delivery_events() RETURNS trigger LANGUAGE plpgsql AS $$
-		BEGIN
-			DELETE FROM delivery_events WHERE queue_id=OLD.id;
-			RETURN OLD;
-		END
-		$$`,
-		`CREATE TRIGGER trg_send_queue_delete_delivery_events AFTER DELETE ON send_queue FOR EACH ROW EXECUTE FUNCTION lanqin_delete_queue_delivery_events()`,
 	}
 }

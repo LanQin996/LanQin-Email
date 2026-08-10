@@ -105,6 +105,8 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 		t.Fatalf("foreign-key cascade left %d memberships", membershipCount)
 	}
 
+	assertExternalDeliveryCascade(t, ctx, a, adminID, now)
+
 	var migrationCount int
 	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=?`, externalSchemaVersion).Scan(&migrationCount); err != nil {
 		t.Fatalf("load schema version: %v", err)
@@ -114,5 +116,46 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	}
 	if err := a.db.QueryRowContext(ctx, `SELECT id FROM users WHERE id=?`, "missing").Scan(new(string)); err != sql.ErrNoRows {
 		t.Fatalf("missing row error=%v, want sql.ErrNoRows", err)
+	}
+}
+
+func assertExternalDeliveryCascade(t *testing.T, ctx context.Context, a *App, adminID, now string) {
+	t.Helper()
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM domains WHERE name=?`, "contract.test").Scan(&domainID); err != nil {
+		t.Fatalf("load seeded domain: %v", err)
+	}
+	mailboxID := newID("mbx")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, mailboxID, adminID, domainID, mailboxID, mailboxID+"@contract.test", "Contract", "unused", 1, "active", now, now); err != nil {
+		t.Fatalf("insert cascade mailbox: %v", err)
+	}
+	queueID := newID("queue")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO send_queue(id,user_id,mailbox_id,source,mail_from,header_from,recipients_json,mime_base64,status,next_attempt_at,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, queueID, adminID, mailboxID, "contract", mailboxID+"@contract.test", mailboxID+"@contract.test", "[]", "", "delivered", now, now, now); err != nil {
+		t.Fatalf("insert cascade send queue: %v", err)
+	}
+	deliveryID := newID("delivery")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO delivery_events(id,external_id,provider,queue_id,recipient,status,occurred_at,created_at)
+		VALUES(?,?,?,?,?,?,?,?)`, deliveryID, deliveryID, "contract", queueID, "recipient@example.test", "delivered", now, now); err != nil {
+		t.Fatalf("insert cascade delivery event: %v", err)
+	}
+	outboxID := newID("outbox")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO status_webhook_outbox(id,event_key,event_type,mailbox_id,payload_json,next_attempt_at,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)`, outboxID, outboxID, "contract", mailboxID, "{}", now, now, now); err != nil {
+		t.Fatalf("insert cascade webhook: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM mailboxes WHERE id=?`, mailboxID); err != nil {
+		t.Fatalf("delete cascade mailbox: %v", err)
+	}
+	for table, id := range map[string]string{
+		"delivery_events":       deliveryID,
+		"send_queue":            queueID,
+		"status_webhook_outbox": outboxID,
+	} {
+		var count int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE id=?`, id).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("cascade cleanup %s count=%d err=%v", table, count, err)
+		}
 	}
 }

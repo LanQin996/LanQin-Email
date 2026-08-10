@@ -13,8 +13,6 @@ func mysqlFreshSchema() []string {
 	for _, statement := range postgres {
 		trimmed := strings.TrimSpace(statement)
 		switch {
-		case strings.HasPrefix(trimmed, "CREATE FUNCTION "), strings.HasPrefix(trimmed, "CREATE TRIGGER "):
-			continue
 		case (strings.HasPrefix(trimmed, "CREATE INDEX ") || strings.HasPrefix(trimmed, "CREATE UNIQUE INDEX ")) && strings.Contains(trimmed, " WHERE "):
 			continue
 		case strings.HasPrefix(trimmed, "CREATE TABLE "):
@@ -39,12 +37,6 @@ func mysqlFreshSchema() []string {
 		`CREATE INDEX idx_messages_maildir_backfill ON messages(created_at)`,
 		`CREATE INDEX idx_messages_maildir_cleanup ON messages(updated_at)`,
 		`CREATE INDEX idx_external_imap_messages_local ON external_imap_messages(local_message_id)`,
-		`CREATE TRIGGER trg_mailbox_delete_status_webhook_outbox
-			AFTER DELETE ON mailboxes FOR EACH ROW
-			DELETE FROM status_webhook_outbox WHERE mailbox_id=OLD.id`,
-		`CREATE TRIGGER trg_send_queue_delete_delivery_events
-			AFTER DELETE ON send_queue FOR EACH ROW
-			DELETE FROM delivery_events WHERE queue_id=OLD.id`,
 	)
 	return statements
 }

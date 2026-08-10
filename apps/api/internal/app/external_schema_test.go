@@ -35,8 +35,8 @@ func TestPostgresFreshSchemaPreservesConditionalIndexes(t *testing.T) {
 		"idx_messages_folder_imap_uid",
 		"idx_send_queue_mailbox_source_message_id",
 		"WHERE raw_path<>''",
-		"CREATE FUNCTION lanqin_delete_mailbox_webhooks",
-		"CREATE FUNCTION lanqin_delete_queue_delivery_events",
+		"queue_id VARCHAR(64) NOT NULL REFERENCES send_queue(id) ON DELETE CASCADE",
+		"mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE",
 	} {
 		if !strings.Contains(schema, fragment) {
 			t.Errorf("PostgreSQL schema is missing %q", fragment)
@@ -53,6 +53,7 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		"CREATE INDEX IF NOT EXISTS",
 		"CREATE UNIQUE INDEX IF NOT EXISTS",
 		"CREATE FUNCTION ",
+		"CREATE TRIGGER ",
 		"ALTER TABLE messages",
 		"ALTER TABLE send_queue",
 		"CREATE INDEX idx_messages_mailbox_raw_path ON messages(mailbox_id,raw_path)",
@@ -63,6 +64,9 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 	}
 	for _, statement := range statements {
 		trimmed := strings.TrimSpace(statement)
+		if !strings.HasPrefix(trimmed, "CREATE TABLE ") && !strings.HasPrefix(trimmed, "CREATE INDEX ") && !strings.HasPrefix(trimmed, "CREATE UNIQUE INDEX ") {
+			t.Errorf("MySQL schema contains unexpected or privileged DDL: %.80s", trimmed)
+		}
 		if strings.HasPrefix(trimmed, "CREATE TABLE ") && !strings.HasSuffix(trimmed, "ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin") {
 			t.Errorf("MySQL table is missing engine or binary collation: %.80s", trimmed)
 		}
@@ -85,8 +89,8 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		"positive_imap_uid BIGINT GENERATED ALWAYS",
 		"dedupe_message_id VARCHAR(512)",
 		"FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
-		"trg_mailbox_delete_status_webhook_outbox",
-		"trg_send_queue_delete_delivery_events",
+		"FOREIGN KEY (queue_id) REFERENCES send_queue(id) ON DELETE CASCADE",
+		"FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id) ON DELETE CASCADE",
 	} {
 		if !strings.Contains(schema, fragment) {
 			t.Errorf("MySQL schema is missing %q", fragment)
