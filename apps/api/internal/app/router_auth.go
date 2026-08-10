@@ -289,15 +289,17 @@ func (a *App) authenticateAPIToken(r *http.Request) (*User, map[string]bool, err
 	if token == "" {
 		return nil, nil, errors.New("no api token")
 	}
-	now := a.now().UTC().Format(time.RFC3339Nano)
-	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,at.scopes_json,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
+	nowTime := a.now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
+	row := a.db.QueryRowContext(r.Context(), `SELECT at.id,at.scopes_json,at.last_used_at,u.id,u.email,u.display_name,u.role,u.disabled,u.two_factor_enabled,u.created_at
 		FROM api_tokens at JOIN users u ON u.id=at.user_id
 		WHERE at.token_hash=? AND at.disabled=0 AND at.expires_at > ?`, hashToken(token), now)
 	var tokenID, scopesJSON string
+	var lastUsedAt sql.NullString
 	var u User
 	var disabled, twoFactorEnabled int
 	var created string
-	if err := row.Scan(&tokenID, &scopesJSON, &u.ID, &u.Email, &u.DisplayName, &u.Role, &disabled, &twoFactorEnabled, &created); err != nil {
+	if err := row.Scan(&tokenID, &scopesJSON, &lastUsedAt, &u.ID, &u.Email, &u.DisplayName, &u.Role, &disabled, &twoFactorEnabled, &created); err != nil {
 		return nil, nil, err
 	}
 	u.Disabled = intBool(disabled)
@@ -309,7 +311,12 @@ func (a *App) authenticateAPIToken(r *http.Request) (*User, map[string]bool, err
 	if err := a.attachUserAuthorization(r.Context(), &u); err != nil {
 		return nil, nil, err
 	}
-	_, _ = a.db.ExecContext(r.Context(), `UPDATE api_tokens SET last_used_at=? WHERE id=?`, now, tokenID)
+	lastUsed, lastUsedErr := time.Parse(time.RFC3339Nano, lastUsedAt.String)
+	cutoff := nowTime.Add(-time.Minute)
+	if !lastUsedAt.Valid || lastUsedErr != nil || lastUsed.Before(cutoff) {
+		_, _ = a.db.ExecContext(r.Context(), `UPDATE api_tokens SET last_used_at=?
+			WHERE id=? AND (last_used_at IS NULL OR julianday(last_used_at) < julianday(?))`, now, tokenID, cutoff.Format(time.RFC3339Nano))
+	}
 	scopes := map[string]bool{}
 	for _, scope := range jsonDecodeSlice(scopesJSON) {
 		scopes[scope] = true

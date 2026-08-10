@@ -28,6 +28,22 @@ type AttachmentInput struct {
 	Filename      string `json:"filename"`
 	ContentType   string `json:"contentType"`
 	ContentBase64 string `json:"contentBase64"`
+
+	decodedContent []byte `json:"-"`
+	contentDecoded bool   `json:"-"`
+}
+
+func (a *AttachmentInput) contentBytes() ([]byte, error) {
+	if a.contentDecoded {
+		return a.decodedContent, nil
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(a.ContentBase64))
+	if err != nil {
+		return nil, err
+	}
+	a.decodedContent = data
+	a.contentDecoded = true
+	return data, nil
 }
 
 type storedMessage struct {
@@ -823,28 +839,16 @@ func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLim
 	if limitBytes == 0 {
 		return nil
 	}
-	for _, att := range attachments {
-		decodedLen, err := decodedBase64Len(att.ContentBase64)
+	for i := range attachments {
+		decoded, err := attachments[i].contentBytes()
 		if err != nil {
 			return fmt.Errorf("%w: %v", errInvalidMIME, err)
 		}
-		if decodedLen > limitBytes {
+		if int64(len(decoded)) > limitBytes {
 			return fmt.Errorf("%w: max %d MB", errAttachmentTooLarge, limits.MaxAttachmentMB)
 		}
 	}
 	return nil
-}
-
-func decodedBase64Len(value string) (int64, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, nil
-	}
-	data, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		return 0, err
-	}
-	return int64(len(data)), nil
 }
 
 var errIMAPRateLimited = errors.New("imap rate limit exceeded")
@@ -2033,10 +2037,12 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	hasAttachments := len(attachments) > 0
 	size := int64(len(msg.BodyText) + len(msg.BodyHTML))
-	for _, att := range attachments {
-		if decoded, err := base64.StdEncoding.DecodeString(att.ContentBase64); err == nil {
-			size += int64(len(decoded))
+	for i := range attachments {
+		decoded, err := attachments[i].contentBytes()
+		if err != nil {
+			return "", err
 		}
+		size += int64(len(decoded))
 	}
 	if err := a.ensureMailboxQuotaAvailable(ctx, db, msg.MailboxID, size); err != nil {
 		return "", err
@@ -2112,7 +2118,7 @@ func (a *App) storeAttachmentWithDB(ctx context.Context, db dbExecutor, messageI
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	data, err := base64.StdEncoding.DecodeString(input.ContentBase64)
+	data, err := input.contentBytes()
 	if err != nil {
 		return err
 	}

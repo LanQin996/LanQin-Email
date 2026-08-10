@@ -189,9 +189,15 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 	respondJSON(w, status, map[string]any{"error": msg})
 }
 
+const maxJSONRequestBodyBytes int64 = 64 << 20
+
 func decodeJSON(r *http.Request, dst any) error {
+	return decodeJSONWithLimit(r, dst, maxJSONRequestBodyBytes)
+}
+
+func decodeJSONWithLimit(r *http.Request, dst any, limit int64) error {
 	defer r.Body.Close()
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
 		return err

@@ -1702,17 +1702,13 @@ func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string
 	if q := strings.TrimSpace(query); q != "" {
 		criteria.Text = []string{q}
 	}
-	data, err := c.client.UIDSearch(criteria, nil).Wait()
+	data, err := c.client.UIDSearch(criteria, c.uidSearchAllOptions()).Wait()
 	if err != nil {
 		return nil, "", err
 	}
-	uids := data.AllUIDs()
+	uids := boundedSearchUIDs(data.All, limit, true)
 	if len(uids) == 0 {
 		return nil, "", nil
-	}
-	sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
-	if len(uids) > limit {
-		uids = uids[:limit]
 	}
 	var set imap.UIDSet
 	set.AddNum(uids...)
@@ -1741,24 +1737,91 @@ func (c *goExternalIMAPClient) FetchNew(ctx context.Context, folder string, afte
 	if err != nil {
 		return nil, err
 	}
+	if afterUID == ^uint32(0) {
+		return nil, nil
+	}
 	if selected.NumMessages == 0 || selected.UIDNext <= imap.UID(afterUID+1) {
 		return nil, nil
 	}
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
+	var searchRange imap.UIDSet
+	searchRange.AddRange(imap.UID(afterUID+1), selected.UIDNext-1)
+	data, err := c.client.UIDSearch(&imap.SearchCriteria{UID: []imap.UIDSet{searchRange}}, c.uidSearchAllOptions()).Wait()
+	if err != nil {
+		return nil, err
+	}
+	uids := boundedSearchUIDs(data.All, limit, false)
+	if len(uids) == 0 {
+		return nil, nil
+	}
 	var set imap.UIDSet
-	set.AddRange(imap.UID(afterUID+1), selected.UIDNext-1)
+	set.AddNum(uids...)
 	bodySection := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader, Peek: true}
 	messages, err := c.client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true, Envelope: true, InternalDate: true, RFC822Size: true, BodySection: []*imap.FetchItemBodySection{bodySection}}).Collect()
 	if err != nil {
 		return nil, err
 	}
 	out := []externalIMAPRemoteMessage{}
-	for i := 0; i < len(messages) && len(out) < limit; i++ {
-		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, messages[i], nil))
+	for _, message := range messages {
+		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, message, nil))
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].UID < out[j].UID })
 	return out, nil
+}
+
+func (c *goExternalIMAPClient) uidSearchAllOptions() *imap.SearchOptions {
+	caps := c.client.Caps()
+	if caps.Has(imap.CapIMAP4rev2) || caps.Has(imap.CapESearch) {
+		return &imap.SearchOptions{ReturnAll: true}
+	}
+	return nil
+}
+
+// boundedSearchUIDs reads only the requested edge of a possibly large,
+// range-compressed SEARCH result. SEARCH results are always static UID sets.
+func boundedSearchUIDs(numSet imap.NumSet, limit int, newestFirst bool) []imap.UID {
+	uidSet, ok := numSet.(imap.UIDSet)
+	if !ok || uidSet.Dynamic() || limit <= 0 {
+		return nil
+	}
+	uids := make([]imap.UID, 0, min(limit, len(uidSet)))
+	appendRange := func(start, stop imap.UID, descending bool) bool {
+		if start == 0 || stop == 0 {
+			return false
+		}
+		if descending {
+			for uid := stop; ; uid-- {
+				uids = append(uids, uid)
+				if len(uids) == limit || uid == start {
+					break
+				}
+			}
+		} else {
+			for uid := start; ; uid++ {
+				uids = append(uids, uid)
+				if len(uids) == limit || uid == stop {
+					break
+				}
+			}
+		}
+		return len(uids) == limit
+	}
+	if newestFirst {
+		for i := len(uidSet) - 1; i >= 0; i-- {
+			if appendRange(uidSet[i].Start, uidSet[i].Stop, true) {
+				break
+			}
+		}
+	} else {
+		for _, uidRange := range uidSet {
+			if appendRange(uidRange.Start, uidRange.Stop, false) {
+				break
+			}
+		}
+	}
+	return uids
 }
 
 func (c *goExternalIMAPClient) FetchRaw(ctx context.Context, folder string, uid uint32) ([]byte, externalIMAPRemoteMessage, error) {
