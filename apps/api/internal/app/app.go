@@ -23,18 +23,19 @@ import (
 )
 
 type App struct {
-	cfg           Config
-	db            *sql.DB
-	log           *slog.Logger
-	now           func() time.Time
-	policy        *HTMLPolicy
-	workerCancel  context.CancelFunc
-	workerWG      sync.WaitGroup
-	maildirHealth *maildirSyncHealthTracker
-	maildirSyncMu sync.Mutex
-	maildirDirs   map[string]maildirDirectorySignature
-	maildirRuns   uint64
-	externalIMAP  externalIMAPClientFactory
+	cfg              Config
+	db               *sql.DB
+	log              *slog.Logger
+	now              func() time.Time
+	policy           *HTMLPolicy
+	workerCancel     context.CancelFunc
+	workerWG         sync.WaitGroup
+	maildirHealth    *maildirSyncHealthTracker
+	maildirSyncMu    sync.Mutex
+	maildirDirs      map[string]maildirDirectorySignature
+	maildirRuns      uint64
+	externalIMAP     externalIMAPClientFactory
+	messageSearchFTS bool
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -290,7 +291,6 @@ func (a *App) migrate(ctx context.Context) error {
 		`DROP INDEX IF EXISTS idx_messages_mailbox_folder_received`,
 		`DROP INDEX IF EXISTS idx_messages_mailbox_starred_received`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,
@@ -582,6 +582,9 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := a.rebuildHTMLOnlyMessageSnippets(ctx); err != nil {
+		return err
+	}
+	if err := a.ensureMessageSearchFTS(ctx); err != nil {
 		return err
 	}
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
@@ -1140,12 +1143,6 @@ func (a *App) migrateMessagesFromName(ctx context.Context) error {
 			return err
 		}
 	}
-	if _, err := a.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_messages_search`); err != nil {
-		return err
-	}
-	if _, err := a.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -1155,7 +1152,6 @@ func messageIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, is_read)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received_id ON messages(mailbox_id, received_at DESC, id DESC) WHERE is_starred=1`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,

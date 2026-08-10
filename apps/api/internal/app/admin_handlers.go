@@ -780,9 +780,15 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if q != "" {
-		where = append(where, "(m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.to_addrs LIKE ? OR m.recipient_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ? OR mb.address LIKE ? OR u.email LIKE ?)")
-		like := "%" + q + "%"
-		args = append(args, like, like, like, like, like, like, like, like, like)
+		if a.canUseMessageFTS(q) {
+			where = append(where, "(m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) OR mb.address LIKE ? OR u.email LIKE ?)")
+			like := "%" + q + "%"
+			args = append(args, messageFTSLiteralQuery(q, adminSearchColumns), like, like)
+		} else {
+			where = append(where, "(m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.to_addrs LIKE ? OR m.recipient_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ? OR mb.address LIKE ? OR u.email LIKE ?)")
+			like := "%" + q + "%"
+			args = append(args, like, like, like, like, like, like, like, like, like)
+		}
 	}
 	args = append(args, limit+1, offset)
 

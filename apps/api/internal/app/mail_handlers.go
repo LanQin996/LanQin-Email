@@ -411,9 +411,14 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 	limit := mailMessagesPageSize
 
 	if q != "" {
-		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
-		like := "%" + q + "%"
-		args = append(args, like, like, like, like, like)
+		if a.canUseMessageFTS(q) {
+			where += ` AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`
+			args = append(args, messageFTSLiteralQuery(q, webmailSearchColumns))
+		} else {
+			where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
+			like := "%" + q + "%"
+			args = append(args, like, like, like, like, like)
+		}
 	}
 	if cursorReceivedAt != "" {
 		where += ` AND (m.received_at,m.id) < (?,?)`
