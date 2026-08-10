@@ -237,7 +237,20 @@ API 现支持 SQLite、MySQL 8.4 和 PostgreSQL 16，SQLite 仍是默认数据�
 - `LANQIN_DATABASE_URL`：MySQL DSN 或 PostgreSQL URL
 - 可通过 `LANQIN_DB_MAX_OPEN_CONNS`、`LANQIN_DB_MAX_IDLE_CONNS` 等变量调整连接池
 
-当前 all-in-one 镜像内的 Postfix、Dovecot 和 Rspamd 查询配置仍仅支持 SQLite。在对应的邮件服务查询配置完成改造前，不要仅修改数据库 driver 后直接用于生产邮件收发。现有 SQLite 数据迁移到外部数据库也应使用单独的导入工具，不应依赖应用启动时自动处理。
+一体化部署支持 SQLite、MySQL 8.4 和 PostgreSQL 16。SQLite 仍是默认数据库；选择 MySQL/PostgreSQL 时，在基础 `docker-compose.yml` 上叠加对应文件即可。现有 SQLite 数据不会自动迁移，跨库导入应使用单独的数据迁移工具。
+
+```bash
+# SQLite（默认）
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+
+# MySQL 8.4
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml up -d
+
+# PostgreSQL 16
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+```
+
+两种外部数据库模式仍只运行一个 `lanqin-email` 主容器，仅额外增加一个数据库容器。具体必填变量见 `deploy/.env.example`。
 
 ## License
 

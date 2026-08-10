@@ -168,7 +168,20 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 
 ## Architecture
 
-The API supports SQLite, MySQL 8.4, and PostgreSQL 16. SQLite remains the default for the bundled all-in-one mail stack. MySQL/PostgreSQL initialization requires a new empty database; SQLite data is not migrated automatically. The bundled Postfix, Dovecot, and Rspamd lookup configuration is still SQLite-only, so do not switch a production mail stack to an external database until the matching mail-service lookup configuration is deployed.
+The all-in-one deployment supports SQLite, MySQL 8.4, and PostgreSQL 16. SQLite remains the default. Add one database override to the base Compose file when selecting MySQL or PostgreSQL. Existing SQLite data is not migrated automatically.
+
+```bash
+# SQLite (default)
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+
+# MySQL 8.4
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml up -d
+
+# PostgreSQL 16
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+```
+
+Each variant keeps Nginx, the API, Postfix, Dovecot, and Rspamd in the existing `lanqin-email` container and adds only one database container. See `deploy/.env.example` for the required passwords.
 
 ```text
 ┌────────────────────────────────────────────────────────────┐

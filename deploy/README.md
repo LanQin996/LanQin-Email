@@ -190,7 +190,7 @@ LANQIN_STATUS_WEBHOOK_SECRET=replace-with-another-long-random-secret
 LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=false
 ```
 
-事件先写入 SQLite outbox，再由后台 worker 投递；非 2xx 响应会按退避策略重试，最多 10 次。默认只允许公网 HTTPS，禁止重定向、URL 用户信息和私网/本机目标。只有可信内网或本地测试才应开启 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS`。
+事件先写入数据库 outbox，再由后台 worker 投递；非 2xx 响应会按退避策略重试，最多 10 次。默认只允许公网 HTTPS，禁止重定向、URL 用户信息和私网/本机目标。只有可信内网或本地测试才应开启 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS`。
 
 Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
 
@@ -207,9 +207,31 @@ docker compose logs --tail=200 lanqin-email
 
 确认后台“系统设置”里没有把本机 Postfix 的 `SMTP Require TLS` 打开；本机 `127.0.0.1:25` 必须保持 TLS=false。
 
+## 数据库版本选择
+
+默认 SQLite 部署：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+```
+
+MySQL 8.4 部署需要先在 `deploy/.env` 设置 `LANQIN_MYSQL_ROOT_PASSWORD` 和 `LANQIN_MYSQL_PASSWORD`：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml up -d
+```
+
+PostgreSQL 16 部署需要先在 `deploy/.env` 设置 `LANQIN_POSTGRES_ADMIN_PASSWORD` 和 `LANQIN_POSTGRES_PASSWORD`。应用账号不是 PostgreSQL 超级用户；应用密码必须使用字母、数字、点、下划线、波浪线或连字符：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+```
+
+两种模式都保留单个 `lanqin-email` 主容器，只额外增加一个数据库容器。数据库使用独立 Docker volume，端口默认不暴露到宿主机。首次启动必须使用空数据库，应用不会自动迁移 SQLite 数据；不要同时叠加 MySQL 和 PostgreSQL 两个 override。已有数据库 volume 的账号密码不会因修改 `.env` 自动轮换，应先在数据库内更新密码。
+
 ## 生产注意
 
 - 建议在服务器或边缘网关配置 HTTPS。
 - 云厂商通常默认封禁 25 端口，需要单独申请解封。
-- SQLite 适合 V1 单机部署；多节点部署前迁移到 PostgreSQL，并把 Postfix/Dovecot maps 改为 PostgreSQL。
+- SQLite 适合轻量单机部署；MySQL/PostgreSQL 版本必须使用对应 Compose override，使 API、Postfix、Dovecot 与 Rspamd 保持同库。
 
