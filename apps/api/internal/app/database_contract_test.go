@@ -76,6 +76,10 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	if !isUniqueViolation(err) {
 		t.Fatalf("duplicate email error=%v, want unique violation", err)
 	}
+	template, err := a.mailTemplate(ctx, smtpTestTemplateKey)
+	if err != nil || template.Key != smtpTestTemplateKey {
+		t.Fatalf("load default mail template: template=%+v err=%v", template, err)
+	}
 
 	groupID := newID("grp")
 	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)

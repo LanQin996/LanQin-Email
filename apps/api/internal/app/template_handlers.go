@@ -61,9 +61,10 @@ func defaultMailTemplates() []MailTemplate {
 
 func (a *App) ensureDefaultMailTemplates(ctx context.Context) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
 	for _, tpl := range defaultMailTemplates() {
-		query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO mail_templates(key,name,subject,body_text,body_html,updated_at)
-			VALUES(?,?,?,?,?,?)`, `(key)`)
+		query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO mail_templates(`+keyColumn+`,name,subject,body_text,body_html,updated_at)
+			VALUES(?,?,?,?,?,?)`, `(`+keyColumn+`)`)
 		if _, err := a.db.ExecContext(ctx, query,
 			tpl.Key, tpl.Name, tpl.Subject, tpl.BodyText, tpl.BodyHTML, now); err != nil {
 			return err
@@ -73,7 +74,8 @@ func (a *App) ensureDefaultMailTemplates(ctx context.Context) error {
 }
 
 func (a *App) handleListMailTemplates(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT key,name,subject,body_text,body_html,updated_at FROM mail_templates ORDER BY name`)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT `+keyColumn+`,name,subject,body_text,body_html,updated_at FROM mail_templates ORDER BY name`)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to list templates")
 		return
@@ -123,7 +125,8 @@ func (a *App) handleUpdateMailTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	bodyHTML = a.policy.Sanitize(bodyHTML)
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	res, err := a.db.ExecContext(r.Context(), `UPDATE mail_templates SET subject=?,body_text=?,body_html=?,updated_at=? WHERE key=?`,
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	res, err := a.db.ExecContext(r.Context(), `UPDATE mail_templates SET subject=?,body_text=?,body_html=?,updated_at=? WHERE `+keyColumn+`=?`,
 		subject, bodyText, bodyHTML, now, key)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update template")
@@ -150,7 +153,8 @@ func (a *App) handleResetMailTemplate(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		now := a.now().UTC().Format(time.RFC3339Nano)
-		res, err := a.db.ExecContext(r.Context(), `UPDATE mail_templates SET name=?,subject=?,body_text=?,body_html=?,updated_at=? WHERE key=?`,
+		keyColumn := keyColumnSQL(a.cfg.DBDriver)
+		res, err := a.db.ExecContext(r.Context(), `UPDATE mail_templates SET name=?,subject=?,body_text=?,body_html=?,updated_at=? WHERE `+keyColumn+`=?`,
 			tpl.Name, tpl.Subject, tpl.BodyText, tpl.BodyHTML, now, key)
 		if err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to reset template")
@@ -172,7 +176,8 @@ func (a *App) handleResetMailTemplate(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) mailTemplate(ctx context.Context, key string) (MailTemplate, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT key,name,subject,body_text,body_html,updated_at FROM mail_templates WHERE key=?`, key)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	row := a.db.QueryRowContext(ctx, `SELECT `+keyColumn+`,name,subject,body_text,body_html,updated_at FROM mail_templates WHERE `+keyColumn+`=?`, key)
 	var tpl MailTemplate
 	var updated string
 	if err := row.Scan(&tpl.Key, &tpl.Name, &tpl.Subject, &tpl.BodyText, &tpl.BodyHTML, &updated); err != nil {

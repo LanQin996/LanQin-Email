@@ -75,6 +75,8 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		}
 	}
 	for _, fragment := range []string{
+		"CREATE TABLE system_settings (\n\t\t\t`key` VARCHAR(255) PRIMARY KEY",
+		"CREATE TABLE mail_templates (\n\t\t\t`key` VARCHAR(255) PRIMARY KEY",
 		"`system` INTEGER NOT NULL DEFAULT 0",
 		"mailbox_raw_path_key BINARY(32)",
 		"unregistered_raw_path_key BINARY(32)",

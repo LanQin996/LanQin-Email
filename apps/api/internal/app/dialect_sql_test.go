@@ -61,6 +61,14 @@ func TestDialectScalarFunctions(t *testing.T) {
 			t.Fatalf("%s system column = %q", driver, got)
 		}
 	}
+	if got := keyColumnSQL(databaseDriverMySQL); got != "`key`" {
+		t.Fatalf("MySQL key column = %q", got)
+	}
+	for _, driver := range []string{databaseDriverSQLite, databaseDriverPostgres} {
+		if got := keyColumnSQL(driver); got != "key" {
+			t.Fatalf("%s key column = %q", driver, got)
+		}
+	}
 	if got := apiTokenLastUsedUpdateSQL(databaseDriverPostgres); strings.Contains(got, "julianday") || !strings.Contains(got, "last_used_at < ?") {
 		t.Fatalf("Postgres token update uses incompatible date comparison: %q", got)
 	}

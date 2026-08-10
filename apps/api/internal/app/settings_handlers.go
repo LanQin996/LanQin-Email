@@ -320,7 +320,8 @@ func (a *App) systemSettingsSnapshot() SystemSettings {
 }
 
 func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
-	rows, err := a.db.QueryContext(ctx, `SELECT key,value FROM system_settings`)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	rows, err := a.db.QueryContext(ctx, `SELECT `+keyColumn+`,value FROM system_settings`)
 	if err != nil {
 		return err
 	}
@@ -438,13 +439,14 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		"externalImapOutlookClientSecret": cfg.ExternalIMAPOutlookClientSecret,
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for key, value := range values {
-		query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)`, `(key)`,
+		query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(`+keyColumn+`,value,updated_at) VALUES(?,?,?)`, `(`+keyColumn+`)`,
 			`value=excluded.value,updated_at=excluded.updated_at`,
 			`value=VALUES(value),updated_at=VALUES(updated_at)`)
 		if _, err := tx.ExecContext(ctx, query, key, value, now); err != nil {

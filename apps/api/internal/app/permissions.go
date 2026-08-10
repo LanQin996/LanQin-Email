@@ -538,7 +538,8 @@ func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 
 func (a *App) ensureRegularUserMailPermissions(ctx context.Context) error {
 	var migrated string
-	err := a.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE key=?`, regularUserPermissionMigrationKey).Scan(&migrated)
+	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	err := a.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE `+keyColumn+`=?`, regularUserPermissionMigrationKey).Scan(&migrated)
 	if err == nil && migrated == "1" {
 		return nil
 	}
@@ -572,7 +573,7 @@ func (a *App) ensureRegularUserMailPermissions(ctx context.Context) error {
 			return err
 		}
 	}
-	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)`, `(key)`,
+	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(`+keyColumn+`,value,updated_at) VALUES(?,?,?)`, `(`+keyColumn+`)`,
 		`value=excluded.value,updated_at=excluded.updated_at`,
 		`value=VALUES(value),updated_at=VALUES(updated_at)`)
 	_, err = a.db.ExecContext(ctx, query, regularUserPermissionMigrationKey, "1", now)
