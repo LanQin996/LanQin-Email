@@ -53,6 +53,8 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		"CREATE INDEX IF NOT EXISTS",
 		"CREATE UNIQUE INDEX IF NOT EXISTS",
 		"CREATE FUNCTION ",
+		"ALTER TABLE messages",
+		"ALTER TABLE send_queue",
 		"CREATE INDEX idx_messages_mailbox_raw_path ON messages(mailbox_id,raw_path)",
 	} {
 		if strings.Contains(schema, forbidden) {
@@ -89,6 +91,19 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		if !strings.Contains(schema, fragment) {
 			t.Errorf("MySQL schema is missing %q", fragment)
 		}
+	}
+	var messagesTable string
+	for _, statement := range statements {
+		if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE messages ") {
+			messagesTable = statement
+			break
+		}
+	}
+	if generated, foreignKey := strings.Index(messagesTable, "mailbox_raw_path_key BINARY(32)"), strings.Index(messagesTable, "FOREIGN KEY (mailbox_id) REFERENCES mailboxes(id)"); generated < 0 || foreignKey < 0 || generated > foreignKey {
+		t.Error("MySQL messages generated indexes must be defined before its foreign keys")
+	}
+	if count := strings.Count(messagesTable, ") VIRTUAL"); count != 3 || strings.Contains(messagesTable, ") STORED") {
+		t.Errorf("MySQL messages generated columns must be virtual; virtual count=%d", count)
 	}
 }
 
