@@ -78,9 +78,14 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	}
 
 	groupID := newID("grp")
-	if _, err := a.db.ExecContext(ctx, `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,`+systemColumn+`,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, groupID, groupID, "", "[]", "{}", 0, now, now); err != nil {
 		t.Fatalf("insert permission group: %v", err)
+	}
+	group, err := a.permissionGroupByID(ctx, groupID)
+	if err != nil || group.ID != groupID || group.System {
+		t.Fatalf("load permission group: group=%+v err=%v", group, err)
 	}
 	if _, err := a.db.ExecContext(ctx, `INSERT INTO user_permission_groups(user_id,group_id,created_at) VALUES(?,?,?)`, adminID, groupID, now); err != nil {
 		t.Fatalf("insert permission membership: %v", err)

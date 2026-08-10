@@ -72,6 +72,11 @@ func postgresTableToMySQL(statement string) string {
 	foreignKeys := make([]string, 0, 4)
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "system ") {
+			line = strings.Replace(line, "system", "`system`", 1)
+			lines[i] = line
+			trimmed = strings.TrimSpace(line)
+		}
 		referenceAt := strings.Index(trimmed, " REFERENCES ")
 		if referenceAt < 0 {
 			continue

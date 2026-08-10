@@ -75,6 +75,7 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 		}
 	}
 	for _, fragment := range []string{
+		"`system` INTEGER NOT NULL DEFAULT 0",
 		"mailbox_raw_path_key BINARY(32)",
 		"unregistered_raw_path_key BINARY(32)",
 		"positive_imap_uid BIGINT GENERATED ALWAYS",

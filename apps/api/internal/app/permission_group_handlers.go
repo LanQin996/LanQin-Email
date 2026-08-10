@@ -18,7 +18,8 @@ func (a *App) handleDefaultPermissionLimits(w http.ResponseWriter, r *http.Reque
 }
 
 func (a *App) handleListPermissionGroups(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,description,permissions_json,limits_json,system,created_at,updated_at
+	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name,description,permissions_json,limits_json,`+systemColumn+`,created_at,updated_at
 		FROM permission_groups
 		ORDER BY created_at ASC,name ASC`)
 	if err != nil {
@@ -126,7 +127,8 @@ func (a *App) handleCreatePermissionGroup(w http.ResponseWriter, r *http.Request
 	}
 	id := newID("pg")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)
+	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,`+systemColumn+`,created_at,updated_at)
 		VALUES(?,?,?,?,?,0,?,?)`, id, name, strings.TrimSpace(req.Description), encodePermissions(permissions), encodePermissionLimits(limits), now, now); err != nil {
 		badRequest(w, err)
 		return
@@ -142,7 +144,8 @@ func (a *App) handleCreatePermissionGroup(w http.ResponseWriter, r *http.Request
 func (a *App) handleUpdatePermissionGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var existingSystem int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT system FROM permission_groups WHERE id=?`, id).Scan(&existingSystem); err != nil {
+	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)
+	if err := a.db.QueryRowContext(r.Context(), `SELECT `+systemColumn+` FROM permission_groups WHERE id=?`, id).Scan(&existingSystem); err != nil {
 		respondError(w, http.StatusNotFound, "permission group not found")
 		return
 	}
@@ -210,7 +213,8 @@ func (a *App) handleUpdatePermissionGroup(w http.ResponseWriter, r *http.Request
 func (a *App) handleDeletePermissionGroup(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	var system int
-	if err := a.db.QueryRowContext(r.Context(), `SELECT system FROM permission_groups WHERE id=?`, id).Scan(&system); err != nil {
+	systemColumn := permissionGroupSystemColumnSQL(a.cfg.DBDriver)
+	if err := a.db.QueryRowContext(r.Context(), `SELECT `+systemColumn+` FROM permission_groups WHERE id=?`, id).Scan(&system); err != nil {
 		respondError(w, http.StatusNotFound, "permission group not found")
 		return
 	}

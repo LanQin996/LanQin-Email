@@ -34,6 +34,13 @@ func permissionGroupRenameSQL(driver string) string {
 	return `UPDATE permission_groups SET name=name || ' (' || id || ')' WHERE name=? AND id<>?`
 }
 
+func permissionGroupSystemColumnSQL(driver string) string {
+	if sqlDialect(driver) == databaseDriverMySQL {
+		return "`system`"
+	}
+	return "system"
+}
+
 func apiTokenLastUsedUpdateSQL(driver string) string {
 	if sqlDialect(driver) == databaseDriverSQLite {
 		return `UPDATE api_tokens SET last_used_at=?

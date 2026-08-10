@@ -53,6 +53,14 @@ func TestDialectScalarFunctions(t *testing.T) {
 	if got := permissionGroupRenameSQL(databaseDriverMySQL); !strings.Contains(got, "CONCAT(") || strings.Contains(got, "||") {
 		t.Fatalf("MySQL rename query is not using CONCAT: %q", got)
 	}
+	if got := permissionGroupSystemColumnSQL(databaseDriverMySQL); got != "`system`" {
+		t.Fatalf("MySQL system column = %q", got)
+	}
+	for _, driver := range []string{databaseDriverSQLite, databaseDriverPostgres} {
+		if got := permissionGroupSystemColumnSQL(driver); got != "system" {
+			t.Fatalf("%s system column = %q", driver, got)
+		}
+	}
 	if got := apiTokenLastUsedUpdateSQL(databaseDriverPostgres); strings.Contains(got, "julianday") || !strings.Contains(got, "last_used_at < ?") {
 		t.Fatalf("Postgres token update uses incompatible date comparison: %q", got)
 	}
