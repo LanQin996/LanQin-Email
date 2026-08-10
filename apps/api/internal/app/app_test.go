@@ -4205,6 +4205,66 @@ func TestMaildirImportStoresAuthenticationResults(t *testing.T) {
 	}
 }
 
+func TestMaildirSyncDoesNotRewriteUnchangedFiles(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	a.cfg.MaildirRoot = root
+	_, mailbox := defaultAdminUserAndMailbox(t, a)
+	mailboxID := mailbox.ID
+	clearMailboxMessagesForTest(t, a, mailboxID)
+	mailboxes, err := a.maildirMailboxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin maildirMailbox
+	for _, mb := range mailboxes {
+		if mb.ID == mailboxID {
+			admin = mb
+			break
+		}
+	}
+	if admin.ID == "" {
+		t.Fatal("admin mailbox not found")
+	}
+	dir := filepath.Join(root, admin.Domain, admin.LocalPart, "Maildir", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: sender@example.test",
+		"To: admin@lanqin.local",
+		"Subject: unchanged mail",
+		"Message-Id: <unchanged-mail@example.test>",
+		"Date: Sat, 13 Jun 2026 13:00:00 +0000",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"unchanged body",
+	}, "\r\n")
+	if err := os.WriteFile(filepath.Join(dir, "1749819602.M1P1.unchanged"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := a.syncMaildirOnce(ctx); err != nil || count != 1 {
+		t.Fatalf("first sync count=%d err=%v", count, err)
+	}
+	var before string
+	if err := a.db.QueryRowContext(ctx, `SELECT updated_at FROM messages WHERE mailbox_id=? AND message_id=?`, mailboxID, "<unchanged-mail@example.test>").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	base := parseTime(before)
+	a.now = func() time.Time { return base.Add(time.Hour) }
+	if count, err := a.syncMaildirOnce(ctx); err != nil || count != 0 {
+		t.Fatalf("second sync count=%d err=%v", count, err)
+	}
+	var after string
+	if err := a.db.QueryRowContext(ctx, `SELECT updated_at FROM messages WHERE mailbox_id=? AND message_id=?`, mailboxID, "<unchanged-mail@example.test>").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("unchanged mail updated_at changed from %q to %q", before, after)
+	}
+}
+
 func TestMaildirSyncHealthDisabled(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -4224,6 +4284,43 @@ func TestMaildirSyncHealthDisabled(t *testing.T) {
 	}
 	if health.ScanSeconds != 30 {
 		t.Fatalf("scan seconds=%d, want default 30", health.ScanSeconds)
+	}
+}
+
+func TestMaildirSyncHealthSeparatesCurrentAndLastRun(t *testing.T) {
+	tracker := newMaildirSyncHealthTracker()
+	cfg := Config{MaildirRoot: "/var/mail/vhosts", MaildirScanSeconds: 30}
+	firstStart := time.Date(2026, 8, 10, 10, 54, 0, 0, time.UTC)
+	firstFinish := firstStart.Add(250 * time.Millisecond)
+	nextRun := firstFinish.Add(30 * time.Second)
+
+	tracker.markWorkerStarted(nil)
+	tracker.markRunStarted(firstStart)
+	running := tracker.snapshot(cfg)
+	if !running.Running || running.CurrentRun == nil || !running.CurrentRun.StartedAt.Equal(firstStart) {
+		t.Fatalf("running snapshot=%+v, want current run", running)
+	}
+	if running.LastRun != nil || running.NextRunAt != nil {
+		t.Fatalf("running snapshot last=%+v next=%+v, want neither", running.LastRun, running.NextRunAt)
+	}
+
+	tracker.markRunFinished(firstFinish, maildirSyncCounts{FilesScanned: 3, Imported: 1}, nil, &nextRun)
+	completed := tracker.snapshot(cfg)
+	if completed.Running || completed.CurrentRun != nil || completed.LastRun == nil {
+		t.Fatalf("completed snapshot=%+v, want only last run", completed)
+	}
+	if completed.LastRun.FinishedAt == nil || !completed.LastRun.FinishedAt.Equal(firstFinish) || completed.LastRun.DurationMs != 250 {
+		t.Fatalf("completed last run=%+v, want finish and duration", completed.LastRun)
+	}
+
+	secondStart := nextRun
+	tracker.markRunStarted(secondStart)
+	second := tracker.snapshot(cfg)
+	if second.CurrentRun == nil || !second.CurrentRun.StartedAt.Equal(secondStart) || second.LastRun == nil || second.LastRun.FinishedAt == nil {
+		t.Fatalf("second snapshot current=%+v last=%+v", second.CurrentRun, second.LastRun)
+	}
+	if second.NextRunAt != nil {
+		t.Fatalf("next run during active sync=%+v, want nil", second.NextRunAt)
 	}
 }
 

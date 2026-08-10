@@ -981,7 +981,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const canResetTemplates = hasPermission(user, "admin.templates.reset")
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates, enabled: canViewTemplates })
   const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "externalImap" | "templates" | "security" | "about">("base")
-  const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage" })
+  const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage", refetchInterval: (query) => query.state.data?.running ? 2000 : false })
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
   const [openRegistration, setOpenRegistration] = React.useState(false)
@@ -1270,6 +1270,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
 function MaildirSyncHealthCard({ health, loading, error, onRefresh, refreshing, fallbackRoot }: { health?: MaildirSyncHealth; loading: boolean; error: Error | null; onRefresh: () => void; refreshing: boolean; fallbackRoot: string }) {
   const root = health?.root || fallbackRoot
   const configured = health?.configured ?? !!root
+  const currentRun = health?.currentRun
   const lastRun = health?.lastRun
   const counters = lastRun?.counts || health?.summary
   const recentErrors = health?.recentErrors || []
@@ -1296,9 +1297,9 @@ function MaildirSyncHealthCard({ health, loading, error, onRefresh, refreshing, 
         {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{queryErrorMessage(error)}</div>}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <InfoLine label="当前状态" value={<MaildirStatusBadge status={status} />} />
-          <InfoLine label="最近开始" value={formatOptionalDate(lastRun?.startedAt)} />
-          <InfoLine label="最近结束" value={formatOptionalDate(lastRun?.finishedAt)} />
-          <InfoLine label="最近耗时" value={formatDuration(lastRun?.durationMs)} />
+          <InfoLine label="最近开始" value={formatOptionalDate(currentRun?.startedAt || lastRun?.startedAt)} />
+          <InfoLine label="最近结束" value={lastRun?.finishedAt ? formatOptionalDate(lastRun.finishedAt) : currentRun ? "进行中" : "-"} />
+          <InfoLine label="最近耗时" value={formatRunDuration(currentRun, lastRun)} />
           <InfoLine label="扫描间隔" value={health?.scanSeconds ? `${health.scanSeconds} 秒` : "-"} />
           <InfoLine label="下次运行" value={formatOptionalDate(health?.nextRunAt)} />
           <InfoLine label="最后错误" value={lastRun?.error || health?.lastError || "-"} />
@@ -1354,9 +1355,19 @@ function formatOptionalDate(value?: string) {
 }
 
 function formatDuration(value?: number) {
-  if (!value) return "-"
+  if (value == null || !Number.isFinite(value)) return "-"
   if (value < 1000) return `${value} ms`
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} 秒`
+}
+
+function formatRunDuration(currentRun?: MaildirSyncHealth["currentRun"], lastRun?: MaildirSyncHealth["lastRun"]) {
+  if (currentRun) {
+    const startedAt = Date.parse(currentRun.startedAt)
+    if (Number.isFinite(startedAt)) {
+      return `进行中 ${formatDuration(Math.max(0, Date.now() - startedAt))}`
+    }
+  }
+  return formatDuration(lastRun?.durationMs)
 }
 
 function queryErrorMessage(error: unknown) {

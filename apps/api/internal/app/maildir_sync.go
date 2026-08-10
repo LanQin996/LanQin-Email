@@ -38,6 +38,13 @@ type maildirFolder struct {
 	Role string
 }
 
+type knownMaildirFile struct {
+	MailboxID string
+	FolderID  string
+	IsRead    bool
+	IsStarred bool
+}
+
 type parsedMail struct {
 	Text        string
 	HTML        string
@@ -49,8 +56,7 @@ func (a *App) maildirWorker(ctx context.Context) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
-	nextRunAt := a.now().UTC()
-	a.maildirHealth.markWorkerStarted(&nextRunAt)
+	a.maildirHealth.markWorkerStarted(nil)
 	a.log.Info("maildir sync worker started", "root", a.cfg.MaildirRoot, "interval", interval.String())
 	if counts, err := a.syncMaildirOnceTracked(ctx, interval); err != nil {
 		a.log.Warn("initial maildir sync failed", "error", err)
@@ -106,10 +112,15 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 	if err != nil {
 		return maildirSyncCounts{}, err
 	}
+	knownFiles, err := a.knownMaildirFiles(ctx)
+	if err != nil {
+		return maildirSyncCounts{}, err
+	}
+	seenFiles := make(map[string]struct{}, len(knownFiles))
 	counts := maildirSyncCounts{}
 	for _, mb := range mailboxes {
 		if mb.Unregistered {
-			mbCounts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
+			mbCounts, err := a.syncUnregisteredMaildirDetailed(ctx, mb, knownFiles, seenFiles)
 			counts.FilesScanned += mbCounts.FilesScanned
 			counts.Imported += mbCounts.Imported
 			counts.FileErrors += mbCounts.FileErrors
@@ -145,7 +156,18 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 						continue
 					}
 					path := filepath.Join(dir, entry.Name())
+					seenFiles[path] = struct{}{}
 					counts.FilesScanned++
+					handled, err := a.syncKnownMaildirFileState(ctx, mb, folder, path, knownFiles)
+					if err != nil {
+						counts.FileErrors++
+						counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
+						a.log.Warn("maildir state sync failed", "path", path, "error", err)
+						continue
+					}
+					if handled {
+						continue
+					}
 					ok, err := a.syncMaildirFile(ctx, mb, folder, path)
 					if err != nil {
 						counts.FileErrors++
@@ -165,12 +187,45 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 		return counts, err
 	}
 	counts.Backfilled += backfilled
-	cleaned, err := a.cleanupMissingMaildirMessages(ctx)
+	cleaned, err := a.cleanupMissingMaildirMessages(ctx, seenFiles)
 	if err != nil {
 		return counts, err
 	}
 	counts.Cleaned += cleaned
 	return counts, nil
+}
+
+func (a *App) knownMaildirFiles(ctx context.Context) (map[string]knownMaildirFile, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT COALESCE(mailbox_id,''),COALESCE(folder_id,''),raw_path,is_read,is_starred FROM messages WHERE raw_path<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := map[string]knownMaildirFile{}
+	for rows.Next() {
+		var path string
+		var state knownMaildirFile
+		var read, starred int
+		if err := rows.Scan(&state.MailboxID, &state.FolderID, &path, &read, &starred); err != nil {
+			return nil, err
+		}
+		state.IsRead = intBool(read)
+		state.IsStarred = intBool(starred)
+		files[path] = state
+	}
+	return files, rows.Err()
+}
+
+func (a *App) syncKnownMaildirFileState(ctx context.Context, mb maildirMailbox, folder maildirFolder, path string, knownFiles map[string]knownMaildirFile) (bool, error) {
+	state, ok := knownFiles[path]
+	if !ok || state.MailboxID != mb.ID {
+		return false, nil
+	}
+	read, starred := maildirFlagsFromPath(path, folder.Name)
+	if state.FolderID == folder.ID && state.IsRead == read && state.IsStarred == starred {
+		return true, nil
+	}
+	return a.syncExistingMaildirMessageState(ctx, mb.ID, folder.ID, path, "", read, starred)
 }
 
 func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
@@ -217,11 +272,15 @@ func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
 }
 
 func (a *App) syncUnregisteredMaildir(ctx context.Context, mb maildirMailbox) (int, error) {
-	counts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
+	knownFiles, err := a.knownMaildirFiles(ctx)
+	if err != nil {
+		return 0, err
+	}
+	counts, err := a.syncUnregisteredMaildirDetailed(ctx, mb, knownFiles, make(map[string]struct{}))
 	return counts.Imported, err
 }
 
-func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMailbox) (maildirSyncCounts, error) {
+func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMailbox, knownFiles map[string]knownMaildirFile, seenFiles map[string]struct{}) (maildirSyncCounts, error) {
 	base := filepath.Join(strings.TrimSpace(a.cfg.MaildirRoot), mb.Domain, mb.LocalPart, "Maildir")
 	counts := maildirSyncCounts{}
 	for _, sub := range []string{"new", "cur"} {
@@ -243,7 +302,11 @@ func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMai
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
+			seenFiles[path] = struct{}{}
 			counts.FilesScanned++
+			if state, ok := knownFiles[path]; ok && state.MailboxID == "" {
+				continue
+			}
 			ok, err := a.syncUnregisteredMaildirFile(ctx, mb, path)
 			if err != nil {
 				counts.FileErrors++
@@ -512,12 +575,12 @@ func (a *App) removeDuplicateMaildirMessage(ctx context.Context, rawPath, mailbo
 	a.removeMaildirPath(ctx, rawPath)
 }
 
-func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
+func (a *App) cleanupMissingMaildirMessages(ctx context.Context, seenFiles map[string]struct{}) (int, error) {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
 		return 0, nil
 	}
 	cutoff := a.now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE COALESCE(mailbox_id,'')<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE mailbox_id IS NOT NULL AND mailbox_id<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -538,6 +601,9 @@ func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
 			return 0, err
 		}
 		if !ok {
+			continue
+		}
+		if _, seen := seenFiles[it.RawPath]; seen {
 			continue
 		}
 		if _, err := os.Stat(it.RawPath); errors.Is(err, os.ErrNotExist) {

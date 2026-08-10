@@ -145,6 +145,7 @@ export type MaildirSyncHealth = {
   scanSeconds: number
   workerStarted: boolean
   running: boolean
+  currentRun?: MaildirSyncRun
   lastRun?: MaildirSyncRun
   lastError?: string
   nextRunAt?: string

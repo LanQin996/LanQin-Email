@@ -285,6 +285,8 @@ func (a *App) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_cleanup ON messages(updated_at) WHERE raw_path<>'' AND mailbox_id IS NOT NULL AND mailbox_id<>''`,
 		`CREATE TABLE IF NOT EXISTS sent_message_dedupe_keys (
 			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
 			folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
@@ -1144,6 +1146,8 @@ func messageIndexes() []string {
 		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_cleanup ON messages(updated_at) WHERE raw_path<>'' AND mailbox_id IS NOT NULL AND mailbox_id<>''`,
 	}
 }
 
