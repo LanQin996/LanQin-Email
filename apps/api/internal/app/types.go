@@ -35,16 +35,35 @@ type Domain struct {
 }
 
 type Mailbox struct {
-	ID          string    `json:"id"`
-	UserID      string    `json:"userId"`
-	UserEmail   string    `json:"userEmail,omitempty"`
-	DomainID    string    `json:"domainId"`
-	LocalPart   string    `json:"localPart"`
-	Address     string    `json:"address"`
-	DisplayName string    `json:"displayName"`
-	QuotaMB     int       `json:"quotaMb"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID                   string    `json:"id"`
+	UserID               string    `json:"userId"`
+	UserEmail            string    `json:"userEmail,omitempty"`
+	DomainID             string    `json:"domainId"`
+	LocalPart            string    `json:"localPart"`
+	Address              string    `json:"address"`
+	DisplayName          string    `json:"displayName"`
+	QuotaMB              int       `json:"quotaMb"`
+	Status               string    `json:"status"`
+	CreatedAt            time.Time `json:"createdAt"`
+	Access               string    `json:"access,omitempty"`
+	SharedBy             string    `json:"sharedBy,omitempty"`
+	ShareScope           string    `json:"shareScope,omitempty"`
+	ShareIncludesStarred bool      `json:"shareIncludesStarred,omitempty"`
+}
+
+type MailboxShare struct {
+	ID               string     `json:"id"`
+	MailboxID        string     `json:"mailboxId"`
+	MailboxAddress   string     `json:"mailboxAddress"`
+	SharedWithUserID string     `json:"sharedWithUserId"`
+	SharedWithEmail  string     `json:"sharedWithEmail"`
+	SharedWithName   string     `json:"sharedWithName"`
+	Scope            string     `json:"scope"`
+	IncludeStarred   bool       `json:"includeStarred"`
+	FolderIDs        []string   `json:"folderIds"`
+	LabelIDs         []string   `json:"labelIds"`
+	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
 }
 
 type Alias struct {

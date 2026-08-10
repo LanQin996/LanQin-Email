@@ -445,6 +445,189 @@ func TestAuthAdminAndLocalDeliveryFlow(t *testing.T) {
 	}
 }
 
+func TestMailboxSharingCustomScopeIsReadOnlyAndRevocable(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/domains", nil, &domains); code != http.StatusOK || len(domains.Items) == 0 {
+		t.Fatalf("domains code=%d items=%+v", code, domains.Items)
+	}
+	ownerMailbox := createTestMailbox(t, admin, domains.Items[0].ID, "share-owner", "Share Owner", "Password123!", nil)
+	targetMailbox := createTestMailbox(t, admin, domains.Items[0].ID, "share-target", "Share Target", "Password123!", nil)
+	outsiderMailbox := createTestMailbox(t, admin, domains.Items[0].ID, "share-outsider", "Share Outsider", "Password123!", nil)
+
+	owner := &testClient{t: t, server: ts}
+	if code := owner.do("POST", "/api/auth/login", map[string]string{"email": ownerMailbox.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("owner login code=%d", code)
+	}
+	for _, subject := range []string{"shared archive", "private inbox"} {
+		if code := admin.do("POST", "/api/mail/send", map[string]any{"to": []string{ownerMailbox.Address}, "subject": subject, "text": subject}, nil); code != http.StatusCreated {
+			t.Fatalf("send %q code=%d", subject, code)
+		}
+	}
+	var inbox struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := owner.do("GET", "/api/mail/messages?mailboxId="+ownerMailbox.ID+"&folder=Inbox", nil, &inbox); code != http.StatusOK || len(inbox.Items) != 2 {
+		t.Fatalf("owner inbox code=%d items=%+v", code, inbox.Items)
+	}
+	var archivedMessage, privateMessage MailMessage
+	for _, message := range inbox.Items {
+		if message.Subject == "shared archive" {
+			archivedMessage = message
+		} else if message.Subject == "private inbox" {
+			privateMessage = message
+		}
+	}
+	if archivedMessage.ID == "" || privateMessage.ID == "" {
+		t.Fatalf("missing test messages: %+v", inbox.Items)
+	}
+	if code := owner.do("POST", "/api/mail/messages/"+archivedMessage.ID+"/move", map[string]string{"folder": "Archive"}, nil); code != http.StatusOK {
+		t.Fatalf("archive message code=%d", code)
+	}
+	var folders struct {
+		Items []MailFolder `json:"items"`
+	}
+	if code := owner.do("GET", "/api/mail/folders?mailboxId="+ownerMailbox.ID, nil, &folders); code != http.StatusOK {
+		t.Fatalf("owner folders code=%d", code)
+	}
+	archiveFolderID := ""
+	for _, folder := range folders.Items {
+		if folder.Name == "Archive" {
+			archiveFolderID = folder.ID
+		}
+	}
+	if archiveFolderID == "" {
+		t.Fatal("archive folder not found")
+	}
+	var shareUsers struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+	}
+	if code := owner.do("GET", "/api/me/share-users?q=share-target", nil, &shareUsers); code != http.StatusOK || len(shareUsers.Items) != 1 || shareUsers.Items[0].ID != targetMailbox.UserID {
+		t.Fatalf("share user search code=%d items=%+v", code, shareUsers.Items)
+	}
+	var share MailboxShare
+	if code := owner.do("POST", "/api/me/mailbox-shares", map[string]any{
+		"mailboxId": ownerMailbox.ID, "sharedWithUserId": targetMailbox.UserID, "scope": "custom",
+		"folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false, "expiresInDays": 0,
+	}, &share); code != http.StatusCreated || share.MailboxID != ownerMailbox.ID {
+		t.Fatalf("create share code=%d share=%+v", code, share)
+	}
+	var ownerShares struct {
+		Items []MailboxShare `json:"items"`
+	}
+	if code := owner.do("GET", "/api/me/mailbox-shares", nil, &ownerShares); code != http.StatusOK || len(ownerShares.Items) != 1 || ownerShares.Items[0].ID != share.ID || len(ownerShares.Items[0].FolderIDs) != 1 || ownerShares.Items[0].FolderIDs[0] != archiveFolderID {
+		t.Fatalf("owner shares code=%d items=%+v", code, ownerShares.Items)
+	}
+
+	target := &testClient{t: t, server: ts}
+	if code := target.do("POST", "/api/auth/login", map[string]string{"email": targetMailbox.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("target login code=%d", code)
+	}
+	var targetMailboxes struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := target.do("GET", "/api/mail/mailboxes", nil, &targetMailboxes); code != http.StatusOK {
+		t.Fatalf("target mailboxes code=%d", code)
+	}
+	foundShared := false
+	for _, mailbox := range targetMailboxes.Items {
+		if mailbox.ID == ownerMailbox.ID {
+			foundShared = mailbox.Access == "read" && mailbox.ShareScope == "custom"
+		}
+	}
+	if !foundShared {
+		t.Fatalf("shared mailbox missing or wrong access: %+v", targetMailboxes.Items)
+	}
+	var targetFolders struct {
+		Items []MailFolder `json:"items"`
+	}
+	if code := target.do("GET", "/api/mail/folders?mailboxId="+ownerMailbox.ID, nil, &targetFolders); code != http.StatusOK || len(targetFolders.Items) != 1 || targetFolders.Items[0].ID != archiveFolderID {
+		t.Fatalf("shared folders code=%d items=%+v", code, targetFolders.Items)
+	}
+	var sharedMessages struct {
+		Items []MailMessage `json:"items"`
+	}
+	if code := target.do("GET", "/api/mail/messages?mailboxId="+ownerMailbox.ID+"&folder=Archive", nil, &sharedMessages); code != http.StatusOK || len(sharedMessages.Items) != 1 || sharedMessages.Items[0].ID != archivedMessage.ID {
+		t.Fatalf("shared archive code=%d items=%+v", code, sharedMessages.Items)
+	}
+	if code := target.do("GET", "/api/mail/messages?mailboxId="+ownerMailbox.ID+"&folder=Inbox", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("unshared inbox should be hidden, code=%d", code)
+	}
+	var detail MailMessage
+	if code := target.do("GET", "/api/mail/messages/"+archivedMessage.ID+"?markRead=0", nil, &detail); code != http.StatusOK || detail.ID != archivedMessage.ID {
+		t.Fatalf("shared detail code=%d detail=%+v", code, detail)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+privateMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("private detail should be hidden, code=%d", code)
+	}
+	if code := target.do("POST", "/api/mail/messages/"+archivedMessage.ID+"/mark-read", map[string]bool{"read": true}, nil); code != http.StatusNotFound {
+		t.Fatalf("shared mailbox mutation should be denied, code=%d", code)
+	}
+	if code := target.do("POST", "/api/mail/send", map[string]any{"mailboxId": ownerMailbox.ID, "to": []string{outsiderMailbox.Address}, "subject": "forbidden", "text": "forbidden"}, nil); code != http.StatusNotFound {
+		t.Fatalf("send as shared mailbox should be denied, code=%d", code)
+	}
+	if code := target.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{"scope": "all", "expiresInDays": 0}, nil); code != http.StatusNotFound {
+		t.Fatalf("share recipient should not edit share, code=%d", code)
+	}
+	var updatedShare MailboxShare
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "all", "folderIds": []string{}, "labelIds": []string{}, "includeStarred": false, "expiresInDays": 7,
+	}, &updatedShare); code != http.StatusOK || updatedShare.Scope != "all" || updatedShare.ExpiresAt == nil {
+		t.Fatalf("update share code=%d share=%+v", code, updatedShare)
+	}
+	if remaining := updatedShare.ExpiresAt.Sub(a.now().UTC()); remaining < 7*24*time.Hour-time.Minute || remaining > 7*24*time.Hour+time.Minute {
+		t.Fatalf("updated share expiration remaining=%s", remaining)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+privateMessage.ID+"?markRead=0", nil, &detail); code != http.StatusOK || detail.ID != privateMessage.ID {
+		t.Fatalf("updated all-content share should expose inbox detail, code=%d detail=%+v", code, detail)
+	}
+	preservedExpiration := *updatedShare.ExpiresAt
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+	}, &updatedShare); code != http.StatusOK || updatedShare.Scope != "custom" || updatedShare.ExpiresAt == nil || !updatedShare.ExpiresAt.Equal(preservedExpiration) {
+		t.Fatalf("update share while preserving expiration code=%d share=%+v wantExpiration=%s", code, updatedShare, preservedExpiration)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+privateMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("updated custom share should hide inbox detail again, code=%d", code)
+	}
+
+	outsider := &testClient{t: t, server: ts}
+	if code := outsider.do("POST", "/api/auth/login", map[string]string{"email": outsiderMailbox.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("outsider login code=%d", code)
+	}
+	var outsiderMailboxes struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := outsider.do("GET", "/api/mail/mailboxes", nil, &outsiderMailboxes); code != http.StatusOK {
+		t.Fatalf("outsider mailboxes code=%d", code)
+	}
+	for _, mailbox := range outsiderMailboxes.Items {
+		if mailbox.ID == ownerMailbox.ID {
+			t.Fatalf("outsider received shared mailbox: %+v", mailbox)
+		}
+	}
+	if code := outsider.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{"scope": "all", "expiresInDays": 0}, nil); code != http.StatusNotFound {
+		t.Fatalf("outsider should not edit share, code=%d", code)
+	}
+
+	if code := owner.do("DELETE", "/api/me/mailbox-shares/"+share.ID, nil, nil); code != http.StatusOK {
+		t.Fatalf("delete share code=%d", code)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+archivedMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("revoked share should stop immediately, code=%d", code)
+	}
+}
+
 func TestExternalIMAPAccountEncryptsPasswordAndDoesNotReturnSecret(t *testing.T) {
 	dir := t.TempDir()
 	a := newTestAppWithConfig(t, Config{

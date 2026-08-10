@@ -202,6 +202,20 @@ func (a *App) migrate(ctx context.Context) error {
 			updated_at TEXT NOT NULL,
 			UNIQUE(domain_id, local_part)
 		)`,
+		`CREATE TABLE IF NOT EXISTS mailbox_shares (
+			id TEXT PRIMARY KEY,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			shared_with_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			scope TEXT NOT NULL CHECK(scope IN ('all','custom')),
+			include_starred INTEGER NOT NULL DEFAULT 0,
+			expires_at TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			CHECK(owner_user_id <> shared_with_user_id),
+			UNIQUE(mailbox_id, shared_with_user_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_shares_recipient ON mailbox_shares(shared_with_user_id, expires_at, mailbox_id)`,
 		`CREATE TABLE IF NOT EXISTS aliases (
 			id TEXT PRIMARY KEY,
 			domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
@@ -478,6 +492,16 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			UNIQUE(mailbox_id, name)
+		)`,
+		`CREATE TABLE IF NOT EXISTS mailbox_share_folders (
+			share_id TEXT NOT NULL REFERENCES mailbox_shares(id) ON DELETE CASCADE,
+			folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+			PRIMARY KEY(share_id, folder_id)
+		)`,
+		`CREATE TABLE IF NOT EXISTS mailbox_share_labels (
+			share_id TEXT NOT NULL REFERENCES mailbox_shares(id) ON DELETE CASCADE,
+			label_id TEXT NOT NULL REFERENCES mail_labels(id) ON DELETE CASCADE,
+			PRIMARY KEY(share_id, label_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS message_labels (
 			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,

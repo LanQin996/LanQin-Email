@@ -55,11 +55,16 @@ type storedMessage struct {
 
 func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
-	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at
+	ownedOnly := r.URL.Query().Get("owned") == "1"
+	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at,
+		u.email,CASE WHEN mb.user_id=? THEN 'owner' ELSE 'read' END,CASE WHEN mb.user_id=? THEN '' ELSE u.email END,COALESCE(ms.scope,''),COALESCE(ms.include_starred,0)
 		FROM mailboxes mb
 		JOIN domains d ON d.id=mb.domain_id
-		WHERE mb.user_id=? AND mb.status='active' AND d.status='active'
-		ORDER BY mb.address`, user.ID)
+		JOIN users u ON u.id=mb.user_id
+		LEFT JOIN mailbox_shares ms ON ms.mailbox_id=mb.id AND ms.owner_user_id=mb.user_id AND ms.shared_with_user_id=?
+			AND (ms.expires_at IS NULL OR ms.expires_at>?)
+		WHERE (mb.user_id=? OR (?=0 AND ms.id IS NOT NULL)) AND mb.status='active' AND d.status='active'
+		ORDER BY CASE WHEN mb.user_id=? THEN 0 ELSE 1 END,mb.address`, user.ID, user.ID, user.ID, a.now().UTC().Format(time.RFC3339Nano), user.ID, ownedOnly, user.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load mailboxes")
 		return
@@ -69,11 +74,10 @@ func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m Mailbox
 		var created string
-		if err := rows.Scan(&m.ID, &m.UserID, &m.DomainID, &m.LocalPart, &m.Address, &m.DisplayName, &m.QuotaMB, &m.Status, &created); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.DomainID, &m.LocalPart, &m.Address, &m.DisplayName, &m.QuotaMB, &m.Status, &created, &m.UserEmail, &m.Access, &m.SharedBy, &m.ShareScope, &m.ShareIncludesStarred); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to scan mailboxes")
 			return
 		}
-		m.UserEmail = user.Email
 		m.CreatedAt = parseTime(created)
 		items = append(items, m)
 	}
@@ -81,17 +85,24 @@ func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
-	mb, err := a.mailboxForCurrentUser(r)
+	access, err := a.mailboxReadAccessForRequest(r)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
+	}
+	mb := access.Mailbox
+	where := `f.mailbox_id=?`
+	args := []any{mb.ID}
+	if !access.Owner && access.Scope == "custom" {
+		where += ` AND EXISTS (SELECT 1 FROM mailbox_share_folders msf WHERE msf.share_id=? AND msf.folder_id=f.id)`
+		args = append(args, access.ShareID)
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT f.id,f.name,f.role,
 		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
 		COUNT(m.id) AS total,
 		f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
 		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
-		WHERE f.mailbox_id=? GROUP BY f.id,f.name,f.role,f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
+		WHERE `+where+` GROUP BY f.id,f.name,f.role,f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
 		ORDER BY CASE
 			WHEN lower(f.name)='inbox' THEN 1000
 			WHEN lower(f.name)='sent' THEN 5000
@@ -100,7 +111,7 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 			WHEN lower(f.name)='spam' THEN 8000
 			WHEN lower(f.name)='trash' THEN 9000
 			ELSE f.sort_order
-		END, f.created_at,f.name`, mb.ID)
+		END, f.created_at,f.name`, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load folders")
 		return
@@ -345,17 +356,18 @@ func (a *App) nextCustomFolderSortOrder(ctx context.Context, mailboxID string) (
 }
 
 func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
-	mb, err := a.mailboxForCurrentUser(r)
+	access, err := a.mailboxReadAccessForRequest(r)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
+	mb := access.Mailbox
 	if labelID := strings.TrimSpace(r.URL.Query().Get("labelId")); labelID != "" {
-		if !a.labelBelongsToMailbox(r.Context(), labelID, mb.ID) {
+		if !a.labelBelongsToMailbox(r.Context(), labelID, mb.ID) || !a.mailboxShareCanReadLabel(r.Context(), access, labelID) {
 			respondError(w, http.StatusNotFound, "label not found")
 			return
 		}
-		a.respondMailMessageList(w, r, `m.mailbox_id=? AND EXISTS (SELECT 1 FROM message_labels ml WHERE ml.message_id=m.id AND ml.label_id=?)`, []any{mb.ID, labelID})
+		a.respondMailMessageList(w, r, access, `m.mailbox_id=? AND EXISTS (SELECT 1 FROM message_labels ml WHERE ml.message_id=m.id AND ml.label_id=?)`, []any{mb.ID, labelID})
 		return
 	}
 	folder := r.URL.Query().Get("folder")
@@ -368,24 +380,37 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	} else {
 		folder = normalized
 	}
-	folderID, err := a.ensureFolder(r.Context(), mb.ID, folder)
+	var folderID string
+	if access.Owner {
+		folderID, err = a.ensureFolder(r.Context(), mb.ID, folder)
+	} else {
+		err = a.db.QueryRowContext(r.Context(), `SELECT id FROM folders WHERE mailbox_id=? AND lower(name)=lower(?)`, mb.ID, folder).Scan(&folderID)
+	}
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load folder")
 		return
 	}
-	a.respondMailMessageList(w, r, `m.mailbox_id=? AND m.folder_id=?`, []any{mb.ID, folderID})
+	if !a.mailboxShareCanReadFolder(r.Context(), access, folderID) {
+		respondError(w, http.StatusNotFound, "folder not found")
+		return
+	}
+	a.respondMailMessageList(w, r, access, `m.mailbox_id=? AND m.folder_id=?`, []any{mb.ID, folderID})
 }
 
 func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
-	mb, err := a.mailboxForCurrentUser(r)
+	access, err := a.mailboxReadAccessForRequest(r)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	a.respondMailMessageList(w, r, `m.mailbox_id=? AND m.is_starred=1`, []any{mb.ID})
+	if !access.Owner && access.Scope == "custom" && !access.IncludeStarred {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	a.respondMailMessageList(w, r, access, `m.mailbox_id=? AND m.is_starred=1`, []any{access.Mailbox.ID})
 }
 
-func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, where string, args []any) {
+func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, access *mailboxReadAccess, where string, args []any) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
 	if offset < 0 {
@@ -425,19 +450,39 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 		respondError(w, http.StatusInternalServerError, "failed to load labels")
 		return
 	}
+	if access != nil && !access.Owner && access.Scope == "custom" {
+		for i := range items {
+			visible := items[i].Labels[:0]
+			for _, label := range items[i].Labels {
+				if a.mailboxShareCanReadLabel(r.Context(), access, label.ID) {
+					visible = append(visible, label)
+				}
+			}
+			items[i].Labels = visible
+		}
+	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
 
 func (a *App) handleMailLabels(w http.ResponseWriter, r *http.Request) {
-	mb, err := a.mailboxForCurrentUser(r)
+	access, err := a.mailboxReadAccessForRequest(r)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")
 		return
 	}
-	labels, err := a.labelsForMailbox(r.Context(), mb.ID)
+	labels, err := a.labelsForMailbox(r.Context(), access.Mailbox.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load labels")
 		return
+	}
+	if !access.Owner && access.Scope == "custom" {
+		visible := labels[:0]
+		for _, label := range labels {
+			if a.mailboxShareCanReadLabel(r.Context(), access, label.ID) {
+				visible = append(visible, label)
+			}
+		}
+		labels = visible
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": labels})
 }
@@ -567,12 +612,13 @@ func (a *App) handleRemoveMessageLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
-	msg, err := a.loadMessageForRequest(r, chi.URLParam(r, "id"), true)
+	msg, err := a.loadMessageForReadRequest(r, chi.URLParam(r, "id"), true)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	if r.URL.Query().Get("markRead") != "0" && !msg.IsRead && userHasPermission(currentUser(r), PermissionMailOrganize) {
+	access, _ := a.mailboxReadAccessWithID(r, msg.MailboxID)
+	if access != nil && access.Owner && r.URL.Query().Get("markRead") != "0" && !msg.IsRead && userHasPermission(currentUser(r), PermissionMailOrganize) {
 		read := true
 		if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, &read, nil); err != nil {
 			a.log.Warn("failed to update maildir read flag", "message_id", msg.ID, "error", err)
@@ -1869,14 +1915,16 @@ func (a *App) handleDeleteMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleAttachment(w http.ResponseWriter, r *http.Request) {
-	user := currentUser(r)
 	attID := chi.URLParam(r, "id")
-	row := a.db.QueryRowContext(r.Context(), `SELECT a.filename,a.content_type,a.size_bytes,a.storage_path
-		FROM attachments a JOIN messages m ON m.id=a.message_id JOIN mailboxes mb ON mb.id=m.mailbox_id
-		WHERE a.id=? AND mb.user_id=?`, attID, user.ID)
-	var filename, contentType, path string
+	row := a.db.QueryRowContext(r.Context(), `SELECT a.filename,a.content_type,a.size_bytes,a.storage_path,a.message_id
+		FROM attachments a WHERE a.id=?`, attID)
+	var filename, contentType, path, messageID string
 	var size int64
-	if err := row.Scan(&filename, &contentType, &size, &path); err != nil {
+	if err := row.Scan(&filename, &contentType, &size, &path, &messageID); err != nil {
+		respondError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	if _, err := a.loadMessageForReadRequest(r, messageID, false); err != nil {
 		respondError(w, http.StatusNotFound, "attachment not found")
 		return
 	}

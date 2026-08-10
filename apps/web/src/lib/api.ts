@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -61,6 +61,11 @@ export const api = {
   cleanupMail: (payload: { mailboxId: string; target: "empty-trash" | "empty-spam" | "archive-read-inbox" }) => request<{ ok: boolean; affected: number }>("/api/me/cleanup", { method: "POST", body: JSON.stringify(payload) }),
   mailboxApplyOptions: () => request<MailboxApplyOptions>("/api/me/mailbox-apply-options"),
   applyMailbox: (payload: { domainId: string; localPart: string; displayName: string }) => request<Mailbox>("/api/me/mailboxes/apply", { method: "POST", body: JSON.stringify(payload) }),
+  shareUsers: (q: string) => request<ListResponse<ShareUser>>(`/api/me/share-users?q=${encodeURIComponent(q)}`),
+  mailboxShares: (mailboxId?: string) => request<ListResponse<MailboxShare>>(`/api/me/mailbox-shares${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  createMailboxShare: (payload: MailboxSharePayload) => request<MailboxShare>("/api/me/mailbox-shares", { method: "POST", body: JSON.stringify(payload) }),
+  updateMailboxShare: (id: string, payload: MailboxShareUpdatePayload) => request<MailboxShare>(`/api/me/mailbox-shares/${id}`, { method: "POST", body: JSON.stringify(payload) }),
+  deleteMailboxShare: (id: string) => request<{ ok: boolean }>(`/api/me/mailbox-shares/${id}`, { method: "DELETE" }),
   externalImapAccounts: (mailboxId?: string) => request<ListResponse<ExternalImapAccount>>(`/api/me/external-imap-accounts${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
   createExternalImapAccount: (payload: ExternalImapAccountPayload) => request<ExternalImapAccount>("/api/me/external-imap-accounts", { method: "POST", body: JSON.stringify(payload) }),
   updateExternalImapAccount: (id: string, payload: ExternalImapAccountPayload) => request<ExternalImapAccount>(`/api/me/external-imap-accounts/${id}`, { method: "POST", body: JSON.stringify(payload) }),
@@ -124,6 +129,7 @@ export const api = {
   dnsRecords: (domainId: string) => request<{ items: DNSRecord[] }>(`/api/admin/domains/${domainId}/dns-records`),
   checkDns: (domainId: string) => request<DNSCheckResult>(`/api/admin/domains/${domainId}/check-dns`, { method: "POST" }),
   myMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes"),
+  myOwnedMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes?owned=1"),
   externalMailAccounts: () => request<ListResponse<ExternalImapAccount>>("/api/mail/external-accounts"),
   externalFolders: (id: string) => request<ListResponse<ExternalImapFolder>>(`/api/mail/external-accounts/${id}/folders`),
   externalMessages: (id: string, folder: string, cursor = "", q = "") => {

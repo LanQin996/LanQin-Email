@@ -46,7 +46,7 @@ func (a *App) handleTranslateMailMessage(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusBadRequest, "unsupported target language")
 		return
 	}
-	msg, err := a.loadMessageForRequest(r, chi.URLParam(r, "id"), true)
+	msg, err := a.loadMessageForReadRequest(r, chi.URLParam(r, "id"), true)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "message not found")
 		return

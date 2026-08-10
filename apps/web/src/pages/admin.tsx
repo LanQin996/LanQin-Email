@@ -730,6 +730,7 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
 
 function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   const qc = useQueryClient()
+  const [refreshing, setRefreshing] = React.useState(false)
   const [query, setQuery] = React.useState("")
   const [mailboxId, setMailboxId] = React.useState("all")
   const [folder, setFolder] = React.useState("all")
@@ -747,13 +748,25 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   })
   const detail = useQuery({ queryKey: ["admin", "message", selectedId], queryFn: () => api.adminMessage(selectedId!), enabled: !!selectedId })
   const items = messages.data?.pages.flatMap((page) => page.items || []) || []
+  async function refresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin", "messages"] }),
+        new Promise((resolve) => window.setTimeout(resolve, 500)),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle>全部邮件</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["admin", "messages"] })}>
-            <RefreshCcw className="h-4 w-4" />刷新
+          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
+            <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />{refreshing ? "刷新中..." : "刷新"}
           </Button>
         </div>
       </CardHeader>
@@ -857,6 +870,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
 
 function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
   const qc = useQueryClient()
+  const [refreshing, setRefreshing] = React.useState(false)
   const [mailboxId, setMailboxId] = React.useState("all")
   const [event, setEvent] = React.useState("all")
   const [messageId, setMessageId] = React.useState("")
@@ -876,13 +890,25 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
   })
   const items = audit.data?.pages.flatMap((page) => page.items || []) || []
+  async function refresh() {
+    if (refreshing) return
+    setRefreshing(true)
+    try {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["admin", "send-audit"] }),
+        new Promise((resolve) => window.setTimeout(resolve, 500)),
+      ])
+    } finally {
+      setRefreshing(false)
+    }
+  }
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5" />发送审计</CardTitle>
-          <Button variant="outline" size="sm" onClick={() => qc.invalidateQueries({ queryKey: ["admin", "send-audit"] })}>
-            <RefreshCcw className="h-4 w-4" />刷新
+          <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
+            <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />{refreshing ? "刷新中..." : "刷新"}
           </Button>
         </div>
       </CardHeader>
@@ -1875,7 +1901,7 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
       <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><CheckCircle2 className="h-4 w-4" />检测结果</div>
       <div className="mt-2 space-y-2">{Object.entries(check.data.checks).map(([k, v]) => <div key={k} className="flex items-center gap-2 text-sm"><CheckCircle2 className={`h-4 w-4 shrink-0 ${v.ok ? "text-green-600" : "text-destructive"}`} /><span className="font-medium">{k.toUpperCase()}:</span> {v.message}</div>)}</div>
     </>}</>
-  const checkButton = canCheckDNS ? <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}><RefreshCcw className="h-4 w-4" />检测</Button> : null
+  const checkButton = canCheckDNS ? <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}><RefreshCcw className={cn("h-4 w-4", check.isPending && "animate-spin")} />{check.isPending ? "检测中..." : "检测"}</Button> : null
   const header = <div className="flex items-center justify-between"><CardTitle>DNS 记录</CardTitle>{checkButton}</div>
   if (embedded) return <div className="space-y-4"><div className="flex items-center justify-between"><div className="font-medium">DNS 记录</div>{checkButton}</div>{content}</div>
   return <Card><CardHeader>{header}</CardHeader><CardContent>{content}</CardContent></Card>
