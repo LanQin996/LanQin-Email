@@ -1338,6 +1338,8 @@ function MaildirStatusBadge({ status }: { status: string }) {
 
 function maildirCounterRows(counters?: Record<string, number | undefined>) {
   return [
+    { key: "directoriesChecked", label: "检查目录", value: counterValue(counters, "directoriesChecked") },
+    { key: "directoriesScanned", label: "扫描目录", value: counterValue(counters, "directoriesScanned") },
     { key: "filesScanned", label: "扫描文件", value: counterValue(counters, "filesScanned") },
     { key: "imported", label: "导入", value: counterValue(counters, "imported") },
     { key: "backfilled", label: "回填", value: counterValue(counters, "backfilled") },

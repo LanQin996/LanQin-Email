@@ -31,6 +31,9 @@ type App struct {
 	workerCancel  context.CancelFunc
 	workerWG      sync.WaitGroup
 	maildirHealth *maildirSyncHealthTracker
+	maildirSyncMu sync.Mutex
+	maildirDirs   map[string]maildirDirectorySignature
+	maildirRuns   uint64
 	externalIMAP  externalIMAPClientFactory
 }
 

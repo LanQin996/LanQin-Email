@@ -136,7 +136,7 @@ export type ExternalImapFolder = { name: string; role: string; unreadCount: numb
 export type ExternalImapSyncRun = { id: string; accountId: string; folder?: string; status: string; imported: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
 export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
-export type MaildirSyncCounts = { filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
+export type MaildirSyncCounts = { directoriesChecked: number; directoriesScanned: number; filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
 export type MaildirSyncRun = { startedAt: string; finishedAt?: string; durationMs: number; status: "running" | "success" | "partial" | "error"; error?: string; counts: MaildirSyncCounts }
 export type MaildirSyncHealth = {
   configured: boolean

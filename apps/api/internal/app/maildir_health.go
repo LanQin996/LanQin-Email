@@ -10,12 +10,14 @@ import (
 const maxMaildirRecentErrors = 10
 
 type maildirSyncCounts struct {
-	FilesScanned     int      `json:"filesScanned"`
-	Imported         int      `json:"imported"`
-	Backfilled       int      `json:"backfilled"`
-	Cleaned          int      `json:"cleaned"`
-	FileErrors       int      `json:"fileErrors"`
-	fileErrorDetails []string `json:"-"`
+	DirectoriesChecked int      `json:"directoriesChecked"`
+	DirectoriesScanned int      `json:"directoriesScanned"`
+	FilesScanned       int      `json:"filesScanned"`
+	Imported           int      `json:"imported"`
+	Backfilled         int      `json:"backfilled"`
+	Cleaned            int      `json:"cleaned"`
+	FileErrors         int      `json:"fileErrors"`
+	fileErrorDetails   []string `json:"-"`
 }
 
 func (c maildirSyncCounts) total() int {
@@ -128,6 +130,8 @@ func (h *maildirSyncHealthTracker) markRunFinished(finishedAt time.Time, counts 
 		h.lastError = ""
 	}
 	h.summary.FilesScanned += counts.FilesScanned
+	h.summary.DirectoriesChecked += counts.DirectoriesChecked
+	h.summary.DirectoriesScanned += counts.DirectoriesScanned
 	h.summary.Imported += counts.Imported
 	h.summary.Backfilled += counts.Backfilled
 	h.summary.Cleaned += counts.Cleaned
