@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -784,11 +783,11 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	if q != "" {
 		if a.canUseMessageFTS(q) {
-			where = append(where, "(m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) OR mb.address LIKE ? OR u.email LIKE ?)")
+			where = append(where, "(m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) OR LOWER(mb.address) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?))")
 			like := "%" + q + "%"
 			args = append(args, messageFTSLiteralQuery(q, adminSearchColumns), like, like)
 		} else {
-			where = append(where, "(m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.to_addrs LIKE ? OR m.recipient_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ? OR mb.address LIKE ? OR u.email LIKE ?)")
+			where = append(where, "(LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.to_addrs) LIKE LOWER(?) OR LOWER(m.recipient_addr) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?) OR LOWER(mb.address) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?))")
 			like := "%" + q + "%"
 			args = append(args, like, like, like, like, like, like, like, like, like)
 		}
@@ -856,6 +855,8 @@ func (a *App) handleAdminMessage(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, msg)
 }
 
+const adminSendAuditPageSize = 50
+
 func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
 	messageID := strings.TrimSpace(r.URL.Query().Get("messageId"))
@@ -870,11 +871,12 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorCreatedAt, cursorID, offset, err := parseSendQueueCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
-	limit := 50
+	limit := adminSendAuditPageSize
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -902,15 +904,24 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "sae.created_at<=?")
 		args = append(args, to)
 	}
-	args = append(args, limit+1, offset)
+	if cursorCreatedAt != "" {
+		where = append(where, "(sae.created_at,sae.id) < (?,?)")
+		args = append(args, cursorCreatedAt, cursorID)
+	}
+	args = append(args, limit+1)
 
-	rows, err := a.db.QueryContext(r.Context(), `SELECT sae.id,sae.queue_id,sae.mailbox_id,COALESCE(mb.address,''),sae.sent_message_id,COALESCE(sq.message_id,m.message_id,''),sae.source,sae.event,sae.status,sae.mail_from,sae.header_from,sae.recipients_json,sae.error,sae.created_at
+	query := `SELECT sae.id,sae.queue_id,sae.mailbox_id,COALESCE(mb.address,''),sae.sent_message_id,COALESCE(sq.message_id,m.message_id,''),sae.source,sae.event,sae.status,sae.mail_from,sae.header_from,sae.recipients_json,sae.error,sae.created_at
 		FROM send_audit_events sae
 		LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id
 		LEFT JOIN send_queue sq ON sq.id=sae.queue_id
 		LEFT JOIN messages m ON m.id=sae.sent_message_id
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY sae.created_at DESC, sae.id DESC LIMIT ? OFFSET ?`, args...)
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY sae.created_at DESC,sae.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load send audit")
 		return
@@ -935,7 +946,8 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeSendQueueCursor(last.CreatedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }

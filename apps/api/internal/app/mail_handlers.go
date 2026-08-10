@@ -415,7 +415,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 			where += ` AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`
 			args = append(args, messageFTSLiteralQuery(q, webmailSearchColumns))
 		} else {
-			where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
+			where += ` AND (LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?))`
 			like := "%" + q + "%"
 			args = append(args, like, like, like, like, like)
 		}
@@ -565,7 +565,8 @@ func (a *App) handleAddMessageLabel(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `INSERT OR IGNORE INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, msg.ID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, `(message_id,label_id)`)
+	_, err = a.db.ExecContext(r.Context(), query, msg.ID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to add label")
 		return

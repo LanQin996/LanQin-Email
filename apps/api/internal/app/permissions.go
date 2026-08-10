@@ -509,16 +509,18 @@ func permissionGroupNames() map[string]string {
 func (a *App) ensureDefaultPermissionGroups(ctx context.Context) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	for _, item := range defaultPermissionGroups() {
-		if _, err := a.db.ExecContext(ctx, `UPDATE permission_groups SET name=name || ' (' || id || ')' WHERE name=? AND id<>?`, item.Name, item.ID); err != nil {
+		if _, err := a.db.ExecContext(ctx, permissionGroupRenameSQL(a.cfg.DBDriver), item.Name, item.ID); err != nil {
 			return err
 		}
-		query := `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
-			VALUES(?,?,?,?,?,?,?,?)
-			ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, permissions_json=excluded.permissions_json, limits_json=excluded.limits_json, system=excluded.system, updated_at=excluded.updated_at`
+		query := upsertSQL(a.cfg.DBDriver, `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?)`, `(id)`,
+			`name=excluded.name,description=excluded.description,permissions_json=excluded.permissions_json,limits_json=excluded.limits_json,system=excluded.system,updated_at=excluded.updated_at`,
+			`name=VALUES(name),description=VALUES(description),permissions_json=VALUES(permissions_json),limits_json=VALUES(limits_json),system=VALUES(system),updated_at=VALUES(updated_at)`)
 		if item.ID == PermissionGroupRegular {
-			query = `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?,?)
-				ON CONFLICT(id) DO UPDATE SET name=excluded.name, description=excluded.description, system=excluded.system, updated_at=excluded.updated_at`
+			query = upsertSQL(a.cfg.DBDriver, `INSERT INTO permission_groups(id,name,description,permissions_json,limits_json,system,created_at,updated_at)
+				VALUES(?,?,?,?,?,?,?,?)`, `(id)`,
+				`name=excluded.name,description=excluded.description,system=excluded.system,updated_at=excluded.updated_at`,
+				`name=VALUES(name),description=VALUES(description),system=VALUES(system),updated_at=VALUES(updated_at)`)
 		}
 		if _, err := a.db.ExecContext(ctx, query, item.ID, item.Name, item.Description, encodePermissions(item.Permissions), encodePermissionLimits(item.Limits), boolInt(item.System), now, now); err != nil {
 			return err
@@ -569,8 +571,10 @@ func (a *App) ensureRegularUserMailPermissions(ctx context.Context) error {
 			return err
 		}
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)
-		ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, regularUserPermissionMigrationKey, "1", now)
+	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)`, `(key)`,
+		`value=excluded.value,updated_at=excluded.updated_at`,
+		`value=VALUES(value),updated_at=VALUES(updated_at)`)
+	_, err = a.db.ExecContext(ctx, query, regularUserPermissionMigrationKey, "1", now)
 	return err
 }
 

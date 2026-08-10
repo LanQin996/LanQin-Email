@@ -61,6 +61,30 @@ func TestPerformanceIndexesCoverHotMailboxQueries(t *testing.T) {
 			args:      []any{"mb_test", "2026-01-01T00:00:00Z", "mail_test"},
 		},
 		{
+			name:      "send audit global list",
+			indexName: "idx_send_audit_events_created_id",
+			query:     `SELECT sae.id,COALESCE(mb.address,''),COALESCE(sq.message_id,m.message_id,'') FROM send_audit_events sae LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id LEFT JOIN send_queue sq ON sq.id=sae.queue_id LEFT JOIN messages m ON m.id=sae.sent_message_id WHERE (sae.created_at,sae.id)<(?,?) ORDER BY sae.created_at DESC,sae.id DESC LIMIT 51`,
+			args:      []any{"2026-01-01T00:00:00Z", "audit_test"},
+		},
+		{
+			name:      "send audit mailbox list",
+			indexName: "idx_send_audit_events_mailbox_created_id",
+			query:     `SELECT sae.id,COALESCE(mb.address,''),COALESCE(sq.message_id,m.message_id,'') FROM send_audit_events sae LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id LEFT JOIN send_queue sq ON sq.id=sae.queue_id LEFT JOIN messages m ON m.id=sae.sent_message_id WHERE sae.mailbox_id=? AND (sae.created_at,sae.id)<(?,?) ORDER BY sae.created_at DESC,sae.id DESC LIMIT 51`,
+			args:      []any{"mb_test", "2026-01-01T00:00:00Z", "audit_test"},
+		},
+		{
+			name:      "send audit event list",
+			indexName: "idx_send_audit_events_event_created_id",
+			query:     `SELECT sae.id,COALESCE(mb.address,''),COALESCE(sq.message_id,m.message_id,'') FROM send_audit_events sae LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id LEFT JOIN send_queue sq ON sq.id=sae.queue_id LEFT JOIN messages m ON m.id=sae.sent_message_id WHERE sae.event=? AND (sae.created_at,sae.id)<(?,?) ORDER BY sae.created_at DESC,sae.id DESC LIMIT 51`,
+			args:      []any{sendAuditFailed, "2026-01-01T00:00:00Z", "audit_test"},
+		},
+		{
+			name:      "send audit queue timeline",
+			indexName: "idx_send_audit_events_queue_created_id",
+			query:     `SELECT id FROM send_audit_events WHERE queue_id=? ORDER BY created_at,id`,
+			args:      []any{"queue_test"},
+		},
+		{
 			name:      "maildir message id lookup",
 			indexName: "idx_messages_mailbox_message_id",
 			query:     `SELECT id FROM messages WHERE mailbox_id=? AND message_id=? AND message_id<>''`,

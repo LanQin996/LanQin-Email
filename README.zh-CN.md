@@ -227,6 +227,18 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - v1 支持本人邮箱发信；如需 send-as，可使用启用的别名转发 source 指向本人邮箱，或在数据库中配置 `send_as_grants`。
 - 如果客户端随后又通过 IMAP APPEND 写入自己的 Sent 副本，Maildir 同步会按 Sent 文件夹内的 `Message-ID` 去重。
 
+## 数据库支持
+
+API 现支持 SQLite、MySQL 8.4 和 PostgreSQL 16，SQLite 仍是默认数据库。MySQL/PostgreSQL 必须使用新的空数据库启动，系统不会自动迁移现有 SQLite 数据。
+
+外部数据库配置：
+
+- `LANQIN_DB_DRIVER=mysql` 或 `LANQIN_DB_DRIVER=postgres`
+- `LANQIN_DATABASE_URL`：MySQL DSN 或 PostgreSQL URL
+- 可通过 `LANQIN_DB_MAX_OPEN_CONNS`、`LANQIN_DB_MAX_IDLE_CONNS` 等变量调整连接池
+
+当前 all-in-one 镜像内的 Postfix、Dovecot 和 Rspamd 查询配置仍仅支持 SQLite。在对应的邮件服务查询配置完成改造前，不要仅修改数据库 driver 后直接用于生产邮件收发。现有 SQLite 数据迁移到外部数据库也应使用单独的导入工具，不应依赖应用启动时自动处理。
+
 ## License
 
 [MIT](./LICENSE)

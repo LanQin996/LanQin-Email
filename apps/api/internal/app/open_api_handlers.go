@@ -523,7 +523,7 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 			where += " AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)"
 			args = append(args, messageFTSLiteralQuery(q, openAPISearchColumns))
 		} else {
-			where += " AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.to_addrs LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)"
+			where += " AND (LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.to_addrs) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?))"
 			like := "%" + q + "%"
 			args = append(args, like, like, like, like, like, like)
 		}
@@ -654,7 +654,8 @@ func openAPISendStatusFromQueue(item SendQueueEntry, mailboxAddress string) open
 
 func (a *App) reserveOpenAPISendIdempotency(ctx context.Context, userID, key, requestHash string) (openAPISendStatus, bool, error) {
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM send_idempotency_keys WHERE created_at<?`, a.now().UTC().Add(-24*time.Hour).Format(time.RFC3339Nano))
-	res, err := a.db.ExecContext(ctx, `INSERT OR IGNORE INTO send_idempotency_keys(user_id,idempotency_key,request_hash,created_at) VALUES(?,?,?,?)`, userID, key, requestHash, a.now().UTC().Format(time.RFC3339Nano))
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO send_idempotency_keys(user_id,idempotency_key,request_hash,created_at) VALUES(?,?,?,?)`, `(user_id,idempotency_key)`)
+	res, err := a.db.ExecContext(ctx, query, userID, key, requestHash, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return openAPISendStatus{}, false, err
 	}

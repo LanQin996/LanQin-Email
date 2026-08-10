@@ -9,7 +9,14 @@ import (
 
 type Config struct {
 	Addr                            string
+	DBDriver                        string
+	DBDSN                           string
 	DBPath                          string
+	DBMaxOpenConns                  int
+	DBMaxIdleConns                  int
+	DBConnMaxLifetimeSeconds        int
+	DBConnMaxIdleTimeSeconds        int
+	DBConnectTimeoutSeconds         int
 	DataDir                         string
 	CookieName                      string
 	SessionTTLHours                 int
@@ -59,9 +66,17 @@ type Config struct {
 
 func LoadConfig() Config {
 	dataDir := getenv("LANQIN_DATA_DIR", "./data")
+	databaseDSN := getenv("LANQIN_DATABASE_URL", getenv("LANQIN_DB_DSN", ""))
 	return Config{
 		Addr:                            getenv("LANQIN_ADDR", ":8080"),
+		DBDriver:                        strings.ToLower(getenv("LANQIN_DB_DRIVER", databaseDriverSQLite)),
+		DBDSN:                           databaseDSN,
 		DBPath:                          getenv("LANQIN_DB_PATH", filepath.Join(dataDir, "lanqin.db")),
+		DBMaxOpenConns:                  getenvInt("LANQIN_DB_MAX_OPEN_CONNS", 20),
+		DBMaxIdleConns:                  getenvInt("LANQIN_DB_MAX_IDLE_CONNS", 10),
+		DBConnMaxLifetimeSeconds:        getenvInt("LANQIN_DB_CONN_MAX_LIFETIME_SECONDS", 1800),
+		DBConnMaxIdleTimeSeconds:        getenvInt("LANQIN_DB_CONN_MAX_IDLE_TIME_SECONDS", 300),
+		DBConnectTimeoutSeconds:         getenvInt("LANQIN_DB_CONNECT_TIMEOUT_SECONDS", 10),
 		DataDir:                         dataDir,
 		CookieName:                      getenv("LANQIN_COOKIE_NAME", "lanqin_session"),
 		SessionTTLHours:                 getenvInt("LANQIN_SESSION_TTL_HOURS", 24*7),

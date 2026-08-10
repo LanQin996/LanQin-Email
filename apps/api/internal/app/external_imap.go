@@ -1186,9 +1186,11 @@ func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAc
 			skipped++
 		}
 	}
-	_, _ = a.db.ExecContext(ctx, `INSERT INTO external_imap_folder_states(account_id,remote_folder,local_folder_id,uid_validity,last_uid,last_sync_at,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?)
-		ON CONFLICT(account_id,remote_folder) DO UPDATE SET local_folder_id=excluded.local_folder_id,uid_validity=excluded.uid_validity,last_uid=MAX(last_uid,excluded.last_uid),last_sync_at=excluded.last_sync_at,updated_at=excluded.updated_at`,
+	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO external_imap_folder_states(account_id,remote_folder,local_folder_id,uid_validity,last_uid,last_sync_at,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?)`, `(account_id,remote_folder)`,
+		`local_folder_id=excluded.local_folder_id,uid_validity=excluded.uid_validity,last_uid=`+scalarMaxSQL(a.cfg.DBDriver, "last_uid", "excluded.last_uid")+`,last_sync_at=excluded.last_sync_at,updated_at=excluded.updated_at`,
+		`local_folder_id=VALUES(local_folder_id),uid_validity=VALUES(uid_validity),last_uid=GREATEST(last_uid,VALUES(last_uid)),last_sync_at=VALUES(last_sync_at),updated_at=VALUES(updated_at)`)
+	_, _ = a.db.ExecContext(ctx, query,
 		account.ID, folder.Name, localFolderID, folder.UIDValidity, maxUID, now, now, now)
 	return imported, skipped, failed, nil
 }
@@ -1216,7 +1218,8 @@ func (a *App) insertExternalIMAPMessageOnce(ctx context.Context, account externa
 		return "", err
 	}
 	defer tx.Rollback()
-	res, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO external_imap_messages(account_id,remote_folder,uid_validity,uid,message_id,is_read,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, account.ID, folder, item.UIDValidity, item.UID, msg.MessageID, boolInt(item.IsRead), now, now)
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO external_imap_messages(account_id,remote_folder,uid_validity,uid,message_id,is_read,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, `(account_id,remote_folder,uid_validity,uid)`)
+	res, err := tx.ExecContext(ctx, query, account.ID, folder, item.UIDValidity, item.UID, msg.MessageID, boolInt(item.IsRead), now, now)
 	if err != nil {
 		return "", err
 	}

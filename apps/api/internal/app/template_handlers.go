@@ -62,8 +62,9 @@ func defaultMailTemplates() []MailTemplate {
 func (a *App) ensureDefaultMailTemplates(ctx context.Context) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	for _, tpl := range defaultMailTemplates() {
-		if _, err := a.db.ExecContext(ctx, `INSERT INTO mail_templates(key,name,subject,body_text,body_html,updated_at)
-			VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO NOTHING`,
+		query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO mail_templates(key,name,subject,body_text,body_html,updated_at)
+			VALUES(?,?,?,?,?,?)`, `(key)`)
+		if _, err := a.db.ExecContext(ctx, query,
 			tpl.Key, tpl.Name, tpl.Subject, tpl.BodyText, tpl.BodyHTML, now); err != nil {
 			return err
 		}

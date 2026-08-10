@@ -148,6 +148,8 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_PUBLIC_BASE_URL` | Public Webmail URL | `https://mail.example.com` |
 | `LANQIN_ADMIN_EMAIL` | Initial admin email | `admin@example.com` |
 | `LANQIN_ADMIN_PASSWORD` | Initial admin password; must be changed in production | `ChangeMe123!` |
+| `LANQIN_DB_DRIVER` | API database driver: `sqlite`, `mysql`, or `postgres` | `sqlite` |
+| `LANQIN_DATABASE_URL` | MySQL DSN or PostgreSQL URL; required for external databases | Empty |
 | `LANQIN_DB_PATH` | SQLite database path | `/data/lanqin.db` |
 | `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging | `false` |
 | `LANQIN_OPEN_REGISTRATION` | Enable public registration | `false` |
@@ -165,6 +167,8 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook external IMAP OAuth2; callback is `/api/external-imap-oauth/outlook/callback` | Empty |
 
 ## Architecture
+
+The API supports SQLite, MySQL 8.4, and PostgreSQL 16. SQLite remains the default for the bundled all-in-one mail stack. MySQL/PostgreSQL initialization requires a new empty database; SQLite data is not migrated automatically. The bundled Postfix, Dovecot, and Rspamd lookup configuration is still SQLite-only, so do not switch a production mail stack to an external database until the matching mail-service lookup configuration is deployed.
 
 ```text
 ┌────────────────────────────────────────────────────────────┐

@@ -14,6 +14,10 @@ const (
 )
 
 func (a *App) ensureMessageSearchFTS(ctx context.Context) error {
+	if a.cfg.DBDriver != databaseDriverSQLite {
+		a.messageSearchFTS = false
+		return nil
+	}
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err

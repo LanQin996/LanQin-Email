@@ -101,7 +101,7 @@ func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	mailboxID, err := a.createMailboxWithPasswordHash(r.Context(), user.ID, domainID, localPart, displayName, passwordHash, 1024, "active")
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if isUniqueViolation(err) {
 			respondError(w, http.StatusConflict, "该邮箱地址已被占用")
 			return
 		}
@@ -195,9 +195,11 @@ func (a *App) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 	}
 	id := newID("ctc")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO contacts(id,user_id,name,email,note,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(user_id,email) DO UPDATE SET name=excluded.name,note=excluded.note,updated_at=excluded.updated_at`,
+	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO contacts(id,user_id,name,email,note,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?)`, `(user_id,email)`,
+		`name=excluded.name,note=excluded.note,updated_at=excluded.updated_at`,
+		`name=VALUES(name),note=VALUES(note),updated_at=VALUES(updated_at)`)
+	_, err := a.db.ExecContext(r.Context(), query,
 		id, user.ID, name, email, strings.TrimSpace(req.Note), now, now)
 	if err != nil {
 		badRequest(w, err)
@@ -587,9 +589,11 @@ func (a *App) handleCreateBlockedSender(w http.ResponseWriter, r *http.Request) 
 	}
 	id := newID("blk")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	_, err := a.db.ExecContext(r.Context(), `INSERT INTO blocked_senders(id,user_id,mailbox_id,email,reason,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?)
-		ON CONFLICT(user_id,mailbox_id,email) DO UPDATE SET reason=excluded.reason,updated_at=excluded.updated_at`,
+	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO blocked_senders(id,user_id,mailbox_id,email,reason,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?)`, `(user_id,mailbox_id,email)`,
+		`reason=excluded.reason,updated_at=excluded.updated_at`,
+		`reason=VALUES(reason),updated_at=VALUES(updated_at)`)
+	_, err := a.db.ExecContext(r.Context(), query,
 		id, user.ID, mailboxID, email, strings.TrimSpace(req.Reason), now, now)
 	if err != nil {
 		badRequest(w, err)
@@ -1340,7 +1344,8 @@ func (a *App) applyRuleLabel(ctx context.Context, mailboxID, messageID string, a
 			return err
 		}
 	}
-	_, err = a.db.ExecContext(ctx, `INSERT OR IGNORE INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, messageID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, `(message_id,label_id)`)
+	_, err = a.db.ExecContext(ctx, query, messageID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
 	return err
 }
 

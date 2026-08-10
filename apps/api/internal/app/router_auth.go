@@ -314,8 +314,7 @@ func (a *App) authenticateAPIToken(r *http.Request) (*User, map[string]bool, err
 	lastUsed, lastUsedErr := time.Parse(time.RFC3339Nano, lastUsedAt.String)
 	cutoff := nowTime.Add(-time.Minute)
 	if !lastUsedAt.Valid || lastUsedErr != nil || lastUsed.Before(cutoff) {
-		_, _ = a.db.ExecContext(r.Context(), `UPDATE api_tokens SET last_used_at=?
-			WHERE id=? AND (last_used_at IS NULL OR julianday(last_used_at) < julianday(?))`, now, tokenID, cutoff.Format(time.RFC3339Nano))
+		_, _ = a.db.ExecContext(r.Context(), apiTokenLastUsedUpdateSQL(a.cfg.DBDriver), now, tokenID, cutoff.Format(time.RFC3339Nano))
 	}
 	scopes := map[string]bool{}
 	for _, scope := range jsonDecodeSlice(scopesJSON) {

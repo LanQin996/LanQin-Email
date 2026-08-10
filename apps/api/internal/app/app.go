@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
 )
 
 type App struct {
@@ -42,24 +41,28 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create db dir: %w", err)
+	cfg = normalizeDatabaseConfig(cfg)
+	if cfg.DBDriver == databaseDriverSQLite {
+		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create db dir: %w", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "attachments"), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", cfg.DBPath)
+	db, err := openDatabase(context.Background(), cfg)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 
 	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
 	a.externalIMAP = a
-	if err := a.configureSQLite(context.Background()); err != nil {
-		db.Close()
-		return nil, err
+	if cfg.DBDriver == databaseDriverSQLite {
+		if err := a.configureSQLite(context.Background()); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	if err := a.migrate(context.Background()); err != nil {
 		db.Close()
@@ -124,6 +127,13 @@ func (a *App) configureSQLite(ctx context.Context) error {
 }
 
 func (a *App) migrate(ctx context.Context) error {
+	if a.cfg.DBDriver != databaseDriverSQLite {
+		if err := initializeExternalSchema(ctx, a.db, a.cfg.DBDriver); err != nil {
+			return err
+		}
+		return a.ensureDefaultPermissionGroups(ctx)
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -350,7 +360,11 @@ func (a *App) migrate(ctx context.Context) error {
 			error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created ON send_audit_events(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created_id ON send_audit_events(created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_mailbox_created_id ON send_audit_events(mailbox_id,created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_event_created_id ON send_audit_events(event,created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_queue_created_id ON send_audit_events(queue_id,created_at,id)`,
+		`DROP INDEX IF EXISTS idx_send_audit_events_created`,
 		`CREATE TABLE IF NOT EXISTS delivery_events (
 			id TEXT PRIMARY KEY,
 			external_id TEXT NOT NULL,

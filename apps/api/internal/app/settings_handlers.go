@@ -444,8 +444,10 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 	}
 	defer tx.Rollback()
 	for key, value := range values {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)
-			ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at`, key, value, now); err != nil {
+		query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(key,value,updated_at) VALUES(?,?,?)`, `(key)`,
+			`value=excluded.value,updated_at=excluded.updated_at`,
+			`value=VALUES(value),updated_at=VALUES(updated_at)`)
+		if _, err := tx.ExecContext(ctx, query, key, value, now); err != nil {
 			return err
 		}
 	}
