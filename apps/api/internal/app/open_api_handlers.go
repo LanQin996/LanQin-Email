@@ -503,7 +503,7 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	limit := parseOpenAPILimit(r, 30, 100)
-	cursorReceivedAt, cursorID, offset, err := parseOpenAPIMessageCursor(r.URL.Query().Get("cursor"))
+	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
 	if err != nil {
 		badRequest(w, err)
 		return
@@ -524,8 +524,8 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 		args = append(args, like, like, like, like, like, like)
 	}
 	if cursorReceivedAt != "" {
-		where += " AND (m.received_at<? OR (m.received_at=? AND m.id<?))"
-		args = append(args, cursorReceivedAt, cursorReceivedAt, cursorID)
+		where += " AND (m.received_at,m.id) < (?,?)"
+		args = append(args, cursorReceivedAt, cursorID)
 	}
 	args = append(args, limit+1)
 	query := `SELECT m.id,m.mailbox_id,m.folder_id,f.name,m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
@@ -559,7 +559,7 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 	if len(items) > limit {
 		items = items[:limit]
 		last := items[len(items)-1]
-		nextCursor = encodeOpenAPIMessageCursor(last.ReceivedAt, last.ID)
+		nextCursor = encodeMessageListCursor(last.ReceivedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": nextCursor})
 }
@@ -719,44 +719,9 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-type openAPIMessageCursor struct {
-	ReceivedAt string `json:"receivedAt"`
-	ID         string `json:"id"`
-}
-
 type openAPIListCursor struct {
 	Sort string `json:"sort"`
 	ID   string `json:"id"`
-}
-
-func encodeOpenAPIMessageCursor(receivedAt time.Time, id string) string {
-	payload, _ := json.Marshal(openAPIMessageCursor{ReceivedAt: receivedAt.UTC().Format(time.RFC3339Nano), ID: id})
-	return base64.RawURLEncoding.EncodeToString(payload)
-}
-
-func parseOpenAPIMessageCursor(raw string) (receivedAt, id string, offset int, err error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return "", "", 0, nil
-	}
-	if n, convErr := strconv.Atoi(raw); convErr == nil {
-		if n < 0 {
-			return "", "", 0, errors.New("invalid cursor")
-		}
-		return "", "", n, nil
-	}
-	data, err := base64.RawURLEncoding.DecodeString(raw)
-	if err != nil {
-		return "", "", 0, errors.New("invalid cursor")
-	}
-	var cursor openAPIMessageCursor
-	if err := json.Unmarshal(data, &cursor); err != nil || cursor.ReceivedAt == "" || cursor.ID == "" {
-		return "", "", 0, errors.New("invalid cursor")
-	}
-	if _, err := time.Parse(time.RFC3339Nano, cursor.ReceivedAt); err != nil {
-		return "", "", 0, errors.New("invalid cursor")
-	}
-	return cursor.ReceivedAt, cursor.ID, 0, nil
 }
 
 func encodeOpenAPIListCursor(sortValue, id string) string {

@@ -403,9 +403,10 @@ func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, where string, args []any) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
 	limit := mailMessagesPageSize
 
@@ -414,9 +415,17 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 		like := "%" + q + "%"
 		args = append(args, like, like, like, like, like)
 	}
-	args = append(args, limit+1, offset)
+	if cursorReceivedAt != "" {
+		where += ` AND (m.received_at,m.id) < (?,?)`
+		args = append(args, cursorReceivedAt, cursorID)
+	}
+	args = append(args, limit+1)
 	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
-		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`
+		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
 	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
@@ -432,10 +441,15 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, whe
 		}
 		items = append(items, msg)
 	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load messages")
+		return
+	}
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeMessageListCursor(last.ReceivedAt, last.ID)
 	}
 	if err := a.attachLabelsToMessages(r.Context(), items); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load labels")

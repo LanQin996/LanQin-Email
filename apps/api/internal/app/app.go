@@ -284,9 +284,11 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received_id ON messages(mailbox_id, folder_id, received_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, is_read)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received ON messages(mailbox_id, received_at DESC) WHERE is_starred=1`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received_id ON messages(mailbox_id, received_at DESC, id DESC) WHERE is_starred=1`,
+		`DROP INDEX IF EXISTS idx_messages_mailbox_folder_received`,
+		`DROP INDEX IF EXISTS idx_messages_mailbox_starred_received`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
@@ -1149,9 +1151,9 @@ func (a *App) migrateMessagesFromName(ctx context.Context) error {
 
 func messageIndexes() []string {
 	return []string{
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received_id ON messages(mailbox_id, folder_id, received_at DESC, id DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, is_read)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received ON messages(mailbox_id, received_at DESC) WHERE is_starred=1`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received_id ON messages(mailbox_id, received_at DESC, id DESC) WHERE is_starred=1`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,

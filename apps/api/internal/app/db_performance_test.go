@@ -31,10 +31,16 @@ func TestPerformanceIndexesCoverHotMailboxQueries(t *testing.T) {
 			args:      []any{"fld_test", 0},
 		},
 		{
+			name:      "folder message list",
+			indexName: "idx_messages_mailbox_folder_received_id",
+			query:     `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND (received_at,id)<(?,?) ORDER BY received_at DESC,id DESC LIMIT 31`,
+			args:      []any{"mb_test", "fld_test", "2026-01-01T00:00:00Z", "mail_test"},
+		},
+		{
 			name:      "starred message list",
-			indexName: "idx_messages_mailbox_starred_received",
-			query:     `SELECT id FROM messages WHERE mailbox_id=? AND is_starred=1 ORDER BY received_at DESC LIMIT 51`,
-			args:      []any{"mb_test"},
+			indexName: "idx_messages_mailbox_starred_received_id",
+			query:     `SELECT id FROM messages WHERE mailbox_id=? AND is_starred=1 AND (received_at,id)<(?,?) ORDER BY received_at DESC,id DESC LIMIT 31`,
+			args:      []any{"mb_test", "2026-01-01T00:00:00Z", "mail_test"},
 		},
 		{
 			name:      "maildir message id lookup",
