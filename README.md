@@ -148,6 +148,8 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_PUBLIC_BASE_URL` | Public Webmail URL | `https://mail.example.com` |
 | `LANQIN_ADMIN_EMAIL` | Initial admin email | `admin@example.com` |
 | `LANQIN_ADMIN_PASSWORD` | Initial admin password; must be changed in production | `ChangeMe123!` |
+| `LANQIN_DB_DRIVER` | API database driver: `sqlite`, `mysql`, or `postgres` | `sqlite` |
+| `LANQIN_DATABASE_URL` | MySQL DSN or PostgreSQL URL; required for external databases | Empty |
 | `LANQIN_DB_PATH` | SQLite database path | `/data/lanqin.db` |
 | `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging | `false` |
 | `LANQIN_OPEN_REGISTRATION` | Enable public registration | `false` |
@@ -165,6 +167,21 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook external IMAP OAuth2; callback is `/api/external-imap-oauth/outlook/callback` | Empty |
 
 ## Architecture
+
+The all-in-one deployment supports SQLite, MySQL 8.4, and PostgreSQL 16. SQLite remains the default. Add one database override to the base Compose file when selecting MySQL or PostgreSQL. Existing SQLite data is not migrated automatically.
+
+```bash
+# SQLite (default)
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+
+# MySQL 8.4
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml up -d
+
+# PostgreSQL 16
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+```
+
+Each variant keeps Nginx, the API, Postfix, Dovecot, and Rspamd in the existing `lanqin-email` container and adds only one database container. See `deploy/.env.example` for the required passwords.
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
@@ -189,6 +206,10 @@ Mail flow:
 3. **Local delivery**: In development, internal mailboxes can send directly into the recipient Inbox; if `LANQIN_SMTP_HOST` is not configured, external recipients are not actually delivered.
 4. **Third-party clients**: Connect with SMTP 465/587, IMAP 993, or POP3 995; in production, configure certificates that match `LANQIN_PUBLIC_HOSTNAME`.
 5. **External mailbox access**: Users can add external IMAP accounts in personal mailbox management. Local-storage mode syncs mail into the database; remote-direct mode reads from the remote server each time and does not write into local mail tables.
+
+## Open API
+
+External integrations should use the versioned `/api/open/v1` endpoints with scoped API Tokens. See the [API guide](docs/API.md) and the machine-readable [OpenAPI 3.1 contract](docs/openapi.json). Sending supports idempotency keys; final delivery events can be ingested through a signed endpoint and all status changes can be pushed through the reliable signed webhook outbox.
 
 ## Development and Verification
 

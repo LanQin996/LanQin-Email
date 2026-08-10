@@ -23,6 +23,31 @@ type AdminUser struct {
 	Mailboxes    []string `json:"mailboxes"`
 }
 
+type APIToken struct {
+	ID         string     `json:"id"`
+	Name       string     `json:"name"`
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	ExpiresAt  *time.Time `json:"expiresAt,omitempty"`
+	Disabled   bool       `json:"disabled"`
+	Scopes     []string   `json:"scopes"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	UpdatedAt  time.Time  `json:"updatedAt"`
+}
+
+type DeliveryEvent struct {
+	ID           string    `json:"id"`
+	ExternalID   string    `json:"externalId"`
+	Provider     string    `json:"provider"`
+	QueueID      string    `json:"queueId"`
+	MessageID    string    `json:"messageId"`
+	RFCMessageID string    `json:"rfcMessageId"`
+	Recipient    string    `json:"recipient"`
+	Status       string    `json:"status"`
+	Reason       string    `json:"reason,omitempty"`
+	OccurredAt   time.Time `json:"occurredAt"`
+	CreatedAt    time.Time `json:"createdAt"`
+}
+
 type Domain struct {
 	ID            string     `json:"id"`
 	Name          string     `json:"name"`
@@ -35,35 +60,66 @@ type Domain struct {
 }
 
 type Mailbox struct {
-	ID                   string    `json:"id"`
-	UserID               string    `json:"userId"`
-	UserEmail            string    `json:"userEmail,omitempty"`
-	DomainID             string    `json:"domainId"`
-	LocalPart            string    `json:"localPart"`
-	Address              string    `json:"address"`
-	DisplayName          string    `json:"displayName"`
-	QuotaMB              int       `json:"quotaMb"`
-	Status               string    `json:"status"`
-	CreatedAt            time.Time `json:"createdAt"`
-	Access               string    `json:"access,omitempty"`
-	SharedBy             string    `json:"sharedBy,omitempty"`
-	ShareScope           string    `json:"shareScope,omitempty"`
-	ShareIncludesStarred bool      `json:"shareIncludesStarred,omitempty"`
+	ID                     string    `json:"id"`
+	UserID                 string    `json:"userId"`
+	UserEmail              string    `json:"userEmail,omitempty"`
+	DomainID               string    `json:"domainId"`
+	LocalPart              string    `json:"localPart"`
+	Address                string    `json:"address"`
+	DisplayName            string    `json:"displayName"`
+	QuotaMB                int       `json:"quotaMb"`
+	Status                 string    `json:"status"`
+	CreatedAt              time.Time `json:"createdAt"`
+	Access                 string    `json:"access,omitempty"`
+	SharedBy               string    `json:"sharedBy,omitempty"`
+	ShareScope             string    `json:"shareScope,omitempty"`
+	ShareIncludesStarred   bool      `json:"shareIncludesStarred,omitempty"`
+	ShareAllowsAttachments bool      `json:"shareAllowsAttachments,omitempty"`
 }
 
 type MailboxShare struct {
 	ID               string     `json:"id"`
 	MailboxID        string     `json:"mailboxId"`
 	MailboxAddress   string     `json:"mailboxAddress"`
+	OwnerUserID      string     `json:"ownerUserId"`
+	OwnerEmail       string     `json:"ownerEmail"`
+	OwnerName        string     `json:"ownerName"`
 	SharedWithUserID string     `json:"sharedWithUserId"`
 	SharedWithEmail  string     `json:"sharedWithEmail"`
 	SharedWithName   string     `json:"sharedWithName"`
 	Scope            string     `json:"scope"`
 	IncludeStarred   bool       `json:"includeStarred"`
 	FolderIDs        []string   `json:"folderIds"`
+	FolderNames      []string   `json:"folderNames"`
 	LabelIDs         []string   `json:"labelIds"`
+	LabelNames       []string   `json:"labelNames"`
+	AllowAttachments bool       `json:"allowAttachments"`
+	Version          int        `json:"version"`
+	Status           string     `json:"status"`
 	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
+	LastAccessedAt   *time.Time `json:"lastAccessedAt,omitempty"`
+	RevokedAt        *time.Time `json:"revokedAt,omitempty"`
+	LeftAt           *time.Time `json:"leftAt,omitempty"`
 	CreatedAt        time.Time  `json:"createdAt"`
+}
+
+type MailboxShareAuditEvent struct {
+	ID         string         `json:"id"`
+	ShareID    string         `json:"shareId"`
+	ActorEmail string         `json:"actorEmail"`
+	Event      string         `json:"event"`
+	Details    map[string]any `json:"details"`
+	CreatedAt  time.Time      `json:"createdAt"`
+}
+
+type UserNotification struct {
+	ID        string         `json:"id"`
+	Type      string         `json:"type"`
+	Title     string         `json:"title"`
+	Body      string         `json:"body"`
+	Data      map[string]any `json:"data"`
+	ReadAt    *time.Time     `json:"readAt,omitempty"`
+	CreatedAt time.Time      `json:"createdAt"`
 }
 
 type Alias struct {

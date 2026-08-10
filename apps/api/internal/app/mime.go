@@ -79,8 +79,9 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 		return nil, err
 	}
 
-	for _, att := range m.Attachments {
-		data, err := base64.StdEncoding.DecodeString(att.ContentBase64)
+	for i := range m.Attachments {
+		att := &m.Attachments[i]
+		data, err := att.contentBytes()
 		if err != nil {
 			return nil, err
 		}

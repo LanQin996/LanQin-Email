@@ -38,10 +38,31 @@ type maildirFolder struct {
 	Role string
 }
 
+type knownMaildirFile struct {
+	MailboxID string
+	FolderID  string
+	IsRead    bool
+	IsStarred bool
+}
+
 type parsedMail struct {
 	Text        string
 	HTML        string
 	Attachments []AttachmentInput
+}
+
+const maildirFullScanEvery = 20
+
+type maildirDirectorySignature struct {
+	Exists      bool
+	ModTimeNano int64
+	Size        int64
+}
+
+type maildirScanTarget struct {
+	Mailbox   maildirMailbox
+	Folder    maildirFolder
+	Directory string
 }
 
 func (a *App) maildirWorker(ctx context.Context) {
@@ -49,8 +70,7 @@ func (a *App) maildirWorker(ctx context.Context) {
 	if interval <= 0 {
 		interval = 30 * time.Second
 	}
-	nextRunAt := a.now().UTC()
-	a.maildirHealth.markWorkerStarted(&nextRunAt)
+	a.maildirHealth.markWorkerStarted(nil)
 	a.log.Info("maildir sync worker started", "root", a.cfg.MaildirRoot, "interval", interval.String())
 	if counts, err := a.syncMaildirOnceTracked(ctx, interval); err != nil {
 		a.log.Warn("initial maildir sync failed", "error", err)
@@ -102,61 +122,127 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 	if root == "" {
 		return maildirSyncCounts{}, nil
 	}
+	a.maildirSyncMu.Lock()
+	defer a.maildirSyncMu.Unlock()
+
 	mailboxes, err := a.maildirMailboxes(ctx)
 	if err != nil {
 		return maildirSyncCounts{}, err
 	}
+	targets, err := a.maildirScanTargets(ctx, root, mailboxes)
+	if err != nil {
+		return maildirSyncCounts{}, err
+	}
+	if a.maildirDirs == nil {
+		a.maildirDirs = make(map[string]maildirDirectorySignature)
+	}
+	a.maildirRuns++
+	fullScan := a.maildirRuns == 1 || a.maildirRuns%maildirFullScanEvery == 0
+	type pendingDirectory struct {
+		target    maildirScanTarget
+		signature maildirDirectorySignature
+	}
+	pending := make([]pendingDirectory, 0, len(targets))
 	counts := maildirSyncCounts{}
-	for _, mb := range mailboxes {
-		if mb.Unregistered {
-			mbCounts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
-			counts.FilesScanned += mbCounts.FilesScanned
-			counts.Imported += mbCounts.Imported
-			counts.FileErrors += mbCounts.FileErrors
-			counts.fileErrorDetails = append(counts.fileErrorDetails, mbCounts.fileErrorDetails...)
-			if err != nil {
-				return counts, err
-			}
-			continue
+	for _, target := range targets {
+		select {
+		case <-ctx.Done():
+			return counts, ctx.Err()
+		default:
 		}
-		folders, err := a.maildirFolders(ctx, mb.ID)
+		counts.DirectoriesChecked++
+		signature, err := statMaildirDirectory(target.Directory)
 		if err != nil {
 			return counts, err
 		}
-		base := filepath.Join(root, mb.Domain, mb.LocalPart, "Maildir")
-		for _, folder := range folders {
-			folderBase := maildirFolderPath(base, folder.Name)
-			for _, sub := range []string{"new", "cur"} {
-				select {
-				case <-ctx.Done():
-					return counts, ctx.Err()
-				default:
+		previous, known := a.maildirDirs[target.Directory]
+		if !fullScan && known && previous == signature {
+			continue
+		}
+		counts.DirectoriesScanned++
+		pending = append(pending, pendingDirectory{target: target, signature: signature})
+	}
+
+	knownFiles := map[string]knownMaildirFile{}
+	if len(pending) > 0 {
+		knownFiles, err = a.knownMaildirFiles(ctx)
+		if err != nil {
+			return counts, err
+		}
+	}
+	seenFiles := make(map[string]struct{}, len(knownFiles))
+	scannedDirs := make(map[string]struct{}, len(pending))
+	for _, item := range pending {
+		target := item.target
+		dir := target.Directory
+		scannedDirs[dir] = struct{}{}
+		fileErrorsBefore := counts.FileErrors
+		entries, err := os.ReadDir(dir)
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return counts, err
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
+				continue
+			}
+			path := filepath.Join(dir, entry.Name())
+			seenFiles[path] = struct{}{}
+			counts.FilesScanned++
+			if target.Mailbox.Unregistered {
+				if state, ok := knownFiles[path]; ok && state.MailboxID == "" {
+					continue
 				}
-				dir := filepath.Join(folderBase, sub)
-				entries, err := os.ReadDir(dir)
+				ok, err := a.syncUnregisteredMaildirFile(ctx, target.Mailbox, path)
 				if err != nil {
-					if errors.Is(err, os.ErrNotExist) {
-						continue
-					}
-					return counts, err
+					counts.FileErrors++
+					counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
+					a.log.Warn("unregistered maildir file import failed", "path", path, "error", err)
+					continue
 				}
-				for _, entry := range entries {
-					if entry.IsDir() || strings.HasPrefix(entry.Name(), ".") {
-						continue
-					}
-					path := filepath.Join(dir, entry.Name())
-					counts.FilesScanned++
-					ok, err := a.syncMaildirFile(ctx, mb, folder, path)
-					if err != nil {
-						counts.FileErrors++
-						counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
-						a.log.Warn("maildir file import failed", "path", path, "error", err)
-						continue
-					}
-					if ok {
-						counts.Imported++
-					}
+				if ok {
+					counts.Imported++
 				}
+				continue
+			}
+			handled, err := a.syncKnownMaildirFileState(ctx, target.Mailbox, target.Folder, path, knownFiles)
+			if err != nil {
+				counts.FileErrors++
+				counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
+				a.log.Warn("maildir state sync failed", "path", path, "error", err)
+				continue
+			}
+			if handled {
+				continue
+			}
+			ok, err := a.syncMaildirFile(ctx, target.Mailbox, target.Folder, path)
+			if err != nil {
+				counts.FileErrors++
+				counts.fileErrorDetails = append(counts.fileErrorDetails, fmt.Sprintf("%s: %v", path, err))
+				a.log.Warn("maildir file import failed", "path", path, "error", err)
+				continue
+			}
+			if ok {
+				counts.Imported++
+			}
+		}
+		after, err := statMaildirDirectory(dir)
+		if err != nil {
+			return counts, err
+		}
+		if counts.FileErrors == fileErrorsBefore && after == item.signature {
+			a.maildirDirs[dir] = after
+		} else {
+			delete(a.maildirDirs, dir)
+		}
+	}
+	if fullScan {
+		activeDirs := make(map[string]struct{}, len(targets))
+		for _, target := range targets {
+			activeDirs[target.Directory] = struct{}{}
+		}
+		for dir := range a.maildirDirs {
+			if _, active := activeDirs[dir]; !active {
+				delete(a.maildirDirs, dir)
 			}
 		}
 	}
@@ -165,12 +251,83 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 		return counts, err
 	}
 	counts.Backfilled += backfilled
-	cleaned, err := a.cleanupMissingMaildirMessages(ctx)
+	cleaned, err := a.cleanupMissingMaildirMessages(ctx, seenFiles, scannedDirs, fullScan)
 	if err != nil {
 		return counts, err
 	}
 	counts.Cleaned += cleaned
 	return counts, nil
+}
+
+func (a *App) maildirScanTargets(ctx context.Context, root string, mailboxes []maildirMailbox) ([]maildirScanTarget, error) {
+	targets := make([]maildirScanTarget, 0, len(mailboxes)*2)
+	for _, mb := range mailboxes {
+		base := filepath.Join(root, mb.Domain, mb.LocalPart, "Maildir")
+		if mb.Unregistered {
+			for _, sub := range []string{"new", "cur"} {
+				targets = append(targets, maildirScanTarget{Mailbox: mb, Directory: filepath.Clean(filepath.Join(base, sub))})
+			}
+			continue
+		}
+		folders, err := a.maildirFolders(ctx, mb.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, folder := range folders {
+			folderBase := maildirFolderPath(base, folder.Name)
+			for _, sub := range []string{"new", "cur"} {
+				targets = append(targets, maildirScanTarget{Mailbox: mb, Folder: folder, Directory: filepath.Clean(filepath.Join(folderBase, sub))})
+			}
+		}
+	}
+	return targets, nil
+}
+
+func statMaildirDirectory(path string) (maildirDirectorySignature, error) {
+	info, err := os.Stat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return maildirDirectorySignature{}, nil
+	}
+	if err != nil {
+		return maildirDirectorySignature{}, err
+	}
+	if !info.IsDir() {
+		return maildirDirectorySignature{}, fmt.Errorf("maildir path is not a directory: %s", path)
+	}
+	return maildirDirectorySignature{Exists: true, ModTimeNano: info.ModTime().UnixNano(), Size: info.Size()}, nil
+}
+
+func (a *App) knownMaildirFiles(ctx context.Context) (map[string]knownMaildirFile, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT COALESCE(mailbox_id,''),COALESCE(folder_id,''),raw_path,is_read,is_starred FROM messages WHERE raw_path<>''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	files := map[string]knownMaildirFile{}
+	for rows.Next() {
+		var path string
+		var state knownMaildirFile
+		var read, starred int
+		if err := rows.Scan(&state.MailboxID, &state.FolderID, &path, &read, &starred); err != nil {
+			return nil, err
+		}
+		state.IsRead = intBool(read)
+		state.IsStarred = intBool(starred)
+		files[path] = state
+	}
+	return files, rows.Err()
+}
+
+func (a *App) syncKnownMaildirFileState(ctx context.Context, mb maildirMailbox, folder maildirFolder, path string, knownFiles map[string]knownMaildirFile) (bool, error) {
+	state, ok := knownFiles[path]
+	if !ok || state.MailboxID != mb.ID {
+		return false, nil
+	}
+	read, starred := maildirFlagsFromPath(path, folder.Name)
+	if state.FolderID == folder.ID && state.IsRead == read && state.IsStarred == starred {
+		return true, nil
+	}
+	return a.syncExistingMaildirMessageState(ctx, mb.ID, folder.ID, path, "", read, starred)
 }
 
 func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
@@ -217,11 +374,15 @@ func (a *App) maildirMailboxes(ctx context.Context) ([]maildirMailbox, error) {
 }
 
 func (a *App) syncUnregisteredMaildir(ctx context.Context, mb maildirMailbox) (int, error) {
-	counts, err := a.syncUnregisteredMaildirDetailed(ctx, mb)
+	knownFiles, err := a.knownMaildirFiles(ctx)
+	if err != nil {
+		return 0, err
+	}
+	counts, err := a.syncUnregisteredMaildirDetailed(ctx, mb, knownFiles, make(map[string]struct{}))
 	return counts.Imported, err
 }
 
-func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMailbox) (maildirSyncCounts, error) {
+func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMailbox, knownFiles map[string]knownMaildirFile, seenFiles map[string]struct{}) (maildirSyncCounts, error) {
 	base := filepath.Join(strings.TrimSpace(a.cfg.MaildirRoot), mb.Domain, mb.LocalPart, "Maildir")
 	counts := maildirSyncCounts{}
 	for _, sub := range []string{"new", "cur"} {
@@ -243,7 +404,11 @@ func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMai
 				continue
 			}
 			path := filepath.Join(dir, entry.Name())
+			seenFiles[path] = struct{}{}
 			counts.FilesScanned++
+			if state, ok := knownFiles[path]; ok && state.MailboxID == "" {
+				continue
+			}
 			ok, err := a.syncUnregisteredMaildirFile(ctx, mb, path)
 			if err != nil {
 				counts.FileErrors++
@@ -512,12 +677,15 @@ func (a *App) removeDuplicateMaildirMessage(ctx context.Context, rawPath, mailbo
 	a.removeMaildirPath(ctx, rawPath)
 }
 
-func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
+func (a *App) cleanupMissingMaildirMessages(ctx context.Context, seenFiles, scannedDirs map[string]struct{}, fullScan bool) (int, error) {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
 		return 0, nil
 	}
+	if !fullScan && len(scannedDirs) == 0 {
+		return 0, nil
+	}
 	cutoff := a.now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE COALESCE(mailbox_id,'')<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE mailbox_id IS NOT NULL AND mailbox_id<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
 	if err != nil {
 		return 0, err
 	}
@@ -538,6 +706,14 @@ func (a *App) cleanupMissingMaildirMessages(ctx context.Context) (int, error) {
 			return 0, err
 		}
 		if !ok {
+			continue
+		}
+		if !fullScan {
+			if _, scanned := scannedDirs[filepath.Clean(filepath.Dir(it.RawPath))]; !scanned {
+				continue
+			}
+		}
+		if _, seen := seenFiles[it.RawPath]; seen {
 			continue
 		}
 		if _, err := os.Stat(it.RawPath); errors.Is(err, os.ErrNotExist) {

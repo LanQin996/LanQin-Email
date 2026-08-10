@@ -1,0 +1,48 @@
+name: Bug report / Bug 报告
+description: Report something that is not working as expected. / 报告异常或不可用的问题。
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in Chinese or English.
+
+        你可以使用中文或英文填写。
+
+        Please do not include passwords, tokens, API keys, verification codes, session cookies, private keys, real mailbox lists, or unreleased security vulnerability details.
+
+        请不要粘贴密码、Token、API Key、验证码、Session Cookie、私钥、真实邮箱列表，或未公开安全漏洞细节。
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / 详情
+      description: What happened? What did you expect instead? / 发生了什么？你原本期望什么？
+      placeholder: "Example / 示例：发送邮件失败，页面提示 500。"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      description: The LanQin Email version you are using. / 你正在使用的 LanQin Email 版本。
+      placeholder: "v1.2.3"
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境（可选）
+      description: Add browser, OS, deployment mode, or related config only if helpful. / 如果有帮助，可以补充浏览器、系统、部署方式或相关配置。
+      placeholder: |
+        Browser and OS:
+        Deployment: Docker / local / not sure
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or steps / 日志、截图或复现步骤（可选）
+      description: Redact secrets and personal data before posting. / 粘贴前请先隐藏敏感信息和个人数据。

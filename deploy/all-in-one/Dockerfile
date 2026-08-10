@@ -28,9 +28,9 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
   rm -f /etc/apt/apt.conf.d/docker-clean && \
   apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates tzdata sqlite3 supervisor nginx \
-    postfix postfix-sqlite \
-    dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite ssl-cert \
+    ca-certificates tzdata curl sqlite3 default-mysql-client postgresql-client supervisor nginx \
+    postfix postfix-sqlite postfix-mysql postfix-pgsql \
+    dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-sqlite dovecot-mysql dovecot-pgsql ssl-cert \
     rspamd
 
 COPY --from=api-build /out/lanqin-api /usr/local/bin/lanqin-api
@@ -43,12 +43,14 @@ COPY deploy/all-in-one/entrypoint.sh /entrypoint.sh
 COPY deploy/postfix/main.cf /etc/postfix/main.cf
 COPY deploy/postfix/master.cf /etc/postfix/master.cf
 COPY deploy/postfix/sqlite-*.cf /etc/postfix/
+COPY deploy/postfix/configure-db.sh /usr/local/bin/lanqin-postfix-configure-db
 COPY deploy/dovecot/dovecot.conf /etc/dovecot/dovecot.conf
 COPY deploy/dovecot/dovecot-sql.conf.ext /etc/dovecot/dovecot-sql.conf.ext
+COPY deploy/dovecot/configure-db.sh /usr/local/bin/lanqin-dovecot-configure-db
 COPY deploy/rspamd/local.d/ /etc/rspamd/local.d/
 COPY deploy/rspamd/sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
 
-RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim && mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim
+RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim /usr/local/bin/lanqin-postfix-configure-db /usr/local/bin/lanqin-dovecot-configure-db && mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim
 
 EXPOSE 80 443 25 465 587 993 995
 CMD ["/entrypoint.sh"]

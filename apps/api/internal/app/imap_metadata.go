@@ -165,7 +165,8 @@ func (a *App) backfillFolderIMAPUIDs(ctx context.Context, folderID string) error
 	if err := a.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(imap_uid),0),COALESCE(MAX(imap_modseq),1) FROM messages WHERE folder_id=?`, folderID).Scan(&maxUID, &maxModSeq); err != nil {
 		return err
 	}
-	_, err = a.db.ExecContext(ctx, `UPDATE folders SET uid_next=MAX(uid_next,?),highest_modseq=MAX(highest_modseq,?) WHERE id=?`, maxUID+1, maxModSeq, folderID)
+	query := `UPDATE folders SET uid_next=` + scalarMaxSQL(a.cfg.DBDriver, "uid_next", "?") + `,highest_modseq=` + scalarMaxSQL(a.cfg.DBDriver, "highest_modseq", "?") + ` WHERE id=?`
+	_, err = a.db.ExecContext(ctx, query, maxUID+1, maxModSeq, folderID)
 	return err
 }
 
@@ -197,7 +198,8 @@ func (a *App) nextIMAPMetadata(ctx context.Context, db dbExecutor, folderID stri
 	if nextModSeq < 1 {
 		nextModSeq = 1
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE folders SET uid_next=?,highest_modseq=MAX(highest_modseq,?) WHERE id=?`, nextUID+1, nextModSeq, folderID); err != nil {
+	query := `UPDATE folders SET uid_next=?,highest_modseq=` + scalarMaxSQL(a.cfg.DBDriver, "highest_modseq", "?") + ` WHERE id=?`
+	if _, err := db.ExecContext(ctx, query, nextUID+1, nextModSeq, folderID); err != nil {
 		return imapMetadata{}, err
 	}
 	return imapMetadata{UID: nextUID, ModSeq: nextModSeq}, nil
@@ -226,7 +228,8 @@ func (a *App) bumpFolderModSeqWithDB(ctx context.Context, db dbExecutor, folderI
 	if next < 1 || next == math.MaxInt64 {
 		next = current
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE folders SET highest_modseq=MAX(highest_modseq,?) WHERE id=?`, next, folderID); err != nil {
+	query := `UPDATE folders SET highest_modseq=` + scalarMaxSQL(a.cfg.DBDriver, "highest_modseq", "?") + ` WHERE id=?`
+	if _, err := db.ExecContext(ctx, query, next, folderID); err != nil {
 		return 0, err
 	}
 	return next, nil

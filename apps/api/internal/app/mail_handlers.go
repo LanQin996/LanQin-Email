@@ -28,6 +28,22 @@ type AttachmentInput struct {
 	Filename      string `json:"filename"`
 	ContentType   string `json:"contentType"`
 	ContentBase64 string `json:"contentBase64"`
+
+	decodedContent []byte `json:"-"`
+	contentDecoded bool   `json:"-"`
+}
+
+func (a *AttachmentInput) contentBytes() ([]byte, error) {
+	if a.contentDecoded {
+		return a.decodedContent, nil
+	}
+	data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(a.ContentBase64))
+	if err != nil {
+		return nil, err
+	}
+	a.decodedContent = data
+	a.contentDecoded = true
+	return data, nil
 }
 
 type storedMessage struct {
@@ -57,12 +73,12 @@ func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	ownedOnly := r.URL.Query().Get("owned") == "1"
 	rows, err := a.db.QueryContext(r.Context(), `SELECT mb.id,mb.user_id,mb.domain_id,mb.local_part,mb.address,mb.display_name,mb.quota_mb,mb.status,mb.created_at,
-		u.email,CASE WHEN mb.user_id=? THEN 'owner' ELSE 'read' END,CASE WHEN mb.user_id=? THEN '' ELSE u.email END,COALESCE(ms.scope,''),COALESCE(ms.include_starred,0)
+		u.email,CASE WHEN mb.user_id=? THEN 'owner' ELSE 'read' END,CASE WHEN mb.user_id=? THEN '' ELSE u.email END,COALESCE(ms.scope,''),COALESCE(ms.include_starred,0),COALESCE(ms.allow_attachments,1)
 		FROM mailboxes mb
 		JOIN domains d ON d.id=mb.domain_id
 		JOIN users u ON u.id=mb.user_id
 		LEFT JOIN mailbox_shares ms ON ms.mailbox_id=mb.id AND ms.owner_user_id=mb.user_id AND ms.shared_with_user_id=?
-			AND (ms.expires_at IS NULL OR ms.expires_at>?)
+			AND ms.revoked_at IS NULL AND ms.left_at IS NULL AND (ms.expires_at IS NULL OR ms.expires_at>?)
 		WHERE (mb.user_id=? OR (?=0 AND ms.id IS NOT NULL)) AND mb.status='active' AND d.status='active'
 		ORDER BY CASE WHEN mb.user_id=? THEN 0 ELSE 1 END,mb.address`, user.ID, user.ID, user.ID, a.now().UTC().Format(time.RFC3339Nano), user.ID, ownedOnly, user.ID)
 	if err != nil {
@@ -74,7 +90,7 @@ func (a *App) handleMyMailboxes(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m Mailbox
 		var created string
-		if err := rows.Scan(&m.ID, &m.UserID, &m.DomainID, &m.LocalPart, &m.Address, &m.DisplayName, &m.QuotaMB, &m.Status, &created, &m.UserEmail, &m.Access, &m.SharedBy, &m.ShareScope, &m.ShareIncludesStarred); err != nil {
+		if err := rows.Scan(&m.ID, &m.UserID, &m.DomainID, &m.LocalPart, &m.Address, &m.DisplayName, &m.QuotaMB, &m.Status, &created, &m.UserEmail, &m.Access, &m.SharedBy, &m.ShareScope, &m.ShareIncludesStarred, &m.ShareAllowsAttachments); err != nil {
 			respondError(w, http.StatusInternalServerError, "failed to scan mailboxes")
 			return
 		}
@@ -412,20 +428,34 @@ func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, access *mailboxReadAccess, where string, args []any) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
 	limit := mailMessagesPageSize
 
 	if q != "" {
-		where += ` AND (m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ?)`
-		like := "%" + q + "%"
-		args = append(args, like, like, like, like, like)
+		if a.canUseMessageFTS(q) {
+			where += ` AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`
+			args = append(args, messageFTSLiteralQuery(q, webmailSearchColumns))
+		} else {
+			where += ` AND (LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?))`
+			like := "%" + q + "%"
+			args = append(args, like, like, like, like, like)
+		}
 	}
-	args = append(args, limit+1, offset)
+	if cursorReceivedAt != "" {
+		where += ` AND (m.received_at,m.id) < (?,?)`
+		args = append(args, cursorReceivedAt, cursorID)
+	}
+	args = append(args, limit+1)
 	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
-		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC LIMIT ? OFFSET ?`
+		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
 	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
@@ -441,10 +471,15 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 		}
 		items = append(items, msg)
 	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load messages")
+		return
+	}
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeMessageListCursor(last.ReceivedAt, last.ID)
 	}
 	if err := a.attachLabelsToMessages(r.Context(), items); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load labels")
@@ -575,7 +610,8 @@ func (a *App) handleAddMessageLabel(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	_, err = a.db.ExecContext(r.Context(), `INSERT OR IGNORE INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, msg.ID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO message_labels(message_id,label_id,created_at) VALUES(?,?,?)`, `(message_id,label_id)`)
+	_, err = a.db.ExecContext(r.Context(), query, msg.ID, label.ID, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to add label")
 		return
@@ -737,6 +773,14 @@ var errSenderNotAuthorized = errors.New("sender address is not authorized")
 var errMailboxQuotaExceeded = errors.New("mailbox quota exceeded")
 
 func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput) (*MailMessage, error) {
+	return a.sendMailWithSource(ctx, user, mb, req, sendSourceWebmail)
+}
+
+func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, req mailComposeInput, source string) (*MailMessage, error) {
+	source = strings.TrimSpace(source)
+	if source == "" {
+		source = sendSourceWebmail
+	}
 	if err := validateAttachmentLimit(req.Attachments, userLimits(user)); err != nil {
 		return nil, err
 	}
@@ -788,8 +832,8 @@ func (a *App) sendMailNow(ctx context.Context, user *User, mb *Mailbox, req mail
 		a.deleteMessage(ctx, sentID)
 		return nil, fmt.Errorf("failed to store sent message in maildir: %w", err)
 	}
-	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
-	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: sendSourceWebmail, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
+	a.recordSendAudit(ctx, sendAuditAccepted, sendQueueStatusQueued, sendAuditInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, Source: source, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients})
+	if _, err := a.enqueueSend(ctx, sendQueueInput{UserID: user.ID, MailboxID: mb.ID, SentMessageID: sentID, MessageID: messageID, Source: source, MailFrom: fromAddress, HeaderFrom: fromAddress, Recipients: allRecipients, MIMEBytes: mimeBytes, Now: now}); err != nil {
 		a.deleteMessage(ctx, sentID)
 		return nil, fmt.Errorf("failed to enqueue delivery: %w", err)
 	}
@@ -861,28 +905,16 @@ func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLim
 	if limitBytes == 0 {
 		return nil
 	}
-	for _, att := range attachments {
-		decodedLen, err := decodedBase64Len(att.ContentBase64)
+	for i := range attachments {
+		decoded, err := attachments[i].contentBytes()
 		if err != nil {
 			return fmt.Errorf("%w: %v", errInvalidMIME, err)
 		}
-		if decodedLen > limitBytes {
+		if int64(len(decoded)) > limitBytes {
 			return fmt.Errorf("%w: max %d MB", errAttachmentTooLarge, limits.MaxAttachmentMB)
 		}
 	}
 	return nil
-}
-
-func decodedBase64Len(value string) (int64, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0, nil
-	}
-	data, err := base64.StdEncoding.DecodeString(value)
-	if err != nil {
-		return 0, err
-	}
-	return int64(len(data)), nil
 }
 
 var errIMAPRateLimited = errors.New("imap rate limit exceeded")
@@ -1924,7 +1956,13 @@ func (a *App) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
-	if _, err := a.loadMessageForReadRequest(r, messageID, false); err != nil {
+	message, err := a.loadMessageForReadRequest(r, messageID, false)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	access, err := a.mailboxReadAccessWithID(r, message.MailboxID)
+	if err != nil || (!access.Owner && !access.AllowAttachments) {
 		respondError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
@@ -2073,10 +2111,12 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	hasAttachments := len(attachments) > 0
 	size := int64(len(msg.BodyText) + len(msg.BodyHTML))
-	for _, att := range attachments {
-		if decoded, err := base64.StdEncoding.DecodeString(att.ContentBase64); err == nil {
-			size += int64(len(decoded))
+	for i := range attachments {
+		decoded, err := attachments[i].contentBytes()
+		if err != nil {
+			return "", err
 		}
+		size += int64(len(decoded))
 	}
 	if err := a.ensureMailboxQuotaAvailable(ctx, db, msg.MailboxID, size); err != nil {
 		return "", err
@@ -2152,7 +2192,7 @@ func (a *App) storeAttachmentWithDB(ctx context.Context, db dbExecutor, messageI
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-	data, err := base64.StdEncoding.DecodeString(input.ContentBase64)
+	data, err := input.contentBytes()
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,38 @@
+services:
+  lanqin-email:
+    environment:
+      LANQIN_DB_DRIVER: postgres
+      LANQIN_DATABASE_URL: "postgres://${LANQIN_POSTGRES_USER:-lanqin}:${LANQIN_POSTGRES_PASSWORD:?Set LANQIN_POSTGRES_PASSWORD in deploy/.env}@postgres:5432/${LANQIN_POSTGRES_DATABASE:-lanqin}?sslmode=disable"
+      LANQIN_DB_HOST: postgres
+      LANQIN_DB_PORT: "5432"
+      LANQIN_DB_NAME: "${LANQIN_POSTGRES_DATABASE:-lanqin}"
+      LANQIN_DB_USER: "${LANQIN_POSTGRES_USER:-lanqin}"
+      LANQIN_DB_PASSWORD: "${LANQIN_POSTGRES_PASSWORD:?Set LANQIN_POSTGRES_PASSWORD in deploy/.env}"
+      LANQIN_DB_SSLMODE: disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: "${LANQIN_POSTGRES_DATABASE:-lanqin}"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${LANQIN_POSTGRES_ADMIN_PASSWORD:?Set LANQIN_POSTGRES_ADMIN_PASSWORD in deploy/.env}"
+      LANQIN_POSTGRES_APP_USER: "${LANQIN_POSTGRES_USER:-lanqin}"
+      LANQIN_POSTGRES_APP_PASSWORD: "${LANQIN_POSTGRES_PASSWORD:?Set LANQIN_POSTGRES_PASSWORD in deploy/.env}"
+    volumes:
+      - lanqin-postgres-data:/var/lib/postgresql/data
+      - ./postgres/init-app-user.sh:/docker-entrypoint-initdb.d/10-lanqin-app-user.sh:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  lanqin-postgres-data:

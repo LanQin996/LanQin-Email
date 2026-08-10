@@ -60,6 +60,7 @@ const defaultPermissionLimits: PermissionLimits = { maxAttachmentMb: 25, smtpDai
 export function AdminPage() {
   const me = useMe()
   const user = me.data?.user
+  const [params, setParams] = useSearchParams()
   const canOverview = hasPermission(user, "admin.overview.view")
   const canUsersView = hasPermission(user, "admin.users.view")
   const canPermissionGroupsView = hasPermission(user, "admin.permission_groups.view")
@@ -70,24 +71,23 @@ export function AdminPage() {
   const canMessagesView = hasPermission(user, "admin.messages.view")
   const canSettingsView = hasPermission(user, "admin.settings.view")
   const canTemplatesView = hasPermission(user, "admin.templates.view")
-  const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: api.adminOverview, enabled: !!user && canOverview })
-  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.users, enabled: !!user && (canUsersView || canMailboxesView) })
-  const permissionGroups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: !!user && (canPermissionGroupsView || canUsersView) })
-  const domains = useQuery({ queryKey: ["admin", "domains"], queryFn: api.domains, enabled: !!user && (canDomainsView || canDNSView || canMailboxesView || canAliasesView || canSettingsView || canTemplatesView) })
-  const mailboxes = useQuery({ queryKey: ["admin", "mailboxes"], queryFn: api.mailboxes, enabled: !!user && (canMailboxesView || canMessagesView) })
-  const aliases = useQuery({ queryKey: ["admin", "aliases"], queryFn: api.aliases, enabled: !!user && canAliasesView })
-  const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: api.systemSettings, enabled: !!user && canSettingsView })
-  const [params, setParams] = useSearchParams()
+  const visibleSections = sectionKeys.filter((key) => hasAnyPermission(user, sectionPermissions[key]))
+  const rawSection = params.get("section") as Section | null
+  const section: Section = rawSection && visibleSections.includes(rawSection) ? rawSection : visibleSections[0] || "overview"
+  const needsDomains = section === "overview" || section === "domains" || section === "mailboxes" || section === "aliases" || section === "settings"
+  const overview = useQuery({ queryKey: ["admin", "overview"], queryFn: api.adminOverview, enabled: !!user && canOverview && section === "overview" })
+  const users = useQuery({ queryKey: ["admin", "users"], queryFn: api.users, enabled: !!user && ((section === "users" && canUsersView) || (section === "mailboxes" && canMailboxesView)) })
+  const permissionGroups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: !!user && ((section === "permissionGroups" && canPermissionGroupsView) || (section === "users" && canUsersView)) })
+  const domains = useQuery({ queryKey: ["admin", "domains"], queryFn: api.domains, enabled: !!user && needsDomains && (canDomainsView || canDNSView || canMailboxesView || canAliasesView || canSettingsView || canTemplatesView) })
+  const mailboxes = useQuery({ queryKey: ["admin", "mailboxes"], queryFn: api.mailboxes, enabled: !!user && ((section === "mailboxes" && canMailboxesView) || ((section === "messages" || section === "sendAudit") && canMessagesView)) })
+  const aliases = useQuery({ queryKey: ["admin", "aliases"], queryFn: api.aliases, enabled: !!user && canAliasesView && section === "aliases" })
+  const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: api.systemSettings, enabled: !!user && canSettingsView && (section === "overview" || section === "settings") })
 
   const domainItems = domains.data?.items || []
   const mailboxItems = mailboxes.data?.items || []
   const aliasItems = aliases.data?.items || []
   const userItems = users.data?.items || []
   const assignablePermissionGroups = (permissionGroups.data?.items || []).filter((group) => group.id !== "pg_super_admin" && group.id !== "pg_regular_user")
-  const visibleSections = sectionKeys.filter((key) => hasAnyPermission(user, sectionPermissions[key]))
-  const rawSection = params.get("section") as Section | null
-  const section: Section = rawSection && visibleSections.includes(rawSection) ? rawSection : visibleSections[0] || "overview"
-
   return (
     <ScrollArea className="h-[calc(100svh-3rem)] md:h-svh">
       <main className="p-4 sm:p-6">
@@ -1007,7 +1007,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const canResetTemplates = hasPermission(user, "admin.templates.reset")
   const templates = useQuery({ queryKey: ["admin", "mail-templates"], queryFn: api.mailTemplates, enabled: canViewTemplates })
   const [settingsTab, setSettingsTab] = React.useState<"base" | "smtp" | "storage" | "mail" | "externalImap" | "templates" | "security" | "about">("base")
-  const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage" })
+  const maildirHealth = useQuery({ queryKey: ["admin", "maildir-sync", "health"], queryFn: api.maildirSyncHealth, enabled: canSettingsView && settingsTab === "storage", refetchInterval: (query) => query.state.data?.running ? 2000 : false })
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
   const [openRegistration, setOpenRegistration] = React.useState(false)
@@ -1296,6 +1296,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
 function MaildirSyncHealthCard({ health, loading, error, onRefresh, refreshing, fallbackRoot }: { health?: MaildirSyncHealth; loading: boolean; error: Error | null; onRefresh: () => void; refreshing: boolean; fallbackRoot: string }) {
   const root = health?.root || fallbackRoot
   const configured = health?.configured ?? !!root
+  const currentRun = health?.currentRun
   const lastRun = health?.lastRun
   const counters = lastRun?.counts || health?.summary
   const recentErrors = health?.recentErrors || []
@@ -1322,9 +1323,9 @@ function MaildirSyncHealthCard({ health, loading, error, onRefresh, refreshing, 
         {error && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{queryErrorMessage(error)}</div>}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <InfoLine label="当前状态" value={<MaildirStatusBadge status={status} />} />
-          <InfoLine label="最近开始" value={formatOptionalDate(lastRun?.startedAt)} />
-          <InfoLine label="最近结束" value={formatOptionalDate(lastRun?.finishedAt)} />
-          <InfoLine label="最近耗时" value={formatDuration(lastRun?.durationMs)} />
+          <InfoLine label="最近开始" value={formatOptionalDate(currentRun?.startedAt || lastRun?.startedAt)} />
+          <InfoLine label="最近结束" value={lastRun?.finishedAt ? formatOptionalDate(lastRun.finishedAt) : currentRun ? "进行中" : "-"} />
+          <InfoLine label="最近耗时" value={formatRunDuration(currentRun, lastRun)} />
           <InfoLine label="扫描间隔" value={health?.scanSeconds ? `${health.scanSeconds} 秒` : "-"} />
           <InfoLine label="下次运行" value={formatOptionalDate(health?.nextRunAt)} />
           <InfoLine label="最后错误" value={lastRun?.error || health?.lastError || "-"} />
@@ -1363,6 +1364,8 @@ function MaildirStatusBadge({ status }: { status: string }) {
 
 function maildirCounterRows(counters?: Record<string, number | undefined>) {
   return [
+    { key: "directoriesChecked", label: "检查目录", value: counterValue(counters, "directoriesChecked") },
+    { key: "directoriesScanned", label: "扫描目录", value: counterValue(counters, "directoriesScanned") },
     { key: "filesScanned", label: "扫描文件", value: counterValue(counters, "filesScanned") },
     { key: "imported", label: "导入", value: counterValue(counters, "imported") },
     { key: "backfilled", label: "回填", value: counterValue(counters, "backfilled") },
@@ -1380,9 +1383,19 @@ function formatOptionalDate(value?: string) {
 }
 
 function formatDuration(value?: number) {
-  if (!value) return "-"
+  if (value == null || !Number.isFinite(value)) return "-"
   if (value < 1000) return `${value} ms`
   return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} 秒`
+}
+
+function formatRunDuration(currentRun?: MaildirSyncHealth["currentRun"], lastRun?: MaildirSyncHealth["lastRun"]) {
+  if (currentRun) {
+    const startedAt = Date.parse(currentRun.startedAt)
+    if (Number.isFinite(startedAt)) {
+      return `进行中 ${formatDuration(Math.max(0, Date.now() - startedAt))}`
+    }
+  }
+  return formatDuration(lastRun?.durationMs)
 }
 
 function queryErrorMessage(error: unknown) {

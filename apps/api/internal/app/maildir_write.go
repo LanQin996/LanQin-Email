@@ -357,7 +357,7 @@ func (a *App) backfillSQLiteMessagesToMaildir(ctx context.Context) (int, error) 
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
 		return 0, nil
 	}
-	rows, err := a.db.QueryContext(ctx, `SELECT id FROM messages WHERE COALESCE(mailbox_id,'')<>'' AND COALESCE(folder_id,'')<>'' AND raw_path='' ORDER BY created_at LIMIT 100`)
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM messages WHERE mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>'' AND raw_path='' ORDER BY created_at LIMIT 100`)
 	if err != nil {
 		return 0, err
 	}

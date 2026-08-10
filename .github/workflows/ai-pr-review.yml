@@ -5,6 +5,14 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/release.yml"
+      - ".ai-reviewignore"
+      - "LICENSE"
+      - "deploy/.env.example"
   issue_comment:
     types: [created]
   workflow_dispatch:

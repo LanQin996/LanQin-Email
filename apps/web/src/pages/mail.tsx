@@ -70,6 +70,28 @@ type ComposeSendIntent = { title: string; description: string; confirmText: stri
 type MessageContextMenuState = { message: MailMessage; x: number; y: number }
 type SidebarContextMenuState = { item: MailMenuItem; x: number; y: number }
 type FolderDropTarget = { key: string; edge: "before" | "after" | "end" }
+
+async function runWithConcurrency<T>(items: readonly T[], limit: number, task: (item: T, index: number) => Promise<unknown>) {
+  let nextIndex = 0
+  let hasError = false
+  let firstError: unknown
+  const workerCount = Math.min(Math.max(1, limit), items.length)
+  const workers = Array.from({ length: workerCount }, async () => {
+    while (!hasError) {
+      const index = nextIndex++
+      if (index >= items.length) return
+      try {
+        await task(items[index], index)
+      } catch (error) {
+        hasError = true
+        firstError = error
+      }
+    }
+  })
+  await Promise.all(workers)
+  if (hasError) throw firstError
+}
+
 type MailMenuItem =
   | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
   | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
@@ -107,7 +129,7 @@ export function MailPage() {
   const [displayMode] = useDisplayMode()
   const isMobile = useIsMobile()
   const [refreshing, setRefreshing] = React.useState(false)
-  const [autoRefreshing, setAutoRefreshing] = React.useState(false)
+  const [listAutoRefreshing, setListAutoRefreshing] = React.useState(false)
   const [lastAutoRefreshAt, setLastAutoRefreshAt] = React.useState<Date | null>(null)
   const [bulkPending, setBulkPending] = React.useState(false)
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
@@ -139,7 +161,7 @@ export function MailPage() {
   const canScheduleMail = hasPermission(user, "mail.messages.schedule")
   const canOrganizeMail = hasPermission(user, "mail.messages.organize")
   const canManageLabels = hasPermission(user, "mail.labels.manage")
-  const canDownloadAttachments = hasPermission(user, "mail.attachments.download")
+  const hasAttachmentPermission = hasPermission(user, "mail.attachments.download")
   const canManageSignatures = hasPermission(user, "mail.signatures.manage")
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const externalImapEnabled = publicSettings.data?.externalImapEnabled ?? false
@@ -151,6 +173,7 @@ export function MailPage() {
   const selectedMailbox = React.useMemo(() => mailboxList.data?.items.find((item) => item.id === selectedMailboxId), [mailboxList.data?.items, selectedMailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const selectedMailboxOwned = selectedMailbox?.access !== "read"
+  const canDownloadAttachments = hasAttachmentPermission && (selectedMailboxOwned || selectedMailbox?.shareAllowsAttachments !== false)
   const canSendSelectedMailbox = canSendMail && selectedMailboxOwned
   const canManageSelectedDrafts = canManageDrafts && selectedMailboxOwned
   const canScheduleSelectedMailbox = canScheduleMail && selectedMailboxOwned
@@ -159,23 +182,29 @@ export function MailPage() {
   const restrictedSharedMailbox = selectedMailbox?.access === "read" && selectedMailbox.shareScope === "custom"
   const hasMailboxes = (mailboxList.data?.items.length || 0) > 0
   const folders = useQuery({ queryKey: ["folders", activeMailboxId], queryFn: () => api.folders(activeMailboxId), enabled: !!activeMailboxId && canReadMail })
-  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && canReadMail })
+  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && (canReadMail || canManageLabels) })
   const sharedSelectionReady = !restrictedSharedMailbox
     || mailView === "external"
     || (mailView === "folder" && !!folders.data?.items.some((item) => item.name === folder))
     || (mailView === "label" && !!labels.data?.items.some((item) => item.id === selectedLabelId))
     || (mailView === "starred" && !!selectedMailbox?.shareIncludesStarred)
   const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && selectedMailboxOwned && hasPermission(user, "mail.stats.view") })
-  const scheduledSends = useQuery({ queryKey: ["scheduled-sends", activeMailboxId], queryFn: () => api.scheduledSends(activeMailboxId), enabled: !!activeMailboxId && canScheduleSelectedMailbox, refetchInterval: 30000 })
+  const scheduledSends = useQuery({
+    queryKey: ["scheduled-sends", activeMailboxId],
+    queryFn: () => api.scheduledSends(activeMailboxId),
+    enabled: !!activeMailboxId && canScheduleSelectedMailbox,
+    refetchInterval: mailView === "scheduled" ? 30000 : false,
+  })
   const canViewSendQueue = canReadMail && selectedMailboxOwned
   const sendQueue = useQuery({
     queryKey: ["send-queue", activeMailboxId, sendQueueStatus, sendQueueMessageId, sendQueueRecipient, sendQueueFrom, sendQueueTo],
     queryFn: () => api.sendQueue({ mailboxId: activeMailboxId, status: sendQueueStatus, messageId: sendQueueMessageId.trim(), recipient: sendQueueRecipient.trim(), from: datetimeLocalToISO(sendQueueFrom), to: datetimeLocalToISO(sendQueueTo) }),
     enabled: !!activeMailboxId && canViewSendQueue,
-    refetchInterval: 15000,
+    refetchInterval: mailView === "sendQueue" ? 15000 : false,
   })
-  const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: !!sendQueueAuditId && canViewSendQueue })
+  const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: mailView === "sendQueue" && !!sendQueueAuditId && canViewSendQueue })
   const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
+  const isPlainInboxView = mailView === "folder" && folder === "Inbox" && query.trim() === ""
   React.useEffect(() => {
     if (externalImapEnabled) return
     setSelectedExternalAccountId("")
@@ -211,7 +240,7 @@ export function MailPage() {
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
     queryFn: () => api.messages("Inbox", "", "", activeMailboxId),
-    enabled: !!activeMailboxId && canReadMail && (!restrictedSharedMailbox || !!folders.data?.items.some((item) => item.name === "Inbox")),
+    enabled: !!activeMailboxId && canReadMail && !isPlainInboxView && (!restrictedSharedMailbox || !!folders.data?.items.some((item) => item.name === "Inbox")),
     refetchInterval: mailRefreshInterval,
     refetchIntervalInBackground: true,
   })
@@ -225,7 +254,7 @@ export function MailPage() {
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!activeMailboxId && canReadMail && sharedSelectionReady && mailView !== "scheduled" && mailView !== "sendQueue" && (mailView !== "label" || !!selectedLabelId),
+    enabled: !!activeMailboxId && canReadMail && sharedSelectionReady && mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "external" && (mailView !== "label" || !!selectedLabelId),
   })
   const externalMessages = useInfiniteQuery({
     queryKey: ["external-messages", selectedExternalAccountId, externalFolder, query],
@@ -235,6 +264,8 @@ export function MailPage() {
     enabled: !!selectedExternalAccountId && canReadMail && mailView === "external" && externalImapEnabled,
   })
   const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)) })
+  const notificationItems = isPlainInboxView ? messages.data?.pages[0]?.items : inboxProbe.data?.items
+  const autoRefreshing = Boolean(publicSettings.data?.mailAutoRefresh && (listAutoRefreshing || inboxProbe.isRefetching))
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
     qc.setQueryData(["message", id], (current: MailMessage | undefined) => current ? { ...current, ...patch } : current)
     qc.setQueriesData({ queryKey: ["messages"] }, (current: InfiniteData<MailListResponse> | undefined) => {
@@ -451,7 +482,7 @@ export function MailPage() {
   const markAllRead = useMutation({
     mutationFn: async (items: MailMessage[]) => {
       const unread = items.filter((message) => !message.isRead)
-      await Promise.all(unread.map((message) => api.markRead(message.id, true)))
+      await runWithConcurrency(unread, 4, (message) => api.markRead(message.id, true))
       return unread.length
     },
     onSuccess: async (count) => {
@@ -520,8 +551,8 @@ export function MailPage() {
   }, [])
 
   React.useEffect(() => {
-    if (!activeMailboxId || !inboxProbe.data?.items) return
-    const items = inboxProbe.data.items
+    if (!activeMailboxId || !notificationItems) return
+    const items = notificationItems
     const latest = items[0]
     const nextState = { latestId: latest?.id || "", latestReceivedAt: latest?.receivedAt || "" }
     const prevState = mailNotifyStateRef.current[activeMailboxId]
@@ -529,9 +560,14 @@ export function MailPage() {
       mailNotifyStateRef.current[activeMailboxId] = nextState
       return
     }
+    if (nextState.latestReceivedAt < prevState.latestReceivedAt) return
     const newMessages = items.filter((item) => item.receivedAt > prevState.latestReceivedAt && item.id !== prevState.latestId)
     mailNotifyStateRef.current[activeMailboxId] = nextState
     if (newMessages.length === 0) return
+
+    void qc.invalidateQueries({ queryKey: ["folders"] })
+    void qc.invalidateQueries({ queryKey: ["mail-stats"] })
+    void qc.invalidateQueries({ queryKey: ["labels"] })
 
     const first = newMessages[0]
     const firstSender = senderDisplayName(first)
@@ -567,7 +603,7 @@ export function MailPage() {
         notification.close()
       }
     }
-  }, [activeMailboxId, inboxProbe.data?.items, toast])
+  }, [activeMailboxId, notificationItems, qc, toast])
 
   React.useEffect(() => {
     const events = new EventSource("/api/events", { withCredentials: true })
@@ -581,24 +617,56 @@ export function MailPage() {
   }, [qc])
 
   React.useEffect(() => {
-    if (!publicSettings.data?.mailAutoRefresh) return
-    const timer = window.setInterval(() => {
-      setAutoRefreshing(true)
-      Promise.all([
-        qc.invalidateQueries({ queryKey: ["messages"] }),
-        qc.invalidateQueries({ queryKey: ["folders"] }),
-        qc.invalidateQueries({ queryKey: ["mail-stats"] }),
-        qc.invalidateQueries({ queryKey: ["labels"] }),
-        qc.invalidateQueries({ queryKey: ["scheduled-sends"] }),
-        qc.invalidateQueries({ queryKey: ["send-queue"] }),
-        qc.invalidateQueries({ queryKey: ["mail-notifications"] }),
-      ]).finally(() => {
-        setLastAutoRefreshAt(new Date())
-        window.setTimeout(() => setAutoRefreshing(false), 600)
-      })
-    }, mailRefreshInterval || 30000)
-    return () => window.clearInterval(timer)
-  }, [mailRefreshInterval, publicSettings.data?.mailAutoRefresh, qc])
+    if (!mailRefreshInterval || !activeMailboxId || !canReadMail || mailView === "scheduled" || mailView === "sendQueue") return
+    if (mailView === "label" && !selectedLabelId) return
+    if (mailView === "external" && (!externalImapEnabled || !selectedExternalAccountId)) return
+
+    let stopped = false
+    let inFlight = false
+    const probeFirstPage = async () => {
+      if (inFlight) return
+      inFlight = true
+      setListAutoRefreshing(true)
+      try {
+        const queryKey = mailView === "external"
+          ? ["external-messages", selectedExternalAccountId, externalFolder, query]
+          : ["messages", activeMailboxId, mailView, folder, selectedLabelId, query]
+        const nextPage = mailView === "external"
+          ? await api.externalMessages(selectedExternalAccountId, externalFolder, "", query)
+          : mailView === "starred"
+            ? await api.starredMessages(query, "", activeMailboxId)
+            : mailView === "label"
+              ? await api.labelMessages(selectedLabelId, query, "", activeMailboxId)
+              : await api.messages(folder, query, "", activeMailboxId)
+        const current = qc.getQueryData<InfiniteData<MailListResponse>>(queryKey)
+        if (current?.pages[0] && JSON.stringify(current.pages[0]) !== JSON.stringify(nextPage)) {
+          await qc.invalidateQueries({ queryKey, exact: true })
+        }
+      } catch {
+        // A transient probe failure should not replace the currently displayed mailbox data.
+      } finally {
+        inFlight = false
+        if (!stopped) {
+          setLastAutoRefreshAt(new Date())
+          window.setTimeout(() => {
+            if (!stopped) setListAutoRefreshing(false)
+          }, 600)
+        }
+      }
+    }
+    const timer = window.setInterval(() => void probeFirstPage(), mailRefreshInterval)
+    return () => {
+      stopped = true
+      window.clearInterval(timer)
+      setListAutoRefreshing(false)
+    }
+  }, [activeMailboxId, canReadMail, externalFolder, externalImapEnabled, folder, mailRefreshInterval, mailView, qc, query, selectedExternalAccountId, selectedLabelId])
+
+  React.useEffect(() => {
+    if (publicSettings.data?.mailAutoRefresh && inboxProbe.dataUpdatedAt > 0 && !isPlainInboxView) {
+      setLastAutoRefreshAt(new Date(inboxProbe.dataUpdatedAt))
+    }
+  }, [inboxProbe.dataUpdatedAt, isPlainInboxView, publicSettings.data?.mailAutoRefresh])
 
   const selected = detail.data
   const allMessages = (mailView === "external" ? externalMessages.data?.pages : messages.data?.pages)?.flatMap((page) => page.items || []) || []
@@ -673,15 +741,15 @@ export function MailPage() {
     try {
       if (action === "read" || action === "unread") {
         const read = action === "read"
-        await Promise.all(ids.map((id) => api.markRead(id, read)))
+        await runWithConcurrency(ids, 4, (id) => api.markRead(id, read))
       } else if (action === "star" || action === "unstar") {
         const starred = action === "star"
-        await Promise.all(ids.map((id) => api.star(id, starred)))
+        await runWithConcurrency(ids, 4, (id) => api.star(id, starred))
       } else if (action === "delete") {
-        await Promise.all(ids.map((id) => api.delete(id)))
+        await runWithConcurrency(ids, 4, (id) => api.delete(id))
       } else {
         const target = action === "archive" ? "Archive" : action === "trash" ? "Trash" : "Spam"
-        await Promise.all(ids.map((id) => api.move(id, target)))
+        await runWithConcurrency(ids, 4, (id) => api.move(id, target))
       }
       if (selectedId && ids.includes(selectedId)) setSelectedId(null)
       setCompactSelectedIds([])
@@ -1957,6 +2025,7 @@ function sendQueueSourceLabel(source: string) {
   const normalized = source.toLowerCase()
   if (normalized === "submission") return "SMTP Submission"
   if (normalized === "webmail") return "Webmail"
+  if (normalized === "open_api") return "Open API"
   if (normalized === "scheduled") return "定时发送"
   return source || "未知"
 }

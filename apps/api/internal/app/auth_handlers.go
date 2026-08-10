@@ -129,7 +129,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	userID := newID("usr")
 	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(passwordHash), 0, now, now); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if isUniqueViolation(err) {
 			respondError(w, http.StatusConflict, "该邮箱已被注册")
 			return
 		}

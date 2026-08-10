@@ -190,6 +190,10 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 4. **第三方客户端**：可通过 SMTP 465/587、IMAP 993、POP3 995 连接；生产环境请配置匹配 `LANQIN_PUBLIC_HOSTNAME` 的证书。
 5. **外部邮箱接入**：个人邮箱管理可添加外部 IMAP 账号。本地存储模式会同步入库；远端直连模式每次读取远端，不写入本地邮件表。
 
+## 开放 API
+
+外部系统应使用版本化的 `/api/open/v1` 接口和带 scope 的 API Token。详细说明见 [API 文档](docs/API.md)，机器可读契约见 [OpenAPI 3.1](docs/openapi.json)。发信支持幂等键；最终投递事件可通过签名入口写入，全部状态变化也可通过可靠的签名 webhook outbox 主动推送。
+
 ## 开发与验证
 
 ```bash
@@ -222,6 +226,31 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - 发送队列由 LanQin API 后台 worker relay 到 `LANQIN_SMTP_HOST:LANQIN_SMTP_PORT`，失败会记录审计并按退避策略重试。
 - v1 支持本人邮箱发信；如需 send-as，可使用启用的别名转发 source 指向本人邮箱，或在数据库中配置 `send_as_grants`。
 - 如果客户端随后又通过 IMAP APPEND 写入自己的 Sent 副本，Maildir 同步会按 Sent 文件夹内的 `Message-ID` 去重。
+
+## 数据库支持
+
+API 现支持 SQLite、MySQL 8.4 和 PostgreSQL 16，SQLite 仍是默认数据库。MySQL/PostgreSQL 必须使用新的空数据库启动，系统不会自动迁移现有 SQLite 数据。
+
+外部数据库配置：
+
+- `LANQIN_DB_DRIVER=mysql` 或 `LANQIN_DB_DRIVER=postgres`
+- `LANQIN_DATABASE_URL`：MySQL DSN 或 PostgreSQL URL
+- 可通过 `LANQIN_DB_MAX_OPEN_CONNS`、`LANQIN_DB_MAX_IDLE_CONNS` 等变量调整连接池
+
+一体化部署支持 SQLite、MySQL 8.4 和 PostgreSQL 16。SQLite 仍是默认数据库；选择 MySQL/PostgreSQL 时，在基础 `docker-compose.yml` 上叠加对应文件即可。现有 SQLite 数据不会自动迁移，跨库导入应使用单独的数据迁移工具。
+
+```bash
+# SQLite（默认）
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+
+# MySQL 8.4
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml up -d
+
+# PostgreSQL 16
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml up -d
+```
+
+两种外部数据库模式仍只运行一个 `lanqin-email` 主容器，仅额外增加一个数据库容器。具体必填变量见 `deploy/.env.example`。
 
 ## License
 

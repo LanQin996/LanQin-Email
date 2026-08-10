@@ -51,14 +51,18 @@ export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number
 export type PermissionGroupSummary = { id: string; name: string }
 export type PermissionGroup = { id: string; name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits; system: boolean; userCount: number; createdAt: string; updatedAt: string }
 export type User = { id: string; email: string; displayName: string; role: "admin" | "user"; disabled: boolean; protected: boolean; twoFactorEnabled: boolean; permissions: PermissionKey[]; limits: PermissionLimits; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; createdAt: string }
+export type APIToken = { id: string; name: string; lastUsedAt?: string; expiresAt?: string; disabled: boolean; scopes: string[]; createdAt: string; updatedAt: string }
 export type AdminUser = User & { mailboxCount: number; mailboxes?: string[] }
 export type AdminOverview = { users: number; activeUsers: number; domains: number; mailboxes: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number; storageBytes: number }
 export type Domain = { id: string; name: string; status: string; dkimSelector: string; dkimPublicKey?: string; dnsStatus: string; dnsCheckedAt?: string; createdAt: string }
-export type Mailbox = { id: string; userId: string; userEmail?: string; domainId: string; localPart: string; address: string; displayName: string; quotaMb: number; status: string; createdAt: string; access?: "owner" | "read"; sharedBy?: string; shareScope?: "all" | "custom"; shareIncludesStarred?: boolean }
+export type Mailbox = { id: string; userId: string; userEmail?: string; domainId: string; localPart: string; address: string; displayName: string; quotaMb: number; status: string; createdAt: string; access?: "owner" | "read"; sharedBy?: string; shareScope?: "all" | "custom"; shareIncludesStarred?: boolean; shareAllowsAttachments?: boolean }
 export type ShareUser = { id: string; email: string; displayName: string }
-export type MailboxShare = { id: string; mailboxId: string; mailboxAddress: string; sharedWithUserId: string; sharedWithEmail: string; sharedWithName: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; labelIds: string[]; expiresAt?: string; createdAt: string }
-export type MailboxSharePayload = { mailboxId: string; sharedWithUserId: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; labelIds: string[]; expiresInDays: 0 | 7 | 30 | 90 }
-export type MailboxShareUpdatePayload = Omit<MailboxSharePayload, "mailboxId" | "sharedWithUserId" | "expiresInDays"> & { expiresInDays?: 0 | 7 | 30 | 90 }
+export type MailboxShareStatus = "active" | "expiring" | "expired" | "revoked" | "left"
+export type MailboxShare = { id: string; mailboxId: string; mailboxAddress: string; ownerUserId: string; ownerEmail: string; ownerName: string; sharedWithUserId: string; sharedWithEmail: string; sharedWithName: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; folderNames: string[]; labelIds: string[]; labelNames: string[]; allowAttachments: boolean; version: number; status: MailboxShareStatus; expiresAt?: string; lastAccessedAt?: string; revokedAt?: string; leftAt?: string; createdAt: string }
+export type MailboxSharePayload = { mailboxId: string; sharedWithUserId: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; labelIds: string[]; allowAttachments: boolean; expiresInDays?: 0 | 7 | 30 | 90; expiresAt?: string }
+export type MailboxShareUpdatePayload = Omit<MailboxSharePayload, "mailboxId" | "sharedWithUserId"> & { version: number }
+export type MailboxShareAuditEvent = { id: string; shareId: string; actorEmail: string; event: "created" | "updated" | "renewed" | "revoked" | "left" | "accessed"; details: Record<string, unknown>; createdAt: string }
+export type UserNotification = { id: string; type: string; title: string; body: string; data: Record<string, unknown>; readAt?: string; createdAt: string }
 export type Alias = { id: string; domainId: string; source: string; destination: string; enabled: boolean; createdAt: string }
 export type MailFolder = { id: string; name: string; role: string; sortOrder: number; unreadCount: number; totalCount: number; uidValidity: number; uidNext: number; highestModseq: number }
 export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
@@ -139,7 +143,7 @@ export type ExternalImapFolder = { name: string; role: string; unreadCount: numb
 export type ExternalImapSyncRun = { id: string; accountId: string; folder?: string; status: string; imported: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }
 export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
 export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
-export type MaildirSyncCounts = { filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
+export type MaildirSyncCounts = { directoriesChecked: number; directoriesScanned: number; filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
 export type MaildirSyncRun = { startedAt: string; finishedAt?: string; durationMs: number; status: "running" | "success" | "partial" | "error"; error?: string; counts: MaildirSyncCounts }
 export type MaildirSyncHealth = {
   configured: boolean
@@ -148,6 +152,7 @@ export type MaildirSyncHealth = {
   scanSeconds: number
   workerStarted: boolean
   running: boolean
+  currentRun?: MaildirSyncRun
   lastRun?: MaildirSyncRun
   lastError?: string
   nextRunAt?: string

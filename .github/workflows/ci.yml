@@ -6,12 +6,22 @@ on:
       - main
     paths-ignore:
       - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/release.yml"
+      - ".ai-reviewignore"
+      - "LICENSE"
       - "deploy/.env.example"
   pull_request:
     branches:
       - main
     paths-ignore:
       - "**/*.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - ".github/release.yml"
+      - ".ai-reviewignore"
+      - "LICENSE"
       - "deploy/.env.example"
 
 permissions:
@@ -59,3 +69,71 @@ jobs:
       - name: Test api
         working-directory: apps/api
         run: go test ./...
+
+      - name: Check deployment shell scripts
+        run: >-
+          go run mvdan.cc/sh/v3/cmd/shfmt@v3.10.0 -d
+          deploy/postfix/configure-db.sh
+          deploy/dovecot/configure-db.sh
+          deploy/rspamd/sync-dkim.sh
+          deploy/all-in-one/entrypoint.sh
+          deploy/postgres/init-app-user.sh
+
+      - name: Render database Compose variants
+        env:
+          LANQIN_MYSQL_PASSWORD: mysql-app-contract
+          LANQIN_MYSQL_ROOT_PASSWORD: mysql-root-contract
+          LANQIN_POSTGRES_PASSWORD: postgres-app-contract
+          LANQIN_POSTGRES_ADMIN_PASSWORD: postgres-admin-contract
+        run: |
+          cp deploy/.env.example deploy/.env
+          docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml config --quiet
+          docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml config --quiet
+
+  database-contracts:
+    name: Database contracts
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: lanqin
+          POSTGRES_USER: lanqin
+          POSTGRES_PASSWORD: lanqin_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lanqin -d lanqin"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: lanqin
+          MYSQL_USER: lanqin
+          MYSQL_PASSWORD: lanqin_contract
+          MYSQL_ROOT_PASSWORD: root_contract
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ulanqin -planqin_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      LANQIN_TEST_POSTGRES_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin?sslmode=disable
+      LANQIN_TEST_MYSQL_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/api/go.mod
+          cache-dependency-path: apps/api/go.sum
+
+      - name: Test PostgreSQL and MySQL contracts
+        working-directory: apps/api
+        run: go test ./internal/app -run '^TestExternalDatabaseContract$' -count=1 -timeout=5m

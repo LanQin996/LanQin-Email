@@ -1,0 +1,99 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LanQin Email Open API",
+    "version": "1.0.0",
+    "description": "Versioned integration API. The unversioned /api/open routes are compatibility aliases for /api/open/v1."
+  },
+  "servers": [{ "url": "/api/open/v1" }],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/domains": { "get": { "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "description": "Paginated domains" } } }, "post": { "responses": { "201": { "description": "Domain created" } } } },
+    "/domains/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Domain" }, "404": { "$ref": "#/components/responses/NotFound" } } }, "post": { "responses": { "200": { "description": "Domain updated" } } }, "delete": { "responses": { "200": { "description": "Domain deleted" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/domains/{id}/dns-records": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Required DNS records" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/domains/{id}/dns-check": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "DNS check result" } } } },
+    "/mailboxes": { "get": { "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "description": "Paginated mailboxes" } } }, "post": { "responses": { "201": { "description": "Mailbox created" } } } },
+    "/mailboxes/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Mailbox" }, "404": { "$ref": "#/components/responses/NotFound" } } }, "post": { "responses": { "200": { "description": "Mailbox updated" } } }, "delete": { "responses": { "200": { "description": "Mailbox deleted" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/mailboxes/{id}/password": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "Owner and mailbox passwords reset" } } } },
+    "/mailboxes/{id}/messages": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "get": { "responses": { "200": { "description": "Paginated messages" } } } },
+    "/messages/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Message detail" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/attachments/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Attachment bytes" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/send": {
+      "get": { "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "description": "Paginated sends" } } },
+      "post": {
+        "parameters": [{ "$ref": "#/components/parameters/IdempotencyKey" }],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendRequest" } } } },
+        "responses": { "200": { "description": "Idempotent replay", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendStatus" } } } }, "201": { "description": "Queued", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendStatus" } } } }, "409": { "$ref": "#/components/responses/Conflict" } }
+      }
+    },
+    "/send/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Send status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SendStatus" } } } }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/send/{id}/events": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Queue audit and delivery events" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/send/{id}/retry": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "Send requeued" }, "409": { "$ref": "#/components/responses/Conflict" } } } },
+    "/send/{id}/cancel": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "Send canceled" }, "409": { "$ref": "#/components/responses/Conflict" } } } },
+    "/aliases": { "get": { "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "description": "Paginated aliases" } } }, "post": { "responses": { "201": { "description": "Alias created" } } } },
+    "/aliases/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Alias" }, "404": { "$ref": "#/components/responses/NotFound" } } }, "post": { "responses": { "200": { "description": "Alias updated" } } }, "delete": { "responses": { "200": { "description": "Alias deleted" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
+    "/delivery-events": {
+      "post": {
+        "security": [],
+        "description": "HMAC-SHA256 signed delivery event callback. Sign timestamp + '.' + raw body.",
+        "parameters": [
+          { "name": "X-LanQin-Timestamp", "in": "header", "required": true, "schema": { "type": "string" } },
+          { "name": "X-LanQin-Signature", "in": "header", "required": true, "schema": { "type": "string", "pattern": "^sha256=[a-f0-9]{64}$" } }
+        ],
+        "requestBody": { "required": true, "content": { "application/json": { "schema": { "type": "object", "required": ["events"], "properties": { "events": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/components/schemas/DeliveryEventInput" } } } } } } },
+        "responses": { "200": { "description": "Events stored or deduplicated" }, "401": { "$ref": "#/components/responses/Unauthorized" } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer", "bearerFormat": "lq_* API Token" } },
+    "parameters": {
+      "IdempotencyKey": { "name": "Idempotency-Key", "in": "header", "required": false, "description": "Up to 128 characters; retained for 24 hours.", "schema": { "type": "string", "maxLength": 128 } },
+      "ResourceId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+      "Limit": { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 100 } },
+      "Cursor": { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string" } }
+    },
+    "responses": {
+      "Unauthorized": { "description": "Missing or invalid authentication" },
+      "NotFound": { "description": "Resource not found or not owned by the token user" },
+      "Conflict": { "description": "Idempotency key conflict or concurrent state change" }
+    },
+    "schemas": {
+      "SendRequest": {
+        "type": "object", "required": ["mailboxId"],
+        "properties": {
+          "mailboxId": { "type": "string" }, "from": { "type": "string" }, "fromName": { "type": "string" },
+          "to": { "type": "array", "items": { "type": "string", "format": "email" } },
+          "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
+          "bcc": { "type": "array", "items": { "type": "string", "format": "email" } },
+          "subject": { "type": "string" }, "text": { "type": "string" }, "html": { "type": "string" },
+          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/AttachmentInput" } }
+        }
+      },
+      "AttachmentInput": { "type": "object", "required": ["filename", "contentBase64"], "properties": { "filename": { "type": "string" }, "contentType": { "type": "string" }, "contentBase64": { "type": "string", "contentEncoding": "base64" } } },
+      "SendStatus": {
+        "type": "object", "required": ["id", "status", "messageId", "rfcMessageId", "mailboxId", "createdAt"],
+        "properties": {
+          "id": { "type": "string", "description": "Stable sent message id (mail_*)." },
+          "queueId": { "type": "string", "description": "Internal queue id (snd_*)." },
+          "status": { "type": "string", "enum": ["accepted", "queued", "sending", "relayed", "failed", "canceled", "delivered", "bounced", "complained", "rejected", "deferred", "partial"] },
+          "queueStatus": { "type": "string", "enum": ["queued", "sending", "delivered", "failed", "canceled"] },
+          "messageId": { "type": "string" }, "rfcMessageId": { "type": "string" }, "mailboxId": { "type": "string" },
+          "mailboxAddress": { "type": "string" }, "subject": { "type": "string" }, "recipients": { "type": "array", "items": { "type": "string" } },
+          "recipientStatuses": { "type": "array", "items": { "$ref": "#/components/schemas/RecipientStatus" } },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "RecipientStatus": { "type": "object", "required": ["recipient", "status", "occurredAt"], "properties": { "recipient": { "type": "string" }, "status": { "type": "string" }, "reason": { "type": "string" }, "provider": { "type": "string" }, "occurredAt": { "type": "string", "format": "date-time" } } },
+      "DeliveryEventInput": {
+        "type": "object", "required": ["id", "provider", "recipient", "status", "occurredAt"],
+        "properties": {
+          "id": { "type": "string" }, "provider": { "type": "string" }, "queueId": { "type": "string" }, "messageId": { "type": "string" }, "rfcMessageId": { "type": "string" },
+          "recipient": { "type": "string", "format": "email" }, "status": { "type": "string", "enum": ["delivered", "bounced", "complained", "rejected", "deferred"] },
+          "reason": { "type": "string" }, "occurredAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Error": { "type": "object", "required": ["error"], "properties": { "error": { "type": "string" } } }
+    }
+  }
+}

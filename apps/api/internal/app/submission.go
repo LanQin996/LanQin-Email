@@ -400,7 +400,8 @@ func (a *App) insertSentDedupeKeyWithDB(ctx context.Context, db dbExecutor, mail
 	if strings.TrimSpace(messageID) == "" {
 		return nil
 	}
-	res, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO sent_message_dedupe_keys(mailbox_id,folder_id,message_id,created_at) VALUES(?,?,?,?)`, mailboxID, folderID, messageID, a.now().UTC().Format(time.RFC3339Nano))
+	query := insertIgnoreSQL(a.cfg.DBDriver, `INSERT INTO sent_message_dedupe_keys(mailbox_id,folder_id,message_id,created_at) VALUES(?,?,?,?)`, `(mailbox_id,folder_id,message_id)`)
+	res, err := db.ExecContext(ctx, query, mailboxID, folderID, messageID, a.now().UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return err
 	}

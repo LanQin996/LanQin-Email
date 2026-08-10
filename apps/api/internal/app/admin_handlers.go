@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -753,15 +752,18 @@ func (a *App) handleListAliases(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+const adminMessagesPageSize = 50
+
 func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
-	limit := 50
+	limit := adminMessagesPageSize
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -780,19 +782,34 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if q != "" {
-		where = append(where, "(m.subject LIKE ? OR m.from_addr LIKE ? OR m.from_name LIKE ? OR m.to_addrs LIKE ? OR m.recipient_addr LIKE ? OR m.snippet LIKE ? OR m.body_text LIKE ? OR mb.address LIKE ? OR u.email LIKE ?)")
-		like := "%" + q + "%"
-		args = append(args, like, like, like, like, like, like, like, like, like)
+		if a.canUseMessageFTS(q) {
+			where = append(where, "(m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) OR LOWER(mb.address) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?))")
+			like := "%" + q + "%"
+			args = append(args, messageFTSLiteralQuery(q, adminSearchColumns), like, like)
+		} else {
+			where = append(where, "(LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.to_addrs) LIKE LOWER(?) OR LOWER(m.recipient_addr) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?) OR LOWER(mb.address) LIKE LOWER(?) OR LOWER(u.email) LIKE LOWER(?))")
+			like := "%" + q + "%"
+			args = append(args, like, like, like, like, like, like, like, like, like)
+		}
 	}
-	args = append(args, limit+1, offset)
+	if cursorReceivedAt != "" {
+		where = append(where, "(m.received_at,m.id) < (?,?)")
+		args = append(args, cursorReceivedAt, cursorID)
+	}
+	args = append(args, limit+1)
 
-	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m
 		LEFT JOIN folders f ON f.id=m.folder_id
 		LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id
 		LEFT JOIN users u ON u.id=mb.user_id
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY m.received_at DESC LIMIT ? OFFSET ?`, args...)
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
 		return
@@ -807,10 +824,15 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, msg)
 	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load messages")
+		return
+	}
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeMessageListCursor(last.ReceivedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
@@ -833,6 +855,8 @@ func (a *App) handleAdminMessage(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, msg)
 }
 
+const adminSendAuditPageSize = 50
+
 func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
 	messageID := strings.TrimSpace(r.URL.Query().Get("messageId"))
@@ -847,11 +871,12 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorCreatedAt, cursorID, offset, err := parseSendQueueCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
-	limit := 50
+	limit := adminSendAuditPageSize
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -879,15 +904,24 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 		where = append(where, "sae.created_at<=?")
 		args = append(args, to)
 	}
-	args = append(args, limit+1, offset)
+	if cursorCreatedAt != "" {
+		where = append(where, "(sae.created_at,sae.id) < (?,?)")
+		args = append(args, cursorCreatedAt, cursorID)
+	}
+	args = append(args, limit+1)
 
-	rows, err := a.db.QueryContext(r.Context(), `SELECT sae.id,sae.queue_id,sae.mailbox_id,COALESCE(mb.address,''),sae.sent_message_id,COALESCE(sq.message_id,m.message_id,''),sae.source,sae.event,sae.status,sae.mail_from,sae.header_from,sae.recipients_json,sae.error,sae.created_at
+	query := `SELECT sae.id,sae.queue_id,sae.mailbox_id,COALESCE(mb.address,''),sae.sent_message_id,COALESCE(sq.message_id,m.message_id,''),sae.source,sae.event,sae.status,sae.mail_from,sae.header_from,sae.recipients_json,sae.error,sae.created_at
 		FROM send_audit_events sae
 		LEFT JOIN mailboxes mb ON mb.id=sae.mailbox_id
 		LEFT JOIN send_queue sq ON sq.id=sae.queue_id
 		LEFT JOIN messages m ON m.id=sae.sent_message_id
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY sae.created_at DESC, sae.id DESC LIMIT ? OFFSET ?`, args...)
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY sae.created_at DESC,sae.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load send audit")
 		return
@@ -912,7 +946,8 @@ func (a *App) handleAdminSendAudit(w http.ResponseWriter, r *http.Request) {
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeSendQueueCursor(last.CreatedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
@@ -964,7 +999,7 @@ func (a *App) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 		source = normalizeLocalPart(source) + "@" + domain.Name
 	}
 	destination := normalizeEmail(req.Destination)
-	if source == "" || destination == "" || !strings.Contains(destination, "@") {
+	if source == "" || !strings.HasSuffix(source, "@"+domain.Name) || destination == "" || !strings.Contains(destination, "@") {
 		badRequest(w, errors.New("invalid alias"))
 		return
 	}
@@ -1009,7 +1044,7 @@ func (a *App) handleUpdateAlias(w http.ResponseWriter, r *http.Request) {
 		source = normalizeLocalPart(source) + "@" + domain.Name
 	}
 	destination := normalizeEmail(req.Destination)
-	if source == "" || destination == "" || !strings.Contains(destination, "@") {
+	if source == "" || !strings.HasSuffix(source, "@"+domain.Name) || destination == "" || !strings.Contains(destination, "@") {
 		badRequest(w, errors.New("invalid alias"))
 		return
 	}

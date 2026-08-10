@@ -4,12 +4,16 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"database/sql"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -24,6 +28,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -218,9 +223,14 @@ type testClient struct {
 	t      *testing.T
 	server *httptest.Server
 	cookie *http.Cookie
+	bearer string
 }
 
 func (c *testClient) do(method, path string, body any, out any) int {
+	return c.doWithHeaders(method, path, body, nil, out)
+}
+
+func (c *testClient) doWithHeaders(method, path string, body any, headers map[string]string, out any) int {
 	c.t.Helper()
 	var reader io.Reader
 	if body != nil {
@@ -236,6 +246,12 @@ func (c *testClient) do(method, path string, body any, out any) int {
 	}
 	if c.cookie != nil {
 		req.AddCookie(c.cookie)
+	}
+	if c.bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
+	for key, value := range headers {
+		req.Header.Set(key, value)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -277,6 +293,29 @@ func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, dis
 		t.Fatalf("create mailbox %s code=%d mailbox=%+v", localPart, code, mailbox)
 	}
 	return mailbox
+}
+
+func createTestAPIToken(t *testing.T, client *testClient, name string) string {
+	return createTestAPITokenWithScopes(t, client, name, nil)
+}
+
+func createTestAPITokenWithScopes(t *testing.T, client *testClient, name string, scopes []string) string {
+	t.Helper()
+	var resp struct {
+		Token string   `json:"token"`
+		Item  APIToken `json:"item"`
+	}
+	payload := map[string]any{"name": name}
+	if scopes != nil {
+		payload["scopes"] = scopes
+	}
+	if code := client.do("POST", "/api/me/api-tokens", payload, &resp); code != http.StatusCreated {
+		t.Fatalf("create api token code=%d resp=%+v", code, resp)
+	}
+	if resp.Token == "" || resp.Item.ID == "" || resp.Item.Name != name {
+		t.Fatalf("api token response=%+v", resp)
+	}
+	return resp.Token
 }
 
 func updateRegularPermissionGroup(t *testing.T, admin *testClient, permissions []string) PermissionGroup {
@@ -548,6 +587,12 @@ func TestMailboxSharingCustomScopeIsReadOnlyAndRevocable(t *testing.T) {
 	if !foundShared {
 		t.Fatalf("shared mailbox missing or wrong access: %+v", targetMailboxes.Items)
 	}
+	var receivedShares struct {
+		Items []MailboxShare `json:"items"`
+	}
+	if code := target.do("GET", "/api/me/mailbox-shares/received", nil, &receivedShares); code != http.StatusOK || len(receivedShares.Items) != 1 || receivedShares.Items[0].ID != share.ID {
+		t.Fatalf("received shares code=%d items=%+v", code, receivedShares.Items)
+	}
 	var targetFolders struct {
 		Items []MailFolder `json:"items"`
 	}
@@ -581,24 +626,107 @@ func TestMailboxSharingCustomScopeIsReadOnlyAndRevocable(t *testing.T) {
 	}
 	var updatedShare MailboxShare
 	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
-		"scope": "all", "folderIds": []string{}, "labelIds": []string{}, "includeStarred": false, "expiresInDays": 7,
+		"scope": "all", "folderIds": []string{}, "labelIds": []string{}, "includeStarred": false, "expiresInDays": 7, "version": share.Version,
 	}, &updatedShare); code != http.StatusOK || updatedShare.Scope != "all" || updatedShare.ExpiresAt == nil {
 		t.Fatalf("update share code=%d share=%+v", code, updatedShare)
 	}
 	if remaining := updatedShare.ExpiresAt.Sub(a.now().UTC()); remaining < 7*24*time.Hour-time.Minute || remaining > 7*24*time.Hour+time.Minute {
 		t.Fatalf("updated share expiration remaining=%s", remaining)
 	}
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "all", "folderIds": []string{}, "labelIds": []string{}, "includeStarred": false, "expiresInDays": 30, "version": share.Version,
+	}, nil); code != http.StatusConflict {
+		t.Fatalf("stale share version should conflict, code=%d", code)
+	}
 	if code := target.do("GET", "/api/mail/messages/"+privateMessage.ID+"?markRead=0", nil, &detail); code != http.StatusOK || detail.ID != privateMessage.ID {
 		t.Fatalf("updated all-content share should expose inbox detail, code=%d detail=%+v", code, detail)
 	}
 	preservedExpiration := *updatedShare.ExpiresAt
 	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
-		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false, "version": updatedShare.Version,
 	}, &updatedShare); code != http.StatusOK || updatedShare.Scope != "custom" || updatedShare.ExpiresAt == nil || !updatedShare.ExpiresAt.Equal(preservedExpiration) {
 		t.Fatalf("update share while preserving expiration code=%d share=%+v wantExpiration=%s", code, updatedShare, preservedExpiration)
 	}
 	if code := target.do("GET", "/api/mail/messages/"+privateMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
 		t.Fatalf("updated custom share should hide inbox detail again, code=%d", code)
+	}
+
+	attachmentPath := filepath.Join(t.TempDir(), "shared.txt")
+	if err := os.WriteFile(attachmentPath, []byte("shared attachment"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	attachmentID := newID("att")
+	if _, err := a.db.Exec(`INSERT INTO attachments(id,message_id,filename,content_type,size_bytes,storage_path,created_at) VALUES(?,?,?,?,?,?,?)`,
+		attachmentID, archivedMessage.ID, "shared.txt", "text/plain", 17, attachmentPath, a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+		"allowAttachments": false, "version": updatedShare.Version,
+	}, &updatedShare); code != http.StatusOK || updatedShare.AllowAttachments {
+		t.Fatalf("disable shared attachments code=%d share=%+v", code, updatedShare)
+	}
+	if code := target.do("GET", "/api/mail/attachments/"+attachmentID, nil, nil); code != http.StatusNotFound {
+		t.Fatalf("disabled shared attachment should be hidden, code=%d", code)
+	}
+	if code := owner.do("GET", "/api/mail/attachments/"+attachmentID, nil, nil); code != http.StatusOK {
+		t.Fatalf("owner attachment access code=%d", code)
+	}
+	customExpiry := a.now().UTC().Add(48 * time.Hour).Truncate(time.Second)
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+		"allowAttachments": true, "expiresAt": customExpiry.Format(time.RFC3339), "version": updatedShare.Version,
+	}, &updatedShare); code != http.StatusOK || !updatedShare.AllowAttachments || updatedShare.ExpiresAt == nil || !updatedShare.ExpiresAt.Equal(customExpiry) {
+		t.Fatalf("custom expiry and attachment restore code=%d share=%+v", code, updatedShare)
+	}
+	if code := target.do("GET", "/api/mail/attachments/"+attachmentID, nil, nil); code != http.StatusOK {
+		t.Fatalf("enabled shared attachment access code=%d", code)
+	}
+	var audit struct {
+		Items []MailboxShareAuditEvent `json:"items"`
+	}
+	if code := owner.do("GET", "/api/me/mailbox-shares/"+share.ID+"/audit", nil, &audit); code != http.StatusOK || len(audit.Items) < 3 {
+		t.Fatalf("owner share audit code=%d items=%+v", code, audit.Items)
+	}
+	if code := target.do("GET", "/api/me/mailbox-shares/"+share.ID+"/audit", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("recipient should not read owner audit, code=%d", code)
+	}
+	var targetNotifications struct {
+		Items []UserNotification `json:"items"`
+	}
+	if code := target.do("GET", "/api/me/notifications", nil, &targetNotifications); code != http.StatusOK || len(targetNotifications.Items) < 2 {
+		t.Fatalf("target notifications code=%d items=%+v", code, targetNotifications.Items)
+	}
+
+	if _, err := a.db.Exec(`UPDATE mailbox_shares SET expires_at=? WHERE id=?`, a.now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), share.ID); err != nil {
+		t.Fatal(err)
+	}
+	if code := owner.do("GET", "/api/me/mailbox-shares", nil, &ownerShares); code != http.StatusOK || len(ownerShares.Items) != 1 || ownerShares.Items[0].Status != "expired" {
+		t.Fatalf("expired owner share code=%d items=%+v", code, ownerShares.Items)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+archivedMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("expired share should be inaccessible, code=%d", code)
+	}
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+		"allowAttachments": true, "expiresInDays": 7, "version": ownerShares.Items[0].Version,
+	}, &updatedShare); code != http.StatusOK || updatedShare.Status == "expired" {
+		t.Fatalf("renew expired share code=%d share=%+v", code, updatedShare)
+	}
+	if code := target.do("DELETE", "/api/me/mailbox-shares/"+share.ID+"/leave", nil, nil); code != http.StatusOK {
+		t.Fatalf("recipient leave share code=%d", code)
+	}
+	if code := target.do("GET", "/api/mail/messages/"+archivedMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
+		t.Fatalf("left share should be inaccessible, code=%d", code)
+	}
+	if code := owner.do("GET", "/api/me/mailbox-shares", nil, &ownerShares); code != http.StatusOK || ownerShares.Items[0].Status != "left" {
+		t.Fatalf("left owner share code=%d items=%+v", code, ownerShares.Items)
+	}
+	if code := owner.do("POST", "/api/me/mailbox-shares/"+share.ID, map[string]any{
+		"scope": "custom", "folderIds": []string{archiveFolderID}, "labelIds": []string{}, "includeStarred": false,
+		"allowAttachments": true, "expiresInDays": 7, "version": ownerShares.Items[0].Version,
+	}, &updatedShare); code != http.StatusOK {
+		t.Fatalf("restore left share code=%d", code)
 	}
 
 	outsider := &testClient{t: t, server: ts}
@@ -625,6 +753,12 @@ func TestMailboxSharingCustomScopeIsReadOnlyAndRevocable(t *testing.T) {
 	}
 	if code := target.do("GET", "/api/mail/messages/"+archivedMessage.ID+"?markRead=0", nil, nil); code != http.StatusNotFound {
 		t.Fatalf("revoked share should stop immediately, code=%d", code)
+	}
+	if _, err := a.db.Exec(`UPDATE permission_groups SET permissions_json=? WHERE id=?`, `["mail.access"]`, PermissionGroupRegular); err != nil {
+		t.Fatal(err)
+	}
+	if code := target.do("GET", "/api/me/mailbox-shares/received", nil, nil); code != http.StatusForbidden {
+		t.Fatalf("mailbox sharing should require mail.messages.read, code=%d", code)
 	}
 }
 
@@ -1829,6 +1963,610 @@ func TestMailSendRollsBackSentCopyWhenQueueInsertFails(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatalf("sent copy should be removed after enqueue failure, count=%d", count)
+	}
+}
+
+func TestAPITokenManagementStoresHashAndRevokes(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	var created struct {
+		Token string   `json:"token"`
+		Item  APIToken `json:"item"`
+	}
+	if code := admin.do("POST", "/api/me/api-tokens", map[string]string{"name": "integration-test"}, &created); code != http.StatusCreated {
+		t.Fatalf("create api token code=%d resp=%+v", code, created)
+	}
+	nullScopes := bytes.NewBufferString(`{"name":"null-scopes","scopes":null}`)
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/api/me/api-tokens", nullScopes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(admin.cookie)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("null scopes create code=%d", resp.StatusCode)
+	}
+	if !strings.HasPrefix(created.Token, "lq_") || created.Item.ID == "" || created.Item.Name != "integration-test" || created.Item.ExpiresAt == nil {
+		t.Fatalf("created token response=%+v", created)
+	}
+	if remaining := time.Until(*created.Item.ExpiresAt); remaining < 89*24*time.Hour || remaining > 91*24*time.Hour {
+		t.Fatalf("created token default expiry=%s, remaining=%s", created.Item.ExpiresAt, remaining)
+	}
+	var storedHash string
+	if err := a.db.QueryRow(`SELECT token_hash FROM api_tokens WHERE id=?`, created.Item.ID).Scan(&storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if storedHash == created.Token || storedHash != hashToken(created.Token) {
+		t.Fatalf("stored token hash=%q token=%q", storedHash, created.Token)
+	}
+
+	openAdmin := &testClient{t: t, server: ts, bearer: created.Token}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
+		t.Fatalf("open api with bearer token code=%d", code)
+	}
+	if _, err := a.db.Exec(`UPDATE api_tokens SET expires_at=? WHERE id=?`, a.now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), created.Item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("expired bearer token code=%d", code)
+	}
+	if _, err := a.db.Exec(`UPDATE api_tokens SET expires_at=? WHERE id=?`, created.Item.ExpiresAt.UTC().Format(time.RFC3339Nano), created.Item.ID); err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Items []APIToken `json:"items"`
+	}
+	if code := admin.do("GET", "/api/me/api-tokens", nil, &listed); code != http.StatusOK {
+		t.Fatalf("list api tokens code=%d", code)
+	}
+	if len(listed.Items) != 1 || listed.Items[0].ID != created.Item.ID || listed.Items[0].LastUsedAt == nil {
+		t.Fatalf("listed tokens=%+v", listed.Items)
+	}
+
+	if code := admin.do("POST", "/api/me/api-tokens/"+created.Item.ID, map[string]any{"expiresAt": ""}, &map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("empty api token expiry update code=%d", code)
+	}
+
+	disabled := true
+	var updated APIToken
+	if code := admin.do("POST", "/api/me/api-tokens/"+created.Item.ID, map[string]any{"disabled": disabled}, &updated); code != http.StatusOK {
+		t.Fatalf("disable api token code=%d item=%+v", code, updated)
+	}
+	if !updated.Disabled {
+		t.Fatalf("updated token should be disabled: %+v", updated)
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("disabled bearer token code=%d", code)
+	}
+	if code := admin.do("DELETE", "/api/me/api-tokens/"+created.Item.ID, nil, &map[string]any{}); code != http.StatusOK {
+		t.Fatalf("delete api token code=%d", code)
+	}
+}
+
+func TestOpenAPIDomainAndMailboxCRUD(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d body=%v", code, login)
+	}
+	adminToken := createTestAPIToken(t, admin, "admin-open-api")
+	openAdmin := &testClient{t: t, server: ts, bearer: adminToken}
+
+	var authErr map[string]any
+	if code := admin.do("GET", "/api/open/domains", nil, &authErr); code != http.StatusUnauthorized {
+		t.Fatalf("cookie-only open api code=%d body=%v", code, authErr)
+	}
+
+	var domain Domain
+	if code := openAdmin.do("POST", "/api/open/domains", map[string]string{"name": "api.example.test"}, &domain); code != http.StatusCreated {
+		t.Fatalf("create open api domain code=%d domain=%+v", code, domain)
+	}
+	if domain.Name != "api.example.test" || domain.DKIMPublicKey == "" {
+		t.Fatalf("domain=%+v", domain)
+	}
+	var domains struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/domains", nil, &domains); code != http.StatusOK {
+		t.Fatalf("list open api domains code=%d", code)
+	}
+	if len(domains.Items) < 2 {
+		t.Fatalf("domains=%+v", domains.Items)
+	}
+	var disabled Domain
+	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "disabled"}, &disabled); code != http.StatusOK {
+		t.Fatalf("update open api domain code=%d domain=%+v", code, disabled)
+	}
+	if disabled.Status != "disabled" {
+		t.Fatalf("domain status=%q", disabled.Status)
+	}
+	if code := openAdmin.do("POST", "/api/open/domains/"+domain.ID, map[string]string{"status": "active"}, &domain); code != http.StatusOK {
+		t.Fatalf("reactivate open api domain code=%d domain=%+v", code, domain)
+	}
+
+	var mailbox Mailbox
+	if code := openAdmin.do("POST", "/api/open/mailboxes", map[string]any{
+		"domainId":    domain.ID,
+		"localPart":   "api-user",
+		"displayName": "API User",
+		"password":    "Password123!",
+		"quotaMb":     256,
+	}, &mailbox); code != http.StatusCreated {
+		t.Fatalf("create open api mailbox code=%d mailbox=%+v", code, mailbox)
+	}
+	if mailbox.Address != "api-user@api.example.test" || mailbox.QuotaMB != 256 {
+		t.Fatalf("mailbox=%+v", mailbox)
+	}
+	var mailboxes struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/mailboxes", nil, &mailboxes); code != http.StatusOK {
+		t.Fatalf("list open api mailboxes code=%d", code)
+	}
+	if len(mailboxes.Items) < 2 {
+		t.Fatalf("mailboxes=%+v", mailboxes.Items)
+	}
+	var updated Mailbox
+	if code := openAdmin.do("POST", "/api/open/mailboxes/"+mailbox.ID, map[string]any{"displayName": "Renamed API User", "quotaMb": 512, "status": "disabled"}, &updated); code != http.StatusOK {
+		t.Fatalf("update open api mailbox code=%d mailbox=%+v", code, updated)
+	}
+	if updated.DisplayName != "Renamed API User" || updated.QuotaMB != 512 || updated.Status != "disabled" {
+		t.Fatalf("updated mailbox=%+v", updated)
+	}
+	var ok map[string]any
+	if code := openAdmin.do("DELETE", "/api/open/mailboxes/"+mailbox.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete open api mailbox code=%d body=%v", code, ok)
+	}
+	if code := openAdmin.do("DELETE", "/api/open/domains/"+domain.ID, nil, &ok); code != http.StatusOK {
+		t.Fatalf("delete open api domain code=%d body=%v", code, ok)
+	}
+}
+
+func TestOpenAPISendStatusAndMailboxMessages(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d body=%v", code, login)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "open-sender", "Open API Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "open-recipient", "Open API Recipient", "Password123!", nil)
+	other := createTestMailbox(t, admin, domainID, "open-other", "Open API Other", "Password123!", nil)
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login code=%d body=%v", code, login)
+	}
+	senderToken := createTestAPIToken(t, senderClient, "sender-open-api")
+	senderOpen := &testClient{t: t, server: ts, bearer: senderToken}
+	if code := senderClient.do("POST", "/api/open/send", map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "cookie-only open api send",
+		"text":      "this should not authenticate",
+	}, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("cookie-only open api send code=%d", code)
+	}
+	var sent struct {
+		ID             string    `json:"id"`
+		QueueID        string    `json:"queueId"`
+		Status         string    `json:"status"`
+		MessageID      string    `json:"messageId"`
+		RFCMessageID   string    `json:"rfcMessageId"`
+		MailboxID      string    `json:"mailboxId"`
+		MailboxAddress string    `json:"mailboxAddress"`
+		Subject        string    `json:"subject"`
+		CreatedAt      time.Time `json:"createdAt"`
+	}
+	if code := senderOpen.do("POST", "/api/open/send", map[string]any{
+		"mailboxId": sender.ID,
+		"to":        []string{recipient.Address},
+		"subject":   "open api send",
+		"text":      "hello from open api",
+	}, &sent); code != http.StatusCreated {
+		t.Fatalf("open api send code=%d body=%+v", code, sent)
+	}
+	if sent.ID == "" || sent.QueueID == "" || sent.Status != sendQueueStatusQueued || sent.MessageID == "" || sent.MailboxAddress != sender.Address {
+		t.Fatalf("sent response=%+v", sent)
+	}
+	var sendSource string
+	if err := a.db.QueryRow(`SELECT source FROM send_audit_events WHERE sent_message_id=? AND event=?`, sent.MessageID, sendAuditAccepted).Scan(&sendSource); err != nil {
+		t.Fatal(err)
+	}
+	if sendSource != sendSourceOpenAPI {
+		t.Fatalf("open api send audit source=%q, want %q", sendSource, sendSourceOpenAPI)
+	}
+	if err := a.db.QueryRow(`SELECT source FROM send_queue WHERE id=?`, sent.QueueID).Scan(&sendSource); err != nil {
+		t.Fatal(err)
+	}
+	if sendSource != sendSourceOpenAPI {
+		t.Fatalf("open api send queue source=%q, want %q", sendSource, sendSourceOpenAPI)
+	}
+
+	var status struct {
+		ID             string `json:"id"`
+		QueueID        string `json:"queueId"`
+		Status         string `json:"status"`
+		MessageID      string `json:"messageId"`
+		RFCMessageID   string `json:"rfcMessageId"`
+		MailboxID      string `json:"mailboxId"`
+		MailboxAddress string `json:"mailboxAddress"`
+		Subject        string `json:"subject"`
+	}
+	if code := senderOpen.do("GET", "/api/open/send/"+sent.ID, nil, &status); code != http.StatusOK {
+		t.Fatalf("open api send status code=%d status=%+v", code, status)
+	}
+	if status.ID != sent.MessageID || status.QueueID != sent.QueueID || status.MessageID != sent.MessageID || status.Status != sendQueueStatusQueued {
+		t.Fatalf("status=%+v sent=%+v", status, sent)
+	}
+
+	recipientClient := &testClient{t: t, server: ts}
+	if code := recipientClient.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("recipient login code=%d body=%v", code, login)
+	}
+	recipientToken := createTestAPIToken(t, recipientClient, "recipient-open-api")
+	recipientOpen := &testClient{t: t, server: ts, bearer: recipientToken}
+	var inbox struct {
+		Items      []MailMessage `json:"items"`
+		NextCursor string        `json:"nextCursor"`
+	}
+	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+recipient.ID+"/messages?folder=Inbox", nil, &inbox); code != http.StatusOK {
+		t.Fatalf("open api mailbox messages code=%d inbox=%+v", code, inbox)
+	}
+	if len(inbox.Items) != 1 || inbox.Items[0].Subject != "open api send" || inbox.Items[0].From != sender.Address {
+		t.Fatalf("inbox=%+v", inbox.Items)
+	}
+	if code := recipientOpen.do("GET", "/api/open/mailboxes/"+other.ID+"/messages?folder=Inbox", nil, &map[string]any{}); code != http.StatusNotFound {
+		t.Fatalf("cross-user mailbox read code=%d", code)
+	}
+	if code := recipientOpen.do("GET", "/api/open/send/"+sent.ID, nil, &map[string]any{}); code != http.StatusNotFound {
+		t.Fatalf("cross-user send status code=%d", code)
+	}
+}
+
+func TestOpenAPIV1ScopesIdempotencyAndDeliveryEvents(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "25"
+	a.cfg.DeliveryWebhookSecret = "delivery-test-secret"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "v1-sender", "V1 Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "v1-recipient", "V1 Recipient", "Password123!", nil)
+
+	adminReadToken := createTestAPITokenWithScopes(t, admin, "domain-reader", []string{"domains:read"})
+	adminRead := &testClient{t: t, server: ts, bearer: adminReadToken}
+	if code := adminRead.do("GET", "/api/open/v1/domains", nil, &map[string]any{}); code != http.StatusOK {
+		t.Fatalf("v1 scoped domain list code=%d", code)
+	}
+	if code := adminRead.do("POST", "/api/open/v1/domains", map[string]string{"name": "scope-denied.example"}, &map[string]any{}); code != http.StatusForbidden {
+		t.Fatalf("read-only token domain create code=%d", code)
+	}
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login code=%d", code)
+	}
+	sendToken := createTestAPITokenWithScopes(t, senderClient, "send-only", []string{"messages:send"})
+	sendClient := &testClient{t: t, server: ts, bearer: sendToken}
+	payload := map[string]any{"mailboxId": sender.ID, "to": []string{recipient.Address}, "subject": "idempotent send", "text": "one delivery"}
+	headers := map[string]string{"Idempotency-Key": "invoice-42"}
+	var first openAPISendStatus
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", payload, headers, &first); code != http.StatusCreated {
+		t.Fatalf("first idempotent send code=%d body=%+v", code, first)
+	}
+	if first.ID == "" || first.ID != first.MessageID || first.QueueID == "" || first.ID == first.QueueID {
+		t.Fatalf("stable send identifiers=%+v", first)
+	}
+	var replay openAPISendStatus
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", payload, headers, &replay); code != http.StatusOK {
+		t.Fatalf("idempotent replay code=%d body=%+v", code, replay)
+	}
+	if replay.ID != first.ID || replay.QueueID != first.QueueID {
+		t.Fatalf("replay=%+v first=%+v", replay, first)
+	}
+	var queueCount int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM send_queue WHERE source=? AND sent_message_id=?`, sendSourceOpenAPI, first.MessageID).Scan(&queueCount); err != nil || queueCount != 1 {
+		t.Fatalf("idempotent queue count=%d err=%v", queueCount, err)
+	}
+	changed := map[string]any{"mailboxId": sender.ID, "to": []string{recipient.Address}, "subject": "changed", "text": "different"}
+	if code := sendClient.doWithHeaders("POST", "/api/open/v1/send", changed, headers, &map[string]any{}); code != http.StatusConflict {
+		t.Fatalf("changed idempotency payload code=%d", code)
+	}
+	if code := sendClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &map[string]any{}); code != http.StatusForbidden {
+		t.Fatalf("send-only token read code=%d", code)
+	}
+
+	readToken := createTestAPITokenWithScopes(t, senderClient, "read-only", []string{"messages:read"})
+	readClient := &testClient{t: t, server: ts, bearer: readToken}
+	var queued openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &queued); code != http.StatusOK || queued.Status != sendQueueStatusQueued {
+		t.Fatalf("read status code=%d body=%+v", code, queued)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,updated_at=? WHERE id=?`, sendQueueStatusSending, a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var sending openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &sending); code != http.StatusOK || sending.Status != sendQueueStatusSending {
+		t.Fatalf("sending status code=%d body=%+v", code, sending)
+	}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,delivered_at=?,updated_at=? WHERE id=?`, sendQueueStatusDelivered, a.now().UTC().Format(time.RFC3339Nano), a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var relayed openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &relayed); code != http.StatusOK || relayed.Status != "relayed" || relayed.QueueStatus != sendQueueStatusDelivered {
+		t.Fatalf("relayed status code=%d body=%+v", code, relayed)
+	}
+
+	eventPayload := struct {
+		Events []deliveryWebhookEvent `json:"events"`
+	}{Events: []deliveryWebhookEvent{{ID: "provider-event-1", Provider: "test-provider", MessageID: first.MessageID, Recipient: recipient.Address, Status: "bounced", Reason: "550 mailbox unavailable", OccurredAt: a.now().UTC().Format(time.RFC3339Nano)}}}
+	body, _ := json.Marshal(eventPayload)
+	timestamp := strconv.FormatInt(a.now().UTC().Unix(), 10)
+	mac := hmac.New(sha256.New, []byte(a.cfg.DeliveryWebhookSecret))
+	_, _ = mac.Write([]byte(timestamp + "."))
+	_, _ = mac.Write(body)
+	webhookHeaders := map[string]string{"X-LanQin-Timestamp": timestamp, "X-LanQin-Signature": "sha256=" + hex.EncodeToString(mac.Sum(nil))}
+	badSignatureHeaders := map[string]string{"X-LanQin-Timestamp": timestamp, "X-LanQin-Signature": "sha256=" + strings.Repeat("0", 64)}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, badSignatureHeaders, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("invalid delivery webhook signature code=%d", code)
+	}
+	oldTimestamp := strconv.FormatInt(a.now().UTC().Add(-10*time.Minute).Unix(), 10)
+	oldMAC := hmac.New(sha256.New, []byte(a.cfg.DeliveryWebhookSecret))
+	_, _ = oldMAC.Write([]byte(oldTimestamp + "."))
+	_, _ = oldMAC.Write(body)
+	oldHeaders := map[string]string{"X-LanQin-Timestamp": oldTimestamp, "X-LanQin-Signature": "sha256=" + hex.EncodeToString(oldMAC.Sum(nil))}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, oldHeaders, &map[string]any{}); code != http.StatusUnauthorized {
+		t.Fatalf("expired delivery webhook signature code=%d", code)
+	}
+	var webhookResult struct {
+		Accepted   int `json:"accepted"`
+		Duplicates int `json:"duplicates"`
+	}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, webhookHeaders, &webhookResult); code != http.StatusOK || webhookResult.Accepted != 1 {
+		t.Fatalf("delivery webhook code=%d body=%+v", code, webhookResult)
+	}
+	if code := admin.doWithHeaders("POST", "/api/open/v1/delivery-events", eventPayload, webhookHeaders, &webhookResult); code != http.StatusOK || webhookResult.Duplicates != 1 {
+		t.Fatalf("delivery webhook duplicate code=%d body=%+v", code, webhookResult)
+	}
+	var bounced openAPISendStatus
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &bounced); code != http.StatusOK || bounced.Status != "bounced" || len(bounced.RecipientStatuses) != 1 {
+		t.Fatalf("bounced status code=%d body=%+v", code, bounced)
+	}
+	var events struct {
+		DeliveryEvents []DeliveryEvent `json:"deliveryEvents"`
+	}
+	if code := readClient.do("GET", "/api/open/v1/send/"+first.ID+"/events", nil, &events); code != http.StatusOK || len(events.DeliveryEvents) != 1 {
+		t.Fatalf("delivery events code=%d body=%+v", code, events)
+	}
+
+	manageToken := createTestAPITokenWithScopes(t, senderClient, "send-manager", []string{"messages:read", "messages:manage"})
+	manageClient := &testClient{t: t, server: ts, bearer: manageToken}
+	if _, err := a.db.Exec(`UPDATE send_queue SET status=?,attempt_count=max_attempts,last_error='test failure',updated_at=? WHERE id=?`, sendQueueStatusFailed, a.now().UTC().Format(time.RFC3339Nano), first.QueueID); err != nil {
+		t.Fatal(err)
+	}
+	var failed openAPISendStatus
+	if code := manageClient.do("GET", "/api/open/v1/send/"+first.ID, nil, &failed); code != http.StatusOK || failed.QueueStatus != sendQueueStatusFailed {
+		t.Fatalf("failed status code=%d body=%+v", code, failed)
+	}
+	var retried openAPISendStatus
+	if code := manageClient.do("POST", "/api/open/v1/send/"+first.ID+"/retry", nil, &retried); code != http.StatusOK || retried.QueueStatus != sendQueueStatusQueued {
+		t.Fatalf("retry code=%d body=%+v", code, retried)
+	}
+	var canceled openAPISendStatus
+	if code := manageClient.do("POST", "/api/open/v1/send/"+first.ID+"/cancel", nil, &canceled); code != http.StatusOK || canceled.QueueStatus != sendQueueStatusCanceled {
+		t.Fatalf("cancel code=%d body=%+v", code, canceled)
+	}
+}
+
+func TestOpenAPIPaginationAndMailboxCreateRollback(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+	token := createTestAPITokenWithScopes(t, admin, "admin-v1", []string{"domains:read", "mailboxes:write"})
+	openAdmin := &testClient{t: t, server: ts, bearer: token}
+	createTestDomain(t, admin, "pagination-one.test")
+	createTestDomain(t, admin, "pagination-two.test")
+	var firstPage struct {
+		Items      []Domain `json:"items"`
+		NextCursor string   `json:"nextCursor"`
+	}
+	if code := openAdmin.do("GET", "/api/open/v1/domains?limit=1", nil, &firstPage); code != http.StatusOK || len(firstPage.Items) != 1 || firstPage.NextCursor == "" {
+		t.Fatalf("first domain page code=%d body=%+v", code, firstPage)
+	}
+	var secondPage struct {
+		Items []Domain `json:"items"`
+	}
+	if code := openAdmin.do("GET", "/api/open/v1/domains?limit=1&cursor="+url.QueryEscape(firstPage.NextCursor), nil, &secondPage); code != http.StatusOK || len(secondPage.Items) != 1 || secondPage.Items[0].ID == firstPage.Items[0].ID {
+		t.Fatalf("second domain page code=%d body=%+v", code, secondPage)
+	}
+
+	domainID := mustDefaultDomainID(t, a)
+	createTestMailbox(t, admin, domainID, "rollback-address", "Existing", "Password123!", nil)
+	payload := map[string]any{"domainId": domainID, "localPart": "rollback-address", "displayName": "Should Rollback", "password": "Password123!", "ownerEmail": "orphan-owner@example.test"}
+	if code := openAdmin.do("POST", "/api/open/v1/mailboxes", payload, &map[string]any{}); code != http.StatusBadRequest {
+		t.Fatalf("duplicate mailbox create code=%d", code)
+	}
+	var orphanCount int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email=?`, "orphan-owner@example.test").Scan(&orphanCount); err != nil || orphanCount != 0 {
+		t.Fatalf("orphan user count=%d err=%v", orphanCount, err)
+	}
+}
+
+func TestOpenAPIContractCoversV1Routes(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "docs", "openapi.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		OpenAPI    string                                `json:"openapi"`
+		Paths      map[string]map[string]json.RawMessage `json:"paths"`
+		Components struct {
+			SecuritySchemes map[string]json.RawMessage `json:"securitySchemes"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatalf("parse openapi contract: %v", err)
+	}
+	if document.OpenAPI != "3.1.0" || document.Components.SecuritySchemes["bearerAuth"] == nil {
+		t.Fatalf("invalid openapi metadata: version=%q security=%v", document.OpenAPI, document.Components.SecuritySchemes)
+	}
+	routes := map[string][]string{
+		"/domains": {"get", "post"}, "/domains/{id}": {"get", "post", "delete"},
+		"/domains/{id}/dns-records": {"get"}, "/domains/{id}/dns-check": {"post"},
+		"/mailboxes": {"get", "post"}, "/mailboxes/{id}": {"get", "post", "delete"},
+		"/mailboxes/{id}/password": {"post"}, "/mailboxes/{id}/messages": {"get"},
+		"/messages/{id}": {"get"}, "/attachments/{id}": {"get"},
+		"/send": {"get", "post"}, "/send/{id}": {"get"}, "/send/{id}/events": {"get"},
+		"/send/{id}/retry": {"post"}, "/send/{id}/cancel": {"post"},
+		"/aliases": {"get", "post"}, "/aliases/{id}": {"get", "post", "delete"},
+		"/delivery-events": {"post"},
+	}
+	for route, methods := range routes {
+		pathItem := document.Paths[route]
+		if pathItem == nil {
+			t.Errorf("openapi missing path %s", route)
+			continue
+		}
+		for _, method := range methods {
+			if pathItem[method] == nil {
+				t.Errorf("openapi missing operation %s %s", strings.ToUpper(method), route)
+			}
+		}
+		if strings.Contains(route, "{id}") {
+			var raw map[string]any
+			if err := json.Unmarshal(data, &raw); err != nil {
+				t.Fatal(err)
+			}
+			paths, _ := raw["paths"].(map[string]any)
+			item, _ := paths[route].(map[string]any)
+			parameters, _ := item["parameters"].([]any)
+			foundID := false
+			for _, value := range parameters {
+				parameter, _ := value.(map[string]any)
+				if parameter["$ref"] == "#/components/parameters/ResourceId" || parameter["name"] == "id" {
+					foundID = true
+				}
+			}
+			if !foundID {
+				t.Errorf("openapi path %s does not declare id parameter", route)
+			}
+		}
+	}
+}
+
+func TestStatusWebhookOutboxDeliveryRetryAndSSRFProtection(t *testing.T) {
+	a := newTestApp(t)
+	stopTestWorkers(a)
+	accept := false
+	requests := 0
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		timestamp := r.Header.Get("X-LanQin-Timestamp")
+		mac := hmac.New(sha256.New, []byte("outbound-test-secret"))
+		_, _ = mac.Write([]byte(timestamp + "."))
+		_, _ = mac.Write(body)
+		if r.Header.Get("X-LanQin-Webhook-Id") == "" || r.Header.Get("X-LanQin-Signature") != "sha256="+hex.EncodeToString(mac.Sum(nil)) {
+			t.Error("invalid outbound webhook signature headers")
+		}
+		var envelope statusWebhookEnvelope
+		if err := json.Unmarshal(body, &envelope); err != nil || envelope.Type != "send.failed" {
+			t.Errorf("invalid outbound webhook payload: err=%v payload=%s", err, body)
+		}
+		if !accept {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	a.cfg.StatusWebhookURL = receiver.URL
+	a.cfg.StatusWebhookSecret = "outbound-test-secret"
+	a.cfg.StatusWebhookAllowPrivateHosts = true
+
+	user, mb := defaultAdminUserAndMailbox(t, a)
+	a.recordSendAudit(context.Background(), sendAuditFailed, sendQueueStatusFailed, sendAuditInput{QueueID: "snd_test", UserID: user.ID, MailboxID: mb.ID, SentMessageID: "mail_test", Source: sendSourceOpenAPI, MailFrom: mb.Address, Recipients: []string{"recipient@example.test"}, Error: "test failure"})
+	var outboxID string
+	if err := a.db.QueryRow(`SELECT id FROM status_webhook_outbox WHERE event_type='send.failed'`).Scan(&outboxID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueStatusWebhooks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var attempts int
+	var deliveredAt sql.NullString
+	if err := a.db.QueryRow(`SELECT attempt_count,delivered_at FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&attempts, &deliveredAt); err != nil || attempts != 1 || deliveredAt.Valid {
+		t.Fatalf("failed delivery outbox attempts=%d delivered=%v err=%v", attempts, deliveredAt, err)
+	}
+	accept = true
+	if _, err := a.db.Exec(`UPDATE status_webhook_outbox SET next_attempt_at=? WHERE id=?`, a.now().UTC().Format(time.RFC3339Nano), outboxID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.processDueStatusWebhooks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT attempt_count,delivered_at FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&attempts, &deliveredAt); err != nil || attempts != 2 || !deliveredAt.Valid || requests != 2 {
+		t.Fatalf("successful retry attempts=%d delivered=%v requests=%d err=%v", attempts, deliveredAt, requests, err)
+	}
+	if _, err := a.db.Exec(`DELETE FROM mailboxes WHERE id=?`, mb.ID); err != nil {
+		t.Fatal(err)
+	}
+	var remaining int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM status_webhook_outbox WHERE id=?`, outboxID).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("mailbox deletion should remove webhook outbox, remaining=%d err=%v", remaining, err)
+	}
+
+	privateTLS := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer privateTLS.Close()
+	a.cfg.StatusWebhookURL = privateTLS.URL
+	a.cfg.StatusWebhookAllowPrivateHosts = false
+	if _, err := a.validatedStatusWebhookURL(context.Background()); err == nil || !strings.Contains(err.Error(), "private or local") {
+		t.Fatalf("private webhook target should be rejected, err=%v", err)
 	}
 }
 
@@ -3745,6 +4483,66 @@ func TestMaildirImportStoresAuthenticationResults(t *testing.T) {
 	}
 }
 
+func TestMaildirSyncDoesNotRewriteUnchangedFiles(t *testing.T) {
+	a := newTestApp(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	a.cfg.MaildirRoot = root
+	_, mailbox := defaultAdminUserAndMailbox(t, a)
+	mailboxID := mailbox.ID
+	clearMailboxMessagesForTest(t, a, mailboxID)
+	mailboxes, err := a.maildirMailboxes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var admin maildirMailbox
+	for _, mb := range mailboxes {
+		if mb.ID == mailboxID {
+			admin = mb
+			break
+		}
+	}
+	if admin.ID == "" {
+		t.Fatal("admin mailbox not found")
+	}
+	dir := filepath.Join(root, admin.Domain, admin.LocalPart, "Maildir", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := strings.Join([]string{
+		"From: sender@example.test",
+		"To: admin@lanqin.local",
+		"Subject: unchanged mail",
+		"Message-Id: <unchanged-mail@example.test>",
+		"Date: Sat, 13 Jun 2026 13:00:00 +0000",
+		"Content-Type: text/plain; charset=utf-8",
+		"",
+		"unchanged body",
+	}, "\r\n")
+	if err := os.WriteFile(filepath.Join(dir, "1749819602.M1P1.unchanged"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := a.syncMaildirOnce(ctx); err != nil || count != 1 {
+		t.Fatalf("first sync count=%d err=%v", count, err)
+	}
+	var before string
+	if err := a.db.QueryRowContext(ctx, `SELECT updated_at FROM messages WHERE mailbox_id=? AND message_id=?`, mailboxID, "<unchanged-mail@example.test>").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+	base := parseTime(before)
+	a.now = func() time.Time { return base.Add(time.Hour) }
+	if count, err := a.syncMaildirOnce(ctx); err != nil || count != 0 {
+		t.Fatalf("second sync count=%d err=%v", count, err)
+	}
+	var after string
+	if err := a.db.QueryRowContext(ctx, `SELECT updated_at FROM messages WHERE mailbox_id=? AND message_id=?`, mailboxID, "<unchanged-mail@example.test>").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Fatalf("unchanged mail updated_at changed from %q to %q", before, after)
+	}
+}
+
 func TestMaildirSyncHealthDisabled(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())
@@ -3764,6 +4562,43 @@ func TestMaildirSyncHealthDisabled(t *testing.T) {
 	}
 	if health.ScanSeconds != 30 {
 		t.Fatalf("scan seconds=%d, want default 30", health.ScanSeconds)
+	}
+}
+
+func TestMaildirSyncHealthSeparatesCurrentAndLastRun(t *testing.T) {
+	tracker := newMaildirSyncHealthTracker()
+	cfg := Config{MaildirRoot: "/var/mail/vhosts", MaildirScanSeconds: 30}
+	firstStart := time.Date(2026, 8, 10, 10, 54, 0, 0, time.UTC)
+	firstFinish := firstStart.Add(250 * time.Millisecond)
+	nextRun := firstFinish.Add(30 * time.Second)
+
+	tracker.markWorkerStarted(nil)
+	tracker.markRunStarted(firstStart)
+	running := tracker.snapshot(cfg)
+	if !running.Running || running.CurrentRun == nil || !running.CurrentRun.StartedAt.Equal(firstStart) {
+		t.Fatalf("running snapshot=%+v, want current run", running)
+	}
+	if running.LastRun != nil || running.NextRunAt != nil {
+		t.Fatalf("running snapshot last=%+v next=%+v, want neither", running.LastRun, running.NextRunAt)
+	}
+
+	tracker.markRunFinished(firstFinish, maildirSyncCounts{FilesScanned: 3, Imported: 1}, nil, &nextRun)
+	completed := tracker.snapshot(cfg)
+	if completed.Running || completed.CurrentRun != nil || completed.LastRun == nil {
+		t.Fatalf("completed snapshot=%+v, want only last run", completed)
+	}
+	if completed.LastRun.FinishedAt == nil || !completed.LastRun.FinishedAt.Equal(firstFinish) || completed.LastRun.DurationMs != 250 {
+		t.Fatalf("completed last run=%+v, want finish and duration", completed.LastRun)
+	}
+
+	secondStart := nextRun
+	tracker.markRunStarted(secondStart)
+	second := tracker.snapshot(cfg)
+	if second.CurrentRun == nil || !second.CurrentRun.StartedAt.Equal(secondStart) || second.LastRun == nil || second.LastRun.FinishedAt == nil {
+		t.Fatalf("second snapshot current=%+v last=%+v", second.CurrentRun, second.LastRun)
+	}
+	if second.NextRunAt != nil {
+		t.Fatalf("next run during active sync=%+v, want nil", second.NextRunAt)
 	}
 }
 

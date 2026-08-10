@@ -19,43 +19,50 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
 )
 
 type App struct {
-	cfg           Config
-	db            *sql.DB
-	log           *slog.Logger
-	now           func() time.Time
-	policy        *HTMLPolicy
-	workerCancel  context.CancelFunc
-	workerWG      sync.WaitGroup
-	maildirHealth *maildirSyncHealthTracker
-	externalIMAP  externalIMAPClientFactory
+	cfg              Config
+	db               *sql.DB
+	log              *slog.Logger
+	now              func() time.Time
+	policy           *HTMLPolicy
+	workerCancel     context.CancelFunc
+	workerWG         sync.WaitGroup
+	maildirHealth    *maildirSyncHealthTracker
+	maildirSyncMu    sync.Mutex
+	maildirDirs      map[string]maildirDirectorySignature
+	maildirRuns      uint64
+	externalIMAP     externalIMAPClientFactory
+	messageSearchFTS bool
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
-		return nil, fmt.Errorf("create db dir: %w", err)
+	cfg = normalizeDatabaseConfig(cfg)
+	if cfg.DBDriver == databaseDriverSQLite {
+		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
+			return nil, fmt.Errorf("create db dir: %w", err)
+		}
 	}
 	if err := os.MkdirAll(filepath.Join(cfg.DataDir, "attachments"), 0o755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", cfg.DBPath)
+	db, err := openDatabase(context.Background(), cfg)
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
 
 	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
 	a.externalIMAP = a
-	if err := a.configureSQLite(context.Background()); err != nil {
-		db.Close()
-		return nil, err
+	if cfg.DBDriver == databaseDriverSQLite {
+		if err := a.configureSQLite(context.Background()); err != nil {
+			db.Close()
+			return nil, err
+		}
 	}
 	if err := a.migrate(context.Background()); err != nil {
 		db.Close()
@@ -82,6 +89,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
+	a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
 	return a, nil
 }
 
@@ -119,6 +127,13 @@ func (a *App) configureSQLite(ctx context.Context) error {
 }
 
 func (a *App) migrate(ctx context.Context) error {
+	if a.cfg.DBDriver != databaseDriverSQLite {
+		if err := initializeExternalSchema(ctx, a.db, a.cfg.DBDriver); err != nil {
+			return err
+		}
+		return a.ensureDefaultPermissionGroups(ctx)
+	}
+
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
 			id TEXT PRIMARY KEY,
@@ -163,6 +178,30 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS api_tokens (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			name TEXT NOT NULL,
+			token_hash TEXT NOT NULL UNIQUE,
+			last_used_at TEXT,
+			expires_at TEXT NOT NULL,
+			disabled INTEGER NOT NULL DEFAULT 0,
+			scopes_json TEXT NOT NULL DEFAULT '["*"]',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS send_idempotency_keys (
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			idempotency_key TEXT NOT NULL,
+			request_hash TEXT NOT NULL,
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			queue_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			PRIMARY KEY(user_id, idempotency_key)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_idempotency_created ON send_idempotency_keys(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_api_tokens_hash ON api_tokens(token_hash)`,
 		`CREATE TABLE IF NOT EXISTS system_settings (
 			key TEXT PRIMARY KEY,
 			value TEXT NOT NULL,
@@ -209,13 +248,40 @@ func (a *App) migrate(ctx context.Context) error {
 			shared_with_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			scope TEXT NOT NULL CHECK(scope IN ('all','custom')),
 			include_starred INTEGER NOT NULL DEFAULT 0,
+			allow_attachments INTEGER NOT NULL DEFAULT 1,
+			version INTEGER NOT NULL DEFAULT 1,
 			expires_at TEXT,
+			last_accessed_at TEXT,
+			revoked_at TEXT,
+			left_at TEXT,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			CHECK(owner_user_id <> shared_with_user_id),
 			UNIQUE(mailbox_id, shared_with_user_id)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_mailbox_shares_recipient ON mailbox_shares(shared_with_user_id, expires_at, mailbox_id)`,
+		`CREATE TABLE IF NOT EXISTS mailbox_share_audit_events (
+			id TEXT PRIMARY KEY,
+			share_id TEXT NOT NULL REFERENCES mailbox_shares(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			actor_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			event TEXT NOT NULL,
+			details_json TEXT NOT NULL DEFAULT '{}',
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_share_audit_share ON mailbox_share_audit_events(share_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS user_notifications (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			type TEXT NOT NULL,
+			title TEXT NOT NULL,
+			body TEXT NOT NULL,
+			data_json TEXT NOT NULL DEFAULT '{}',
+			dedupe_key TEXT UNIQUE,
+			read_at TEXT,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_user_notifications_user ON user_notifications(user_id, created_at DESC)`,
 		`CREATE TABLE IF NOT EXISTS aliases (
 			id TEXT PRIMARY KEY,
 			domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
@@ -270,10 +336,18 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received_id ON messages(mailbox_id, folder_id, received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_received_id ON messages(received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_received_id ON messages(mailbox_id, received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, is_read)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received_id ON messages(mailbox_id, received_at DESC, id DESC) WHERE is_starred=1`,
+		`DROP INDEX IF EXISTS idx_messages_mailbox_folder_received`,
+		`DROP INDEX IF EXISTS idx_messages_mailbox_starred_received`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_cleanup ON messages(updated_at) WHERE raw_path<>'' AND mailbox_id IS NOT NULL AND mailbox_id<>''`,
 		`CREATE TABLE IF NOT EXISTS sent_message_dedupe_keys (
 			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
 			folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
@@ -327,7 +401,50 @@ func (a *App) migrate(ctx context.Context) error {
 			error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL
 		)`,
-		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created ON send_audit_events(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_created_id ON send_audit_events(created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_mailbox_created_id ON send_audit_events(mailbox_id,created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_event_created_id ON send_audit_events(event,created_at DESC,id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_send_audit_events_queue_created_id ON send_audit_events(queue_id,created_at,id)`,
+		`DROP INDEX IF EXISTS idx_send_audit_events_created`,
+		`CREATE TABLE IF NOT EXISTS delivery_events (
+			id TEXT PRIMARY KEY,
+			external_id TEXT NOT NULL,
+			provider TEXT NOT NULL,
+			queue_id TEXT NOT NULL DEFAULT '',
+			sent_message_id TEXT NOT NULL DEFAULT '',
+			rfc_message_id TEXT NOT NULL DEFAULT '',
+			recipient TEXT NOT NULL,
+			status TEXT NOT NULL,
+			reason TEXT NOT NULL DEFAULT '',
+			occurred_at TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			UNIQUE(provider, external_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_delivery_events_message ON delivery_events(sent_message_id, occurred_at, id)`,
+		`CREATE INDEX IF NOT EXISTS idx_delivery_events_rfc_message ON delivery_events(rfc_message_id, occurred_at, id)`,
+		`CREATE TABLE IF NOT EXISTS status_webhook_outbox (
+			id TEXT PRIMARY KEY,
+			event_key TEXT NOT NULL UNIQUE,
+			event_type TEXT NOT NULL,
+			mailbox_id TEXT NOT NULL DEFAULT '',
+			payload_json TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_due ON status_webhook_outbox(delivered_at,next_attempt_at,created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_mailbox ON status_webhook_outbox(mailbox_id,created_at)`,
+		`CREATE TRIGGER IF NOT EXISTS trg_mailbox_delete_status_webhook_outbox
+			AFTER DELETE ON mailboxes BEGIN
+				DELETE FROM status_webhook_outbox WHERE mailbox_id=OLD.id;
+			END`,
+		`CREATE TRIGGER IF NOT EXISTS trg_send_queue_delete_delivery_events
+			AFTER DELETE ON send_queue BEGIN
+				DELETE FROM delivery_events WHERE queue_id=OLD.id;
+			END`,
 		`CREATE TABLE IF NOT EXISTS attachments (
 			id TEXT PRIMARY KEY,
 			message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -337,6 +454,7 @@ func (a *App) migrate(ctx context.Context) error {
 			storage_path TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_attachments_message_filename ON attachments(message_id, filename)`,
 		`CREATE TABLE IF NOT EXISTS scheduled_sends (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -533,6 +651,9 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.rebuildHTMLOnlyMessageSnippets(ctx); err != nil {
 		return err
 	}
+	if err := a.ensureMessageSearchFTS(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateUsersForTwoFactor(ctx); err != nil {
 		return err
 	}
@@ -557,10 +678,84 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateExternalIMAP(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateAPITokenScopes(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateMailboxSharing(ctx); err != nil {
+		return err
+	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (a *App) migrateMailboxSharing(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(mailbox_shares)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	alter := []struct{ name, sql string }{
+		{"allow_attachments", `ALTER TABLE mailbox_shares ADD COLUMN allow_attachments INTEGER NOT NULL DEFAULT 1`},
+		{"version", `ALTER TABLE mailbox_shares ADD COLUMN version INTEGER NOT NULL DEFAULT 1`},
+		{"last_accessed_at", `ALTER TABLE mailbox_shares ADD COLUMN last_accessed_at TEXT`},
+		{"revoked_at", `ALTER TABLE mailbox_shares ADD COLUMN revoked_at TEXT`},
+		{"left_at", `ALTER TABLE mailbox_shares ADD COLUMN left_at TEXT`},
+	}
+	for _, item := range alter {
+		if !columns[item.name] {
+			if _, err := a.db.ExecContext(ctx, item.sql); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (a *App) migrateAPITokenScopes(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(api_tokens)`)
+	if err != nil {
+		return err
+	}
+	hasScopes := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "scopes_json" {
+			hasScopes = true
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if hasScopes {
+		return nil
+	}
+	_, err = a.db.ExecContext(ctx, `ALTER TABLE api_tokens ADD COLUMN scopes_json TEXT NOT NULL DEFAULT '["*"]'`)
+	return err
 }
 
 func (a *App) migrateMessageAuthentication(ctx context.Context) error {
@@ -1056,21 +1251,21 @@ func (a *App) migrateMessagesFromName(ctx context.Context) error {
 			return err
 		}
 	}
-	if _, err := a.db.ExecContext(ctx, `DROP INDEX IF EXISTS idx_messages_search`); err != nil {
-		return err
-	}
-	if _, err := a.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`); err != nil {
-		return err
-	}
 	return nil
 }
 
 func messageIndexes() []string {
 	return []string{
-		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received ON messages(mailbox_id, folder_id, received_at DESC)`,
-		`CREATE INDEX IF NOT EXISTS idx_messages_search ON messages(mailbox_id, subject, from_addr, from_name, snippet)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_folder_received_id ON messages(mailbox_id, folder_id, received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_received_id ON messages(received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_received_id ON messages(mailbox_id, received_at DESC, id DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_folder_read ON messages(folder_id, is_read)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_starred_received_id ON messages(mailbox_id, received_at DESC, id DESC) WHERE is_starred=1`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_mailbox_message_id ON messages(mailbox_id, message_id) WHERE message_id<>''`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_mailbox_raw_path ON messages(mailbox_id, raw_path) WHERE raw_path <> '' AND mailbox_id IS NOT NULL`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_unregistered_raw_path ON messages(raw_path) WHERE raw_path <> '' AND mailbox_id IS NULL`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_backfill ON messages(created_at) WHERE raw_path='' AND mailbox_id IS NOT NULL AND mailbox_id<>'' AND folder_id IS NOT NULL AND folder_id<>''`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_maildir_cleanup ON messages(updated_at) WHERE raw_path<>'' AND mailbox_id IS NOT NULL AND mailbox_id<>''`,
 	}
 }
 
@@ -1207,6 +1402,22 @@ func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, di
 }
 
 func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+	tx, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status)
+	if err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
 	localPart = normalizeLocalPart(localPart)
 	if localPart == "" {
 		return "", errors.New("invalid local part")
@@ -1218,7 +1429,7 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		status = "active"
 	}
 	var domain string
-	if err := a.db.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
 		return "", err
 	}
 	address := localPart + "@" + domain
@@ -1226,15 +1437,9 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		displayName = address
 	}
 
-	tx, err := a.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
 	id := newID("mbx")
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	_, err = tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
+	_, err := tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, passwordHash, quotaMB, status, now, now)
 	if err != nil {
 		return "", err
@@ -1244,9 +1449,6 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 		if err != nil {
 			return "", err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
 	}
 	return id, nil
 }

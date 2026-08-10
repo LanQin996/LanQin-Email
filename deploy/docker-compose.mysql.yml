@@ -1,0 +1,35 @@
+services:
+  lanqin-email:
+    environment:
+      LANQIN_DB_DRIVER: mysql
+      LANQIN_DATABASE_URL: "${LANQIN_MYSQL_USER:-lanqin}:${LANQIN_MYSQL_PASSWORD:?Set LANQIN_MYSQL_PASSWORD in deploy/.env}@tcp(mysql:3306)/${LANQIN_MYSQL_DATABASE:-lanqin}?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci"
+      LANQIN_DB_HOST: mysql
+      LANQIN_DB_PORT: "3306"
+      LANQIN_DB_NAME: "${LANQIN_MYSQL_DATABASE:-lanqin}"
+      LANQIN_DB_USER: "${LANQIN_MYSQL_USER:-lanqin}"
+      LANQIN_DB_PASSWORD: "${LANQIN_MYSQL_PASSWORD:?Set LANQIN_MYSQL_PASSWORD in deploy/.env}"
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: "${LANQIN_MYSQL_DATABASE:-lanqin}"
+      MYSQL_USER: "${LANQIN_MYSQL_USER:-lanqin}"
+      MYSQL_PASSWORD: "${LANQIN_MYSQL_PASSWORD:?Set LANQIN_MYSQL_PASSWORD in deploy/.env}"
+      MYSQL_ROOT_PASSWORD: "${LANQIN_MYSQL_ROOT_PASSWORD:?Set LANQIN_MYSQL_ROOT_PASSWORD in deploy/.env}"
+    volumes:
+      - lanqin-mysql-data:/var/lib/mysql
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'MYSQL_PWD="$${MYSQL_PASSWORD}" mysqladmin ping -h 127.0.0.1 -u"$${MYSQL_USER}" --silent'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  lanqin-mysql-data:

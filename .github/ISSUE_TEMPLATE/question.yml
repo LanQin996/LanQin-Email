@@ -1,0 +1,31 @@
+name: Question or usage help / 使用问题
+description: Ask a usage question that is not clearly a bug or feature request. / 提交不明显属于 Bug 或功能建议的使用问题。
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please write in Chinese or English.
+
+        你可以使用中文或英文填写。
+
+        Please do not include secrets, private mailbox data, or full production logs.
+
+        请不要包含密钥、私人邮箱数据或完整生产日志。
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details / 详情
+      description: What are you trying to do, and where are you stuck? / 你想完成什么？卡在哪里？
+      placeholder: "Example / 示例：如何给第三方客户端配置 SMTP 和 IMAP？"
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本（可选）
+      description: Add the LanQin Email version if relevant. / 如相关，可以补充 LanQin Email 版本。
+      placeholder: "v1.2.3"

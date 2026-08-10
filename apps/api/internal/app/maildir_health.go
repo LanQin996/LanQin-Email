@@ -10,12 +10,14 @@ import (
 const maxMaildirRecentErrors = 10
 
 type maildirSyncCounts struct {
-	FilesScanned     int      `json:"filesScanned"`
-	Imported         int      `json:"imported"`
-	Backfilled       int      `json:"backfilled"`
-	Cleaned          int      `json:"cleaned"`
-	FileErrors       int      `json:"fileErrors"`
-	fileErrorDetails []string `json:"-"`
+	DirectoriesChecked int      `json:"directoriesChecked"`
+	DirectoriesScanned int      `json:"directoriesScanned"`
+	FilesScanned       int      `json:"filesScanned"`
+	Imported           int      `json:"imported"`
+	Backfilled         int      `json:"backfilled"`
+	Cleaned            int      `json:"cleaned"`
+	FileErrors         int      `json:"fileErrors"`
+	fileErrorDetails   []string `json:"-"`
 }
 
 func (c maildirSyncCounts) total() int {
@@ -38,6 +40,7 @@ type maildirSyncHealthResponse struct {
 	ScanSeconds   int               `json:"scanSeconds"`
 	WorkerStarted bool              `json:"workerStarted"`
 	Running       bool              `json:"running"`
+	CurrentRun    *maildirSyncRun   `json:"currentRun,omitempty"`
 	LastRun       *maildirSyncRun   `json:"lastRun,omitempty"`
 	LastError     string            `json:"lastError,omitempty"`
 	NextRunAt     *time.Time        `json:"nextRunAt,omitempty"`
@@ -90,7 +93,7 @@ func (h *maildirSyncHealthTracker) markRunStarted(startedAt time.Time) {
 	run := &maildirSyncRun{StartedAt: startedAt.UTC(), Status: "running"}
 	h.running = true
 	h.current = run
-	h.lastRun = cloneMaildirSyncRun(run)
+	h.nextRunAt = nil
 }
 
 func (h *maildirSyncHealthTracker) markRunFinished(finishedAt time.Time, counts maildirSyncCounts, err error, nextRunAt *time.Time) {
@@ -127,6 +130,8 @@ func (h *maildirSyncHealthTracker) markRunFinished(finishedAt time.Time, counts 
 		h.lastError = ""
 	}
 	h.summary.FilesScanned += counts.FilesScanned
+	h.summary.DirectoriesChecked += counts.DirectoriesChecked
+	h.summary.DirectoriesScanned += counts.DirectoriesScanned
 	h.summary.Imported += counts.Imported
 	h.summary.Backfilled += counts.Backfilled
 	h.summary.Cleaned += counts.Cleaned
@@ -156,6 +161,7 @@ func (h *maildirSyncHealthTracker) snapshot(cfg Config) maildirSyncHealthRespons
 	defer h.mu.Unlock()
 	out.WorkerStarted = h.workerStarted
 	out.Running = h.running
+	out.CurrentRun = cloneMaildirSyncRun(h.current)
 	out.LastRun = cloneMaildirSyncRun(h.lastRun)
 	out.LastError = h.lastError
 	out.NextRunAt = cloneTimePtr(h.nextRunAt)

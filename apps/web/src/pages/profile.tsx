@@ -2,9 +2,9 @@ import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, BarChart3, Ban, Clock3, Contact, Copy, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Search, Settings, Share2, ShieldCheck, SlidersHorizontal, Sun, Trash2, UserPlus, Users, X } from "lucide-react"
+import { ArrowLeft, BarChart3, Ban, Bell, CalendarClock, Clock3, Contact, Copy, History, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Search, Settings, Share2, ShieldCheck, SlidersHorizontal, Sun, Trash2, UserPlus, Users, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser } from "@/lib/api"
+import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailboxShare, MailboxShareAuditEvent, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser, UserNotification } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Switch } from "@/components/ui/switch"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -32,10 +33,11 @@ import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGrou
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import { useToast } from "@/hooks/use-toast"
 
-type Tab = "profile" | "mailboxes" | "sharing" | "clients" | "signatures" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
+type Tab = "profile" | "apiTokens" | "mailboxes" | "sharing" | "clients" | "signatures" | "contacts" | "cleanup" | "rules" | "blocked" | "stats"
 type PendingConfirm = { title: string; description?: string; confirmText: string; destructive?: boolean; onConfirm: () => void }
 const tabs: Record<Tab, { label: string; icon: React.ReactNode }> = {
   profile: { label: "账户资料", icon: <Settings className="h-4 w-4" /> },
+  apiTokens: { label: "API Token", icon: <KeyRound className="h-4 w-4" /> },
   mailboxes: { label: "邮箱管理", icon: <Mail className="h-4 w-4" /> },
   sharing: { label: "邮箱共享", icon: <Share2 className="h-4 w-4" /> },
   clients: { label: "第三方客户端", icon: <Laptop className="h-4 w-4" /> },
@@ -83,6 +85,7 @@ export function ProfilePage() {
   const canApplyMailbox = hasPermission(user, "mail.mailboxes.apply")
   const visibleTabKeys = tabKeys.filter((key) => {
     if (key === "profile") return true
+    if (key === "apiTokens") return true
     if (key === "mailboxes") return canAccessMail || canApplyMailbox
     if (key === "sharing") return canAccessMail && canReadMail
     if (key === "clients") return canAccessMail
@@ -98,6 +101,7 @@ export function ProfilePage() {
   const mailboxes = useQuery({ queryKey: ["mailboxes", "owned"], queryFn: api.myOwnedMailboxes, enabled: canAccessMail })
   const mailboxApplyOptions = useQuery({ queryKey: ["mailbox-apply-options"], queryFn: api.mailboxApplyOptions, enabled: canApplyMailbox })
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const apiTokens = useQuery({ queryKey: ["api-tokens"], queryFn: api.apiTokens })
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts, enabled: canManageContacts })
   const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures, enabled: canManageSignatures })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules, enabled: canManageRules })
@@ -145,6 +149,21 @@ export function ProfilePage() {
     mutationFn: (form: FormData) => api.disableTwoFactor(String(form.get("code") || "")),
     onSuccess: (data) => { qc.setQueryData(["me"], data); twoFactorFormRef.current?.reset(); toast({ title: "双因素认证已关闭" }) },
     onError: (error) => toast({ title: "关闭失败", description: error.message }),
+  })
+  const createApiToken = useMutation({
+    mutationFn: (payload: { name: string; expiresAt?: string; scopes: string[] }) => api.createApiToken(payload),
+    onSuccess: (res) => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已创建" }); return res },
+    onError: (error) => toast({ title: "创建失败", description: error.message }),
+  })
+  const updateApiToken = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: { name?: string; expiresAt?: string; disabled?: boolean; scopes?: string[] } }) => api.updateApiToken(id, payload),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已更新" }) },
+    onError: (error) => toast({ title: "更新失败", description: error.message }),
+  })
+  const deleteApiToken = useMutation({
+    mutationFn: api.deleteApiToken,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["api-tokens"] }); toast({ title: "API Token 已撤销" }) },
+    onError: (error) => toast({ title: "撤销失败", description: error.message }),
   })
   const createContact = useMutation({
     mutationFn: (form: FormData) => api.createContact({ name: String(form.get("name") || ""), email: String(form.get("email") || ""), note: String(form.get("note") || "") }),
@@ -303,7 +322,7 @@ export function ProfilePage() {
     <div className="h-svh overflow-hidden bg-background">
       <SidebarProvider className="h-full min-h-0 w-full">
         {isMobile ? (
-          <div className="flex h-full min-h-0 flex-col">
+          <div className="flex h-full w-full min-w-0 max-w-full flex-col">
             <header className="flex h-14 shrink-0 items-center gap-2 border-b px-3">
               <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
                 <SheetTrigger asChild>
@@ -317,7 +336,7 @@ export function ProfilePage() {
               <div className="min-w-0 flex-1 text-sm font-semibold">{tabs[tab].label}</div>
               <Button type="button" variant="ghost" size="icon" onClick={() => navigate("/")} aria-label="返回邮箱"><ArrowLeft className="h-4 w-4" /></Button>
             </header>
-            <ScrollArea className="min-h-0 flex-1"><main className="w-full p-4">{renderTab()}</main></ScrollArea>
+            <ScrollArea className="min-h-0 min-w-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block"><main className="w-full min-w-0 max-w-full overflow-x-hidden p-4">{renderTab()}</main></ScrollArea>
           </div>
         ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
@@ -368,6 +387,7 @@ export function ProfilePage() {
       />
     )
     if (tab === "sharing") return <MailboxSharingSection mailboxes={mailboxes.data?.items || []} />
+    if (tab === "apiTokens") return <ApiTokensSection items={apiTokens.data?.items || []} loading={apiTokens.isLoading} pending={createApiToken.isPending || updateApiToken.isPending || deleteApiToken.isPending} onCreate={(payload) => createApiToken.mutateAsync(payload)} onUpdate={(id, payload) => updateApiToken.mutate({ id, payload })} onDelete={(id) => deleteApiToken.mutate(id)} onCopy={copy} />
     if (tab === "clients") return <ClientSettingsSection mailboxes={mailboxes.data?.items || []} selectedMailboxId={mailboxId} hostname={publicSettings.data?.publicHostname} onSelectMailbox={setMailboxId} onCopy={copy} />
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
@@ -895,6 +915,19 @@ function formatDateTime(value: string) {
   return date.toLocaleString()
 }
 
+function dateInputValue(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function dateInputToISOString(value: string) {
+  if (!value) return undefined
+  const [year, month, day] = value.split("-").map(Number)
+  return new Date(year, month - 1, day, 23, 59, 59, 999).toISOString()
+}
+
 function ClientSettingsSection({ mailboxes, selectedMailboxId, hostname, onSelectMailbox, onCopy }: { mailboxes: Mailbox[]; selectedMailboxId: string; hostname?: string; onSelectMailbox: (id: string) => void; onCopy: (text: string) => void }) {
   const selected = mailboxes.find((item) => item.id === selectedMailboxId) || mailboxes[0]
   const server = clientServerHost(hostname, selected?.address)
@@ -978,6 +1011,134 @@ function ClientConfigRow({ label, value, security, onCopy }: { label: string; va
           <Button type="button" variant="ghost" size="icon" className="size-7" onClick={() => onCopy(value)}><Copy className="h-4 w-4" /></Button>
         </div>
       </div>
+    </div>
+  )
+}
+
+const apiTokenScopeOptions = [
+  ["messages:send", "发送邮件"], ["messages:read", "读取邮件与投递状态"], ["messages:manage", "重试或取消发送"],
+  ["domains:read", "查看域名"], ["domains:write", "管理域名"], ["mailboxes:read", "查看邮箱"], ["mailboxes:write", "管理邮箱"],
+  ["dns:read", "查看 DNS"], ["dns:check", "执行 DNS 检测"], ["aliases:read", "查看别名"], ["aliases:write", "管理别名"],
+] as const
+
+function ApiTokensSection({ items, loading, pending, onCreate, onUpdate, onDelete, onCopy }: { items: APIToken[]; loading: boolean; pending: boolean; onCreate: (payload: { name: string; expiresAt?: string; scopes: string[] }) => Promise<{ token: string; item: APIToken }>; onUpdate: (id: string, payload: { name?: string; expiresAt?: string; disabled?: boolean; scopes?: string[] }) => void; onDelete: (id: string) => void; onCopy: (text: string) => void }) {
+  const [createdToken, setCreatedToken] = React.useState("")
+  const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
+  const [scopes, setScopes] = React.useState<string[]>(["messages:send", "messages:read"])
+  const [editingToken, setEditingToken] = React.useState<APIToken | null>(null)
+  const [editingScopes, setEditingScopes] = React.useState<string[]>([])
+  const defaultExpiresAt = React.useMemo(() => dateInputValue(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)), [])
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const target = event.currentTarget
+    const form = new FormData(target)
+    const expiresAt = dateInputToISOString(String(form.get("expiresAt") || ""))
+    try {
+      const res = await onCreate({ name: String(form.get("name") || ""), expiresAt, scopes })
+      setCreatedToken(res.token)
+      target.reset()
+      setScopes(["messages:send", "messages:read"])
+    } catch {
+      // Mutation-level error handling already shows the toast.
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle>API Token</CardTitle>
+              <div className="mt-1 text-sm text-muted-foreground">用于服务端集成调用 `/api/open`，创建后请立即保存。</div>
+            </div>
+            <Badge variant="secondary">{items.length} 个</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {createdToken && (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
+              <div className="text-sm font-medium">只显示一次</div>
+              <div className="mt-2 flex min-w-0 flex-col gap-2 sm:flex-row">
+                <code className="min-w-0 flex-1 overflow-x-auto rounded border bg-background px-3 py-2 text-xs">{createdToken}</code>
+                <Button type="button" variant="outline" onClick={() => onCopy(createdToken)}><Copy className="h-4 w-4" />复制</Button>
+              </div>
+            </div>
+          )}
+
+          <form className="space-y-4" onSubmit={submit}>
+            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+              <Field label="名称"><Input name="name" required maxLength={80} placeholder="billing-system" /></Field>
+              <Field label="到期日期"><Input name="expiresAt" type="date" defaultValue={defaultExpiresAt} min={dateInputValue(new Date())} required /></Field>
+              <Button disabled={pending || scopes.length === 0}>{pending ? "创建中..." : "创建 Token"}</Button>
+            </div>
+            <Field label="授权范围">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {apiTokenScopeOptions.map(([value, label]) => (
+                  <label key={value} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                    <Checkbox checked={scopes.includes(value)} onCheckedChange={(checked) => setScopes((current) => checked === true ? [...current, value] : current.filter((scope) => scope !== value))} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </Field>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle>已创建的 Token</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {items.map((item) => {
+            const expired = item.expiresAt ? new Date(item.expiresAt).getTime() <= Date.now() : false
+            return (
+              <div key={item.id} className="grid gap-3 rounded-lg border p-4 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="truncate font-medium">{item.name}</div>
+                    <Badge variant={item.disabled || expired ? "secondary" : "default"}>{item.disabled ? "已禁用" : expired ? "已过期" : "可用"}</Badge>
+                  </div>
+                  <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                    <span>创建：{formatDateTime(item.createdAt)}</span>
+                    <span>过期：{item.expiresAt ? formatDateTime(item.expiresAt) : "未设置"}</span>
+                    <span>最后使用：{item.lastUsedAt ? formatDateTime(item.lastUsedAt) : "从未使用"}</span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {(item.scopes || ["*"]).map((scope) => <Badge key={scope} variant="outline">{scope}</Badge>)}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" size="sm" disabled={pending} onClick={() => { setEditingToken(item); setEditingScopes(item.scopes?.includes("*") ? ["messages:send", "messages:read"] : item.scopes || []) }}>编辑权限</Button>
+                  <Button type="button" variant="outline" size="sm" disabled={pending || expired} onClick={() => onUpdate(item.id, { disabled: !item.disabled })}>{item.disabled ? "启用" : "禁用"}</Button>
+                  <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={() => setPendingConfirm({ title: "撤销 API Token？", description: `Token “${item.name}” 撤销后无法恢复，正在使用它的集成会立即失效。`, confirmText: "撤销 Token", destructive: true, onConfirm: () => { onDelete(item.id); setPendingConfirm(null) } })}>撤销</Button>
+                </div>
+              </div>
+            )
+          })}
+          {!loading && items.length === 0 && <EmptyState text="暂无 API Token" />}
+        </CardContent>
+      </Card>
+
+      <Dialog open={!!editingToken} onOpenChange={(open) => { if (!open) setEditingToken(null) }}>
+        <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader><DialogTitle>编辑 Token 权限</DialogTitle></DialogHeader>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {apiTokenScopeOptions.map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+                <Checkbox checked={editingScopes.includes(value)} onCheckedChange={(checked) => setEditingScopes((current) => checked === true ? [...current, value] : current.filter((scope) => scope !== value))} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setEditingToken(null)}>取消</Button>
+            <Button type="button" disabled={pending || editingScopes.length === 0} onClick={() => { if (editingToken) onUpdate(editingToken.id, { scopes: editingScopes }); setEditingToken(null) }}>保存权限</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog open={!!pendingConfirm} title={pendingConfirm?.title || ""} description={pendingConfirm?.description} confirmText={pendingConfirm?.confirmText || "撤销"} destructive={!!pendingConfirm?.destructive} pending={pending} onOpenChange={(open) => { if (!open) setPendingConfirm(null) }} onConfirm={() => pendingConfirm?.onConfirm()} />
     </div>
   )
 }
@@ -1471,9 +1632,14 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
   const [folderIds, setFolderIds] = React.useState<string[]>([])
   const [labelIds, setLabelIds] = React.useState<string[]>([])
   const [includeStarred, setIncludeStarred] = React.useState(false)
-  const [expiresInDays, setExpiresInDays] = React.useState<0 | 7 | 30 | 90>(0)
+  const [allowAttachments, setAllowAttachments] = React.useState(true)
+  const [expiration, setExpiration] = React.useState<"0" | "7" | "30" | "90" | "custom">("0")
+  const [customExpiresAt, setCustomExpiresAt] = React.useState("")
+  const [view, setView] = React.useState<"sent" | "received">("sent")
   const [editing, setEditing] = React.useState<MailboxShare | null>(null)
   const [revoking, setRevoking] = React.useState<MailboxShare | null>(null)
+  const [leaving, setLeaving] = React.useState<MailboxShare | null>(null)
+  const [auditShare, setAuditShare] = React.useState<MailboxShare | null>(null)
 
   React.useEffect(() => {
     if (!mailboxId || !mailboxes.some((mailbox) => mailbox.id === mailboxId)) setMailboxId(mailboxes[0]?.id || "")
@@ -1489,11 +1655,14 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
   }, [mailboxId])
 
   const shares = useQuery({ queryKey: ["mailbox-shares"], queryFn: () => api.mailboxShares() })
+  const receivedShares = useQuery({ queryKey: ["mailbox-shares", "received"], queryFn: api.receivedMailboxShares })
+  const notifications = useQuery({ queryKey: ["notifications"], queryFn: api.notifications })
   const folders = useQuery({ queryKey: ["share-folders", mailboxId], queryFn: () => api.folders(mailboxId), enabled: !!mailboxId })
   const labels = useQuery({ queryKey: ["share-labels", mailboxId], queryFn: () => api.labels(mailboxId), enabled: !!mailboxId })
   const users = useQuery({ queryKey: ["share-users", debouncedQuery], queryFn: () => api.shareUsers(debouncedQuery), enabled: debouncedQuery.length >= 2 && !selectedUser })
   const selectedCount = folderIds.length + labelIds.length + (includeStarred ? 1 : 0)
-  const canSubmit = !!mailboxId && !!selectedUser && (scope === "all" || selectedCount > 0)
+  const customExpirationValid = expiration !== "custom" || (!!customExpiresAt && new Date(customExpiresAt).getTime() > Date.now())
+  const canSubmit = !!mailboxId && !!selectedUser && (scope === "all" || selectedCount > 0) && customExpirationValid
   const create = useMutation({
     mutationFn: (payload: MailboxSharePayload) => api.createMailboxShare(payload),
     onSuccess: () => {
@@ -1504,7 +1673,9 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
       setFolderIds([])
       setLabelIds([])
       setIncludeStarred(false)
-      setExpiresInDays(0)
+      setAllowAttachments(true)
+      setExpiration("0")
+      setCustomExpiresAt("")
       toast({ title: "邮箱已共享" })
     },
     onError: (error) => toast({ title: "共享失败", description: error.message }),
@@ -1529,13 +1700,33 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
     },
     onError: (error) => toast({ title: "更新失败", description: error.message }),
   })
+  const leave = useMutation({
+    mutationFn: api.leaveMailboxShare,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["mailbox-shares"] })
+      qc.invalidateQueries({ queryKey: ["mailboxes"] })
+      qc.invalidateQueries({ queryKey: ["notifications"] })
+      setLeaving(null)
+      toast({ title: "已退出邮箱共享" })
+    },
+    onError: (error) => toast({ title: "退出失败", description: error.message }),
+  })
+  const readNotification = useMutation({
+    mutationFn: api.readNotification,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["notifications"] }),
+  })
   function submit() {
     if (!canSubmit || !selectedUser) return
-    create.mutate({ mailboxId, sharedWithUserId: selectedUser.id, scope, folderIds, labelIds, includeStarred, expiresInDays })
+    const expiry = expiration === "custom"
+      ? { expiresAt: new Date(customExpiresAt).toISOString() }
+      : { expiresInDays: Number(expiration) as 0 | 7 | 30 | 90 }
+    create.mutate({ mailboxId, sharedWithUserId: selectedUser.id, scope, folderIds, labelIds, includeStarred, allowAttachments, ...expiry })
   }
   function toggleID(id: string, selected: boolean, setter: React.Dispatch<React.SetStateAction<string[]>>) {
     setter((current) => selected ? Array.from(new Set([...current, id])) : current.filter((item) => item !== id))
   }
+  const displayedShares = view === "sent" ? (shares.data?.items || []) : (receivedShares.data?.items || [])
+  const unreadNotifications = (notifications.data?.items || []).filter((item) => !item.readAt)
 
   return (
     <div className="space-y-8">
@@ -1571,18 +1762,20 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
               </div>
             </Field>
             <Field label="有效期">
-              <Select value={String(expiresInDays)} onValueChange={(value) => setExpiresInDays(Number(value) as 0 | 7 | 30 | 90)}>
+              <Select value={expiration} onValueChange={(value) => setExpiration(value as "0" | "7" | "30" | "90" | "custom")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="0">永不过期</SelectItem><SelectItem value="7">7 天</SelectItem><SelectItem value="30">30 天</SelectItem><SelectItem value="90">90 天</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="0">永不过期</SelectItem><SelectItem value="7">7 天</SelectItem><SelectItem value="30">30 天</SelectItem><SelectItem value="90">90 天</SelectItem><SelectItem value="custom">自定义时间</SelectItem></SelectContent>
               </Select>
             </Field>
           </div>
 
+          {expiration === "custom" && <Field label="自定义到期时间"><Input type="datetime-local" value={customExpiresAt} min={dateTimeLocalValue(new Date(Date.now() + 60_000))} onChange={(event) => setCustomExpiresAt(event.target.value)} />{!customExpirationValid && <div className="text-xs text-destructive">到期时间必须晚于当前时间</div>}</Field>}
+
           <Separator />
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm font-medium">共享范围</div>
-              <div className="grid grid-cols-2 rounded-md border bg-muted/40 p-1">
+              <div className="grid w-full grid-cols-2 rounded-md border bg-muted/40 p-1 sm:w-auto">
                 <Button type="button" size="sm" variant={scope === "all" ? "default" : "ghost"} className="h-8" onClick={() => setScope("all")}>全部内容</Button>
                 <Button type="button" size="sm" variant={scope === "custom" ? "default" : "ghost"} className="h-8" onClick={() => setScope("custom")}>自定义范围</Button>
               </div>
@@ -1604,27 +1797,33 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
             )}
             {scope === "custom" && selectedCount === 0 && <div className="text-sm text-destructive">请至少选择一个文件夹、标签或星标邮件</div>}
           </div>
+          <div className="flex items-center justify-between gap-4 border-t pt-4"><div><div className="text-sm font-medium">允许下载附件</div><div className="text-xs text-muted-foreground">关闭后仍可阅读邮件正文，但附件下载入口不可用</div></div><Switch checked={allowAttachments} onCheckedChange={setAllowAttachments} /></div>
           <div className="flex justify-end"><Button type="button" onClick={submit} disabled={!canSubmit || create.isPending}><Share2 className="h-4 w-4" />{create.isPending ? "共享中..." : "创建共享"}</Button></div>
         </div>
       </section>
 
+      {unreadNotifications.length > 0 && <section className="space-y-2 border-y py-4">
+        <div className="flex items-center gap-2 text-sm font-semibold"><Bell className="h-4 w-4" />共享通知 <Badge variant="secondary">{unreadNotifications.length}</Badge></div>
+        {unreadNotifications.slice(0, 3).map((item: UserNotification) => <Button key={item.id} type="button" variant="ghost" className="h-auto w-full items-start justify-between gap-4 px-3 py-2 text-left font-normal" onClick={() => readNotification.mutate(item.id)}><span className="min-w-0"><span className="block text-sm font-medium">{item.title}</span><span className="block truncate text-xs text-muted-foreground">{item.body}</span></span><span className="shrink-0 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></Button>)}
+      </section>}
+
       <section className="space-y-3">
-        <div className="flex items-center justify-between"><div className="flex items-center gap-2 font-semibold"><Users className="h-4 w-4" />共享记录</div><Badge variant="secondary">{shares.data?.items.length || 0}</Badge></div>
-        {shares.isLoading ? <div className="py-12 text-center text-sm text-muted-foreground">加载中...</div> : (shares.data?.items || []).length === 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2 font-semibold"><Users className="h-4 w-4" />共享记录</div><div className="grid grid-cols-2 rounded-md border bg-muted/40 p-1"><Button type="button" size="sm" variant={view === "sent" ? "default" : "ghost"} className="h-8" onClick={() => setView("sent")}>我发起的</Button><Button type="button" size="sm" variant={view === "received" ? "default" : "ghost"} className="h-8" onClick={() => setView("received")}>共享给我</Button></div></div>
+        {(view === "sent" ? shares.isLoading : receivedShares.isLoading) ? <div className="py-12 text-center text-sm text-muted-foreground">加载中...</div> : displayedShares.length === 0 ? (
           <div className="grid min-h-56 place-items-center border-y py-10 text-center"><div><Share2 className="mx-auto h-9 w-9 text-muted-foreground" /><div className="mt-3 text-sm font-medium">暂无共享记录</div></div></div>
         ) : (
           <div className="grid gap-3 lg:grid-cols-2">
-            {(shares.data?.items || []).map((share) => (
+            {displayedShares.map((share) => (
               <div key={share.id} className="flex min-w-0 items-start gap-3 rounded-lg border p-4">
-                <Avatar className="h-10 w-10 shrink-0"><AvatarFallback>{Array.from(share.sharedWithName || share.sharedWithEmail)[0]?.toUpperCase()}</AvatarFallback></Avatar>
+                <Avatar className="h-10 w-10 shrink-0"><AvatarFallback>{Array.from(view === "sent" ? (share.sharedWithName || share.sharedWithEmail) : (share.ownerName || share.ownerEmail))[0]?.toUpperCase()}</AvatarFallback></Avatar>
                 <div className="min-w-0 flex-1 space-y-2">
-                  <div><div className="truncate text-sm font-medium">{share.sharedWithName || share.sharedWithEmail}</div><div className="truncate text-xs text-muted-foreground">{share.sharedWithEmail}</div></div>
-                  <div className="flex flex-wrap gap-1.5"><Badge variant="outline">{share.mailboxAddress}</Badge><Badge variant="secondary">{share.scope === "all" ? "全部内容" : `${share.folderIds.length + share.labelIds.length + (share.includeStarred ? 1 : 0)} 项`}</Badge></div>
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground"><Clock3 className="h-3.5 w-3.5" />{share.expiresAt ? `${new Date(share.expiresAt).toLocaleDateString()} 到期` : "永不过期"}</div>
+                  <div><div className="truncate text-sm font-medium">{view === "sent" ? (share.sharedWithName || share.sharedWithEmail) : (share.ownerName || share.ownerEmail)}</div><div className="truncate text-xs text-muted-foreground">{view === "sent" ? share.sharedWithEmail : share.ownerEmail}</div></div>
+                  <div className="flex flex-wrap gap-1.5"><Badge variant="outline">{share.mailboxAddress}</Badge><ShareStatusBadge status={share.status} /><Badge variant="secondary">{share.scope === "all" ? "全部内容" : shareScopeText(share)}</Badge><Badge variant="outline">{share.allowAttachments ? "可下载附件" : "仅正文"}</Badge></div>
+                  {share.scope === "custom" && <div className="text-xs text-muted-foreground">{shareScopeNames(share)}</div>}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground"><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />{share.expiresAt ? `${new Date(share.expiresAt).toLocaleString()} 到期` : "永不过期"}</span>{share.lastAccessedAt && <span>最后访问 {new Date(share.lastAccessedAt).toLocaleString()}</span>}</div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" title="编辑共享" onClick={() => setEditing(share)}><PencilLine className="h-4 w-4" /></Button>
-                  <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" title="撤销共享" onClick={() => setRevoking(share)}><Trash2 className="h-4 w-4" /></Button>
+                  {view === "sent" ? <><Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" title="查看审计" onClick={() => setAuditShare(share)}><History className="h-4 w-4" /></Button><Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" title={share.status === "active" || share.status === "expiring" ? "编辑共享" : "续期或恢复"} onClick={() => setEditing(share)}>{share.status === "active" || share.status === "expiring" ? <PencilLine className="h-4 w-4" /> : <CalendarClock className="h-4 w-4" />}</Button>{share.status !== "revoked" && share.status !== "left" && <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" title="撤销共享" onClick={() => setRevoking(share)}><Trash2 className="h-4 w-4" /></Button>}</> : (share.status === "active" || share.status === "expiring") && <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" title="退出共享" onClick={() => setLeaving(share)}><LogOut className="h-4 w-4" /></Button>}
                 </div>
               </div>
             ))}
@@ -1632,7 +1831,9 @@ function MailboxSharingSection({ mailboxes }: { mailboxes: Mailbox[] }) {
         )}
       </section>
       <MailboxShareEditDialog share={editing} open={!!editing} pending={update.isPending} onOpenChange={(open) => { if (!open) setEditing(null) }} onSave={(payload) => { if (editing) update.mutate({ id: editing.id, payload }) }} />
+      <MailboxShareAuditDialog share={auditShare} open={!!auditShare} onOpenChange={(open) => { if (!open) setAuditShare(null) }} />
       <ConfirmDialog open={!!revoking} title="撤销邮箱共享？" description={revoking ? `${revoking.sharedWithEmail} 将立即失去 ${revoking.mailboxAddress} 的只读访问权限。` : undefined} confirmText="撤销共享" destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setRevoking(null) }} onConfirm={() => { if (revoking) remove.mutate(revoking.id) }} />
+      <ConfirmDialog open={!!leaving} title="退出邮箱共享？" description={leaving ? `退出后，你将无法继续读取 ${leaving.mailboxAddress}。` : undefined} confirmText="退出共享" destructive pending={leave.isPending} onOpenChange={(open) => { if (!open) setLeaving(null) }} onConfirm={() => { if (leaving) leave.mutate(leaving.id) }} />
     </div>
   )
 }
@@ -1642,7 +1843,9 @@ function MailboxShareEditDialog({ share, open, pending, onOpenChange, onSave }: 
   const [folderIds, setFolderIds] = React.useState<string[]>([])
   const [labelIds, setLabelIds] = React.useState<string[]>([])
   const [includeStarred, setIncludeStarred] = React.useState(false)
-  const [expiration, setExpiration] = React.useState<"keep" | "0" | "7" | "30" | "90">("0")
+  const [allowAttachments, setAllowAttachments] = React.useState(true)
+  const [expiration, setExpiration] = React.useState<"keep" | "0" | "7" | "30" | "90" | "custom">("0")
+  const [customExpiresAt, setCustomExpiresAt] = React.useState("")
   const folders = useQuery({ queryKey: ["share-edit-folders", share?.mailboxId], queryFn: () => api.folders(share?.mailboxId || ""), enabled: open && !!share?.mailboxId })
   const labels = useQuery({ queryKey: ["share-edit-labels", share?.mailboxId], queryFn: () => api.labels(share?.mailboxId || ""), enabled: open && !!share?.mailboxId })
 
@@ -1652,18 +1855,22 @@ function MailboxShareEditDialog({ share, open, pending, onOpenChange, onSave }: 
     setFolderIds(share.folderIds)
     setLabelIds(share.labelIds)
     setIncludeStarred(share.includeStarred)
+    setAllowAttachments(share.allowAttachments)
     setExpiration(share.expiresAt ? "keep" : "0")
+    setCustomExpiresAt(share.expiresAt ? dateTimeLocalValue(new Date(share.expiresAt)) : "")
   }, [share])
 
   const selectedCount = folderIds.length + labelIds.length + (includeStarred ? 1 : 0)
-  const canSave = !!share && (scope === "all" || selectedCount > 0)
+  const customExpirationValid = expiration !== "custom" || (!!customExpiresAt && new Date(customExpiresAt).getTime() > Date.now())
+  const canSave = !!share && (scope === "all" || selectedCount > 0) && customExpirationValid
   function toggleID(id: string, selected: boolean, setter: React.Dispatch<React.SetStateAction<string[]>>) {
     setter((current) => selected ? Array.from(new Set([...current, id])) : current.filter((item) => item !== id))
   }
   function save() {
     if (!canSave) return
-    const payload: MailboxShareUpdatePayload = { scope, folderIds, labelIds, includeStarred }
-    if (expiration !== "keep") payload.expiresInDays = Number(expiration) as 0 | 7 | 30 | 90
+    const payload: MailboxShareUpdatePayload = { scope, folderIds, labelIds, includeStarred, allowAttachments, version: share.version }
+    if (expiration === "custom") payload.expiresAt = new Date(customExpiresAt).toISOString()
+    else if (expiration !== "keep") payload.expiresInDays = Number(expiration) as 0 | 7 | 30 | 90
     onSave(payload)
   }
 
@@ -1677,18 +1884,19 @@ function MailboxShareEditDialog({ share, open, pending, onOpenChange, onSave }: 
             <div className="min-w-0"><div className="text-xs text-muted-foreground">共享给</div><div className="truncate text-sm font-medium">{share.sharedWithName || share.sharedWithEmail}</div><div className="truncate text-xs text-muted-foreground">{share.sharedWithEmail}</div></div>
           </div>
           <Field label="有效期">
-            <Select value={expiration} onValueChange={(value) => setExpiration(value as "keep" | "0" | "7" | "30" | "90")}>
+            <Select value={expiration} onValueChange={(value) => setExpiration(value as "keep" | "0" | "7" | "30" | "90" | "custom")}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {share.expiresAt && <SelectItem value="keep">保持当前（{new Date(share.expiresAt).toLocaleDateString()} 到期）</SelectItem>}
-                <SelectItem value="0">永不过期</SelectItem><SelectItem value="7">重新设置为 7 天</SelectItem><SelectItem value="30">重新设置为 30 天</SelectItem><SelectItem value="90">重新设置为 90 天</SelectItem>
+                <SelectItem value="0">永不过期</SelectItem><SelectItem value="7">重新设置为 7 天</SelectItem><SelectItem value="30">重新设置为 30 天</SelectItem><SelectItem value="90">重新设置为 90 天</SelectItem><SelectItem value="custom">自定义时间</SelectItem>
               </SelectContent>
             </Select>
           </Field>
+          {expiration === "custom" && <Field label="自定义到期时间"><Input type="datetime-local" value={customExpiresAt} min={dateTimeLocalValue(new Date(Date.now() + 60_000))} onChange={(event) => setCustomExpiresAt(event.target.value)} />{!customExpirationValid && <div className="text-xs text-destructive">到期时间必须晚于当前时间</div>}</Field>}
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="text-sm font-medium">共享范围</div>
-              <div className="grid grid-cols-2 rounded-md border bg-muted/40 p-1">
+              <div className="grid w-full grid-cols-2 rounded-md border bg-muted/40 p-1 sm:w-auto">
                 <Button type="button" size="sm" variant={scope === "all" ? "default" : "ghost"} className="h-8" onClick={() => setScope("all")}>全部内容</Button>
                 <Button type="button" size="sm" variant={scope === "custom" ? "default" : "ghost"} className="h-8" onClick={() => setScope("custom")}>自定义范围</Button>
               </div>
@@ -1705,11 +1913,37 @@ function MailboxShareEditDialog({ share, open, pending, onOpenChange, onSave }: 
             </div>}
             {scope === "custom" && selectedCount === 0 && <div className="text-sm text-destructive">请至少选择一个文件夹、标签或星标邮件</div>}
           </div>
+          <div className="flex items-center justify-between gap-4 border-t pt-4"><div><div className="text-sm font-medium">允许下载附件</div><div className="text-xs text-muted-foreground">关闭后接收人只能阅读正文</div></div><Switch checked={allowAttachments} onCheckedChange={setAllowAttachments} /></div>
         </>}
         <DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>取消</Button><Button type="button" onClick={save} disabled={!canSave || pending}>{pending ? "保存中..." : "保存更改"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   )
+}
+
+function MailboxShareAuditDialog({ share, open, onOpenChange }: { share: MailboxShare | null; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const audit = useQuery({ queryKey: ["mailbox-share-audit", share?.id], queryFn: () => api.mailboxShareAudit(share?.id || ""), enabled: open && !!share })
+  const labels: Record<MailboxShareAuditEvent["event"], string> = { created: "创建共享", updated: "更新权限", renewed: "续期或恢复", revoked: "撤销共享", left: "接收人退出", accessed: "访问邮箱" }
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="sm:max-w-lg"><DialogHeader><DialogTitle>共享审计</DialogTitle></DialogHeader>{share && <div className="text-sm text-muted-foreground">{share.mailboxAddress} · {share.sharedWithEmail}</div>}<div className="max-h-[55vh] space-y-1 overflow-y-auto border-y py-3">{audit.isLoading ? <div className="py-8 text-center text-sm text-muted-foreground">加载中...</div> : (audit.data?.items || []).length === 0 ? <div className="py-8 text-center text-sm text-muted-foreground">暂无审计记录</div> : (audit.data?.items || []).map((item) => <div key={item.id} className="grid grid-cols-[0.5rem_minmax(0,1fr)_auto] items-start gap-3 px-2 py-2"><span className="mt-1.5 h-2 w-2 rounded-full bg-primary" /><span className="min-w-0"><span className="block text-sm font-medium">{labels[item.event]}</span><span className="block truncate text-xs text-muted-foreground">{item.actorEmail}</span></span><span className="text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleString()}</span></div>)}</div><DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button></DialogFooter></DialogContent></Dialog>
+}
+
+function ShareStatusBadge({ status }: { status: MailboxShare["status"] }) {
+  const labels: Record<MailboxShare["status"], string> = { active: "生效中", expiring: "即将到期", expired: "已过期", revoked: "已撤销", left: "对方已退出" }
+  return <Badge variant={status === "expired" || status === "revoked" ? "destructive" : status === "active" ? "outline" : "secondary"}>{labels[status]}</Badge>
+}
+
+function shareScopeText(share: MailboxShare) {
+  return `${share.folderIds.length + share.labelIds.length + (share.includeStarred ? 1 : 0)} 项`
+}
+
+function shareScopeNames(share: MailboxShare) {
+  const names = [...share.folderNames.map(folderLabel), ...share.labelNames, ...(share.includeStarred ? ["星标邮件"] : [])]
+  return names.length > 0 ? names.join("、") : "未选择范围"
+}
+
+function dateTimeLocalValue(date: Date) {
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }
 
 function ScopeCheckbox({ label, checked, onCheckedChange }: { label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
