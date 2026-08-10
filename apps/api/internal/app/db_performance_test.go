@@ -37,6 +37,24 @@ func TestPerformanceIndexesCoverHotMailboxQueries(t *testing.T) {
 			args:      []any{"mb_test", "fld_test", "2026-01-01T00:00:00Z", "mail_test"},
 		},
 		{
+			name:      "admin global message list",
+			indexName: "idx_messages_received_id",
+			query:     `SELECT m.id,COALESCE(f.name,''),COALESCE(mb.address,''),COALESCE(u.email,'') FROM messages m LEFT JOIN folders f ON f.id=m.folder_id LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id LEFT JOIN users u ON u.id=mb.user_id WHERE (m.received_at,m.id)<(?,?) ORDER BY m.received_at DESC,m.id DESC LIMIT 51`,
+			args:      []any{"2026-01-01T00:00:00Z", "mail_test"},
+		},
+		{
+			name:      "admin mailbox message list",
+			indexName: "idx_messages_mailbox_received_id",
+			query:     `SELECT m.id,COALESCE(f.name,''),COALESCE(mb.address,''),COALESCE(u.email,'') FROM messages m LEFT JOIN folders f ON f.id=m.folder_id LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id LEFT JOIN users u ON u.id=mb.user_id WHERE m.mailbox_id=? AND (m.received_at,m.id)<(?,?) ORDER BY m.received_at DESC,m.id DESC LIMIT 51`,
+			args:      []any{"mb_test", "2026-01-01T00:00:00Z", "mail_test"},
+		},
+		{
+			name:      "admin unregistered message list",
+			indexName: "idx_messages_mailbox_received_id",
+			query:     `SELECT m.id,COALESCE(f.name,''),COALESCE(mb.address,''),COALESCE(u.email,'') FROM messages m LEFT JOIN folders f ON f.id=m.folder_id LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id LEFT JOIN users u ON u.id=mb.user_id WHERE m.mailbox_id IS NULL AND (m.received_at,m.id)<(?,?) ORDER BY m.received_at DESC,m.id DESC LIMIT 51`,
+			args:      []any{"2026-01-01T00:00:00Z", "mail_test"},
+		},
+		{
 			name:      "starred message list",
 			indexName: "idx_messages_mailbox_starred_received_id",
 			query:     `SELECT id FROM messages WHERE mailbox_id=? AND is_starred=1 AND (received_at,id)<(?,?) ORDER BY received_at DESC,id DESC LIMIT 31`,

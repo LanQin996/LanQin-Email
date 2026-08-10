@@ -753,15 +753,18 @@ func (a *App) handleListAliases(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
+const adminMessagesPageSize = 50
+
 func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	mailboxID := strings.TrimSpace(r.URL.Query().Get("mailboxId"))
 	folder := strings.TrimSpace(r.URL.Query().Get("folder"))
-	offset, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
-	if offset < 0 {
-		offset = 0
+	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		badRequest(w, err)
+		return
 	}
-	limit := 50
+	limit := adminMessagesPageSize
 
 	where := []string{"1=1"}
 	args := []any{}
@@ -790,15 +793,24 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 			args = append(args, like, like, like, like, like, like, like, like, like)
 		}
 	}
-	args = append(args, limit+1, offset)
+	if cursorReceivedAt != "" {
+		where = append(where, "(m.received_at,m.id) < (?,?)")
+		args = append(args, cursorReceivedAt, cursorID)
+	}
+	args = append(args, limit+1)
 
-	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(mb.address,''),COALESCE(u.email,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
 		FROM messages m
 		LEFT JOIN folders f ON f.id=m.folder_id
 		LEFT JOIN mailboxes mb ON mb.id=m.mailbox_id
 		LEFT JOIN users u ON u.id=mb.user_id
-		WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY m.received_at DESC LIMIT ? OFFSET ?`, args...)
+		WHERE ` + strings.Join(where, " AND ") + `
+		ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
+	if offset > 0 {
+		query += ` OFFSET ?`
+		args = append(args, offset)
+	}
+	rows, err := a.db.QueryContext(r.Context(), query, args...)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load messages")
 		return
@@ -813,10 +825,15 @@ func (a *App) handleAdminMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		items = append(items, msg)
 	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load messages")
+		return
+	}
 	next := ""
 	if len(items) > limit {
 		items = items[:limit]
-		next = strconv.Itoa(offset + limit)
+		last := items[len(items)-1]
+		next = encodeMessageListCursor(last.ReceivedAt, last.ID)
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
