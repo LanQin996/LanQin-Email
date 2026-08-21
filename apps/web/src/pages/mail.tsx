@@ -1323,7 +1323,8 @@ export function MailPage() {
     <PermissionEmptyState title="无定时发送权限" description="当前账号不能查看或管理定时发送任务。" onOpenSettings={openSettings} />
   ) : mailView === "sendQueue" && canViewSendQueue ? (
     <SendQueueView
-      compact={isMobile || displayMode === "compact"}
+      mobile={isMobile}
+      dense={displayMode === "compact"}
       items={visibleSendQueueItems}
       total={sendQueueItems.length}
       loading={sendQueue.isLoading}
@@ -1476,10 +1477,12 @@ export function MailPage() {
                 </Button>
                 <div className="min-w-0 flex-1 text-sm font-semibold">{mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : viewTitle}</div>
                 {canSendSelectedMailbox && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
-                <div className="relative basis-full">
-                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
-                </div>
+                {mailView !== "sendQueue" && (
+                  <div className="relative basis-full">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
+                  </div>
+                )}
               </header>
             )}
             <section className="flex min-h-0 flex-1 flex-col">{contentView}</section>
@@ -1520,10 +1523,12 @@ export function MailPage() {
                       </>
                     )}
                   </div>
-                  <div className="relative w-full max-w-md">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "sendQueue" ? "搜索发送队列" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
-                  </div>
+                  {mailView !== "sendQueue" && (
+                    <div className="relative w-full max-w-md">
+                      <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                      <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
+                    </div>
+                  )}
                 </header>
                 {contentView}
               </section>
@@ -1839,7 +1844,8 @@ const sendQueueStatusOptions: { value: SendQueueStatus | "all"; label: string }[
 ]
 
 function SendQueueView({
-  compact,
+  mobile,
+  dense,
   items,
   total,
   loading,
@@ -1860,7 +1866,8 @@ function SendQueueView({
   onAudit,
   canMutate,
 }: {
-  compact: boolean
+  mobile: boolean
+  dense: boolean
   items: SendQueueItem[]
   total: number
   loading: boolean
@@ -1881,41 +1888,83 @@ function SendQueueView({
   onAudit: (item: SendQueueItem) => void
   canMutate: boolean
 }) {
+  const [filtersOpen, setFiltersOpen] = React.useState(false)
   const hasFilters = status !== "all" || messageId.trim() || recipient.trim() || from || to
+  const activeFilterCount = [status !== "all", !!messageId.trim(), !!recipient.trim(), !!from, !!to].filter(Boolean).length
   const empty = hasFilters ? "当前筛选没有匹配的发送任务" : "发送队列为空"
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className={cn("shrink-0 space-y-3 border-b", compact ? "px-4 py-3" : "px-5 py-4")}>
+      <div className={cn("shrink-0 border-b bg-muted/15", mobile ? "px-4 py-3" : "px-5 py-3")}>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold"><History className="h-4 w-4" />发送队列</div>
-            <div className="text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
+            <div className="flex items-center gap-2 text-base font-semibold"><History className="h-4 w-4" />发送队列</div>
+            <div className="mt-0.5 text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
           </div>
-          <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
-            <SelectTrigger className="h-9 w-[132px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            {mobile && (
+              <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>
+                <SlidersHorizontal className="h-4 w-4" />筛选
+                {activeFilterCount > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[11px] text-background">{activeFilterCount}</span>}
+              </Button>
+            )}
+            <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
+              <SelectTrigger className="h-9 w-[116px] bg-background sm:w-[132px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className={cn("grid gap-2", compact ? "grid-cols-1" : "grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_160px_160px_auto]")}>
-          <Input value={messageId} onChange={(event) => onMessageIdChange(event.target.value)} placeholder="Message-ID" className="h-9" />
-          <Input value={recipient} onChange={(event) => onRecipientChange(event.target.value)} placeholder="收件人" className="h-9" />
-          <Input type="datetime-local" value={from} onChange={(event) => onFromChange(event.target.value)} className="h-9" />
-          <Input type="datetime-local" value={to} onChange={(event) => onToChange(event.target.value)} className="h-9" />
-          <Button type="button" variant="outline" size="sm" className="h-9" disabled={!hasFilters} onClick={onClearFilters}>清除</Button>
-        </div>
+        {(!mobile || filtersOpen) && (
+          <div className={cn("mt-3 grid gap-2", mobile ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-[minmax(220px,1.15fr)_minmax(190px,1fr)_minmax(420px,1.5fr)_auto]")}>
+            <div className="relative min-w-0">
+              <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input value={messageId} onChange={(event) => onMessageIdChange(event.target.value)} placeholder="搜索 Message-ID" className="h-9 bg-background pl-9" />
+            </div>
+            <div className="relative min-w-0">
+              <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input value={recipient} onChange={(event) => onRecipientChange(event.target.value)} placeholder="搜索收件人" className="h-9 bg-background pl-9" />
+            </div>
+            <div className={cn("flex min-w-0 items-center rounded-md border bg-background px-2 shadow-sm focus-within:ring-1 focus-within:ring-ring", mobile ? "flex-col items-stretch gap-1 p-2" : "col-span-2 xl:col-span-1")}>
+              <div className="flex shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
+                <Clock3 className="h-4 w-4" />时间
+              </div>
+              <Input aria-label="开始时间" type="datetime-local" value={from} onChange={(event) => onFromChange(event.target.value)} className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0" />
+              {!mobile && <span className="shrink-0 text-xs text-muted-foreground">至</span>}
+              <Input aria-label="结束时间" type="datetime-local" value={to} onChange={(event) => onToChange(event.target.value)} className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0" />
+            </div>
+            <Button type="button" variant="ghost" size="icon" className={cn("h-9 w-9 text-muted-foreground", mobile && "justify-self-end")} disabled={!hasFilters} onClick={onClearFilters} title="重置筛选" aria-label="重置筛选">
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && <ScheduledSendSkeleton />}
-        {!loading && items.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div>}
+        {!loading && items.length === 0 && (
+          <div className="flex min-h-52 flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><History className="h-5 w-5" /></div>
+            <div className="text-sm font-medium">{empty}</div>
+            {hasFilters && <Button type="button" variant="link" size="sm" className="mt-1 text-muted-foreground" onClick={onClearFilters}>重置筛选</Button>}
+          </div>
+        )}
+        {!loading && !mobile && items.length > 0 && (
+          <div className="sticky top-0 z-10 hidden grid-cols-[120px_minmax(260px,1.5fr)_minmax(180px,0.75fr)_190px_104px] items-center gap-4 border-b bg-background/95 px-5 py-2 text-[11px] font-medium text-muted-foreground backdrop-blur xl:grid">
+            <div>状态</div>
+            <div>邮件</div>
+            <div>投递信息</div>
+            <div>更新时间</div>
+            <div className="text-right">操作</div>
+          </div>
+        )}
         {!loading && items.map((item) => (
           <SendQueueRow
             key={item.id}
             item={item}
-            compact={compact}
+            mobile={mobile}
+            dense={dense}
             pending={pendingId === item.id}
             onRetry={() => onRetry(item)}
             onCancel={() => onCancel(item)}
@@ -1928,45 +1977,50 @@ function SendQueueView({
   )
 }
 
-function SendQueueRow({ item, compact, pending, onRetry, onCancel, onAudit, canMutate }: { item: SendQueueItem; compact: boolean; pending: boolean; onRetry: () => void; onCancel: () => void; onAudit: () => void; canMutate: boolean }) {
+function SendQueueRow({ item, mobile, dense, pending, onRetry, onCancel, onAudit, canMutate }: { item: SendQueueItem; mobile: boolean; dense: boolean; pending: boolean; onRetry: () => void; onCancel: () => void; onAudit: () => void; canMutate: boolean }) {
   const recipients = item.recipients?.length ? item.recipients.join(", ") : "未记录收件人"
   const failure = item.lastError || item.error || item.failureReason || ""
   const canRetry = item.status === "failed"
   const canCancel = item.status === "queued" || item.status === "failed"
   return (
-    <div className={cn("border-b transition-colors hover:bg-accent/40", compact ? "p-4" : "px-5 py-4")}>
-      <div className={cn("gap-4", compact ? "space-y-3" : "grid grid-cols-[minmax(0,1fr)_210px_220px] items-center")}>
+    <div className={cn("border-b transition-colors hover:bg-accent/30", mobile ? "px-4 py-4" : dense ? "px-5 py-2.5" : "px-5 py-3.5")}>
+      <div className={cn("gap-4 space-y-3 xl:grid xl:grid-cols-[120px_minmax(260px,1.5fr)_minmax(180px,0.75fr)_190px_104px] xl:items-center xl:space-y-0")}>
+        <div className="flex items-center justify-between gap-3">
+          <SendQueueStatusBadge status={item.status} />
+          <span className="text-xs text-muted-foreground xl:hidden">{formatDateTime(item.updatedAt || item.createdAt)}</span>
+        </div>
         <div className="min-w-0">
-          <div className="mb-1 flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-semibold">{item.subject || "(无主题)"}</span>
-            <SendQueueStatusBadge status={item.status} />
-          </div>
-          <div className="truncate text-xs text-muted-foreground">发给 {recipients}</div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span>来源：{sendQueueSourceLabel(item.source)}</span>
-            <span>尝试：{item.attemptCount}/{item.maxAttempts}</span>
-            {item.nextAttemptAt && <span>下次：{formatDateTime(item.nextAttemptAt)}</span>}
-          </div>
-          {failure && <div className="mt-2 line-clamp-2 text-xs text-destructive">{failure}</div>}
+          <div className="truncate text-sm font-semibold" title={item.subject || "(无主题)"}>{item.subject || "(无主题)"}</div>
+          <div className="mt-1 truncate text-xs text-muted-foreground" title={recipients}>发给 {recipients}</div>
+          {failure && <div className="mt-2 line-clamp-2 rounded bg-destructive/[0.08] px-2 py-1 text-xs text-destructive" title={failure}>{failure}</div>}
         </div>
-        <div className="space-y-1 text-sm">
-          <div className="text-xs text-muted-foreground">更新时间</div>
-          <div className="font-medium">{formatDateTime(item.updatedAt || item.createdAt)}</div>
-          {item.deliveredAt && <div className="text-xs text-muted-foreground">投递于 {formatDateTime(item.deliveredAt)}</div>}
+        <div className="min-w-0 text-xs">
+          <div className="truncate font-medium" title={sendQueueSourceLabel(item.source)}>{sendQueueSourceLabel(item.source)}</div>
+          <div className="mt-1 text-muted-foreground">尝试 {item.attemptCount}/{item.maxAttempts}</div>
+          {item.nextAttemptAt && <div className="mt-1 truncate text-muted-foreground" title={formatDateTime(item.nextAttemptAt)}>下次 {formatDateTime(item.nextAttemptAt)}</div>}
         </div>
-        <div className={cn("flex flex-wrap gap-2", compact ? "justify-start" : "justify-end")}>
-          <Button type="button" variant="outline" size="sm" onClick={onAudit}>
-            <History className="h-4 w-4" />时间线
+        <div className="hidden min-w-0 text-xs xl:block">
+          <div className="font-medium text-foreground">{formatDateTime(item.updatedAt || item.createdAt)}</div>
+          {item.deliveredAt && <div className="mt-1 truncate text-muted-foreground">投递于 {formatDateTime(item.deliveredAt)}</div>}
+        </div>
+        <div className="flex items-center justify-end gap-1">
+          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={onAudit} title="查看时间线" aria-label="查看时间线">
+            <History className="h-4 w-4" />
           </Button>
           {canMutate && canRetry && (
-            <Button type="button" variant="outline" size="sm" disabled={pending} onClick={onRetry}>
-              <RotateCcw className="h-4 w-4" />{pending ? "处理中..." : "重试"}
+            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" disabled={pending} onClick={onRetry} title={pending ? "处理中..." : "重试任务"} aria-label={pending ? "处理中..." : "重试任务"}>
+              <RotateCcw className={cn("h-4 w-4", pending && "animate-spin")} />
             </Button>
           )}
           {canMutate && canCancel && (
-            <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={onCancel}>
-              {pending ? "处理中..." : "取消"}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" disabled={pending} title="更多操作" aria-label="更多操作"><Ellipsis className="h-4 w-4" /></Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onCancel}><X className="h-4 w-4" />取消任务</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>
@@ -1976,9 +2030,18 @@ function SendQueueRow({ item, compact, pending, onRetry, onCancel, onAudit, canM
 
 function SendQueueStatusBadge({ status }: { status: SendQueueStatus }) {
   const label = status === "queued" ? "排队中" : status === "sending" ? "发送中" : status === "delivered" ? "已投递" : status === "failed" ? "发送失败" : "已取消"
+  const styles = status === "queued"
+    ? "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300"
+    : status === "sending"
+      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300"
+      : status === "delivered"
+        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
+        : status === "failed"
+          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300"
+          : "border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
   return (
-    <Badge variant={status === "failed" ? "destructive" : status === "sending" || status === "queued" ? "secondary" : "outline"} className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">
-      {label}
+    <Badge variant="outline" className={cn("h-6 shrink-0 gap-1.5 rounded-md px-2 text-[11px] font-medium", styles)}>
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />{label}
     </Badge>
   )
 }
@@ -1994,9 +2057,10 @@ function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: b
           {loading && <div className="space-y-3">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full" />)}</div>}
           {!loading && events.length === 0 && <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">暂无投递事件</div>}
           {!loading && events.length > 0 && (
-            <div className="space-y-3">
+            <div className="ml-2 border-l">
               {events.map((event) => (
-                <div key={event.id} className="rounded-lg border p-3">
+                <div key={event.id} className="relative pb-5 pl-5 last:pb-0">
+                  <span className="absolute -left-[5px] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-background bg-foreground" />
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       {event.status && <SendQueueStatusBadge status={event.status} />}
@@ -2004,9 +2068,9 @@ function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: b
                     </div>
                     <span className="text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</span>
                   </div>
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {typeof event.attemptCount === "number" && <span>尝试次数：{event.attemptCount}</span>}
-                    {event.error && <span className="text-destructive">{event.error}</span>}
+                    {event.error && <span className="w-full rounded bg-destructive/[0.08] px-2 py-1.5 text-destructive">{event.error}</span>}
                   </div>
                 </div>
               ))}
