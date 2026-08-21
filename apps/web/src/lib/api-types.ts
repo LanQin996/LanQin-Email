@@ -76,7 +76,7 @@ export type MailMessage = {
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
 export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }
-export type ListResponse<T> = { items: T[]; nextCursor?: string }
+export type ListResponse<T> = { items: T[]; nextCursor?: string; totalCount?: number }
 export type MailTranslation = { translatedText: string; translatedHtml?: string; sourceLanguage?: string; targetLanguage: string; truncated: boolean }
 export type SendPayload = { mailboxId?: string; to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html: string; attachments: { filename: string; contentType: string; contentBase64: string }[] }
 export type DraftPayload = Omit<SendPayload, "attachments"> & { attachments?: SendPayload["attachments"] }

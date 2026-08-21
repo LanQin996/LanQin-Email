@@ -19,8 +19,19 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// mailMessagesPageSize is the max number of messages returned per page in mail listing.
 const mailMessagesPageSize = 30
+
+func mailMessagePageLimit(r *http.Request) (int, error) {
+	raw := strings.TrimSpace(r.URL.Query().Get("limit"))
+	if raw == "" {
+		return mailMessagesPageSize, nil
+	}
+	limit, err := strconv.Atoi(raw)
+	if err != nil || (limit != 20 && limit != 30 && limit != 50) {
+		return 0, errors.New("limit must be 20, 30, or 50")
+	}
+	return limit, nil
+}
 
 const customFolderDefaultSortOrderBase = 100000
 
@@ -433,7 +444,11 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 		badRequest(w, err)
 		return
 	}
-	limit := mailMessagesPageSize
+	limit, err := mailMessagePageLimit(r)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
 
 	if q != "" {
 		if a.canUseMessageFTS(q) {
@@ -444,6 +459,13 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 			like := "%" + q + "%"
 			args = append(args, like, like, like, like, like)
 		}
+	}
+	countWhere := where
+	countArgs := append([]any(nil), args...)
+	var totalCount int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM messages m WHERE `+countWhere, countArgs...).Scan(&totalCount); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to count messages")
+		return
 	}
 	if cursorReceivedAt != "" {
 		where += ` AND (m.received_at,m.id) < (?,?)`
@@ -496,7 +518,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 			items[i].Labels = visible
 		}
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next, "totalCount": totalCount})
 }
 
 func (a *App) handleMailLabels(w http.ResponseWriter, r *http.Request) {

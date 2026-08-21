@@ -12,7 +12,7 @@ import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
 import { useNavigate } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
+import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
 import { api, ExternalImapAccount, ExternalImapFolder, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
@@ -63,13 +63,21 @@ const folderLabels: Record<string, string> = {
 type ComposeDraft = { key: string; id?: string; mailboxId?: string; to?: string; cc?: string; bcc?: string; subject?: string; text?: string; html?: string; files?: File[]; isDraft?: boolean }
 type MailFilter = "all" | "unread" | "starred" | "attachments"
 type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue" | "external"
-type MailListResponse = { items?: MailMessage[]; nextCursor?: string }
+type MailListResponse = { items?: MailMessage[]; nextCursor?: string; totalCount?: number }
+type MailPageSize = 20 | 30 | 50
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
 type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
 type MessageContextMenuState = { message: MailMessage; x: number; y: number }
 type SidebarContextMenuState = { item: MailMenuItem; x: number; y: number }
 type FolderDropTarget = { key: string; edge: "before" | "after" | "end" }
+
+const MAIL_PAGE_SIZE_KEY = "lanqin:mail-page-size"
+
+function getInitialMailPageSize(): MailPageSize {
+  const stored = Number(localStorage.getItem(MAIL_PAGE_SIZE_KEY))
+  return stored === 20 || stored === 50 ? stored : 30
+}
 
 async function runWithConcurrency<T>(items: readonly T[], limit: number, task: (item: T, index: number) => Promise<unknown>) {
   let nextIndex = 0
@@ -114,6 +122,8 @@ export function MailPage() {
   const [mailView, setMailView] = React.useState<MailView>("folder")
   const [selectedLabelId, setSelectedLabelId] = React.useState("")
   const [query, setQuery] = React.useState("")
+  const [messagePageIndex, setMessagePageIndex] = React.useState(0)
+  const [messagePageSize, setMessagePageSize] = React.useState<MailPageSize>(getInitialMailPageSize)
   const [selectedId, setSelectedId] = React.useState<string | null>(null)
   const [compactSelectedIds, setCompactSelectedIds] = React.useState<string[]>([])
   const [composeOpen, setComposeOpen] = React.useState(false)
@@ -170,7 +180,10 @@ export function MailPage() {
   const externalMailAccounts = useQuery({ queryKey: ["mail-external-accounts"], queryFn: api.externalMailAccounts, enabled: canAccessMail && canReadMail && externalImapEnabled })
   const selectedExternalAccount = React.useMemo(() => externalImapEnabled ? externalMailAccounts.data?.items.find((item) => item.id === selectedExternalAccountId) : undefined, [externalImapEnabled, externalMailAccounts.data?.items, selectedExternalAccountId])
   const externalFolders = useQuery({ queryKey: ["mail-external-folders", selectedExternalAccountId], queryFn: () => api.externalFolders(selectedExternalAccountId), enabled: !!selectedExternalAccountId && canReadMail && externalImapEnabled })
-  const selectedMailbox = React.useMemo(() => mailboxList.data?.items.find((item) => item.id === selectedMailboxId), [mailboxList.data?.items, selectedMailboxId])
+  const selectedMailbox = React.useMemo(() => {
+    const items = mailboxList.data?.items || []
+    return items.find((item) => item.id === selectedMailboxId) || items[0]
+  }, [mailboxList.data?.items, selectedMailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const selectedMailboxOwned = selectedMailbox?.access !== "read"
   const canDownloadAttachments = hasAttachmentPermission && (selectedMailboxOwned || selectedMailbox?.shareAllowsAttachments !== false)
@@ -245,24 +258,28 @@ export function MailPage() {
     refetchIntervalInBackground: true,
   })
   const messages = useInfiniteQuery({
-    queryKey: ["messages", activeMailboxId, mailView, folder, selectedLabelId, query],
+    queryKey: ["messages", activeMailboxId, mailView, folder, selectedLabelId, query, messagePageSize],
     queryFn: ({ pageParam }) => {
       const cursor = typeof pageParam === "string" ? pageParam : ""
-      if (mailView === "starred") return api.starredMessages(query, cursor, activeMailboxId)
-      if (mailView === "label") return api.labelMessages(selectedLabelId, query, cursor, activeMailboxId)
-      return api.messages(folder, query, cursor, activeMailboxId)
+      if (mailView === "starred") return api.starredMessages(query, cursor, activeMailboxId, messagePageSize)
+      if (mailView === "label") return api.labelMessages(selectedLabelId, query, cursor, activeMailboxId, messagePageSize)
+      return api.messages(folder, query, cursor, activeMailboxId, messagePageSize)
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!activeMailboxId && canReadMail && sharedSelectionReady && mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "external" && (mailView !== "label" || !!selectedLabelId),
   })
   const externalMessages = useInfiniteQuery({
-    queryKey: ["external-messages", selectedExternalAccountId, externalFolder, query],
-    queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : "", query),
+    queryKey: ["external-messages", selectedExternalAccountId, externalFolder, query, messagePageSize],
+    queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : "", query, messagePageSize),
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
     enabled: !!selectedExternalAccountId && canReadMail && mailView === "external" && externalImapEnabled,
   })
+  React.useEffect(() => {
+    setMessagePageIndex(0)
+    setCompactSelectedIds([])
+  }, [activeMailboxId, externalFolder, folder, mailFilter, mailView, messagePageSize, query, selectedExternalAccountId, selectedLabelId])
   const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)) })
   const notificationItems = isPlainInboxView ? messages.data?.pages[0]?.items : inboxProbe.data?.items
   const autoRefreshing = Boolean(publicSettings.data?.mailAutoRefresh && (listAutoRefreshing || inboxProbe.isRefetching))
@@ -629,15 +646,15 @@ export function MailPage() {
       setListAutoRefreshing(true)
       try {
         const queryKey = mailView === "external"
-          ? ["external-messages", selectedExternalAccountId, externalFolder, query]
-          : ["messages", activeMailboxId, mailView, folder, selectedLabelId, query]
+          ? ["external-messages", selectedExternalAccountId, externalFolder, query, messagePageSize]
+          : ["messages", activeMailboxId, mailView, folder, selectedLabelId, query, messagePageSize]
         const nextPage = mailView === "external"
-          ? await api.externalMessages(selectedExternalAccountId, externalFolder, "", query)
+          ? await api.externalMessages(selectedExternalAccountId, externalFolder, "", query, messagePageSize)
           : mailView === "starred"
-            ? await api.starredMessages(query, "", activeMailboxId)
+            ? await api.starredMessages(query, "", activeMailboxId, messagePageSize)
             : mailView === "label"
-              ? await api.labelMessages(selectedLabelId, query, "", activeMailboxId)
-              : await api.messages(folder, query, "", activeMailboxId)
+              ? await api.labelMessages(selectedLabelId, query, "", activeMailboxId, messagePageSize)
+              : await api.messages(folder, query, "", activeMailboxId, messagePageSize)
         const current = qc.getQueryData<InfiniteData<MailListResponse>>(queryKey)
         if (current?.pages[0] && JSON.stringify(current.pages[0]) !== JSON.stringify(nextPage)) {
           await qc.invalidateQueries({ queryKey, exact: true })
@@ -660,7 +677,7 @@ export function MailPage() {
       window.clearInterval(timer)
       setListAutoRefreshing(false)
     }
-  }, [activeMailboxId, canReadMail, externalFolder, externalImapEnabled, folder, mailRefreshInterval, mailView, qc, query, selectedExternalAccountId, selectedLabelId])
+  }, [activeMailboxId, canReadMail, externalFolder, externalImapEnabled, folder, mailRefreshInterval, mailView, messagePageSize, qc, query, selectedExternalAccountId, selectedLabelId])
 
   React.useEffect(() => {
     if (publicSettings.data?.mailAutoRefresh && inboxProbe.dataUpdatedAt > 0 && !isPlainInboxView) {
@@ -669,7 +686,15 @@ export function MailPage() {
   }, [inboxProbe.dataUpdatedAt, isPlainInboxView, publicSettings.data?.mailAutoRefresh])
 
   const selected = detail.data
-  const allMessages = (mailView === "external" ? externalMessages.data?.pages : messages.data?.pages)?.flatMap((page) => page.items || []) || []
+  const messagePages = (mailView === "external" ? externalMessages.data?.pages : messages.data?.pages) || []
+  const currentMessagePage = messagePages[messagePageIndex] || messagePages[0]
+  const allMessages = currentMessagePage?.items || []
+  const messageTotalCount = currentMessagePage?.totalCount
+  React.useEffect(() => {
+    if (messagePageIndex > 0 && currentMessagePage && (currentMessagePage.items?.length || 0) === 0) {
+      setMessagePageIndex((page) => Math.max(0, page - 1))
+    }
+  }, [currentMessagePage, messagePageIndex])
   const visibleMessages = allMessages.filter((message) => {
     if (mailFilter === "unread") return !message.isRead
     if (mailFilter === "starred") return message.isStarred
@@ -700,13 +725,39 @@ export function MailPage() {
   const selectedCountOnPage = compactSelectedIds.filter((id) => visibleMessageIds.includes(id)).length
   const compactAllSelected = visibleMessageIds.length > 0 && selectedCountOnPage === visibleMessageIds.length
   const compactSomeSelected = selectedCountOnPage > 0 && !compactAllSelected
-  const hasMoreMessages = mailView === "external" ? !!externalMessages.hasNextPage : !!messages.hasNextPage
-  const canLoadMore = mailView === "external" ? !!externalMessages.hasNextPage && !externalMessages.isFetchingNextPage : !!messages.hasNextPage && !messages.isFetchingNextPage
+  const hasPreviousMessagePage = messagePageIndex > 0
+  const hasNextMessagePage = !!messagePages[messagePageIndex + 1] || !!currentMessagePage?.nextCursor
+  const messagePageLoading = mailView === "external" ? externalMessages.isFetchingNextPage : messages.isFetchingNextPage
   function toggleCompactSelectAll(checked: boolean) {
     setCompactSelectedIds(checked ? visibleMessageIds : [])
   }
   function toggleCompactSelect(messageId: string, checked: boolean) {
     setCompactSelectedIds((ids) => checked ? Array.from(new Set([...ids, messageId])) : ids.filter((id) => id !== messageId))
+  }
+  function setMailPageSize(size: MailPageSize) {
+    localStorage.setItem(MAIL_PAGE_SIZE_KEY, String(size))
+    setMessagePageSize(size)
+    setMessagePageIndex(0)
+    setCompactSelectedIds([])
+  }
+  function previousMessagePage() {
+    if (!hasPreviousMessagePage) return
+    setMessagePageIndex((page) => Math.max(0, page - 1))
+    setCompactSelectedIds([])
+  }
+  async function nextMessagePage() {
+    if (!hasNextMessagePage || messagePageLoading) return
+    const nextIndex = messagePageIndex + 1
+    if (messagePages[nextIndex]) {
+      setMessagePageIndex(nextIndex)
+      setCompactSelectedIds([])
+      return
+    }
+    const result = mailView === "external" ? await externalMessages.fetchNextPage() : await messages.fetchNextPage()
+    if (result.data?.pages[nextIndex]) {
+      setMessagePageIndex(nextIndex)
+      setCompactSelectedIds([])
+    }
   }
   async function refreshMailData() {
     await Promise.all([
@@ -1352,14 +1403,20 @@ export function MailPage() {
       title={viewTitle}
       icon={mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : undefined}
       messages={visibleMessages}
-      total={allMessages.length}
+      pageItemCount={allMessages.length}
+      total={messageTotalCount}
       selectedIds={compactSelectedIds}
       allSelected={compactAllSelected}
       someSelected={compactSomeSelected}
       loading={mailView === "external" ? externalMessages.isLoading : messages.isLoading}
-      hasMore={hasMoreMessages}
-      loadingMore={mailView === "external" ? externalMessages.isFetchingNextPage : messages.isFetchingNextPage}
-      onLoadMore={() => mailView === "external" ? externalMessages.fetchNextPage() : messages.fetchNextPage()}
+      pageIndex={messagePageIndex}
+      pageSize={messagePageSize}
+      hasPreviousPage={hasPreviousMessagePage}
+      hasNextPage={hasNextMessagePage}
+      pageLoading={messagePageLoading}
+      onPageSizeChange={setMailPageSize}
+      onPreviousPage={previousMessagePage}
+      onNextPage={() => void nextMessagePage()}
       emptyMessage={emptyMessage}
       selectedId={selectedId}
       selected={selected}
@@ -1398,23 +1455,28 @@ export function MailPage() {
               {canOrganizeSelectedMailbox && <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />}
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge>}{mailView !== "label" && viewTitle}</div>
-                <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${allMessages.length} 封邮件`}</div>
+                <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${messageTotalCount ?? allMessages.length} 封邮件`}</div>
               </div>
             </div>
             {selectedCountOnPage > 0 && canOrganizeSelectedMailbox && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
           </div>
-          <ScrollArea className="min-h-0 flex-1">
+          <ScrollArea key={`mail-page-${messagePageIndex}`} className="min-h-0 flex-1">
             {(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && <MessageSkeleton />}
             {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onContextMenu={(event) => openMessageContextMenu(event, m)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} canOrganize={canOrganizeSelectedMailbox} />)}
             {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
-            {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && hasMoreMessages && (
-              <div className="border-b p-4 text-center">
-                <Button variant="outline" size="sm" disabled={!canLoadMore} onClick={() => mailView === "external" ? externalMessages.fetchNextPage() : messages.fetchNextPage()}>
-                  {(mailView === "external" ? externalMessages.isFetchingNextPage : messages.isFetchingNextPage) ? "加载中..." : "加载更多"}
-                </Button>
-              </div>
-            )}
           </ScrollArea>
+          <MailPagination
+            pageIndex={messagePageIndex}
+            pageSize={messagePageSize}
+            itemCount={allMessages.length}
+            totalCount={messageTotalCount}
+            hasPreviousPage={hasPreviousMessagePage}
+            hasNextPage={hasNextMessagePage}
+            loading={messagePageLoading}
+            onPageSizeChange={setMailPageSize}
+            onPreviousPage={previousMessagePage}
+            onNextPage={() => void nextMessagePage()}
+          />
         </div>
       </ResizablePanel>
       <ResizableHandle withHandle />
@@ -2347,17 +2409,66 @@ function CreateFolderDialog({ open, pending, onOpenChange, onCreate }: { open: b
   )
 }
 
+function MailPagination({ pageIndex, pageSize, itemCount, totalCount, hasPreviousPage, hasNextPage, loading, onPageSizeChange, onPreviousPage, onNextPage }: {
+  pageIndex: number
+  pageSize: MailPageSize
+  itemCount: number
+  totalCount?: number
+  hasPreviousPage: boolean
+  hasNextPage: boolean
+  loading: boolean
+  onPageSizeChange: (size: MailPageSize) => void
+  onPreviousPage: () => void
+  onNextPage: () => void
+}) {
+  const pageNumber = pageIndex + 1
+  const totalPages = typeof totalCount === "number" ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
+  const rangeStart = itemCount > 0 ? pageIndex * pageSize + 1 : 0
+  const rangeEnd = itemCount > 0 ? Math.min(totalCount ?? Number.MAX_SAFE_INTEGER, rangeStart + itemCount - 1) : 0
+  return (
+    <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-t bg-background px-3 py-2 text-xs text-muted-foreground">
+      <div className="min-w-0 truncate whitespace-nowrap">
+        {typeof totalCount === "number" ? `${rangeStart}–${rangeEnd} / ${totalCount}` : `第 ${pageNumber} 页`}
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        <span className="hidden whitespace-nowrap min-[420px]:inline">每页</span>
+        <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value) as MailPageSize)} disabled={loading}>
+          <SelectTrigger className="h-8 w-[68px] bg-background px-2" aria-label="每页邮件数">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent align="end">
+            <SelectItem value="20">20</SelectItem>
+            <SelectItem value="30">30</SelectItem>
+            <SelectItem value="50">50</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={!hasPreviousPage || loading} onClick={onPreviousPage} title="上一页" aria-label="上一页">
+          <ChevronLeft className="h-4 w-4" />
+        </Button>
+        <span className="min-w-10 whitespace-nowrap text-center text-foreground">{pageNumber}{totalPages ? ` / ${totalPages}` : ""}</span>
+        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={!hasNextPage || loading} onClick={onNextPage} title="下一页" aria-label="下一页">
+          <ChevronRight className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function CompactMailView({
   title,
   icon,
   messages,
+  pageItemCount,
   total,
   selectedIds,
   allSelected,
   someSelected,
   loading,
-  hasMore,
-  loadingMore,
+  pageIndex,
+  pageSize,
+  hasPreviousPage,
+  hasNextPage,
+  pageLoading,
   emptyMessage,
   selectedId,
   selected,
@@ -2368,7 +2479,9 @@ function CompactMailView({
   onSelectAll,
   onToggleSelected,
   scheduledDraftIds,
-  onLoadMore,
+  onPageSizeChange,
+  onPreviousPage,
+  onNextPage,
   onCloseReader,
   onStar,
   onReply,
@@ -2391,13 +2504,17 @@ function CompactMailView({
   title: string
   icon?: React.ReactNode
   messages: MailMessage[]
-  total: number
+  pageItemCount: number
+  total?: number
   selectedIds: string[]
   allSelected: boolean
   someSelected: boolean
   loading: boolean
-  hasMore: boolean
-  loadingMore: boolean
+  pageIndex: number
+  pageSize: MailPageSize
+  hasPreviousPage: boolean
+  hasNextPage: boolean
+  pageLoading: boolean
   emptyMessage: string
   selectedId: string | null
   selected?: MailMessage
@@ -2408,7 +2525,9 @@ function CompactMailView({
   onSelectAll: (checked: boolean) => void
   onToggleSelected: (id: string, checked: boolean) => void
   scheduledDraftIds: Set<string>
-  onLoadMore: () => void
+  onPageSizeChange: (size: MailPageSize) => void
+  onPreviousPage: () => void
+  onNextPage: () => void
   onCloseReader: () => void
   onStar: (message: MailMessage) => void
   onReply: (message: MailMessage) => void
@@ -2478,22 +2597,27 @@ function CompactMailView({
               {canOrganize && <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />}
             </>
           ) : (
-            <div className="text-sm text-muted-foreground">{messages.length} / {total} 封</div>
+            <div className="text-sm text-muted-foreground">{typeof total === "number" ? `${messages.length} / ${total} 封` : `${messages.length} 封`}</div>
           )}
         </div>
       </div>
-      <ScrollArea className="min-h-0 flex-1">
+      <ScrollArea key={`compact-mail-page-${pageIndex}`} className="min-h-0 flex-1">
         {loading && <MessageSkeleton />}
         {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onContextMenu={(event) => onContextMenu(event, message)} onStar={() => onStar(message)} canOrganize={canOrganize} />)}
         {!loading && messages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
-        {!loading && hasMore && (
-          <div className="border-b p-4 text-center">
-            <Button variant="outline" size="sm" disabled={loadingMore} onClick={onLoadMore}>
-              {loadingMore ? "加载中..." : "加载更多"}
-            </Button>
-          </div>
-        )}
       </ScrollArea>
+      <MailPagination
+        pageIndex={pageIndex}
+        pageSize={pageSize}
+        itemCount={pageItemCount}
+        totalCount={total}
+        hasPreviousPage={hasPreviousPage}
+        hasNextPage={hasNextPage}
+        loading={pageLoading}
+        onPageSizeChange={onPageSizeChange}
+        onPreviousPage={onPreviousPage}
+        onNextPage={onNextPage}
+      />
     </div>
   )
 }
@@ -2903,7 +3027,7 @@ function MailboxSwitcher({ collapsed, mailboxes, selectedMailbox, onSelect }: { 
           <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
           {!collapsed && (
             <>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{selectedMailbox?.address || "选择邮箱"}</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">{selectedMailbox?.address || "当前邮箱"}</span>
               {selectedMailbox?.access === "read" && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">共享</Badge>}
               <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
             </>

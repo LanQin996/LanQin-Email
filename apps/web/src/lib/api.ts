@@ -141,8 +141,9 @@ export const api = {
   myOwnedMailboxes: () => request<ListResponse<Mailbox>>("/api/mail/mailboxes?owned=1"),
   externalMailAccounts: () => request<ListResponse<ExternalImapAccount>>("/api/mail/external-accounts"),
   externalFolders: (id: string) => request<ListResponse<ExternalImapFolder>>(`/api/mail/external-accounts/${id}/folders`),
-  externalMessages: (id: string, folder: string, cursor = "", q = "") => {
+  externalMessages: (id: string, folder: string, cursor = "", q = "", limit = 30) => {
     const params = new URLSearchParams({ folder, cursor, q })
+    params.set("limit", String(limit))
     return request<ListResponse<MailMessage>>(`/api/mail/external-accounts/${id}/messages?${params.toString()}`)
   },
   externalMessage: (id: string, remoteId: string) => request<MailMessage>(`/api/mail/external-accounts/${id}/messages/${encodeURIComponent(remoteId)}`),
@@ -163,18 +164,21 @@ export const api = {
     return request<MailLabel>(`/api/mail/labels${query}`, { method: "POST", body: JSON.stringify({ name: payload.name, color: payload.color || "" }) })
   },
   deleteLabel: (id: string, mailboxId?: string) => request<{ labels: MailLabel[] }>(`/api/mail/labels/${id}${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`, { method: "DELETE" }),
-  messages: (folder: string, q = "", cursor = "", mailboxId?: string) => {
+  messages: (folder: string, q = "", cursor = "", mailboxId?: string, limit = 30) => {
     const params = new URLSearchParams({ folder, q, cursor })
+    params.set("limit", String(limit))
     if (mailboxId) params.set("mailboxId", mailboxId)
     return request<ListResponse<MailMessage>>(`/api/mail/messages?${params.toString()}`)
   },
-  labelMessages: (labelId: string, q = "", cursor = "", mailboxId?: string) => {
+  labelMessages: (labelId: string, q = "", cursor = "", mailboxId?: string, limit = 30) => {
     const params = new URLSearchParams({ labelId, q, cursor })
+    params.set("limit", String(limit))
     if (mailboxId) params.set("mailboxId", mailboxId)
     return request<ListResponse<MailMessage>>(`/api/mail/messages?${params.toString()}`)
   },
-  starredMessages: (q = "", cursor = "", mailboxId?: string) => {
+  starredMessages: (q = "", cursor = "", mailboxId?: string, limit = 30) => {
     const params = new URLSearchParams({ q, cursor })
+    params.set("limit", String(limit))
     if (mailboxId) params.set("mailboxId", mailboxId)
     return request<ListResponse<MailMessage>>(`/api/mail/starred?${params.toString()}`)
   },

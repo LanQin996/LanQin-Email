@@ -48,7 +48,7 @@ type externalIMAPClientFactory interface {
 type externalIMAPClient interface {
 	Close() error
 	ListFolders(ctx context.Context) ([]externalIMAPRemoteFolder, error)
-	FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, error)
+	FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, int, error)
 	FetchNew(ctx context.Context, folder string, afterUID uint32, limit int) ([]externalIMAPRemoteMessage, error)
 	FetchRaw(ctx context.Context, folder string, uid uint32) ([]byte, externalIMAPRemoteMessage, error)
 	FetchAttachments(ctx context.Context, folder string, uid uint32) ([]Attachment, error)
@@ -597,13 +597,18 @@ func (a *App) handleExternalIMAPMessages(w http.ResponseWriter, r *http.Request)
 	}
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	cursor := strings.TrimSpace(r.URL.Query().Get("cursor"))
+	limit, err := mailMessagePageLimit(r)
+	if err != nil {
+		badRequest(w, err)
+		return
+	}
 	client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "connection failed: "+err.Error())
 		return
 	}
 	defer client.Close()
-	remote, next, err := client.FetchSummaries(r.Context(), folder, query, cursor, externalIMAPMaxFetch)
+	remote, next, totalCount, err := client.FetchSummaries(r.Context(), folder, query, cursor, limit)
 	if err != nil {
 		respondError(w, http.StatusBadRequest, "failed to load remote messages")
 		return
@@ -612,7 +617,7 @@ func (a *App) handleExternalIMAPMessages(w http.ResponseWriter, r *http.Request)
 	for _, msg := range remote {
 		items = append(items, externalRemoteMessageToMailMessage(account, msg, false))
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+	respondJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next, "totalCount": totalCount})
 }
 
 func (a *App) handleExternalIMAPMessage(w http.ResponseWriter, r *http.Request) {
@@ -1676,16 +1681,16 @@ func mailboxHasNoSelect(attrs []imap.MailboxAttr) bool {
 	return false
 }
 
-func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, error) {
+func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string, query string, cursor string, limit int) ([]externalIMAPRemoteMessage, string, int, error) {
 	selected, err := c.client.Select(folder, nil).Wait()
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
-	if limit <= 0 || limit > 100 {
+	if limit != 20 && limit != 30 && limit != 50 {
 		limit = externalIMAPMaxFetch
 	}
 	if selected.NumMessages == 0 {
-		return nil, "", nil
+		return nil, "", 0, nil
 	}
 	maxUID := uint32(0)
 	if strings.TrimSpace(cursor) != "" {
@@ -1694,31 +1699,44 @@ func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string
 	}
 	if maxUID == 0 {
 		if selected.UIDNext == 0 {
-			return nil, "", nil
+			return nil, "", 0, nil
 		}
 		maxUID = uint32(selected.UIDNext - 1)
+	}
+	query = strings.TrimSpace(query)
+	totalCount := int(selected.NumMessages)
+	if query != "" {
+		totalData, err := c.client.UIDSearch(&imap.SearchCriteria{Text: []string{query}}, c.uidSearchAllOptions()).Wait()
+		if err != nil {
+			return nil, "", 0, err
+		}
+		totalCount = staticUIDSetCount(totalData.All)
 	}
 	criteria := &imap.SearchCriteria{}
 	var uidRange imap.UIDSet
 	uidRange.AddRange(1, imap.UID(maxUID))
 	criteria.UID = []imap.UIDSet{uidRange}
-	if q := strings.TrimSpace(query); q != "" {
-		criteria.Text = []string{q}
+	if query != "" {
+		criteria.Text = []string{query}
 	}
 	data, err := c.client.UIDSearch(criteria, c.uidSearchAllOptions()).Wait()
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
-	uids := boundedSearchUIDs(data.All, limit, true)
+	uids := boundedSearchUIDs(data.All, limit+1, true)
 	if len(uids) == 0 {
-		return nil, "", nil
+		return nil, "", totalCount, nil
+	}
+	hasMore := len(uids) > limit
+	if hasMore {
+		uids = uids[:limit]
 	}
 	var set imap.UIDSet
 	set.AddNum(uids...)
 	bodySection := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader, Peek: true}
 	messages, err := c.client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true, Envelope: true, InternalDate: true, RFC822Size: true, BodySection: []*imap.FetchItemBodySection{bodySection}}).Collect()
 	if err != nil {
-		return nil, "", err
+		return nil, "", 0, err
 	}
 	out := []externalIMAPRemoteMessage{}
 	for _, message := range messages {
@@ -1726,13 +1744,32 @@ func (c *goExternalIMAPClient) FetchSummaries(ctx context.Context, folder string
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UID > out[j].UID })
 	next := ""
-	if len(uids) == limit {
+	if hasMore {
 		last := uint32(uids[len(uids)-1])
 		if last > 1 {
 			next = "uid:" + strconv.FormatUint(uint64(last-1), 10)
 		}
 	}
-	return out, next, nil
+	return out, next, totalCount, nil
+}
+
+func staticUIDSetCount(numSet imap.NumSet) int {
+	uidSet, ok := numSet.(imap.UIDSet)
+	if !ok || uidSet.Dynamic() {
+		return 0
+	}
+	total := uint64(0)
+	for _, uidRange := range uidSet {
+		if uidRange.Start == 0 || uidRange.Stop < uidRange.Start {
+			continue
+		}
+		total += uint64(uidRange.Stop-uidRange.Start) + 1
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if total > maxInt {
+		return int(maxInt)
+	}
+	return int(total)
 }
 
 func (c *goExternalIMAPClient) FetchNew(ctx context.Context, folder string, afterUID uint32, limit int) ([]externalIMAPRemoteMessage, error) {

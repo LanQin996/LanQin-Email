@@ -44,3 +44,12 @@ func TestBoundedSearchUIDsRejectsDynamicAndNonUIDSets(t *testing.T) {
 		t.Fatalf("sequence set = %v, want empty", got)
 	}
 }
+
+func TestStaticUIDSetCount(t *testing.T) {
+	var set imap.UIDSet
+	set.AddRange(1, 10)
+	set.AddRange(20, 24)
+	if got := staticUIDSetCount(set); got != 15 {
+		t.Fatalf("staticUIDSetCount=%d, want 15", got)
+	}
+}

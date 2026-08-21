@@ -14,6 +14,7 @@ import (
 type mailMessagePage struct {
 	Items      []MailMessage `json:"items"`
 	NextCursor string        `json:"nextCursor"`
+	TotalCount int           `json:"totalCount"`
 }
 
 func TestMailMessageListUsesStableCursorPagination(t *testing.T) {
@@ -22,7 +23,21 @@ func TestMailMessageListUsesStableCursorPagination(t *testing.T) {
 
 		first := getMailMessagePage(t, client, "/api/mail/messages?folder=Pagination")
 		assertMailMessageIDs(t, first.Items, ids[:mailMessagesPageSize])
+		if first.TotalCount != len(ids) {
+			t.Fatalf("totalCount=%d, want %d", first.TotalCount, len(ids))
+		}
 		assertStableMessageCursor(t, first.NextCursor)
+
+		limited := getMailMessagePage(t, client, "/api/mail/messages?folder=Pagination&limit=20")
+		assertMailMessageIDs(t, limited.Items, ids[:20])
+		if limited.TotalCount != len(ids) {
+			t.Fatalf("limited totalCount=%d, want %d", limited.TotalCount, len(ids))
+		}
+		limitedSecond := getMailMessagePage(t, client, "/api/mail/messages?folder=Pagination&limit=20&cursor="+url.QueryEscape(limited.NextCursor))
+		assertMailMessageIDs(t, limitedSecond.Items, ids[20:])
+		if limitedSecond.NextCursor != "" || limitedSecond.TotalCount != len(ids) {
+			t.Fatalf("limited second nextCursor=%q totalCount=%d", limitedSecond.NextCursor, limitedSecond.TotalCount)
+		}
 
 		legacy := getMailMessagePage(t, client, "/api/mail/messages?folder=Pagination&cursor=30")
 		assertMailMessageIDs(t, legacy.Items, ids[mailMessagesPageSize:])
@@ -30,6 +45,9 @@ func TestMailMessageListUsesStableCursorPagination(t *testing.T) {
 		newerID := insertPaginationTestMessage(t, a, mailbox, folderID, receivedAt.Add(time.Hour), false)
 		second := getMailMessagePage(t, client, "/api/mail/messages?folder=Pagination&cursor="+url.QueryEscape(first.NextCursor))
 		assertMailMessageIDs(t, second.Items, ids[mailMessagesPageSize:])
+		if second.TotalCount != len(ids)+1 {
+			t.Fatalf("second totalCount=%d, want %d", second.TotalCount, len(ids)+1)
+		}
 		for _, item := range second.Items {
 			if item.ID == newerID {
 				t.Fatalf("new message %s appeared after an older page cursor", newerID)
@@ -38,6 +56,9 @@ func TestMailMessageListUsesStableCursorPagination(t *testing.T) {
 
 		if code := client.do("GET", "/api/mail/messages?folder=Pagination&cursor=not-a-cursor", nil, &map[string]any{}); code != http.StatusBadRequest {
 			t.Fatalf("invalid cursor code=%d, want %d", code, http.StatusBadRequest)
+		}
+		if code := client.do("GET", "/api/mail/messages?folder=Pagination&limit=10", nil, &map[string]any{}); code != http.StatusBadRequest {
+			t.Fatalf("invalid limit code=%d, want %d", code, http.StatusBadRequest)
 		}
 	})
 
