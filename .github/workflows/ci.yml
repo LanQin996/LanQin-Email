@@ -78,6 +78,10 @@ jobs:
           deploy/rspamd/sync-dkim.sh
           deploy/all-in-one/entrypoint.sh
           deploy/postgres/init-app-user.sh
+          .github/scripts/generate-release-notes.sh
+
+      - name: Check release notes generator syntax
+        run: bash -n .github/scripts/generate-release-notes.sh
 
       - name: Render database Compose variants
         env:
