@@ -155,6 +155,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 | `LANQIN_TURNSTILE_ENABLED` | 是否启用 Turnstile | `false` |
 | `LANQIN_SMTP_HOST` / `LANQIN_SMTP_PORT` | Webmail 发信 SMTP | `127.0.0.1` / `25` |
 | `LANQIN_MAILDIR_ROOT` | Maildir 根目录 | `/var/mail/vhosts` |
+| `LANQIN_MAILDIR_SCAN_SECONDS` | Maildir 收件扫描间隔（秒） | `5` |
 | `LANQIN_CATCH_ALL_ENABLED` | 未注册收件地址是否进入全部邮件 | `false` |
 | `LANQIN_USER_MAILBOX_APPLY_ENABLED` | 是否允许用户自助申请邮箱 | `false` |
 | `LANQIN_EXTERNAL_IMAP_ENABLED` | 是否启用外部 IMAP 接入；也可在后台“系统设置 > 外部 IMAP”配置 | `false` |

@@ -68,7 +68,7 @@ type maildirScanTarget struct {
 func (a *App) maildirWorker(ctx context.Context) {
 	interval := time.Duration(a.cfg.MaildirScanSeconds) * time.Second
 	if interval <= 0 {
-		interval = 30 * time.Second
+		interval = defaultMaildirScanSeconds * time.Second
 	}
 	a.maildirHealth.markWorkerStarted(nil)
 	a.log.Info("maildir sync worker started", "root", a.cfg.MaildirRoot, "interval", interval.String())
@@ -109,6 +109,9 @@ func (a *App) syncMaildirOnceTracked(ctx context.Context, interval time.Duration
 		nextRunAt = &next
 	}
 	a.maildirHealth.markRunFinished(finishedAt, counts, err, nextRunAt)
+	if err == nil && counts.total() > 0 {
+		a.publishSyncEvent()
+	}
 	return counts, err
 }
 

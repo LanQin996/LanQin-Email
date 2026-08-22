@@ -1043,7 +1043,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       smtpPassword: fieldValue(form, "smtpPassword", ""),
       smtpRequireTls,
       maildirRoot: fieldValue(form, "maildirRoot", settings?.maildirRoot || ""),
-      maildirScanSeconds: fieldNumber(form, "maildirScanSeconds", settings?.maildirScanSeconds || 30),
+      maildirScanSeconds: fieldNumber(form, "maildirScanSeconds", settings?.maildirScanSeconds || 5),
       sessionTtlHours: fieldNumber(form, "sessionTtlHours", settings?.sessionTtlHours || 168),
       allowInsecureHttp,
       openRegistration,
@@ -1139,7 +1139,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
           <Field name="publicHostname" label="公网主机名" defaultValue={settings?.publicHostname || ""} placeholder="mail.example.com" />
           <Field name="publicBaseUrl" label="访问地址" defaultValue={settings?.publicBaseUrl || ""} placeholder="https://mail.example.com" required={false} />
           <Field name="sessionTtlHours" label="登录有效期小时" type="number" defaultValue={String(settings?.sessionTtlHours || 168)} />
-          <Field name="maildirScanSeconds" label="Maildir 扫描秒数" type="number" defaultValue={String(settings?.maildirScanSeconds || 30)} />
+          <Field name="maildirScanSeconds" label="Maildir 扫描秒数" type="number" min={1} defaultValue={String(settings?.maildirScanSeconds || 5)} />
           <SwitchRow label="允许 HTTP 调试" checked={allowInsecureHttp} onCheckedChange={setAllowInsecureHttp} className="md:col-span-2" />
         </CardContent>
       </Card>}

@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const defaultMaildirScanSeconds = 5
+
 type Config struct {
 	Addr                            string
 	DBDriver                        string
@@ -95,7 +97,7 @@ func LoadConfig() Config {
 		TLSCertFile:                     getenv("LANQIN_TLS_CERT_FILE", ""),
 		TLSKeyFile:                      getenv("LANQIN_TLS_KEY_FILE", ""),
 		MaildirRoot:                     getenv("LANQIN_MAILDIR_ROOT", ""),
-		MaildirScanSeconds:              getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", 30),
+		MaildirScanSeconds:              getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", defaultMaildirScanSeconds),
 		AllowInsecureHTTP:               getenvBool("LANQIN_ALLOW_INSECURE_HTTP", true),
 		OpenRegistration:                getenvBool("LANQIN_OPEN_REGISTRATION", false),
 		TwoFactorEnabled:                getenvBool("LANQIN_TWO_FACTOR_ENABLED", false),

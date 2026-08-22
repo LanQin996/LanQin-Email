@@ -1264,6 +1264,9 @@ func (a *App) finishExternalIMAPRun(ctx context.Context, run ExternalIMAPSyncRun
 	}
 	_, _ = a.db.ExecContext(ctx, `UPDATE external_imap_accounts SET last_sync_at=?,last_status=?,last_error=?,updated_at=? WHERE id=?`,
 		finished.Format(time.RFC3339Nano), lastStatus, run.Error, finished.Format(time.RFC3339Nano), run.AccountID)
+	if run.Imported > 0 {
+		a.publishSyncEvent()
+	}
 	return run, err
 }
 

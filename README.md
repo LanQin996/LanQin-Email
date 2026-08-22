@@ -157,6 +157,7 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_TURNSTILE_ENABLED` | Enable Turnstile | `false` |
 | `LANQIN_SMTP_HOST` / `LANQIN_SMTP_PORT` | Webmail outbound SMTP | `127.0.0.1` / `25` |
 | `LANQIN_MAILDIR_ROOT` | Maildir root directory | `/var/mail/vhosts` |
+| `LANQIN_MAILDIR_SCAN_SECONDS` | Maildir incoming-message scan interval in seconds | `5` |
 | `LANQIN_CATCH_ALL_ENABLED` | Whether unregistered recipient addresses go into all messages | `false` |
 | `LANQIN_USER_MAILBOX_APPLY_ENABLED` | Allow users to request mailboxes by themselves | `false` |
 | `LANQIN_EXTERNAL_IMAP_ENABLED` | Enable external IMAP access; also configurable in Admin > System Settings > External IMAP | `false` |

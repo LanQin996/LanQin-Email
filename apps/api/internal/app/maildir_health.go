@@ -146,7 +146,7 @@ func (h *maildirSyncHealthTracker) snapshot(cfg Config) maildirSyncHealthRespons
 	root := strings.TrimSpace(cfg.MaildirRoot)
 	scanSeconds := cfg.MaildirScanSeconds
 	if scanSeconds <= 0 {
-		scanSeconds = 30
+		scanSeconds = defaultMaildirScanSeconds
 	}
 	out := maildirSyncHealthResponse{
 		Configured:  root != "",

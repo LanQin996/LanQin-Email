@@ -154,7 +154,7 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 	next.SMTPRequireTLS = req.SMTPRequireTLS
 	next.MaildirRoot = strings.TrimSpace(req.MaildirRoot)
 	if req.MaildirScanSeconds <= 0 {
-		req.MaildirScanSeconds = 30
+		req.MaildirScanSeconds = defaultMaildirScanSeconds
 	}
 	next.MaildirScanSeconds = req.MaildirScanSeconds
 	if req.SessionTTLHours <= 0 {

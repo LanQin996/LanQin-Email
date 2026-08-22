@@ -111,6 +111,35 @@ func TestMaildirIncrementalScanPerformsPeriodicFullScan(t *testing.T) {
 	}
 }
 
+func TestTrackedMaildirSyncPublishesOnlyWhenMessagesChange(t *testing.T) {
+	a, _, dir := prepareIncrementalMaildirTest(t)
+	events, unsubscribe := a.subscribeSyncEvents()
+	defer unsubscribe()
+	writeIncrementalMaildirMessage(t, dir, "first", "<incremental-event@example.test>")
+
+	counts, err := a.syncMaildirOnceTracked(context.Background(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Imported != 1 {
+		t.Fatalf("counts=%+v, want one imported message", counts)
+	}
+	select {
+	case <-events:
+	default:
+		t.Fatal("maildir import did not publish a sync event")
+	}
+
+	if _, err := a.syncMaildirOnceTracked(context.Background(), time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-events:
+		t.Fatal("unchanged maildir scan published a sync event")
+	default:
+	}
+}
+
 func prepareIncrementalMaildirTest(t *testing.T) (*App, *Mailbox, string) {
 	t.Helper()
 	a := newTestApp(t)

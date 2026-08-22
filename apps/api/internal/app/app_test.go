@@ -4560,8 +4560,8 @@ func TestMaildirSyncHealthDisabled(t *testing.T) {
 	if health.Configured || health.Enabled || health.WorkerStarted || health.Running {
 		t.Fatalf("unexpected disabled health: %+v", health)
 	}
-	if health.ScanSeconds != 30 {
-		t.Fatalf("scan seconds=%d, want default 30", health.ScanSeconds)
+	if health.ScanSeconds != defaultMaildirScanSeconds {
+		t.Fatalf("scan seconds=%d, want default %d", health.ScanSeconds, defaultMaildirScanSeconds)
 	}
 }
 

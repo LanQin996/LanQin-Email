@@ -2030,17 +2030,50 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if flusher != nil {
 		flusher.Flush()
 	}
+	syncEvents, unsubscribe := a.subscribeSyncEvents()
+	defer unsubscribe()
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-syncEvents:
+			fmt.Fprint(w, "event: sync\ndata: {\"status\":\"updated\"}\n\n")
+			if flusher != nil {
+				flusher.Flush()
+			}
 		case t := <-ticker.C:
 			fmt.Fprintf(w, "event: heartbeat\ndata: {\"time\":\"%s\"}\n\n", t.UTC().Format(time.RFC3339))
 			if flusher != nil {
 				flusher.Flush()
 			}
+		}
+	}
+}
+
+func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {
+	client := make(chan struct{}, 1)
+	a.syncEventsMu.Lock()
+	if a.syncEventClients == nil {
+		a.syncEventClients = make(map[chan struct{}]struct{})
+	}
+	a.syncEventClients[client] = struct{}{}
+	a.syncEventsMu.Unlock()
+	return client, func() {
+		a.syncEventsMu.Lock()
+		delete(a.syncEventClients, client)
+		a.syncEventsMu.Unlock()
+	}
+}
+
+func (a *App) publishSyncEvent() {
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	for client := range a.syncEventClients {
+		select {
+		case client <- struct{}{}:
+		default:
 		}
 	}
 }

@@ -33,6 +33,8 @@ type App struct {
 	maildirSyncMu    sync.Mutex
 	maildirDirs      map[string]maildirDirectorySignature
 	maildirRuns      uint64
+	syncEventsMu     sync.Mutex
+	syncEventClients map[chan struct{}]struct{}
 	externalIMAP     externalIMAPClientFactory
 	messageSearchFTS bool
 }
