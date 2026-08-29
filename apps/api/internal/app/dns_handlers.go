@@ -34,13 +34,18 @@ func (a *App) handleDNSCheck(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) dnsRecordsFor(d *Domain) []DNSRecord {
 	name := strings.TrimSuffix(d.Name, ".")
-	host := strings.TrimSuffix(a.cfg.PublicHostname, ".") + "."
-	return []DNSRecord{
-		{Type: "MX", Name: name, Value: fmt.Sprintf("10 %s", host), TTL: 300},
+	host := strings.TrimSuffix(a.cfg.PublicHostname, ".")
+	records := []DNSRecord{
+		{Type: "MX", Name: name, Value: fmt.Sprintf("10 %s.", host), TTL: 300},
 		{Type: "TXT", Name: name, Value: "v=spf1 mx -all", TTL: 300},
-		{Type: "TXT", Name: d.DKIMSelector + "._domainkey." + name, Value: "v=DKIM1; k=rsa; p=" + d.DKIMPublicKey, TTL: 300},
-		{Type: "TXT", Name: "_dmarc." + name, Value: "v=DMARC1; p=quarantine; rua=mailto:postmaster@" + name, TTL: 300},
 	}
+	if !strings.EqualFold(host, name) {
+		records = append(records, DNSRecord{Type: "TXT", Name: host, Value: "v=spf1 a -all", TTL: 300})
+	}
+	return append(records,
+		DNSRecord{Type: "TXT", Name: d.DKIMSelector + "._domainkey." + name, Value: "v=DKIM1; k=rsa; p=" + d.DKIMPublicKey, TTL: 300},
+		DNSRecord{Type: "TXT", Name: "_dmarc." + name, Value: "v=DMARC1; p=quarantine; rua=mailto:postmaster@" + name, TTL: 300},
+	)
 }
 
 func (a *App) checkDNS(ctx context.Context, d *Domain) DNSCheckResult {
@@ -66,11 +71,18 @@ func (a *App) checkDNS(ctx context.Context, d *Domain) DNSCheckResult {
 	}
 
 	rootTXT, _ := resolver.LookupTXT(ctx, d.Name)
-	checks["spf"] = txtContains(rootTXT, "v=spf1", "SPF 记录存在", "未找到 SPF 记录")
+	checks["spf"] = spfCheckStatus(rootTXT, "域名 SPF")
+
+	heloName := strings.TrimSuffix(a.cfg.PublicHostname, ".")
+	heloTXT := rootTXT
+	if !strings.EqualFold(strings.TrimSuffix(d.Name, "."), heloName) {
+		heloTXT, _ = resolver.LookupTXT(ctx, heloName)
+	}
+	checks["helo_spf"] = spfCheckStatus(heloTXT, "HELO 主机 "+heloName+" 的 SPF")
 
 	dkimName := d.DKIMSelector + "._domainkey." + d.Name
 	dkimTXT, _ := resolver.LookupTXT(ctx, dkimName)
-	checks["dkim"] = txtContains(dkimTXT, "v=DKIM1", "DKIM 记录存在", "未找到 DKIM 记录")
+	checks["dkim"] = dkimCheckStatus(dkimTXT, d.DKIMPublicKey)
 
 	dmarcTXT, _ := resolver.LookupTXT(ctx, "_dmarc."+d.Name)
 	checks["dmarc"] = txtContains(dmarcTXT, "v=DMARC1", "DMARC 记录存在", "未找到 DMARC 记录")
@@ -83,6 +95,49 @@ func (a *App) checkDNS(ctx context.Context, d *Domain) DNSCheckResult {
 		}
 	}
 	return DNSCheckResult{Domain: d.Name, Status: status, Checks: checks}
+}
+
+func spfCheckStatus(records []string, label string) DNSCheckStatus {
+	found := append([]string{}, records...)
+	spfRecords := make([]string, 0, 1)
+	for _, item := range records {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(item)), "v=spf1") {
+			spfRecords = append(spfRecords, item)
+		}
+	}
+	if len(spfRecords) == 0 {
+		return DNSCheckStatus{OK: false, Message: "未找到" + label + "记录", Found: found}
+	}
+	if len(spfRecords) > 1 {
+		return DNSCheckStatus{OK: false, Message: label + "存在多条记录，会导致 SPF 校验错误", Found: found}
+	}
+	return DNSCheckStatus{OK: true, Message: label + "记录有效", Found: found}
+}
+
+func dkimCheckStatus(records []string, publicKey string) DNSCheckStatus {
+	found := append([]string{}, records...)
+	for _, item := range records {
+		tags := dnsTagValues(item)
+		if strings.EqualFold(tags["v"], "DKIM1") && tags["p"] == strings.Join(strings.Fields(publicKey), "") {
+			return DNSCheckStatus{OK: true, Message: "DKIM 公钥匹配", Found: found}
+		}
+	}
+	if txtContains(records, "v=DKIM1", "", "").OK {
+		return DNSCheckStatus{OK: false, Message: "DKIM 记录存在，但公钥与当前域名配置不匹配", Found: found}
+	}
+	return DNSCheckStatus{OK: false, Message: "未找到 DKIM 记录", Found: found}
+}
+
+func dnsTagValues(record string) map[string]string {
+	tags := map[string]string{}
+	for _, part := range strings.Split(record, ";") {
+		key, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		tags[strings.ToLower(strings.TrimSpace(key))] = strings.Join(strings.Fields(value), "")
+	}
+	return tags
 }
 
 func txtContains(records []string, needle, okMsg, failMsg string) DNSCheckStatus {

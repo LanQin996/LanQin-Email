@@ -316,7 +316,10 @@ function PermissionGroupsSection({ groups, catalog }: { groups: PermissionGroup[
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>权限组管理</CardTitle>
+          <div>
+            <CardTitle>权限组管理</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">注册用户默认继承“普通用户”系统组；编辑该组并取消“发送邮件”即可统一设为只收不发。</p>
+          </div>
           {canCreate && <PermissionGroupDialog catalog={catalog} />}
         </div>
       </CardHeader>
@@ -683,7 +686,10 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>别名/转发管理</CardTitle>
+          <div>
+            <CardTitle>地址别名投递</CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">将某个收件地址投递到目标邮箱，不是用户收件后的自动转发；来源同时是实体邮箱时会保留本地投递。</p>
+          </div>
           {canCreate && <CreateAliasDialog domains={domains} />}
         </div>
       </CardHeader>
@@ -1912,12 +1918,17 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
     {check.data && <>
       <Separator className="my-4" />
       <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground"><CheckCircle2 className="h-4 w-4" />检测结果</div>
-      <div className="mt-2 space-y-2">{Object.entries(check.data.checks).map(([k, v]) => <div key={k} className="flex items-center gap-2 text-sm"><CheckCircle2 className={`h-4 w-4 shrink-0 ${v.ok ? "text-green-600" : "text-destructive"}`} /><span className="font-medium">{k.toUpperCase()}:</span> {v.message}</div>)}</div>
+      <div className="mt-2 space-y-2">{Object.entries(check.data.checks).map(([k, v]) => <div key={k} className="flex items-center gap-2 text-sm"><CheckCircle2 className={`h-4 w-4 shrink-0 ${v.ok ? "text-green-600" : "text-destructive"}`} /><span className="font-medium">{dnsCheckLabel(k)}:</span> {v.message}</div>)}</div>
     </>}</>
   const checkButton = canCheckDNS ? <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}><RefreshCcw className={cn("h-4 w-4", check.isPending && "animate-spin")} />{check.isPending ? "检测中..." : "检测"}</Button> : null
   const header = <div className="flex items-center justify-between"><CardTitle>DNS 记录</CardTitle>{checkButton}</div>
   if (embedded) return <div className="space-y-4"><div className="flex items-center justify-between"><div className="font-medium">DNS 记录</div>{checkButton}</div>{content}</div>
   return <Card><CardHeader>{header}</CardHeader><CardContent>{content}</CardContent></Card>
+}
+
+function dnsCheckLabel(key: string): string {
+  if (key === "helo_spf") return "HELO SPF"
+  return key.toUpperCase()
 }
 
 const dnsDescriptions: Record<string, string> = {
@@ -1928,6 +1939,7 @@ const dnsDescriptions: Record<string, string> = {
 function dnsDescription(record: DNSRecord): string {
   if (record.type === "TXT" && record.name.startsWith("_dmarc")) return "声明域名的 DMARC 策略（如何处理未通过 SPF/DKIM 验证的邮件）。"
   if (record.type === "TXT" && record.value.includes("DKIM1")) return "DKIM 公钥。收件服务器用此密钥验证邮件是否由你发出。"
+  if (record.type === "TXT" && record.value === "v=spf1 a -all") return "授权邮件服务器主机名用于 SMTP HELO，避免对方报告 HELO 未发布 SPF。"
   if (record.type === "TXT" && record.value.includes("spf1")) return "声明哪些服务器有权使用你的域名发件，防止伪造。"
   if (record.type === "MX") return `确保 ${record.name} 的 A 记录已指向你的服务器 IP，邮件才能到达。`
   return ""

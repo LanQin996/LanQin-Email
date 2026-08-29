@@ -3925,11 +3925,31 @@ func TestDNSRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	records := a.dnsRecordsFor(d)
-	if len(records) != 4 {
+	if len(records) != 5 {
 		t.Fatalf("records=%d", len(records))
 	}
-	if records[0].Type != "MX" || !strings.Contains(records[2].Value, "v=DKIM1") {
+	if records[0].Type != "MX" || records[2].Name != "mail.example.test" || records[2].Value != "v=spf1 a -all" || !strings.Contains(records[3].Value, "v=DKIM1") {
 		t.Fatalf("unexpected records: %+v", records)
+	}
+
+	a.cfg.PublicHostname = d.Name
+	if sameHostRecords := a.dnsRecordsFor(d); len(sameHostRecords) != 4 {
+		t.Fatalf("same-host records=%d, want 4: %+v", len(sameHostRecords), sameHostRecords)
+	}
+}
+
+func TestDNSRecordValidation(t *testing.T) {
+	if status := spfCheckStatus([]string{"google-site-verification=test", "v=spf1 mx -all"}, "域名 SPF"); !status.OK {
+		t.Fatalf("valid SPF status=%+v", status)
+	}
+	if status := spfCheckStatus([]string{"v=spf1 mx -all", "v=spf1 a -all"}, "域名 SPF"); status.OK || !strings.Contains(status.Message, "多条") {
+		t.Fatalf("duplicate SPF status=%+v", status)
+	}
+	if status := dkimCheckStatus([]string{"v=DKIM1; k=rsa; p=abc123"}, "abc123"); !status.OK {
+		t.Fatalf("valid DKIM status=%+v", status)
+	}
+	if status := dkimCheckStatus([]string{"v=DKIM1; k=rsa; p=stale"}, "current"); status.OK || !strings.Contains(status.Message, "不匹配") {
+		t.Fatalf("mismatched DKIM status=%+v", status)
 	}
 }
 

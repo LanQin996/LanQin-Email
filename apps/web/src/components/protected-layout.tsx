@@ -51,9 +51,10 @@ function ProtectedContent() {
   const logout = useLogout()
 
   const user = me.data!.user
-  const isMailRoute = location.pathname === "/" || location.pathname.startsWith("/mail")
-  const isProfileRoute = location.pathname.startsWith("/profile")
-  const isAdminRoute = location.pathname.startsWith("/admin")
+  const pathname = location.pathname.toLowerCase()
+  const isMailRoute = pathname === "/" || pathname.startsWith("/mail")
+  const isProfileRoute = pathname.startsWith("/profile")
+  const isAdminRoute = pathname.startsWith("/admin")
   const adminSection = new URLSearchParams(location.search).get("section") || "overview"
   const visibleAdminSections = adminSections.filter((item) => hasAnyPermission(user, item.permissions))
 

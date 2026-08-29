@@ -20,7 +20,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 
 - **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
 - **邮箱增强**：联系人、签名、收件规则、发件人黑名单、邮件统计、归档已读、清空回收站/垃圾邮件。
-- **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、别名转发、无人收件开关。
+- **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、地址别名投递（不是用户收件后的自动转发）、无人收件开关。
 - **账号与权限**：登录/注册、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC。
 - **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
 - **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
@@ -60,7 +60,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 - Docker Compose v2
 - 可解析的邮件域名，以及可用的 25 / 465 / 587 / 993 / 995 等端口
 
-> 公网收发邮件还需要正确配置 MX、SPF、DKIM、DMARC，并确认云厂商未封禁 SMTP 端口。
+> 公网收发邮件还需要正确配置 MX、域名 SPF、HELO 主机 SPF、DKIM、DMARC，并确认云厂商未封禁 SMTP 端口。
 
 ## 快速开始
 
@@ -134,7 +134,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 2. 生产环境建议挂载真实 TLS 证书，并设置 `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`。
 3. 登录管理后台，添加邮件域名。
 4. 在域名管理中复制并配置 MX、SPF、DKIM、DMARC 记录，然后点击 DNS 检测。
-5. 创建邮箱账号、别名转发或权限组，按需开启注册、2FA、Turnstile、自助申请邮箱。
+5. 创建邮箱账号、地址别名或权限组，按需开启注册、2FA、Turnstile、自助申请邮箱。地址别名用于改写投递目标，不是用户级收件后自动转发规则。
 6. 使用后台 SMTP 测试与 Webmail 收发测试确认链路正常。
 
 ## 关键环境变量

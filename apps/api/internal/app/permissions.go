@@ -444,7 +444,7 @@ func defaultPermissionGroups() []PermissionGroup {
 		{
 			ID:          PermissionGroupRegular,
 			Name:        "普通用户",
-			Description: "仅可使用自己的邮箱功能，不包含后台权限。",
+			Description: "所有注册用户默认继承此组；可在此统一设置收信、发信等邮箱权限。",
 			Permissions: regularUserDefaultPermissions(),
 			Limits:      defaultPermissionLimits(),
 			System:      true,

@@ -20,7 +20,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 
 - **Webmail client**: multiple mailbox switching, folders, reading and composing messages, drafts, scheduled sending, attachments, search, labels, stars, move/delete, read/unread status.
 - **Mailbox enhancements**: contacts, signatures, inbox rules, sender blacklist, mail statistics, archive read messages, empty Trash/Spam.
-- **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, alias forwarding, catch-all toggle.
+- **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, address aliases (delivery redirection, not inbox auto-forwarding), catch-all toggle.
 - **Accounts and permissions**: login/registration, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
 - **Admin panel**: overview checklist, user/permission group/domain/mailbox/alias/all-message management, system settings, mail templates, SMTP testing.
 - **Mail service stack**: Postfix delivery, Dovecot IMAP/POP3, Rspamd anti-spam and DKIM signing, Maildir-to-SQLite sync.
@@ -60,7 +60,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 - Docker Compose v2
 - A resolvable mail domain, plus available ports such as 25 / 465 / 587 / 993 / 995
 
-> Public email sending and receiving also requires correct MX, SPF, DKIM, and DMARC records, and you should confirm that your cloud provider does not block SMTP ports.
+> Public email sending and receiving also requires correct MX, domain SPF, HELO-host SPF, DKIM, and DMARC records, and you should confirm that your cloud provider does not block SMTP ports.
 
 ## Quick Start
 
@@ -134,7 +134,7 @@ See [`deploy/README.md`](./deploy/README.md) for more deployment details.
 2. In production, mount real TLS certificates and set `LANQIN_TLS_CERT_FILE` / `LANQIN_TLS_KEY_FILE`.
 3. Log in to the admin panel and add your mail domain.
 4. Copy and configure MX, SPF, DKIM, and DMARC records from domain management, then run the DNS check.
-5. Create mailbox accounts, alias forwarding, or permission groups; enable registration, 2FA, Turnstile, and self-service mailbox requests as needed.
+5. Create mailbox accounts, address aliases, or permission groups; enable registration, 2FA, Turnstile, and self-service mailbox requests as needed. Address aliases redirect delivery and are not per-user inbox auto-forwarding rules.
 6. Use the admin SMTP test and Webmail send/receive tests to confirm the full path works.
 
 ## Key Environment Variables
