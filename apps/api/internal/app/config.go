@@ -40,6 +40,7 @@ type Config struct {
 	MaildirScanSeconds              int
 	AllowInsecureHTTP               bool
 	OpenRegistration                bool
+	InviteRegistrationEnabled       bool
 	TwoFactorEnabled                bool
 	TurnstileEnabled                bool
 	TurnstileSiteKey                string
@@ -104,6 +105,7 @@ func LoadConfig() Config {
 		MaildirScanSeconds:              getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", defaultMaildirScanSeconds),
 		AllowInsecureHTTP:               getenvBool("LANQIN_ALLOW_INSECURE_HTTP", true),
 		OpenRegistration:                getenvBool("LANQIN_OPEN_REGISTRATION", false),
+		InviteRegistrationEnabled:       false,
 		TwoFactorEnabled:                getenvBool("LANQIN_TWO_FACTOR_ENABLED", false),
 		TurnstileEnabled:                getenvBool("LANQIN_TURNSTILE_ENABLED", false),
 		TurnstileSiteKey:                getenv("LANQIN_TURNSTILE_SITE_KEY", ""),

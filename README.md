@@ -150,6 +150,10 @@ Existing users must sign in with their local account before linking Linux.do und
 
 Production SSO requires a valid HTTPS `LANQIN_PUBLIC_BASE_URL`. LanQin uses the fixed official OAuth endpoints and requests only the `user` scope.
 
+## Invitation Registration
+
+Invitation registration is configured in **Admin > System Settings > Security**. When public registration is disabled but invitation registration is enabled, users must enter a valid invitation code. Administrators can create a custom code or let LanQin generate one, set its maximum number of uses, view and copy the full code later, monitor remaining uses, and delete it. Successful registration and use-count updates are committed in one database transaction. Linux.do registration remains controlled by its separate switch.
+
 ## Key Environment Variables
 
 See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. Common variables:

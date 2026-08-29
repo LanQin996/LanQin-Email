@@ -79,6 +79,16 @@ func postgresFreshSchema() []string {
 			created_at VARCHAR(35) NOT NULL
 		)`,
 		`CREATE INDEX idx_oauth_registration_challenges_expires ON oauth_registration_challenges(expires_at)`,
+		`CREATE TABLE registration_invites (
+			id VARCHAR(64) PRIMARY KEY,
+			code VARCHAR(64) NOT NULL UNIQUE,
+			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
+			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0 AND used_count <= max_uses),
+			created_by VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
+			created_at VARCHAR(35) NOT NULL,
+			updated_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE INDEX idx_registration_invites_created ON registration_invites(created_at)`,
 		`CREATE TABLE api_tokens (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

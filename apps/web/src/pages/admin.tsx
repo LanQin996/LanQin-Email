@@ -3,7 +3,7 @@ import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, BookOpen, CheckCircle2, Circle, ClipboardList, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
-import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, SystemSettings } from "@/lib/api"
+import { api, AdminUser, Alias, DNSRecord, Domain, Mailbox as MailboxType, MailMessage, MailTemplate, MaildirSyncHealth, PermissionGroup, PermissionInfo, PermissionLimits, RegistrationInvite, SystemSettings } from "@/lib/api"
 import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -160,7 +160,7 @@ function OverviewSection({ overview, domains, settings, visibleSections, onSecti
           <CardContent className="space-y-3 text-sm text-muted-foreground">
             <InfoLine label="公网地址" value={settings?.publicBaseUrl || "-"} />
             <InfoLine label="SMTP" value={settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "-"} />
-            <InfoLine label="注册" value={settings?.openRegistration ? "已开放" : "关闭"} />
+            <InfoLine label="注册" value={settings?.openRegistration ? "已开放" : settings?.inviteRegistrationEnabled ? "仅邀请码" : "关闭"} />
             <InfoLine label="用户自助申请" value={settings?.userMailboxApplyEnabled ? "已启用" : "关闭"} />
           </CardContent>
         </Card>
@@ -1017,6 +1017,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const [smtpRequireTls, setSmtpRequireTls] = React.useState(false)
   const [allowInsecureHttp, setAllowInsecureHttp] = React.useState(true)
   const [openRegistration, setOpenRegistration] = React.useState(false)
+  const [inviteRegistrationEnabled, setInviteRegistrationEnabled] = React.useState(false)
   const [twoFactorEnabled, setTwoFactorEnabled] = React.useState(false)
   const [turnstileEnabled, setTurnstileEnabled] = React.useState(false)
   const [linuxDoSSOEnabled, setLinuxDoSSOEnabled] = React.useState(false)
@@ -1032,6 +1033,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     setSmtpRequireTls(settings.smtpRequireTls)
     setAllowInsecureHttp(settings.allowInsecureHttp)
     setOpenRegistration(settings.openRegistration)
+    setInviteRegistrationEnabled(settings.inviteRegistrationEnabled)
     setTwoFactorEnabled(settings.twoFactorEnabled)
     setTurnstileEnabled(settings.turnstileEnabled)
     setLinuxDoSSOEnabled(settings.linuxDoSSOEnabled)
@@ -1057,6 +1059,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       sessionTtlHours: fieldNumber(form, "sessionTtlHours", settings?.sessionTtlHours || 168),
       allowInsecureHttp,
       openRegistration,
+      inviteRegistrationEnabled,
       twoFactorEnabled,
       turnstileEnabled,
       turnstileSiteKey: fieldValue(form, "turnstileSiteKey", settings?.turnstileSiteKey || ""),
@@ -1102,6 +1105,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     settings.sessionTtlHours,
     settings.allowInsecureHttp,
     settings.openRegistration,
+    settings.inviteRegistrationEnabled,
     settings.twoFactorEnabled,
     settings.turnstileEnabled,
     settings.turnstileSiteKey,
@@ -1290,6 +1294,9 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
         <CardHeader><CardTitle>安全设置</CardTitle></CardHeader>
         <CardContent className="space-y-5">
           <SwitchRow label="开放注册" checked={openRegistration} onCheckedChange={setOpenRegistration} />
+          <SwitchRow label="邀请码注册" checked={inviteRegistrationEnabled} onCheckedChange={setInviteRegistrationEnabled} />
+          <div className="text-xs text-muted-foreground">普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。</div>
+          <RegistrationInvitesPanel canUpdate={canUpdateSettings} />
           <Separator />
           <SwitchRow label="双因素认证 (2FA)" checked={twoFactorEnabled} onCheckedChange={setTwoFactorEnabled} />
           <Separator />
@@ -1323,6 +1330,100 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
         <Button disabled={save.isPending || !settings}>{save.isPending ? "保存中..." : "保存设置"}</Button>
       </div>}
     </form>
+  )
+}
+
+function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const invites = useQuery({ queryKey: ["admin", "registration-invites"], queryFn: api.registrationInvites })
+  const [createOpen, setCreateOpen] = React.useState(false)
+  const [code, setCode] = React.useState("")
+  const [maxUses, setMaxUses] = React.useState(1)
+  const [removeItem, setRemoveItem] = React.useState<RegistrationInvite | null>(null)
+  const create = useMutation({
+    mutationFn: () => api.createRegistrationInvite({ code: code.trim() || undefined, maxUses }),
+    onSuccess: (item) => {
+      qc.invalidateQueries({ queryKey: ["admin", "registration-invites"] })
+      setCreateOpen(false)
+      setCode("")
+      setMaxUses(1)
+      toast({ title: "邀请码已创建", description: item.code })
+    },
+    onError: (error) => toast({ title: "创建失败", description: error.message }),
+  })
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteRegistrationInvite(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["admin", "registration-invites"] })
+      setRemoveItem(null)
+      toast({ title: "邀请码已删除" })
+    },
+    onError: (error) => toast({ title: "删除失败", description: error.message }),
+  })
+  const items = invites.data?.items || []
+  const submitCreate = () => {
+    if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > 1_000_000) {
+      toast({ title: "可用次数必须在 1 到 1000000 之间" })
+      return
+    }
+    create.mutate()
+  }
+  return (
+    <div className="space-y-3 border-t pt-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <div className="font-medium">邀请码</div>
+          <div className="text-xs text-muted-foreground">邀请码可重复查看，每次成功注册会扣减一次。</div>
+        </div>
+        {canUpdate && (
+          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+            <DialogTrigger asChild><Button type="button" size="sm"><Plus className="h-4 w-4" />创建邀请码</Button></DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>创建邀请码</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="registrationInviteCode">邀请码</Label>
+                  <Input id="registrationInviteCode" value={code} onChange={(event) => setCode(event.target.value)} maxLength={64} autoComplete="off" className="font-mono uppercase" placeholder="留空自动生成" />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="registrationInviteMaxUses">可用次数</Label>
+                  <Input id="registrationInviteMaxUses" type="number" min={1} max={1_000_000} value={maxUses} onChange={(event) => setMaxUses(Number(event.target.value))} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={create.isPending}>取消</Button>
+                <Button type="button" onClick={submitCreate} disabled={create.isPending}>{create.isPending ? "创建中..." : "创建"}</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        )}
+      </div>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader><TableRow><TableHead>邀请码</TableHead><TableHead>使用情况</TableHead><TableHead>创建人</TableHead><TableHead>创建时间</TableHead>{canUpdate && <TableHead className="w-14" />}</TableRow></TableHeader>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>
+                  <div className="flex min-w-48 items-center gap-2">
+                    <span className="font-mono text-sm">{item.code}</span>
+                    <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="复制邀请码" aria-label="复制邀请码" onClick={() => navigator.clipboard.writeText(item.code).then(() => toast({ title: "邀请码已复制" }))}><Copy className="h-4 w-4" /></Button>
+                  </div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">{item.usedCount} / {item.maxUses} <span className="text-muted-foreground">（剩余 {item.remainingUses}）</span></TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{item.createdByEmail || "-"}</TableCell>
+                <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>
+                {canUpdate && <TableCell><Button type="button" variant="ghost" size="icon" title="删除邀请码" aria-label="删除邀请码" onClick={() => setRemoveItem(item)}><Trash2 className="h-4 w-4" /></Button></TableCell>}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+      {invites.isLoading && <Empty text="正在加载邀请码..." />}
+      {!invites.isLoading && items.length === 0 && <Empty text="暂无邀请码" />}
+      <ConfirmDialog open={!!removeItem} title="删除邀请码" description={removeItem ? `邀请码 ${removeItem.code} 删除后将立即失效。` : ""} confirmText="删除" destructive pending={remove.isPending} onOpenChange={(open) => { if (!open) setRemoveItem(null) }} onConfirm={() => removeItem && remove.mutate(removeItem.id)} />
+    </div>
   )
 }
 

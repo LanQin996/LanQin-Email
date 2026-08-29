@@ -211,6 +211,16 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_oauth_registration_challenges_expires ON oauth_registration_challenges(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS registration_invites (
+			id TEXT PRIMARY KEY,
+			code TEXT NOT NULL UNIQUE,
+			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
+			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0 AND used_count <= max_uses),
+			created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_registration_invites_created ON registration_invites(created_at)`,
 		`CREATE TABLE IF NOT EXISTS api_tokens (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

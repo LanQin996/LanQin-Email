@@ -173,6 +173,7 @@ export type SystemSettings = {
   sessionTtlHours: number
   allowInsecureHttp: boolean
   openRegistration: boolean
+  inviteRegistrationEnabled: boolean
   twoFactorEnabled: boolean
   turnstileEnabled: boolean
   turnstileSiteKey: string
@@ -199,10 +200,11 @@ export type SystemSettings = {
 }
 export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet" | "linuxDoClientSecretSet" | "linuxDoCallbackUrl" | "externalImapSecretSet" | "externalImapGmailClientSecretSet" | "externalImapOutlookClientSecretSet"> & { smtpPassword: string; turnstileSecretKey: string; linuxDoClientSecret: string; externalImapSecretKey: string; externalImapGmailClientSecret: string; externalImapOutlookClientSecret: string }
 export type PublicDomain = { id: string; name: string }
-export type PublicSettings = { openRegistration: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; publicHostname: string; mailAutoRefresh: boolean; mailRefreshMs: number; externalImapEnabled: boolean; linuxDoSSOEnabled: boolean; linuxDoRegistrationEnabled: boolean; mailboxDomains?: PublicDomain[] }
+export type PublicSettings = { openRegistration: boolean; inviteRegistrationEnabled: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; publicHostname: string; mailAutoRefresh: boolean; mailRefreshMs: number; externalImapEnabled: boolean; linuxDoSSOEnabled: boolean; linuxDoRegistrationEnabled: boolean; mailboxDomains?: PublicDomain[] }
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
-export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string }
+export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string; inviteCode?: string }
+export type RegistrationInvite = { id: string; code: string; maxUses: number; usedCount: number; remainingUses: number; createdByEmail?: string; createdAt: string }
 export type LinuxDoIdentity = { linked: boolean; username?: string }
 export type LinuxDoPendingRegistration = { username: string; displayName: string; domains: PublicDomain[] }
 export type LinuxDoRegistrationPayload = { domainId: string; localPart: string; displayName: string; password: string; turnstileToken?: string }

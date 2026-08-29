@@ -56,6 +56,7 @@ export function RegisterPage() {
           turnstileToken,
           domainId,
           localPart,
+          inviteCode: String(form.get("inviteCode") || ""),
         })
       }
 
@@ -65,6 +66,7 @@ export function RegisterPage() {
         displayName: String(form.get("displayName") || ""),
         password,
         turnstileToken,
+        inviteCode: String(form.get("inviteCode") || ""),
       })
     },
     onSuccess: async () => {
@@ -99,7 +101,7 @@ export function RegisterPage() {
               <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前没有可用于注册的邮箱域名</div>
               <Button type="button" variant="outline" className="h-11 w-full text-base" asChild><Link to="/login"><ArrowLeft className="h-4 w-4" />返回登录</Link></Button>
             </div>
-          ) : !linuxDoRegistration && publicSettings.isSuccess && !publicSettings.data.openRegistration ? (
+          ) : !linuxDoRegistration && publicSettings.isSuccess && !publicSettings.data.openRegistration && !publicSettings.data.inviteRegistrationEnabled ? (
             <div className="space-y-5">
               <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前未开放注册</div>
               <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
@@ -143,6 +145,12 @@ export function RegisterPage() {
                 <Label htmlFor="displayName" className="text-sm font-medium">显示名称</Label>
                 <Input id="displayName" name="displayName" autoComplete="name" defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""} className="h-11 text-base" />
               </div>
+              {!linuxDoRegistration && publicSettings.data?.inviteRegistrationEnabled && !publicSettings.data.openRegistration && (
+                <div className="space-y-2">
+                  <Label htmlFor="inviteCode" className="text-sm font-medium">邀请码</Label>
+                  <Input id="inviteCode" name="inviteCode" autoComplete="off" required className="h-11 font-mono text-base uppercase" placeholder="请输入邀请码" />
+                </div>
+              )}
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-sm font-medium">密码</Label>
                 <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required className="h-11 text-base" />
@@ -159,7 +167,7 @@ export function RegisterPage() {
             </form>
           )}
         </div>
-        {!linuxDoRegistration && !(publicSettings.isSuccess && !publicSettings.data.openRegistration) && (
+        {!linuxDoRegistration && !(publicSettings.isSuccess && !publicSettings.data.openRegistration && !publicSettings.data.inviteRegistrationEnabled) && (
           <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <span>已有账号？</span>
             <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>

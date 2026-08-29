@@ -22,6 +22,7 @@ type SystemSettings struct {
 	SessionTTLHours                    int      `json:"sessionTtlHours"`
 	AllowInsecureHTTP                  bool     `json:"allowInsecureHttp"`
 	OpenRegistration                   bool     `json:"openRegistration"`
+	InviteRegistrationEnabled          bool     `json:"inviteRegistrationEnabled"`
 	TwoFactorEnabled                   bool     `json:"twoFactorEnabled"`
 	TurnstileEnabled                   bool     `json:"turnstileEnabled"`
 	TurnstileSiteKey                   string   `json:"turnstileSiteKey"`
@@ -60,6 +61,7 @@ type systemSettingsUpdate struct {
 	SessionTTLHours                 int      `json:"sessionTtlHours"`
 	AllowInsecureHTTP               bool     `json:"allowInsecureHttp"`
 	OpenRegistration                bool     `json:"openRegistration"`
+	InviteRegistrationEnabled       bool     `json:"inviteRegistrationEnabled"`
 	TwoFactorEnabled                bool     `json:"twoFactorEnabled"`
 	TurnstileEnabled                bool     `json:"turnstileEnabled"`
 	TurnstileSiteKey                string   `json:"turnstileSiteKey"`
@@ -86,6 +88,7 @@ type systemSettingsUpdate struct {
 
 type PublicSettings struct {
 	OpenRegistration           bool           `json:"openRegistration"`
+	InviteRegistrationEnabled  bool           `json:"inviteRegistrationEnabled"`
 	TurnstileEnabled           bool           `json:"turnstileEnabled"`
 	TurnstileSiteKey           string         `json:"turnstileSiteKey"`
 	PublicHostname             string         `json:"publicHostname"`
@@ -117,10 +120,10 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 		refreshSeconds = 30
 	}
 	linuxDoEnabled := a.linuxDoEnabled()
-	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
 
 	// Include available domains for mailbox creation during registration
-	if a.cfg.OpenRegistration || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {
+	if a.cfg.OpenRegistration || a.cfg.InviteRegistrationEnabled || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {
 		rows, err := a.db.QueryContext(r.Context(), `SELECT id, name FROM domains WHERE status='active' ORDER BY name`)
 		if err == nil {
 			defer rows.Close()
@@ -175,6 +178,7 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 	next.SessionTTLHours = req.SessionTTLHours
 	next.AllowInsecureHTTP = req.AllowInsecureHTTP
 	next.OpenRegistration = req.OpenRegistration
+	next.InviteRegistrationEnabled = req.InviteRegistrationEnabled
 	next.TwoFactorEnabled = req.TwoFactorEnabled
 	next.TurnstileEnabled = req.TurnstileEnabled
 	next.TurnstileSiteKey = strings.TrimSpace(req.TurnstileSiteKey)
@@ -320,6 +324,7 @@ func (a *App) systemSettingsSnapshot() SystemSettings {
 		SessionTTLHours:                    a.cfg.SessionTTLHours,
 		AllowInsecureHTTP:                  a.cfg.AllowInsecureHTTP,
 		OpenRegistration:                   a.cfg.OpenRegistration,
+		InviteRegistrationEnabled:          a.cfg.InviteRegistrationEnabled,
 		TwoFactorEnabled:                   a.cfg.TwoFactorEnabled,
 		TurnstileEnabled:                   a.cfg.TurnstileEnabled,
 		TurnstileSiteKey:                   a.cfg.TurnstileSiteKey,
@@ -387,6 +392,8 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			a.cfg.AllowInsecureHTTP = value == "true"
 		case "openRegistration":
 			a.cfg.OpenRegistration = value == "true"
+		case "inviteRegistrationEnabled":
+			a.cfg.InviteRegistrationEnabled = value == "true"
 		case "twoFactorEnabled":
 			a.cfg.TwoFactorEnabled = value == "true"
 		case "turnstileEnabled":
@@ -454,6 +461,7 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		"sessionTtlHours":                 strconv.Itoa(cfg.SessionTTLHours),
 		"allowInsecureHttp":               strconv.FormatBool(cfg.AllowInsecureHTTP),
 		"openRegistration":                strconv.FormatBool(cfg.OpenRegistration),
+		"inviteRegistrationEnabled":       strconv.FormatBool(cfg.InviteRegistrationEnabled),
 		"twoFactorEnabled":                strconv.FormatBool(cfg.TwoFactorEnabled),
 		"turnstileEnabled":                strconv.FormatBool(cfg.TurnstileEnabled),
 		"turnstileSiteKey":                cfg.TurnstileSiteKey,

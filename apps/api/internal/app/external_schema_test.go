@@ -141,6 +141,32 @@ func TestLinuxDoExternalSchemaContract(t *testing.T) {
 	}
 }
 
+func TestRegistrationInviteExternalSchemaContract(t *testing.T) {
+	t.Parallel()
+	for name, schema := range map[string]string{"postgres": strings.Join(postgresFreshSchema(), "\n"), "mysql": strings.Join(mysqlFreshSchema(), "\n")} {
+		for _, fragment := range []string{
+			"CREATE TABLE registration_invites",
+			"code VARCHAR(64) NOT NULL UNIQUE",
+			"CHECK(max_uses > 0)",
+			"CHECK(used_count >= 0 AND used_count <= max_uses)",
+			"idx_registration_invites_created",
+		} {
+			if !strings.Contains(schema, fragment) {
+				t.Errorf("%s registration invite schema is missing %q", name, fragment)
+			}
+		}
+	}
+	statements := registrationInviteExternalSchemaStatements()
+	if len(statements) != 2 {
+		t.Fatalf("v3 migration has %d statements, want 2", len(statements))
+	}
+	for _, statement := range statements {
+		if !strings.Contains(statement, "registration_invites") {
+			t.Errorf("v3 migration contains unrelated statement: %.80s", statement)
+		}
+	}
+}
+
 func schemaTableNames(statements []string) []string {
 	names := make([]string, 0, len(externalSchemaTables))
 	for _, statement := range statements {

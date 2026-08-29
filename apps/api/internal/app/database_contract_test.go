@@ -107,6 +107,7 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 
 	assertExternalDeliveryCascade(t, ctx, a, adminID, now)
 	assertOAuthIdentityContract(t, ctx, a)
+	assertRegistrationInviteContract(t, ctx, a, adminID)
 
 	var migrationCount int
 	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=?`, externalSchemaVersion).Scan(&migrationCount); err != nil {
@@ -123,6 +124,23 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 func TestSQLiteOAuthIdentityContract(t *testing.T) {
 	a := newTestApp(t)
 	assertOAuthIdentityContract(t, context.Background(), a)
+}
+
+func TestSQLiteRegistrationInviteContract(t *testing.T) {
+	a := newTestApp(t)
+	admin, _ := defaultAdminUserAndMailbox(t, a)
+	assertRegistrationInviteContract(t, context.Background(), a, admin.ID)
+}
+
+func assertRegistrationInviteContract(t *testing.T, ctx context.Context, a *App, adminID string) {
+	t.Helper()
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO registration_invites(id,code,max_uses,used_count,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID("inv"), "CONTRACT-CODE", 2, 0, adminID, now, now); err != nil {
+		t.Fatalf("insert registration invite: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO registration_invites(id,code,max_uses,used_count,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`, newID("inv"), "CONTRACT-CODE", 2, 0, adminID, now, now); !isUniqueViolation(err) {
+		t.Fatalf("duplicate registration invite error=%v, want unique violation", err)
+	}
 }
 
 func assertOAuthIdentityContract(t *testing.T, ctx context.Context, a *App) {

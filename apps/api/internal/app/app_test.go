@@ -359,6 +359,7 @@ func systemSettingsPayload(settings SystemSettings) map[string]any {
 		"sessionTtlHours":                 settings.SessionTTLHours,
 		"allowInsecureHttp":               settings.AllowInsecureHTTP,
 		"openRegistration":                settings.OpenRegistration,
+		"inviteRegistrationEnabled":       settings.InviteRegistrationEnabled,
 		"twoFactorEnabled":                settings.TwoFactorEnabled,
 		"turnstileEnabled":                settings.TurnstileEnabled,
 		"turnstileSiteKey":                settings.TurnstileSiteKey,

@@ -76,7 +76,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if !a.cfg.OpenRegistration {
+	if !a.cfg.OpenRegistration && !a.cfg.InviteRegistrationEnabled {
 		respondError(w, http.StatusForbidden, "当前未开放注册")
 		return
 	}
@@ -87,6 +87,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		TurnstileToken string `json:"turnstileToken"`
 		DomainID       string `json:"domainId"`
 		LocalPart      string `json:"localPart"`
+		InviteCode     string `json:"inviteCode"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -95,6 +96,16 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if err := a.verifyTurnstile(r.Context(), req.TurnstileToken, r.RemoteAddr); err != nil {
 		respondError(w, http.StatusUnauthorized, "人机验证失败，请重试")
 		return
+	}
+	if !a.cfg.OpenRegistration {
+		if err := a.validateRegistrationInvite(r.Context(), req.InviteCode); err != nil {
+			if errors.Is(err, errRegistrationInviteInvalid) {
+				respondError(w, http.StatusForbidden, "邀请码无效或可用次数已耗尽")
+			} else {
+				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			}
+			return
+		}
 	}
 	email := normalizeEmail(req.Email)
 	if email == "" || !strings.Contains(email, "@") {
@@ -113,6 +124,27 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("显示名称不能超过 80 个字符"))
 		return
 	}
+	var mailboxDomainID string
+	var mailboxLocalPart string
+	if strings.TrimSpace(req.DomainID) != "" && strings.TrimSpace(req.LocalPart) != "" {
+		mailboxDomainID = strings.TrimSpace(req.DomainID)
+		mailboxLocalPart = normalizeLocalPart(req.LocalPart)
+	} else {
+		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE status='active' ORDER BY created_at ASC LIMIT 1`).Scan(&mailboxDomainID); err != nil {
+			mailboxDomainID = ""
+		}
+		if mailboxDomainID != "" {
+			mailboxLocalPart = strings.SplitN(email, "@", 2)[0]
+		}
+	}
+	if mailboxDomainID != "" && mailboxLocalPart != "" {
+		for _, reserved := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
+			if mailboxLocalPart == reserved {
+				respondError(w, http.StatusForbidden, "该前缀已被保留，请使用其他前缀")
+				return
+			}
+		}
+	}
 	if _, _, err := a.userByEmail(r.Context(), email); err == nil {
 		respondError(w, http.StatusConflict, "该邮箱已被注册")
 		return
@@ -127,12 +159,32 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	userID := newID("usr")
-	if _, err := a.db.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+		return
+	}
+	defer tx.Rollback()
+	if !a.cfg.OpenRegistration {
+		if err := a.consumeRegistrationInviteTx(r.Context(), tx, req.InviteCode); err != nil {
+			if errors.Is(err, errRegistrationInviteInvalid) {
+				respondError(w, http.StatusForbidden, "邀请码无效或可用次数已耗尽")
+			} else {
+				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			}
+			return
+		}
+	}
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(passwordHash), 0, now, now); err != nil {
 		if isUniqueViolation(err) {
 			respondError(w, http.StatusConflict, "该邮箱已被注册")
 			return
 		}
+		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+		return
+	}
+	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 		return
 	}
@@ -146,32 +198,8 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create a mailbox for the registered user
-	var mailboxDomainID string
-	var mailboxLocalPart string
-	if strings.TrimSpace(req.DomainID) != "" && strings.TrimSpace(req.LocalPart) != "" {
-		// User selected a specific domain and local part
-		mailboxDomainID = strings.TrimSpace(req.DomainID)
-		mailboxLocalPart = normalizeLocalPart(req.LocalPart)
-	} else {
-		// Auto-detect: use the first active domain and email local part
-		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE status='active' ORDER BY created_at ASC LIMIT 1`).Scan(&mailboxDomainID); err != nil {
-			mailboxDomainID = ""
-		}
-		if mailboxDomainID != "" {
-			mailboxLocalPart = strings.SplitN(email, "@", 2)[0]
-		}
-	}
+	// Create a mailbox for the registered user.
 	if mailboxDomainID != "" && mailboxLocalPart != "" {
-		// Check reserved prefixes
-		reserved := map[string]bool{}
-		for _, item := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
-			reserved[item] = true
-		}
-		if reserved[mailboxLocalPart] {
-			respondError(w, http.StatusForbidden, "该前缀已被保留，请使用其他前缀")
-			return
-		}
 		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active"); mbErr != nil {
 			a.log.Warn("failed to create mailbox for registered user", "error", mbErr, "email", email)
 		}

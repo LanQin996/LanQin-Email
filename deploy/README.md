@@ -134,6 +134,10 @@ https://你的站点/api/auth/linuxdo/callback
 
 Client Secret 保存在现有 `system_settings` 中，接口和前端只显示“已配置”状态，后续留空保存不会清除。关闭 SSO 不会删除 `oauth_identities` 中已有绑定。既有用户应先使用本站邮箱密码登录，再在个人设置中绑定；系统不会按 Linux.do 用户名自动匹配本站账号。启用了本地 TOTP 的用户通过 SSO 登录时仍需输入 TOTP。
 
+## 邀请码注册
+
+在管理后台“系统设置 > 安全”开启“邀请码注册”，然后在同一区域创建邀请码并设置可用次数。邀请码会完整保存在数据库中，管理员之后仍可查看和复制；每次普通账号注册成功会原子扣减一次。普通“开放注册”开启时不要求邀请码，两种开关都关闭时普通注册入口不可用。Linux.do 注册不受邀请码开关影响。
+
 ## 邮件服务边界
 
 - Postfix 读取 `/data/lanqin.db` 中的 `domains`、`mailboxes`、`aliases`。

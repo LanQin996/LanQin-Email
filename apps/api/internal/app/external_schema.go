@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const externalSchemaVersion = 2
+const externalSchemaVersion = 3
 
 var externalSchemaTables = []string{
 	"aliases",
@@ -29,6 +29,7 @@ var externalSchemaTables = []string{
 	"oauth_identities",
 	"oauth_login_states",
 	"oauth_registration_challenges",
+	"registration_invites",
 	"mail_labels",
 	"mail_rules",
 	"mail_signatures",
@@ -100,6 +101,13 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if err != nil {
 			return err
 		}
+		if err := migrateExternalSchemaV3(ctx, conn, driver, tables); err != nil {
+			return err
+		}
+		tables, err = listExternalSchemaTables(ctx, conn, driver)
+		if err != nil {
+			return err
+		}
 		return validateExternalSchema(ctx, conn, tables, migrationName)
 	}
 
@@ -121,7 +129,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 	for _, migration := range []struct {
 		version int
 		name    string
-	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}} {
+	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}} {
 		marker := fmt.Sprintf("INSERT INTO schema_migrations(version,name,applied_at) VALUES(%d,'%s',CURRENT_TIMESTAMP)", migration.version, migration.name)
 		if _, err := executor.ExecContext(ctx, marker); err != nil {
 			return fmt.Errorf("external schema: record v%d: %w", migration.version, err)
@@ -230,6 +238,12 @@ func validateExternalSchema(ctx context.Context, conn *sql.Conn, actual []string
 	if name != "external_schema_v2_linuxdo_sso" {
 		return fmt.Errorf("external schema: unexpected v2 migration %q", name)
 	}
+	if err := conn.QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=3`).Scan(&name); err != nil {
+		return fmt.Errorf("external schema: read v3 migration marker: %w", err)
+	}
+	if name != "external_schema_v3_registration_invites" {
+		return fmt.Errorf("external schema: unexpected v3 migration %q", name)
+	}
 	return nil
 }
 
@@ -238,15 +252,15 @@ func migrateExternalSchemaV2(ctx context.Context, conn *sql.Conn, driver string,
 	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &version); err != nil {
 		return fmt.Errorf("external schema: read migration version: %w", err)
 	}
-	if count == externalSchemaVersion && version == externalSchemaVersion {
+	if count >= 2 && version >= 2 {
 		return nil
 	}
 	if count != 1 || version != 1 {
 		return fmt.Errorf("external schema: unsupported migration history (count=%d, version=%d)", count, version)
 	}
-	legacy := make([]string, 0, len(externalSchemaTables)-3)
+	legacy := make([]string, 0, len(externalSchemaTables)-4)
 	for _, table := range externalSchemaTables {
-		if table != "oauth_identities" && table != "oauth_login_states" && table != "oauth_registration_challenges" {
+		if table != "oauth_identities" && table != "oauth_login_states" && table != "oauth_registration_challenges" && table != "registration_invites" {
 			legacy = append(legacy, table)
 		}
 	}
@@ -295,6 +309,64 @@ func migrateExternalSchemaV2(ctx context.Context, conn *sql.Conn, driver string,
 	return nil
 }
 
+func migrateExternalSchemaV3(ctx context.Context, conn *sql.Conn, driver string, actual []string) error {
+	var count, version int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &version); err != nil {
+		return fmt.Errorf("external schema: read migration version: %w", err)
+	}
+	if count == externalSchemaVersion && version == externalSchemaVersion {
+		return nil
+	}
+	if count != 2 || version != 2 {
+		return fmt.Errorf("external schema: unsupported migration history before v3 (count=%d, version=%d)", count, version)
+	}
+	legacy := make([]string, 0, len(externalSchemaTables)-1)
+	for _, table := range externalSchemaTables {
+		if table != "registration_invites" {
+			legacy = append(legacy, table)
+		}
+	}
+	sort.Strings(legacy)
+	got := append([]string(nil), actual...)
+	sort.Strings(got)
+	if strings.Join(got, "\x00") != strings.Join(legacy, "\x00") {
+		return fmt.Errorf("external schema: database does not match LanQin schema v2 (found tables: %s)", strings.Join(got, ", "))
+	}
+	statements := registrationInviteExternalSchemaStatements()
+	if driver == databaseDriverMySQL {
+		for i := range statements {
+			if strings.HasPrefix(strings.TrimSpace(statements[i]), "CREATE TABLE ") {
+				statements[i] = postgresTableToMySQL(statements[i])
+			}
+		}
+	}
+	var executor externalSchemaExecutor = conn
+	var tx *sql.Tx
+	if driver == databaseDriverPostgres {
+		var err error
+		tx, err = conn.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("external schema: begin v3 PostgreSQL migration: %w", err)
+		}
+		executor = tx
+		defer func() { _ = tx.Rollback() }()
+	}
+	for i, statement := range statements {
+		if _, err := executor.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("external schema: apply v3 statement %d: %w", i+1, err)
+		}
+	}
+	if _, err := executor.ExecContext(ctx, `INSERT INTO schema_migrations(version,name,applied_at) VALUES(3,'external_schema_v3_registration_invites',CURRENT_TIMESTAMP)`); err != nil {
+		return fmt.Errorf("external schema: record v3: %w", err)
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("external schema: commit v3 PostgreSQL migration: %w", err)
+		}
+	}
+	return nil
+}
+
 func linuxDoExternalSchemaStatements() []string {
 	all := postgresFreshSchema()
 	out := make([]string, 0, 5)
@@ -306,6 +378,22 @@ func linuxDoExternalSchemaStatements() []string {
 			continue
 		}
 		if strings.Contains(statement, "idx_oauth_") {
+			out = append(out, statement)
+		}
+	}
+	return out
+}
+
+func registrationInviteExternalSchemaStatements() []string {
+	all := postgresFreshSchema()
+	out := make([]string, 0, 2)
+	for _, statement := range all {
+		fields := strings.Fields(statement)
+		if len(fields) >= 3 && strings.EqualFold(fields[0], "CREATE") && strings.EqualFold(fields[1], "TABLE") && strings.Trim(fields[2], "`\"") == "registration_invites" {
+			out = append(out, statement)
+			continue
+		}
+		if strings.Contains(statement, "idx_registration_invites_") {
 			out = append(out, statement)
 		}
 	}
