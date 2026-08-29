@@ -83,10 +83,11 @@ func postgresFreshSchema() []string {
 			id VARCHAR(64) PRIMARY KEY,
 			code VARCHAR(64) NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
-			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0 AND used_count <= max_uses),
+			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
 			created_by VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
 			created_at VARCHAR(35) NOT NULL,
-			updated_at VARCHAR(35) NOT NULL
+			updated_at VARCHAR(35) NOT NULL,
+			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX idx_registration_invites_created ON registration_invites(created_at)`,
 		`CREATE TABLE api_tokens (
@@ -193,6 +194,35 @@ func postgresFreshSchema() []string {
 			created_at VARCHAR(35) NOT NULL
 		)`,
 		`CREATE INDEX idx_user_notifications_user ON user_notifications(user_id,created_at DESC)`,
+		`CREATE TABLE telegram_notification_settings (
+			user_id VARCHAR(64) PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			bot_token_ciphertext TEXT NOT NULL,
+			bot_username VARCHAR(255) NOT NULL DEFAULT '',
+			chat_id VARCHAR(255) NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_test_at VARCHAR(35),
+			last_delivered_at VARCHAR(35),
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at VARCHAR(35) NOT NULL,
+			updated_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE TABLE telegram_notification_outbox (
+			id VARCHAR(64) PRIMARY KEY,
+			event_key VARCHAR(255) NOT NULL UNIQUE,
+			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id VARCHAR(64) NOT NULL,
+			message_id VARCHAR(64) NOT NULL,
+			rule_id VARCHAR(64) NOT NULL,
+			payload_json TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at VARCHAR(35) NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at VARCHAR(35) NOT NULL,
+			updated_at VARCHAR(35) NOT NULL,
+			delivered_at VARCHAR(35)
+		)`,
+		`CREATE INDEX idx_telegram_notification_outbox_due ON telegram_notification_outbox(delivered_at,next_attempt_at,created_at)`,
+		`CREATE INDEX idx_telegram_notification_outbox_user ON telegram_notification_outbox(user_id,created_at)`,
 		`CREATE TABLE aliases (
 			id VARCHAR(64) PRIMARY KEY,
 			domain_id VARCHAR(64) NOT NULL REFERENCES domains(id) ON DELETE CASCADE,

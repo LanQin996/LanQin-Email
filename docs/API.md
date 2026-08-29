@@ -683,3 +683,18 @@ Outbound requests include `X-LanQin-Webhook-Id`, `X-LanQin-Timestamp`, and `X-La
 The target must be a public HTTPS URL by default. Redirects, URL credentials, loopback, private, link-local, and unspecified addresses are rejected. `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=true` relaxes this for explicitly trusted private deployments and also permits HTTP.
 
 目标地址默认必须是公网 HTTPS。重定向、URL 用户信息、loopback、私网、链路本地和未指定地址都会被拒绝。只有明确可信的私有部署才应设置 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=true`；开启后也允许 HTTP。
+
+## Telegram Incoming Mail Notifications / Telegram 收件通知
+
+Set `LANQIN_NOTIFICATION_SECRET_KEY` to enable per-user Telegram notification settings. The following authenticated endpoints require the `mail.rules.manage` permission:
+
+- `GET /api/me/telegram`: read availability and the current non-secret settings.
+- `POST /api/me/telegram`: save `{ "botToken": "...", "chatId": "...", "enabled": true }`. An empty `botToken` keeps the existing encrypted token.
+- `DELETE /api/me/telegram`: delete the user's settings and pending notifications.
+- `POST /api/me/telegram/test`: send one test message; requests are limited to one per user every 10 seconds.
+
+配置 `LANQIN_NOTIFICATION_SECRET_KEY` 后，可启用用户级 Telegram 通知。以上接口均要求登录并具备 `mail.rules.manage` 权限；响应只返回 `tokenSet`，不会返回 Bot Token 明文。
+
+Add `{ "type": "telegram" }` to a mail rule's `actions` array. Matching new Inbox messages are written to a persistent outbox and delivered asynchronously. The event key is unique per rule and message. Telegram rate-limit responses honor `retry_after`; other transient failures use exponential backoff, up to 10 attempts. Applying a rule to existing messages never sends Telegram notifications.
+
+在收件规则的 `actions` 中加入 `{ "type": "telegram" }`。新进入 Inbox 且命中规则的邮件会先写入持久化 outbox，再异步发送；同一规则和邮件只会入队一次。Telegram 限流响应会遵循 `retry_after`，其他临时失败按退避策略最多重试 10 次。“应用于现有邮件”不会补发 Telegram 通知。

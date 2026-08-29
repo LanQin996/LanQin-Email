@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link, Navigate, useSearchParams } from "react-router-dom"
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, KeyRound, Link2, LockKeyhole } from "lucide-react"
 import { api } from "@/lib/api"
@@ -15,6 +15,7 @@ export function LoginPage() {
   const me = useMe()
   const qc = useQueryClient()
   const { toast } = useToast()
+  const location = useLocation()
   const [params, setParams] = useSearchParams()
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const [turnstileToken, setTurnstileToken] = React.useState("")
@@ -61,8 +62,12 @@ export function LoginPage() {
     toast({ title: "Linux.do 登录失败", description: messages[result] || "Linux.do 登录未完成" })
     setParams({}, { replace: true })
   }, [params, setParams, toast])
+  const requestedPath = typeof location.state === "object" && location.state !== null && "from" in location.state
+    ? String((location.state as { from?: unknown }).from || "")
+    : ""
+  const returnTo = requestedPath.startsWith("/") && !requestedPath.startsWith("//") ? requestedPath : "/"
   const turnstileRequired = !!publicSettings.data?.turnstileEnabled
-  if (me.data?.user) return <Navigate to="/" replace />
+  if (me.data?.user) return <Navigate to={returnTo} replace />
   return (
     <div className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-10">
       <div className="w-full max-w-[420px]">

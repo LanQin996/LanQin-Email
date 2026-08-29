@@ -212,6 +212,14 @@ LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=false
 
 事件先写入数据库 outbox，再由后台 worker 投递；非 2xx 响应会按退避策略重试，最多 10 次。默认只允许公网 HTTPS，禁止重定向、URL 用户信息和私网/本机目标。只有可信内网或本地测试才应开启 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS`。
 
+如需启用用户级 Telegram 收件通知，先配置独立的加密主密钥：
+
+```env
+LANQIN_NOTIFICATION_SECRET_KEY=replace-with-a-long-random-secret
+```
+
+重启服务后，拥有“管理收件规则”权限的用户可在“个人中心 > 收件规则”中填写自己的 Bot Token 和 Chat ID，并把“发送 Telegram 通知”添加为规则动作。Token 使用该主密钥加密后保存；更换或丢失主密钥会导致已有 Token 无法解密。通知先写入 outbox，再异步投递并按退避策略最多重试 10 次。
+
 Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
 
 如果发送队列里出现 relay 失败，通常是 Postfix 会话被中断或外部 SMTP 配置错误。优先检查：

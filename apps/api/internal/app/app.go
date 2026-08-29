@@ -22,22 +22,23 @@ import (
 )
 
 type App struct {
-	cfg              Config
-	db               *sql.DB
-	log              *slog.Logger
-	now              func() time.Time
-	policy           *HTMLPolicy
-	workerCancel     context.CancelFunc
-	workerWG         sync.WaitGroup
-	maildirHealth    *maildirSyncHealthTracker
-	maildirSyncMu    sync.Mutex
-	maildirDirs      map[string]maildirDirectorySignature
-	maildirRuns      uint64
-	syncEventsMu     sync.Mutex
-	syncEventClients map[chan struct{}]struct{}
-	externalIMAP     externalIMAPClientFactory
-	linuxDoOAuth     linuxDoOAuthClient
-	messageSearchFTS bool
+	cfg                Config
+	db                 *sql.DB
+	log                *slog.Logger
+	now                func() time.Time
+	policy             *HTMLPolicy
+	workerCancel       context.CancelFunc
+	workerWG           sync.WaitGroup
+	maildirHealth      *maildirSyncHealthTracker
+	maildirSyncMu      sync.Mutex
+	maildirDirs        map[string]maildirDirectorySignature
+	maildirRuns        uint64
+	syncEventsMu       sync.Mutex
+	syncEventClients   map[chan struct{}]struct{}
+	externalIMAP       externalIMAPClientFactory
+	linuxDoOAuth       linuxDoOAuthClient
+	telegramAPIBaseURL string
+	messageSearchFTS   bool
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -59,7 +60,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
+	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL}
 	a.externalIMAP = a
 	a.linuxDoOAuth = newLinuxDoHTTPClient()
 	if cfg.DBDriver == databaseDriverSQLite {
@@ -94,6 +95,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
 	a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
+	a.startWorker(func() { a.telegramNotificationWorker(workerCtx) })
 	return a, nil
 }
 
@@ -215,10 +217,11 @@ func (a *App) migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			code TEXT NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
-			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0 AND used_count <= max_uses),
+			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
 			created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
 			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL
+			updated_at TEXT NOT NULL,
+			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_registration_invites_created ON registration_invites(created_at)`,
 		`CREATE TABLE IF NOT EXISTS api_tokens (
@@ -325,6 +328,35 @@ func (a *App) migrate(ctx context.Context) error {
 			created_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_user_notifications_user ON user_notifications(user_id, created_at DESC)`,
+		`CREATE TABLE IF NOT EXISTS telegram_notification_settings (
+			user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+			bot_token_ciphertext TEXT NOT NULL,
+			bot_username TEXT NOT NULL DEFAULT '',
+			chat_id TEXT NOT NULL,
+			enabled INTEGER NOT NULL DEFAULT 1,
+			last_test_at TEXT,
+			last_delivered_at TEXT,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE IF NOT EXISTS telegram_notification_outbox (
+			id TEXT PRIMARY KEY,
+			event_key TEXT NOT NULL UNIQUE,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL,
+			message_id TEXT NOT NULL,
+			rule_id TEXT NOT NULL,
+			payload_json TEXT NOT NULL,
+			attempt_count INTEGER NOT NULL DEFAULT 0,
+			next_attempt_at TEXT NOT NULL,
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			delivered_at TEXT
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_telegram_notification_outbox_due ON telegram_notification_outbox(delivered_at,next_attempt_at,created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_telegram_notification_outbox_user ON telegram_notification_outbox(user_id,created_at)`,
 		`CREATE TABLE IF NOT EXISTS aliases (
 			id TEXT PRIMARY KEY,
 			domain_id TEXT NOT NULL REFERENCES domains(id) ON DELETE CASCADE,

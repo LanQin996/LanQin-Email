@@ -10,7 +10,7 @@ import ImageExtension from "@tiptap/extension-image"
 import TextAlign from "@tiptap/extension-text-align"
 import Placeholder from "@tiptap/extension-placeholder"
 import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
 import { api, ExternalImapAccount, ExternalImapFolder, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
@@ -117,6 +117,9 @@ export function MailPage() {
   const qc = useQueryClient()
   const { toast } = useToast()
   const navigate = useNavigate()
+  const [urlParams, setURLParams] = useSearchParams()
+  const deepLinkMailboxId = urlParams.get("mailboxId") || ""
+  const deepLinkMessageId = urlParams.get("messageId") || ""
   const me = useMe()
   const [folder, setFolder] = React.useState("Inbox")
   const [mailView, setMailView] = React.useState<MailView>("folder")
@@ -537,6 +540,36 @@ export function MailPage() {
     setSelectedId(null)
     setMailFilter("all")
   }, [mailView])
+
+  React.useEffect(() => {
+    if (!deepLinkMailboxId || !deepLinkMessageId || !mailboxList.isSuccess) return
+    const target = mailboxList.data?.items.find((item) => item.id === deepLinkMailboxId)
+    if (!target) {
+      toast({ title: "无法打开邮件", description: "邮件链接无效或当前账号无权访问" })
+      const next = new URLSearchParams(urlParams)
+      next.delete("mailboxId")
+      next.delete("messageId")
+      setURLParams(next, { replace: true })
+      return
+    }
+    if (selectedMailboxId !== target.id) {
+      setSelectedMailboxId(target.id)
+      return
+    }
+    if (mailView !== "folder" || folder !== "Inbox") {
+      setSelectedExternalAccountId("")
+      setSelectedLabelId("")
+      setMailView("folder")
+      setFolder("Inbox")
+      setMailFilter("all")
+      return
+    }
+    setSelectedId(deepLinkMessageId)
+    const next = new URLSearchParams(urlParams)
+    next.delete("mailboxId")
+    next.delete("messageId")
+    setURLParams(next, { replace: true })
+  }, [deepLinkMailboxId, deepLinkMessageId, folder, mailView, mailboxList.data?.items, mailboxList.isSuccess, selectedMailboxId, setURLParams, toast, urlParams])
 
   React.useEffect(() => {
     setCompactSelectedIds([])

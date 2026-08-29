@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const externalSchemaVersion = 3
+const externalSchemaVersion = 4
 
 var externalSchemaTables = []string{
 	"aliases",
@@ -54,6 +54,8 @@ var externalSchemaTables = []string{
 	"smtp_send_events",
 	"status_webhook_outbox",
 	"system_settings",
+	"telegram_notification_outbox",
+	"telegram_notification_settings",
 	"user_permission_groups",
 	"users",
 	"user_notifications",
@@ -108,6 +110,13 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if err != nil {
 			return err
 		}
+		if err := migrateExternalSchemaV4(ctx, conn, driver, tables); err != nil {
+			return err
+		}
+		tables, err = listExternalSchemaTables(ctx, conn, driver)
+		if err != nil {
+			return err
+		}
 		return validateExternalSchema(ctx, conn, tables, migrationName)
 	}
 
@@ -129,7 +138,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 	for _, migration := range []struct {
 		version int
 		name    string
-	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}} {
+	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}, {4, "external_schema_v4_telegram_notifications"}} {
 		marker := fmt.Sprintf("INSERT INTO schema_migrations(version,name,applied_at) VALUES(%d,'%s',CURRENT_TIMESTAMP)", migration.version, migration.name)
 		if _, err := executor.ExecContext(ctx, marker); err != nil {
 			return fmt.Errorf("external schema: record v%d: %w", migration.version, err)
@@ -244,6 +253,12 @@ func validateExternalSchema(ctx context.Context, conn *sql.Conn, actual []string
 	if name != "external_schema_v3_registration_invites" {
 		return fmt.Errorf("external schema: unexpected v3 migration %q", name)
 	}
+	if err := conn.QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=4`).Scan(&name); err != nil {
+		return fmt.Errorf("external schema: read v4 migration marker: %w", err)
+	}
+	if name != "external_schema_v4_telegram_notifications" {
+		return fmt.Errorf("external schema: unexpected v4 migration %q", name)
+	}
 	return nil
 }
 
@@ -258,9 +273,9 @@ func migrateExternalSchemaV2(ctx context.Context, conn *sql.Conn, driver string,
 	if count != 1 || version != 1 {
 		return fmt.Errorf("external schema: unsupported migration history (count=%d, version=%d)", count, version)
 	}
-	legacy := make([]string, 0, len(externalSchemaTables)-4)
+	legacy := make([]string, 0, len(externalSchemaTables)-6)
 	for _, table := range externalSchemaTables {
-		if table != "oauth_identities" && table != "oauth_login_states" && table != "oauth_registration_challenges" && table != "registration_invites" {
+		if table != "oauth_identities" && table != "oauth_login_states" && table != "oauth_registration_challenges" && table != "registration_invites" && table != "telegram_notification_settings" && table != "telegram_notification_outbox" {
 			legacy = append(legacy, table)
 		}
 	}
@@ -314,15 +329,15 @@ func migrateExternalSchemaV3(ctx context.Context, conn *sql.Conn, driver string,
 	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &version); err != nil {
 		return fmt.Errorf("external schema: read migration version: %w", err)
 	}
-	if count == externalSchemaVersion && version == externalSchemaVersion {
+	if count >= 3 && version >= 3 {
 		return nil
 	}
 	if count != 2 || version != 2 {
 		return fmt.Errorf("external schema: unsupported migration history before v3 (count=%d, version=%d)", count, version)
 	}
-	legacy := make([]string, 0, len(externalSchemaTables)-1)
+	legacy := make([]string, 0, len(externalSchemaTables)-3)
 	for _, table := range externalSchemaTables {
-		if table != "registration_invites" {
+		if table != "registration_invites" && table != "telegram_notification_settings" && table != "telegram_notification_outbox" {
 			legacy = append(legacy, table)
 		}
 	}
@@ -394,6 +409,81 @@ func registrationInviteExternalSchemaStatements() []string {
 			continue
 		}
 		if strings.Contains(statement, "idx_registration_invites_") {
+			out = append(out, statement)
+		}
+	}
+	return out
+}
+
+func migrateExternalSchemaV4(ctx context.Context, conn *sql.Conn, driver string, actual []string) error {
+	var count, version int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &version); err != nil {
+		return fmt.Errorf("external schema: read migration version: %w", err)
+	}
+	if count >= 4 && version >= 4 {
+		return nil
+	}
+	if count != 3 || version != 3 {
+		return fmt.Errorf("external schema: unsupported migration history before v4 (count=%d, version=%d)", count, version)
+	}
+	legacy := make([]string, 0, len(externalSchemaTables)-2)
+	for _, table := range externalSchemaTables {
+		if table != "telegram_notification_settings" && table != "telegram_notification_outbox" {
+			legacy = append(legacy, table)
+		}
+	}
+	sort.Strings(legacy)
+	got := append([]string(nil), actual...)
+	sort.Strings(got)
+	if strings.Join(got, "\x00") != strings.Join(legacy, "\x00") {
+		return fmt.Errorf("external schema: database does not match LanQin schema v3 (found tables: %s)", strings.Join(got, ", "))
+	}
+	statements := telegramNotificationExternalSchemaStatements()
+	if driver == databaseDriverMySQL {
+		for i := range statements {
+			if strings.HasPrefix(strings.TrimSpace(statements[i]), "CREATE TABLE ") {
+				statements[i] = postgresTableToMySQL(statements[i])
+			}
+		}
+	}
+	var executor externalSchemaExecutor = conn
+	var tx *sql.Tx
+	if driver == databaseDriverPostgres {
+		var err error
+		tx, err = conn.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("external schema: begin v4 PostgreSQL migration: %w", err)
+		}
+		executor = tx
+		defer func() { _ = tx.Rollback() }()
+	}
+	for i, statement := range statements {
+		if _, err := executor.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("external schema: apply v4 statement %d: %w", i+1, err)
+		}
+	}
+	if _, err := executor.ExecContext(ctx, `INSERT INTO schema_migrations(version,name,applied_at) VALUES(4,'external_schema_v4_telegram_notifications',CURRENT_TIMESTAMP)`); err != nil {
+		return fmt.Errorf("external schema: record v4: %w", err)
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("external schema: commit v4 PostgreSQL migration: %w", err)
+		}
+	}
+	return nil
+}
+
+func telegramNotificationExternalSchemaStatements() []string {
+	all := postgresFreshSchema()
+	out := make([]string, 0, 4)
+	wanted := map[string]bool{"telegram_notification_settings": true, "telegram_notification_outbox": true}
+	for _, statement := range all {
+		fields := strings.Fields(statement)
+		if len(fields) >= 3 && strings.EqualFold(fields[0], "CREATE") && strings.EqualFold(fields[1], "TABLE") && wanted[strings.Trim(fields[2], "`\"")] {
+			out = append(out, statement)
+			continue
+		}
+		if strings.Contains(statement, "idx_telegram_notification_") {
 			out = append(out, statement)
 		}
 	}

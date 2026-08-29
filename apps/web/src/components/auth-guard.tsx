@@ -9,7 +9,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (me.isLoading) return <AuthLoading />
   if (me.isError && isTimeoutError(me.error)) return <AuthError message={me.error.message} onRetry={() => me.refetch()} />
-  if (me.isError || !me.data?.user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (me.isError || !me.data?.user) {
+    return <Navigate to="/login" replace state={{ from: `${location.pathname}${location.search}${location.hash}` }} />
+  }
 
   return <>{children}</>
 }

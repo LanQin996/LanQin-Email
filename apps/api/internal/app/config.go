@@ -65,6 +65,7 @@ type Config struct {
 	ExternalIMAPOutlookClientSecret string
 	MailTranslateEnabled            bool
 	MailTranslateMaxChars           int
+	NotificationSecretKey           string
 	DeliveryWebhookSecret           string
 	StatusWebhookURL                string
 	StatusWebhookSecret             string
@@ -130,6 +131,7 @@ func LoadConfig() Config {
 		ExternalIMAPOutlookClientSecret: getenv("LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET", ""),
 		MailTranslateEnabled:            getenvBool("LANQIN_MAIL_TRANSLATE_ENABLED", true),
 		MailTranslateMaxChars:           getenvInt("LANQIN_MAIL_TRANSLATE_MAX_CHARS", 8000),
+		NotificationSecretKey:           getenv("LANQIN_NOTIFICATION_SECRET_KEY", ""),
 		DeliveryWebhookSecret:           getenv("LANQIN_DELIVERY_WEBHOOK_SECRET", ""),
 		StatusWebhookURL:                getenv("LANQIN_STATUS_WEBHOOK_URL", ""),
 		StatusWebhookSecret:             getenv("LANQIN_STATUS_WEBHOOK_SECRET", ""),

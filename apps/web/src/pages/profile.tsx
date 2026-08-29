@@ -2,9 +2,9 @@ import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, BarChart3, Ban, Bell, CalendarClock, Clock3, Contact, Copy, History, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Search, Settings, Share2, ShieldCheck, SlidersHorizontal, Sun, Trash2, UserPlus, Users, X } from "lucide-react"
+import { ArrowLeft, BarChart3, Ban, Bell, Bot, CalendarClock, Clock3, Contact, Copy, History, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Search, Settings, Share2, ShieldCheck, SlidersHorizontal, Sun, Trash2, UserPlus, Users, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, ForwardAddress, MailboxShare, MailboxShareAuditEvent, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser, UserNotification } from "@/lib/api"
+import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, ForwardAddress, MailboxShare, MailboxShareAuditEvent, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser, TelegramSettings, UserNotification } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -105,6 +105,7 @@ export function ProfilePage() {
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts, enabled: canManageContacts })
   const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures, enabled: canManageSignatures })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules, enabled: canManageRules })
+  const telegramSettings = useQuery({ queryKey: ["telegram-settings"], queryFn: api.telegramSettings, enabled: canManageRules })
   const forwardAddresses = useQuery({ queryKey: ["forward-addresses"], queryFn: api.forwardAddresses, enabled: canManageRules })
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders, enabled: canManageBlocked })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
@@ -210,6 +211,21 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
   const deleteRule = useMutation({ mutationFn: api.deleteRule, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); toast({ title: "规则已删除" }) } })
+  const saveTelegramSettings = useMutation({
+    mutationFn: api.saveTelegramSettings,
+    onSuccess: (item) => { qc.setQueryData(["telegram-settings"], item); toast({ title: "Telegram 通知已保存" }) },
+    onError: (error) => toast({ title: "保存失败", description: error.message }),
+  })
+  const testTelegramSettings = useMutation({
+    mutationFn: api.testTelegramSettings,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["telegram-settings"] }); toast({ title: "Telegram 测试消息已发送" }) },
+    onError: (error) => { qc.invalidateQueries({ queryKey: ["telegram-settings"] }); toast({ title: "测试失败", description: error.message }) },
+  })
+  const deleteTelegramSettings = useMutation({
+    mutationFn: api.deleteTelegramSettings,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["telegram-settings"] }); toast({ title: "Telegram 配置已删除" }) },
+    onError: (error) => toast({ title: "删除失败", description: error.message }),
+  })
   const requestForwardAddress = useMutation({
     mutationFn: api.requestForwardAddressVerification,
     onSuccess: (item) => { qc.invalidateQueries({ queryKey: ["forward-addresses"] }); toast({ title: item.verified ? "邮箱已验证" : "验证码已发送" }) },
@@ -429,7 +445,7 @@ export function ProfilePage() {
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
-    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} forwardAddresses={forwardAddresses.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} onRequestForwardAddress={(email) => requestForwardAddress.mutateAsync(email)} onVerifyForwardAddress={(id, code) => verifyForwardAddress.mutateAsync({ id, code })} onDeleteForwardAddress={(id) => deleteForwardAddress.mutate(id)} pending={createRule.isPending || requestForwardAddress.isPending || verifyForwardAddress.isPending || deleteForwardAddress.isPending} />
+    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} forwardAddresses={forwardAddresses.data?.items || []} telegram={telegramSettings.data} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} onRequestForwardAddress={(email) => requestForwardAddress.mutateAsync(email)} onVerifyForwardAddress={(id, code) => verifyForwardAddress.mutateAsync({ id, code })} onDeleteForwardAddress={(id) => deleteForwardAddress.mutate(id)} onSaveTelegram={(payload) => saveTelegramSettings.mutateAsync(payload)} onTestTelegram={() => testTelegramSettings.mutateAsync().then(() => undefined)} onDeleteTelegram={() => deleteTelegramSettings.mutateAsync().then(() => undefined)} pending={createRule.isPending || requestForwardAddress.isPending || verifyForwardAddress.isPending || deleteForwardAddress.isPending || saveTelegramSettings.isPending || testTelegramSettings.isPending || deleteTelegramSettings.isPending} />
     if (tab === "blocked") return <BlockedSection items={blocked.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={blockedMailboxId} spamCount={canViewStats ? stats.data?.byFolder.find((f) => f.role === "spam")?.count || 0 : 0} onMailboxChange={setBlockedMailboxId} onCreate={(form) => createBlocked.mutate(form)} onDelete={(id) => deleteBlocked.mutate(id)} pending={createBlocked.isPending} />
     if (tab === "stats") return <StatsSection stats={stats.data} mailbox={selectedMailbox} onRefresh={() => stats.refetch()} />
     return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} displayMode={displayMode} onDisplayModeChange={setDisplayMode} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
@@ -1418,11 +1434,30 @@ const sizeConditionOperators: RuleConditionOperator[] = ["gt", "gte", "lt", "lte
 const dateConditionOperators: RuleConditionOperator[] = ["before", "after", "on", "equals", "not-equals"]
 const conditionFields = Object.keys(conditionFieldLabels) as RuleConditionField[]
 const commonRuleFolders = ["Inbox", "Archive", "Spam", "Trash"]
-const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到", forward: "自动转发到" }
+const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到", forward: "自动转发到", telegram: "发送 Telegram 通知" }
 
-function RulesSection({ items, mailboxes, labels, forwardAddresses, open, onOpenChange, onCreate, onDelete, onRequestForwardAddress, onVerifyForwardAddress, onDeleteForwardAddress, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; onRequestForwardAddress: (email: string) => Promise<ForwardAddress>; onVerifyForwardAddress: (id: string, code: string) => Promise<ForwardAddress>; onDeleteForwardAddress: (id: string) => void; pending: boolean }) {
+function RulesSection({ items, mailboxes, labels, forwardAddresses, telegram, open, onOpenChange, onCreate, onDelete, onRequestForwardAddress, onVerifyForwardAddress, onDeleteForwardAddress, onSaveTelegram, onTestTelegram, onDeleteTelegram, pending }: {
+  items: MailRule[]
+  mailboxes: Mailbox[]
+  labels: MailLabel[]
+  forwardAddresses: ForwardAddress[]
+  telegram?: TelegramSettings
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreate: (payload: RuleCreatePayload) => void
+  onDelete: (id: string) => void
+  onRequestForwardAddress: (email: string) => Promise<ForwardAddress>
+  onVerifyForwardAddress: (id: string, code: string) => Promise<ForwardAddress>
+  onDeleteForwardAddress: (id: string) => void
+  onSaveTelegram: (payload: { botToken?: string; chatId: string; enabled: boolean }) => Promise<TelegramSettings>
+  onTestTelegram: () => Promise<void>
+  onDeleteTelegram: () => Promise<void>
+  pending: boolean
+}) {
+  const telegramReady = Boolean(telegram?.available && telegram.configured && telegram.enabled)
   return (
     <div className="space-y-4">
+      <TelegramSettingsCard item={telegram} pending={pending} onSave={onSaveTelegram} onTest={onTestTelegram} onDelete={onDeleteTelegram} />
       <ForwardAddressesCard items={forwardAddresses} pending={pending} onRequest={onRequestForwardAddress} onVerify={onVerifyForwardAddress} onDelete={onDeleteForwardAddress} />
       <div className="flex justify-end">
         <Button onClick={() => onOpenChange(true)}><Plus className="h-4 w-4" />新建规则</Button>
@@ -1434,8 +1469,71 @@ function RulesSection({ items, mailboxes, labels, forwardAddresses, open, onOpen
           {items.length === 0 && <EmptyState text="暂无收件规则" />}
         </CardContent>
       </Card>
-      <RuleDialog open={open} onOpenChange={onOpenChange} mailboxes={mailboxes} labels={labels} forwardAddresses={forwardAddresses.filter((item) => item.verified)} pending={pending} onCreate={onCreate} />
+      <RuleDialog open={open} onOpenChange={onOpenChange} mailboxes={mailboxes} labels={labels} forwardAddresses={forwardAddresses.filter((item) => item.verified)} telegramReady={telegramReady} pending={pending} onCreate={onCreate} />
     </div>
+  )
+}
+
+function TelegramSettingsCard({ item, pending, onSave, onTest, onDelete }: {
+  item?: TelegramSettings
+  pending: boolean
+  onSave: (payload: { botToken?: string; chatId: string; enabled: boolean }) => Promise<TelegramSettings>
+  onTest: () => Promise<void>
+  onDelete: () => Promise<void>
+}) {
+  const [botToken, setBotToken] = React.useState("")
+  const [chatId, setChatId] = React.useState("")
+  const [enabled, setEnabled] = React.useState(true)
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    setBotToken("")
+    setChatId(item?.chatId || "")
+    setEnabled(item?.configured ? item.enabled : true)
+  }, [item?.chatId, item?.configured, item?.enabled])
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    try {
+      await onSave({ botToken: botToken.trim() || undefined, chatId: chatId.trim(), enabled })
+      setBotToken("")
+    } catch {
+      // Mutation-level error handling keeps the entered credentials available for correction.
+    }
+  }
+
+  const unavailable = item?.available === false
+  return (
+    <Card>
+      <CardHeader className="gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2"><Bot className="h-5 w-5" />Telegram 通知</CardTitle>
+          <Badge variant={item?.configured && item.enabled ? "default" : "secondary"}>{item?.configured ? (item.enabled ? "已启用" : "已停用") : "未配置"}</Badge>
+        </div>
+        {item?.botUsername && <p className="text-sm text-muted-foreground">@{item.botUsername}</p>}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {unavailable && <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">服务端尚未配置通知加密密钥。</div>}
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={submit}>
+          <Field label="Bot Token"><PasswordInput value={botToken} onChange={(event) => setBotToken(event.target.value)} placeholder={item?.tokenSet ? "留空以保留当前 Token" : "123456789:AA..."} disabled={unavailable} autoComplete="new-password" /></Field>
+          <Field label="Chat ID"><Input value={chatId} onChange={(event) => setChatId(event.target.value)} placeholder="-1001234567890 或 @channel" disabled={unavailable} required /></Field>
+          <div className="flex items-center gap-3 md:col-span-2">
+            <Switch checked={enabled} onCheckedChange={setEnabled} disabled={unavailable || pending} aria-label="启用 Telegram 通知" />
+            <span className="text-sm">启用通知渠道</span>
+          </div>
+          <div className="flex flex-wrap gap-2 md:col-span-2">
+            <Button type="submit" disabled={unavailable || pending || !chatId.trim() || (!item?.tokenSet && !botToken.trim())}>{pending ? "处理中..." : "保存"}</Button>
+            <Button type="button" variant="outline" disabled={unavailable || pending || !item?.configured} onClick={() => void onTest()}><RefreshCcw className="h-4 w-4" />发送测试</Button>
+            {item?.configured && <Button type="button" variant="ghost" className="text-destructive" disabled={pending} onClick={() => setConfirmOpen(true)}><Trash2 className="h-4 w-4" />删除</Button>}
+          </div>
+        </form>
+        {(item?.lastDeliveredAt || item?.lastError) && <div className="border-t pt-3 text-xs text-muted-foreground">
+          {item.lastDeliveredAt && <div>最近送达：{new Date(item.lastDeliveredAt).toLocaleString()}</div>}
+          {item.lastError && <div className="mt-1 break-words text-destructive">最近错误：{item.lastError}</div>}
+        </div>}
+      </CardContent>
+      <ConfirmDialog open={confirmOpen} title="删除 Telegram 配置？" description="待发送的 Telegram 通知也会一并取消。" confirmText="删除配置" destructive onOpenChange={setConfirmOpen} onConfirm={() => { void onDelete(); setConfirmOpen(false) }} />
+    </Card>
   )
 }
 
@@ -1497,7 +1595,7 @@ function ForwardAddressRow({ item, pending, onVerify, onDelete }: { item: Forwar
   )
 }
 
-function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, pending, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: Mailbox[]; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; pending: boolean; onCreate: (payload: RuleCreatePayload) => void }) {
+function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, telegramReady, pending, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: Mailbox[]; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; telegramReady: boolean; pending: boolean; onCreate: (payload: RuleCreatePayload) => void }) {
   const [name, setName] = React.useState("我的规则")
   const [mailboxId, setMailboxId] = React.useState("all")
   const [matchMode, setMatchMode] = React.useState<"all" | "any">("all")
@@ -1546,7 +1644,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, p
 
   const validConditions = conditions.map((item) => item.field === "all" ? { field: "all" as const, operator: "equals" as const, value: "true" } : { ...item, value: (item.value || "").trim() }).filter((item) => item.field && item.operator && item.value)
   const validActions = actions.map((item) => normalizeDraftAction(item, availableLabels)).filter((item) => item.type !== "label" || item.value || item.labelId).filter((item) => item.type !== "move" || item.value).filter((item) => item.type !== "forward" || isForwardEmail(item.value))
-  const canCreate = validConditions.length > 0 && validActions.length > 0 && !pending
+  const canCreate = validConditions.length > 0 && validActions.length > 0 && !pending && (telegramReady || !validActions.some((item) => item.type === "telegram"))
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1603,7 +1701,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, p
                   <div key={index} className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)_auto_auto]">
                     <Select value={action.type} onValueChange={(value) => updateAction(index, { type: value as MailRuleAction["type"], value: "", labelId: "" })}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>{(Object.keys(ruleActionLabels) as MailRuleAction["type"][]).map((value) => <SelectItem key={value} value={value}>{ruleActionLabels[value]}</SelectItem>)}</SelectContent>
+                      <SelectContent>{(Object.keys(ruleActionLabels) as MailRuleAction["type"][]).map((value) => <SelectItem key={value} value={value} disabled={value === "telegram" && !telegramReady}>{ruleActionLabels[value]}</SelectItem>)}</SelectContent>
                     </Select>
                     <RuleActionValue action={action} labels={availableLabels} forwardAddresses={forwardAddresses} onChange={(patch) => updateAction(index, patch)} />
                     <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeAction(index)} disabled={actions.length === 1}><X className="h-4 w-4" /></Button>
@@ -1617,7 +1715,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, p
 
             <div className="space-y-4">
               <RuleCheckbox checked={enabled} onCheckedChange={setEnabled} label="立即启用" />
-              <RuleCheckbox checked={applyToExisting} onCheckedChange={setApplyToExisting} label="应用于现有邮件（不执行自动转发）" />
+              <RuleCheckbox checked={applyToExisting} onCheckedChange={setApplyToExisting} label="应用于现有邮件（不执行自动转发或 Telegram 通知）" />
               <div className="flex items-center gap-2">
                 <RuleCheckbox checked={stopProcessing} onCheckedChange={setStopProcessing} label="终止规则：命中此规则后不再应用其他规则" />
                 <Info className="h-4 w-4 text-muted-foreground" />

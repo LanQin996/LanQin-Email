@@ -486,6 +486,17 @@ func (a *App) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("rule action is required"))
 		return
 	}
+	if ruleHasAction(actions, "telegram") {
+		configured, err := a.telegramConfiguredForUser(r.Context(), user.ID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to check Telegram settings")
+			return
+		}
+		if !configured {
+			badRequest(w, errors.New("Telegram notifications must be configured and enabled first"))
+			return
+		}
+	}
 	if len(ruleForwardRecipients(actions)) > maxRuleForwardRecipients {
 		badRequest(w, fmt.Errorf("at most %d forward recipients are allowed", maxRuleForwardRecipients))
 		return
@@ -1083,7 +1094,7 @@ func normalizeRuleActions(items []MailRuleAction, legacyAction string) []MailRul
 		typ := strings.TrimSpace(item.Type)
 		value := strings.TrimSpace(item.Value)
 		labelID := strings.TrimSpace(item.LabelID)
-		if typ != "archive" && typ != "trash" && typ != "star" && typ != "mark-read" && typ != "label" && typ != "move" && typ != "forward" {
+		if typ != "archive" && typ != "trash" && typ != "star" && typ != "mark-read" && typ != "label" && typ != "move" && typ != "forward" && typ != "telegram" {
 			continue
 		}
 		if typ == "label" && value == "" && labelID == "" {
@@ -1101,6 +1112,15 @@ func normalizeRuleActions(items []MailRuleAction, legacyAction string) []MailRul
 		out = append(out, MailRuleAction{Type: typ, Value: value, LabelID: labelID})
 	}
 	return out
+}
+
+func ruleHasAction(actions []MailRuleAction, actionType string) bool {
+	for _, action := range actions {
+		if action.Type == actionType {
+			return true
+		}
+	}
+	return false
 }
 
 func legacyConditionValue(items []MailRuleCondition, field string) string {
@@ -1293,7 +1313,7 @@ func parseRuleDateValue(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID, ruleID string, actions []MailRuleAction, allowForward bool) error {
+func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID, ruleID string, actions []MailRuleAction, allowExternalDelivery bool) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	normalizedActions := normalizeRuleActions(actions, "")
 	for _, action := range normalizedActions {
@@ -1345,9 +1365,19 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID, ruleID
 			if err := a.applyRuleLabel(ctx, mailboxID, messageID, action); err != nil {
 				return err
 			}
+		case "telegram":
+			if allowExternalDelivery {
+				var userID string
+				if err := a.db.QueryRowContext(ctx, `SELECT user_id FROM mailboxes WHERE id=?`, mailboxID).Scan(&userID); err != nil {
+					return err
+				}
+				if err := a.enqueueTelegramNotification(ctx, userID, mailboxID, messageID, ruleID); err != nil {
+					return err
+				}
+			}
 		}
 	}
-	if allowForward {
+	if allowExternalDelivery {
 		if recipients := ruleForwardRecipients(normalizedActions); len(recipients) > 0 {
 			return a.enqueueRuleForward(ctx, mailboxID, messageID, ruleID, recipients)
 		}

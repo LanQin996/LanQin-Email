@@ -143,17 +143,18 @@ func TestLinuxDoExternalSchemaContract(t *testing.T) {
 
 func TestRegistrationInviteExternalSchemaContract(t *testing.T) {
 	t.Parallel()
-	for name, schema := range map[string]string{"postgres": strings.Join(postgresFreshSchema(), "\n"), "mysql": strings.Join(mysqlFreshSchema(), "\n")} {
-		for _, fragment := range []string{
-			"CREATE TABLE registration_invites",
-			"code VARCHAR(64) NOT NULL UNIQUE",
-			"CHECK(max_uses > 0)",
-			"CHECK(used_count >= 0 AND used_count <= max_uses)",
-			"idx_registration_invites_created",
-		} {
+	postgres := strings.Join(postgresFreshSchema(), "\n")
+	mysql := strings.Join(mysqlFreshSchema(), "\n")
+	for name, schema := range map[string]string{"postgres": postgres, "mysql": mysql} {
+		for _, fragment := range []string{"CREATE TABLE registration_invites", "code VARCHAR(64) NOT NULL UNIQUE", "CHECK(max_uses > 0)", "idx_registration_invites_created"} {
 			if !strings.Contains(schema, fragment) {
 				t.Errorf("%s registration invite schema is missing %q", name, fragment)
 			}
+		}
+	}
+	for name, schema := range map[string]string{"postgres": postgres, "mysql": mysql} {
+		if !strings.Contains(schema, "CHECK(used_count >= 0)") || !strings.Contains(schema, "CHECK(used_count <= max_uses)") {
+			t.Errorf("%s registration invite schema is missing portable usage constraints", name)
 		}
 	}
 	statements := registrationInviteExternalSchemaStatements()
@@ -163,6 +164,36 @@ func TestRegistrationInviteExternalSchemaContract(t *testing.T) {
 	for _, statement := range statements {
 		if !strings.Contains(statement, "registration_invites") {
 			t.Errorf("v3 migration contains unrelated statement: %.80s", statement)
+		}
+	}
+}
+
+func TestTelegramNotificationExternalSchemaContract(t *testing.T) {
+	t.Parallel()
+	for name, schema := range map[string]string{
+		"postgres": strings.Join(postgresFreshSchema(), "\n"),
+		"mysql":    strings.Join(mysqlFreshSchema(), "\n"),
+	} {
+		for _, fragment := range []string{
+			"CREATE TABLE telegram_notification_settings",
+			"CREATE TABLE telegram_notification_outbox",
+			"event_key VARCHAR(255) NOT NULL UNIQUE",
+			"idx_telegram_notification_outbox_due",
+			"idx_telegram_notification_outbox_user",
+		} {
+			if !strings.Contains(schema, fragment) {
+				t.Errorf("%s Telegram notification schema is missing %q", name, fragment)
+			}
+		}
+	}
+
+	statements := telegramNotificationExternalSchemaStatements()
+	if len(statements) != 4 {
+		t.Fatalf("v4 migration has %d statements, want 4", len(statements))
+	}
+	for _, statement := range statements {
+		if !strings.Contains(statement, "telegram_notification_") {
+			t.Errorf("v4 migration contains unrelated statement: %.80s", statement)
 		}
 	}
 }
