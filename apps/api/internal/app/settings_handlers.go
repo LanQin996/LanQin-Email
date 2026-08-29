@@ -26,6 +26,11 @@ type SystemSettings struct {
 	TurnstileEnabled                   bool     `json:"turnstileEnabled"`
 	TurnstileSiteKey                   string   `json:"turnstileSiteKey"`
 	TurnstileSecretSet                 bool     `json:"turnstileSecretSet"`
+	LinuxDoSSOEnabled                  bool     `json:"linuxDoSSOEnabled"`
+	LinuxDoRegistrationEnabled         bool     `json:"linuxDoRegistrationEnabled"`
+	LinuxDoClientID                    string   `json:"linuxDoClientId"`
+	LinuxDoClientSecretSet             bool     `json:"linuxDoClientSecretSet"`
+	LinuxDoCallbackURL                 string   `json:"linuxDoCallbackUrl"`
 	CatchAllEnabled                    bool     `json:"catchAllEnabled"`
 	MailAutoRefresh                    bool     `json:"mailAutoRefresh"`
 	MailRefreshSeconds                 int      `json:"mailRefreshSeconds"`
@@ -59,6 +64,10 @@ type systemSettingsUpdate struct {
 	TurnstileEnabled                bool     `json:"turnstileEnabled"`
 	TurnstileSiteKey                string   `json:"turnstileSiteKey"`
 	TurnstileSecretKey              string   `json:"turnstileSecretKey"`
+	LinuxDoSSOEnabled               bool     `json:"linuxDoSSOEnabled"`
+	LinuxDoRegistrationEnabled      bool     `json:"linuxDoRegistrationEnabled"`
+	LinuxDoClientID                 string   `json:"linuxDoClientId"`
+	LinuxDoClientSecret             string   `json:"linuxDoClientSecret"`
 	CatchAllEnabled                 bool     `json:"catchAllEnabled"`
 	MailAutoRefresh                 bool     `json:"mailAutoRefresh"`
 	MailRefreshSeconds              int      `json:"mailRefreshSeconds"`
@@ -76,14 +85,16 @@ type systemSettingsUpdate struct {
 }
 
 type PublicSettings struct {
-	OpenRegistration    bool           `json:"openRegistration"`
-	TurnstileEnabled    bool           `json:"turnstileEnabled"`
-	TurnstileSiteKey    string         `json:"turnstileSiteKey"`
-	PublicHostname      string         `json:"publicHostname"`
-	MailAutoRefresh     bool           `json:"mailAutoRefresh"`
-	MailRefreshMs       int            `json:"mailRefreshMs"`
-	ExternalIMAPEnabled bool           `json:"externalImapEnabled"`
-	MailboxDomains      []PublicDomain `json:"mailboxDomains,omitempty"`
+	OpenRegistration           bool           `json:"openRegistration"`
+	TurnstileEnabled           bool           `json:"turnstileEnabled"`
+	TurnstileSiteKey           string         `json:"turnstileSiteKey"`
+	PublicHostname             string         `json:"publicHostname"`
+	MailAutoRefresh            bool           `json:"mailAutoRefresh"`
+	MailRefreshMs              int            `json:"mailRefreshMs"`
+	ExternalIMAPEnabled        bool           `json:"externalImapEnabled"`
+	LinuxDoSSOEnabled          bool           `json:"linuxDoSSOEnabled"`
+	LinuxDoRegistrationEnabled bool           `json:"linuxDoRegistrationEnabled"`
+	MailboxDomains             []PublicDomain `json:"mailboxDomains,omitempty"`
 }
 
 type PublicDomain struct {
@@ -105,10 +116,11 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	if refreshSeconds <= 0 {
 		refreshSeconds = 30
 	}
-	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled}
+	linuxDoEnabled := a.linuxDoEnabled()
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
 
 	// Include available domains for mailbox creation during registration
-	if a.cfg.OpenRegistration {
+	if a.cfg.OpenRegistration || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {
 		rows, err := a.db.QueryContext(r.Context(), `SELECT id, name FROM domains WHERE status='active' ORDER BY name`)
 		if err == nil {
 			defer rows.Close()
@@ -171,6 +183,16 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 	}
 	if next.TurnstileEnabled && (next.TurnstileSiteKey == "" || next.TurnstileSecretKey == "") {
 		badRequest(w, errors.New("turnstile keys are required when enabled"))
+		return
+	}
+	next.LinuxDoSSOEnabled = req.LinuxDoSSOEnabled
+	next.LinuxDoRegistrationEnabled = req.LinuxDoRegistrationEnabled
+	next.LinuxDoClientID = strings.TrimSpace(req.LinuxDoClientID)
+	if strings.TrimSpace(req.LinuxDoClientSecret) != "" {
+		next.LinuxDoClientSecret = strings.TrimSpace(req.LinuxDoClientSecret)
+	}
+	if err := validateLinuxDoSettings(next); err != nil {
+		badRequest(w, err)
 		return
 	}
 	next.CatchAllEnabled = req.CatchAllEnabled
@@ -302,6 +324,11 @@ func (a *App) systemSettingsSnapshot() SystemSettings {
 		TurnstileEnabled:                   a.cfg.TurnstileEnabled,
 		TurnstileSiteKey:                   a.cfg.TurnstileSiteKey,
 		TurnstileSecretSet:                 strings.TrimSpace(a.cfg.TurnstileSecretKey) != "",
+		LinuxDoSSOEnabled:                  a.cfg.LinuxDoSSOEnabled,
+		LinuxDoRegistrationEnabled:         a.cfg.LinuxDoRegistrationEnabled,
+		LinuxDoClientID:                    a.cfg.LinuxDoClientID,
+		LinuxDoClientSecretSet:             strings.TrimSpace(a.cfg.LinuxDoClientSecret) != "",
+		LinuxDoCallbackURL:                 a.linuxDoCallbackURL(),
 		CatchAllEnabled:                    a.cfg.CatchAllEnabled,
 		MailAutoRefresh:                    a.cfg.MailAutoRefresh,
 		MailRefreshSeconds:                 a.cfg.MailRefreshSeconds,
@@ -368,6 +395,14 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			a.cfg.TurnstileSiteKey = value
 		case "turnstileSecretKey":
 			a.cfg.TurnstileSecretKey = value
+		case "linuxDoSSOEnabled":
+			a.cfg.LinuxDoSSOEnabled = value == "true"
+		case "linuxDoRegistrationEnabled":
+			a.cfg.LinuxDoRegistrationEnabled = value == "true"
+		case "linuxDoClientId":
+			a.cfg.LinuxDoClientID = value
+		case "linuxDoClientSecret":
+			a.cfg.LinuxDoClientSecret = value
 		case "catchAllEnabled":
 			a.cfg.CatchAllEnabled = value == "true"
 		case "mailAutoRefresh":
@@ -423,6 +458,10 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		"turnstileEnabled":                strconv.FormatBool(cfg.TurnstileEnabled),
 		"turnstileSiteKey":                cfg.TurnstileSiteKey,
 		"turnstileSecretKey":              cfg.TurnstileSecretKey,
+		"linuxDoSSOEnabled":               strconv.FormatBool(cfg.LinuxDoSSOEnabled),
+		"linuxDoRegistrationEnabled":      strconv.FormatBool(cfg.LinuxDoRegistrationEnabled),
+		"linuxDoClientId":                 cfg.LinuxDoClientID,
+		"linuxDoClientSecret":             cfg.LinuxDoClientSecret,
 		"catchAllEnabled":                 strconv.FormatBool(cfg.CatchAllEnabled),
 		"mailAutoRefresh":                 strconv.FormatBool(cfg.MailAutoRefresh),
 		"mailRefreshSeconds":              strconv.Itoa(cfg.MailRefreshSeconds),

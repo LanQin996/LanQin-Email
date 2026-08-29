@@ -50,6 +50,35 @@ func postgresFreshSchema() []string {
 			expires_at VARCHAR(35) NOT NULL,
 			created_at VARCHAR(35) NOT NULL
 		)`,
+		`CREATE TABLE oauth_identities (
+			provider VARCHAR(32) NOT NULL,
+			subject VARCHAR(255) NOT NULL,
+			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			username VARCHAR(255) NOT NULL DEFAULT '',
+			created_at VARCHAR(35) NOT NULL,
+			updated_at VARCHAR(35) NOT NULL,
+			PRIMARY KEY(provider,subject),
+			UNIQUE(user_id,provider)
+		)`,
+		`CREATE INDEX idx_oauth_identities_user ON oauth_identities(user_id,provider)`,
+		`CREATE TABLE oauth_login_states (
+			token_hash VARCHAR(255) PRIMARY KEY,
+			purpose VARCHAR(16) NOT NULL CHECK(purpose IN ('login','link')),
+			user_id VARCHAR(64) REFERENCES users(id) ON DELETE CASCADE,
+			expires_at VARCHAR(35) NOT NULL,
+			created_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE INDEX idx_oauth_login_states_expires ON oauth_login_states(expires_at)`,
+		`CREATE TABLE oauth_registration_challenges (
+			token_hash VARCHAR(255) PRIMARY KEY,
+			provider VARCHAR(32) NOT NULL,
+			subject VARCHAR(255) NOT NULL,
+			username VARCHAR(255) NOT NULL DEFAULT '',
+			display_name VARCHAR(255) NOT NULL DEFAULT '',
+			expires_at VARCHAR(35) NOT NULL,
+			created_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE INDEX idx_oauth_registration_challenges_expires ON oauth_registration_challenges(expires_at)`,
 		`CREATE TABLE api_tokens (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

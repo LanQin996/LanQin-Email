@@ -21,7 +21,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 - **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
 - **邮箱增强**：联系人、签名、收件规则（包括收件后自动转发）、发件人黑名单、邮件统计、归档已读、清空回收站/垃圾邮件。
 - **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、地址别名投递（不是用户收件后的自动转发）、无人收件开关。
-- **账号与权限**：登录/注册、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC。
+- **账号与权限**：邮箱密码登录、Linux.do OAuth2 SSO、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC。
 - **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
 - **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
 - **部署友好**：默认 all-in-one 单容器，也提供多容器 stack 方便调试 Postfix/Dovecot/Rspamd。
@@ -136,6 +136,19 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 4. 在域名管理中复制并配置 MX、SPF、DKIM、DMARC 记录，然后点击 DNS 检测。
 5. 创建邮箱账号、地址别名或权限组，按需开启注册、2FA、Turnstile、自助申请邮箱。地址别名用于改写投递目标；收件后自动转发在“个人设置 → 收件规则”中配置，目标邮箱必须先通过验证码验证。原邮件会保留在收件箱；历史邮件、自动生成邮件及已自动转发邮件不会再次转发。
 6. 使用后台 SMTP 测试与 Webmail 收发测试确认链路正常。
+
+## Linux.do SSO
+
+Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中配置：
+
+1. 访问 [Connect.Linux.Do](https://connect.linux.do/)，进入“**我的应用接入 > 申请新接入**”。
+2. 将回调地址填写为 `https://你的站点/api/auth/linuxdo/callback`，必须与 LanQin 后台显示的只读回调地址完全一致。
+3. 把申请得到的 Client ID、Client Secret 填入后台，再启用 Linux.do 登录。Client Secret 不会返回浏览器；以后保存时留空会保留原值。
+4. 可独立开启 Linux.do 用户注册，不受普通“开放注册”开关影响。新用户授权后仍需选择本站活跃邮箱域名和前缀，并设置本地密码；如果启用了 Turnstile，补全注册同样需要完成人机验证。
+
+既有用户必须先用本站账号登录，再到“**个人设置 > 账户资料**”绑定 Linux.do。系统只按 Linux.do 不可变 `id` 绑定，绝不会按用户名或邮箱前缀自动关联。本地密码仍可正常登录；用户启用 TOTP 后，SSO 登录及绑定/解绑也必须通过 TOTP。关闭 SSO 只会隐藏登录入口，不会删除已有绑定。
+
+生产环境必须为 `LANQIN_PUBLIC_BASE_URL` 配置有效 HTTPS 地址。系统固定使用 Linux.do 官方 OAuth 端点，并且只申请 `user` scope。
 
 ## 关键环境变量
 

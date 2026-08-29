@@ -44,6 +44,10 @@ type Config struct {
 	TurnstileEnabled                bool
 	TurnstileSiteKey                string
 	TurnstileSecretKey              string
+	LinuxDoSSOEnabled               bool
+	LinuxDoRegistrationEnabled      bool
+	LinuxDoClientID                 string
+	LinuxDoClientSecret             string
 	CatchAllEnabled                 bool
 	MailAutoRefresh                 bool
 	MailRefreshSeconds              int
@@ -104,6 +108,10 @@ func LoadConfig() Config {
 		TurnstileEnabled:                getenvBool("LANQIN_TURNSTILE_ENABLED", false),
 		TurnstileSiteKey:                getenv("LANQIN_TURNSTILE_SITE_KEY", ""),
 		TurnstileSecretKey:              getenv("LANQIN_TURNSTILE_SECRET_KEY", ""),
+		LinuxDoSSOEnabled:               false,
+		LinuxDoRegistrationEnabled:      false,
+		LinuxDoClientID:                 "",
+		LinuxDoClientSecret:             "",
 		CatchAllEnabled:                 getenvBool("LANQIN_CATCH_ALL_ENABLED", false),
 		MailAutoRefresh:                 getenvBool("LANQIN_MAIL_AUTO_REFRESH", true),
 		MailRefreshSeconds:              getenvInt("LANQIN_MAIL_REFRESH_SECONDS", 30),

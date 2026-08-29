@@ -294,6 +294,27 @@ export function ProfilePage() {
   }, [mailboxId, mailboxes.isSuccess, mailboxes.data?.items])
   React.useEffect(() => { if (mailboxId) localStorage.setItem("lanqin:selected-mailbox", mailboxId); else localStorage.removeItem("lanqin:selected-mailbox") }, [mailboxId])
   React.useEffect(() => { applyTheme(darkMode, themeMountedRef.current); themeMountedRef.current = true }, [darkMode])
+  React.useEffect(() => {
+    const result = params.get("linuxdo")
+    if (!result) return
+    const messages: Record<string, { title: string; description?: string }> = {
+      linked: { title: "Linux.do 账号已绑定" },
+      cancelled: { title: "已取消 Linux.do 授权" },
+      state: { title: "Linux.do 绑定失败", description: "授权状态无效或已过期，请重试" },
+      code: { title: "Linux.do 绑定失败", description: "Linux.do 未返回授权码" },
+      upstream: { title: "Linux.do 绑定失败", description: "无法验证 Linux.do 账号，请稍后重试" },
+      configuration: { title: "Linux.do 绑定失败", description: "Linux.do SSO 配置已变更或当前不可用" },
+      ineligible: { title: "Linux.do 绑定失败", description: "该 Linux.do 账号未激活或已被禁言" },
+      conflict: { title: "Linux.do 绑定失败", description: "该身份或当前用户已有其他绑定" },
+      session: { title: "Linux.do 绑定失败", description: "登录会话已失效，请重新登录" },
+      save: { title: "Linux.do 绑定失败", description: "绑定信息保存失败，请稍后重试" },
+    }
+    toast(messages[result] || { title: "Linux.do 绑定未完成" })
+    if (result === "linked") qc.invalidateQueries({ queryKey: ["linuxdo-identity"] })
+    const next = new URLSearchParams(params)
+    next.delete("linuxdo")
+    setParams(next, { replace: true })
+  }, [params, qc, setParams, toast])
 
   const logout = useLogout()
   async function copy(text: string) { await navigator.clipboard.writeText(text); toast({ title: "已复制" }) }
@@ -477,6 +498,8 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, show
         </CardContent>
       </Card>
 
+      <LinuxDoAuthSection twoFactorEnabled={user.twoFactorEnabled} />
+
       <Card>
         <CardHeader>
           <CardTitle>界面设置</CardTitle>
@@ -582,6 +605,54 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, show
       </Card>
 
     </div>
+  )
+}
+
+function LinuxDoAuthSection({ twoFactorEnabled }: { twoFactorEnabled: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const formRef = React.useRef<HTMLFormElement>(null)
+  const identity = useQuery({ queryKey: ["linuxdo-identity"], queryFn: api.linuxDoIdentity })
+  const link = useMutation({
+    mutationFn: (form: FormData) => api.startLinuxDoLink({ currentPassword: String(form.get("currentPassword") || ""), twoFactorCode: String(form.get("twoFactorCode") || "") }),
+    onSuccess: (data) => window.location.assign(data.url),
+    onError: (error) => toast({ title: "无法开始绑定", description: error.message }),
+  })
+  const unlink = useMutation({
+    mutationFn: (form: FormData) => api.unlinkLinuxDo({ currentPassword: String(form.get("currentPassword") || ""), twoFactorCode: String(form.get("twoFactorCode") || "") }),
+    onSuccess: () => {
+      formRef.current?.reset()
+      qc.invalidateQueries({ queryKey: ["linuxdo-identity"] })
+      toast({ title: "Linux.do 账号已解除绑定" })
+    },
+    onError: (error) => toast({ title: "解除绑定失败", description: error.message }),
+  })
+  const linked = !!identity.data?.linked
+  return (
+    <Card>
+      <CardHeader><CardTitle>Linux.do SSO</CardTitle></CardHeader>
+      <CardContent className="space-y-5">
+        <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-medium"><Link2 className="h-4 w-4" />Linux.do 账号</div>
+            {linked && <div className="mt-1 truncate text-xs text-muted-foreground">@{identity.data?.username}</div>}
+          </div>
+          <Badge variant={linked ? "default" : "secondary"}>{identity.isLoading ? "加载中" : linked ? "已绑定" : "未绑定"}</Badge>
+        </div>
+        <form ref={formRef} className="space-y-4" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); linked ? unlink.mutate(form) : link.mutate(form) }}>
+          <div className={cn("grid gap-4", twoFactorEnabled && "md:grid-cols-2")}>
+            <Field label="当前密码"><PasswordInput name="currentPassword" autoComplete="current-password" required /></Field>
+            {twoFactorEnabled && <Field label="双因素验证码"><Input name="twoFactorCode" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={6} required /></Field>}
+          </div>
+          <div className="flex justify-end">
+            <Button type="submit" variant={linked ? "destructive" : "default"} disabled={identity.isLoading || link.isPending || unlink.isPending}>
+              <Link2 className="h-4 w-4" />
+              {link.isPending ? "正在跳转..." : unlink.isPending ? "解除中..." : linked ? "解除绑定" : "绑定 Linux.do"}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   )
 }
 

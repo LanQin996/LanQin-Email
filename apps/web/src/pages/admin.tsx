@@ -1019,6 +1019,8 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const [openRegistration, setOpenRegistration] = React.useState(false)
   const [twoFactorEnabled, setTwoFactorEnabled] = React.useState(false)
   const [turnstileEnabled, setTurnstileEnabled] = React.useState(false)
+  const [linuxDoSSOEnabled, setLinuxDoSSOEnabled] = React.useState(false)
+  const [linuxDoRegistrationEnabled, setLinuxDoRegistrationEnabled] = React.useState(false)
   const [catchAllEnabled, setCatchAllEnabled] = React.useState(false)
   const [mailAutoRefresh, setMailAutoRefresh] = React.useState(true)
   const [userMailboxApplyEnabled, setUserMailboxApplyEnabled] = React.useState(false)
@@ -1032,6 +1034,8 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     setOpenRegistration(settings.openRegistration)
     setTwoFactorEnabled(settings.twoFactorEnabled)
     setTurnstileEnabled(settings.turnstileEnabled)
+    setLinuxDoSSOEnabled(settings.linuxDoSSOEnabled)
+    setLinuxDoRegistrationEnabled(settings.linuxDoRegistrationEnabled)
     setCatchAllEnabled(settings.catchAllEnabled)
     setMailAutoRefresh(settings.mailAutoRefresh)
     setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
@@ -1057,6 +1061,10 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       turnstileEnabled,
       turnstileSiteKey: fieldValue(form, "turnstileSiteKey", settings?.turnstileSiteKey || ""),
       turnstileSecretKey: fieldValue(form, "turnstileSecretKey", ""),
+      linuxDoSSOEnabled,
+      linuxDoRegistrationEnabled,
+      linuxDoClientId: fieldValue(form, "linuxDoClientId", settings?.linuxDoClientId || ""),
+      linuxDoClientSecret: fieldValue(form, "linuxDoClientSecret", ""),
       catchAllEnabled,
       mailAutoRefresh,
       mailRefreshSeconds: fieldNumber(form, "mailRefreshSeconds", settings?.mailRefreshSeconds || 30),
@@ -1098,6 +1106,11 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     settings.turnstileEnabled,
     settings.turnstileSiteKey,
     settings.turnstileSecretSet,
+    settings.linuxDoSSOEnabled,
+    settings.linuxDoRegistrationEnabled,
+    settings.linuxDoClientId,
+    settings.linuxDoClientSecretSet,
+    settings.linuxDoCallbackUrl,
     settings.catchAllEnabled,
     settings.mailAutoRefresh,
     settings.mailRefreshSeconds,
@@ -1287,6 +1300,20 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
               <Field name="turnstileSecretKey" label={settings?.turnstileSecretSet ? "Secret Key（留空不变）" : "Secret Key"} type="password" required={!settings?.turnstileSecretSet} />
             </div>
           )}
+          <Separator />
+          <div className="space-y-5">
+            <div>
+              <div className="font-medium">Linux.do SSO</div>
+              <div className="text-xs text-muted-foreground">关闭 SSO 不会删除用户已有的 Linux.do 绑定。</div>
+            </div>
+            <SwitchRow label="启用 Linux.do 登录" checked={linuxDoSSOEnabled} onCheckedChange={setLinuxDoSSOEnabled} />
+            <SwitchRow label="允许 Linux.do 用户注册本站账号" checked={linuxDoRegistrationEnabled} onCheckedChange={setLinuxDoRegistrationEnabled} />
+            <div className="grid gap-4 md:grid-cols-2">
+              <Field name="linuxDoClientId" label="Client ID" defaultValue={settings?.linuxDoClientId || ""} required={linuxDoSSOEnabled} />
+              <Field name="linuxDoClientSecret" label={settings?.linuxDoClientSecretSet ? "Client Secret（留空不变）" : "Client Secret"} type="password" required={linuxDoSSOEnabled && !settings?.linuxDoClientSecretSet} />
+            </div>
+            <Field name="linuxDoCallbackUrl" label="回调地址" value={settings?.linuxDoCallbackUrl || ""} readOnly required={false} />
+          </div>
         </CardContent>
       </Card>}
 

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Link, Navigate, useNavigate } from "react-router-dom"
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeft, ArrowRight, UserPlus } from "lucide-react"
 import { api } from "@/lib/api"
@@ -18,11 +18,14 @@ export function RegisterPage() {
   const me = useMe()
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const [params] = useSearchParams()
   const { toast } = useToast()
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const linuxDoRegistration = params.get("linuxdo") === "complete"
+  const pendingLinuxDo = useQuery({ queryKey: ["linuxdo-pending-registration"], queryFn: api.linuxDoPendingRegistration, enabled: linuxDoRegistration, retry: false })
   const [turnstileToken, setTurnstileToken] = React.useState("")
   const [domainId, setDomainId] = React.useState("")
-  const domains: PublicDomain[] = publicSettings.data?.mailboxDomains || []
+  const domains: PublicDomain[] = linuxDoRegistration ? pendingLinuxDo.data?.domains || [] : publicSettings.data?.mailboxDomains || []
   const selectedDomain = domains.find((d) => d.id === domainId)
 
   const register = useMutation({
@@ -30,6 +33,18 @@ export function RegisterPage() {
       const password = String(form.get("password") || "")
       const confirmPassword = String(form.get("confirmPassword") || "")
       validatePasswordConfirm(password, confirmPassword)
+
+      if (linuxDoRegistration) {
+        const localPart = String(form.get("localPart") || "").trim()
+        if (!domainId || !selectedDomain || !localPart) throw new Error("请选择邮箱域名并填写邮箱前缀")
+        return api.linuxDoRegister({
+          domainId,
+          localPart,
+          displayName: String(form.get("displayName") || ""),
+          password,
+          turnstileToken,
+        })
+      }
 
       if (domainId && selectedDomain) {
         const localPart = String(form.get("localPart") || "").trim()
@@ -54,7 +69,7 @@ export function RegisterPage() {
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["me"] })
-      toast({ title: "注册成功" })
+      toast({ title: linuxDoRegistration ? "Linux.do 账号注册成功" : "注册成功" })
       navigate("/profile", { replace: true })
     },
     onError: (e) => toast({ title: "注册失败", description: e.message }),
@@ -70,9 +85,21 @@ export function RegisterPage() {
         <div className="rounded-lg border bg-background p-6 shadow-sm sm:p-7">
           <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <UserPlus className="h-4 w-4" />
-            注册账号
+            {linuxDoRegistration ? "补全 Linux.do 注册信息" : "注册账号"}
           </div>
-          {publicSettings.isSuccess && !publicSettings.data.openRegistration ? (
+          {linuxDoRegistration && pendingLinuxDo.isLoading ? (
+            <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">正在加载已验证的 Linux.do 账号...</div>
+          ) : linuxDoRegistration && pendingLinuxDo.isError ? (
+            <div className="space-y-5">
+              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">{pendingLinuxDo.error.message}</div>
+              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild><Link to="/login"><ArrowLeft className="h-4 w-4" />重新登录</Link></Button>
+            </div>
+          ) : linuxDoRegistration && pendingLinuxDo.isSuccess && domains.length === 0 ? (
+            <div className="space-y-5">
+              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前没有可用于注册的邮箱域名</div>
+              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild><Link to="/login"><ArrowLeft className="h-4 w-4" />返回登录</Link></Button>
+            </div>
+          ) : !linuxDoRegistration && publicSettings.isSuccess && !publicSettings.data.openRegistration ? (
             <div className="space-y-5">
               <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前未开放注册</div>
               <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
@@ -84,6 +111,11 @@ export function RegisterPage() {
             </div>
           ) : (
             <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (turnstileRequired && !turnstileToken) { toast({ title: "请先完成人机验证" }); return }; register.mutate(new FormData(e.currentTarget)) }}>
+              {linuxDoRegistration && pendingLinuxDo.data && (
+                <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+                  已验证 Linux.do 用户 <span className="font-medium text-foreground">@{pendingLinuxDo.data.username}</span>
+                </div>
+              )}
               {domains.length > 0 ? (
                 <div className="space-y-2">
                   <Label htmlFor="localPart" className="text-sm font-medium">邮箱地址</Label>
@@ -109,7 +141,7 @@ export function RegisterPage() {
               )}
               <div className="space-y-2">
                 <Label htmlFor="displayName" className="text-sm font-medium">显示名称</Label>
-                <Input id="displayName" name="displayName" autoComplete="name" className="h-11 text-base" />
+                <Input id="displayName" name="displayName" autoComplete="name" defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""} className="h-11 text-base" />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="password" className="text-sm font-medium">密码</Label>
@@ -120,14 +152,14 @@ export function RegisterPage() {
                 <PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" minLength={8} required className="h-11 text-base" />
               </div>
               {turnstileRequired && <TurnstileBox siteKey={publicSettings.data?.turnstileSiteKey || ""} onToken={setTurnstileToken} />}
-              <Button className="h-11 w-full text-base" disabled={register.isPending || publicSettings.isLoading}>
-                {register.isPending ? "注册中..." : "注册"}
+              <Button className="h-11 w-full text-base" disabled={register.isPending || publicSettings.isLoading || (linuxDoRegistration && pendingLinuxDo.isLoading)}>
+                {register.isPending ? "注册中..." : linuxDoRegistration ? "完成注册" : "注册"}
                 {!register.isPending && <ArrowRight className="h-4 w-4" />}
               </Button>
             </form>
           )}
         </div>
-        {!(publicSettings.isSuccess && !publicSettings.data.openRegistration) && (
+        {!linuxDoRegistration && !(publicSettings.isSuccess && !publicSettings.data.openRegistration) && (
           <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <span>已有账号？</span>
             <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>

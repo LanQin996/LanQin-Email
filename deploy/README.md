@@ -120,6 +120,20 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 
 配置完成后点击“检测”。
 
+## Linux.do SSO
+
+1. 确认 `LANQIN_PUBLIC_BASE_URL` 是用户实际访问的 HTTPS 地址。
+2. 前往 [Connect.Linux.Do](https://connect.linux.do/) 的“我的应用接入 > 申请新接入”创建应用。
+3. 使用管理后台“系统设置 > 安全”中显示的只读地址作为回调地址，格式为：
+
+```text
+https://你的站点/api/auth/linuxdo/callback
+```
+
+4. 在同一区域填写 Client ID、Client Secret，开启“Linux.do 登录”；按需独立开启“允许 Linux.do 用户注册本站账号”。
+
+Client Secret 保存在现有 `system_settings` 中，接口和前端只显示“已配置”状态，后续留空保存不会清除。关闭 SSO 不会删除 `oauth_identities` 中已有绑定。既有用户应先使用本站邮箱密码登录，再在个人设置中绑定；系统不会按 Linux.do 用户名自动匹配本站账号。启用了本地 TOTP 的用户通过 SSO 登录时仍需输入 TOTP。
+
 ## 邮件服务边界
 
 - Postfix 读取 `/data/lanqin.db` 中的 `domains`、`mailboxes`、`aliases`。

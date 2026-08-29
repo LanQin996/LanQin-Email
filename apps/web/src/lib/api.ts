@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, ForwardAddress, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, ForwardAddress, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, LinuxDoIdentity, LinuxDoPendingRegistration, LinuxDoRegistrationPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -35,8 +35,14 @@ export const api = {
   publicSettings: () => request<PublicSettings>("/api/public/settings"),
   register: (payload: RegisterPayload) => request<{ user: User }>("/api/auth/register", { method: "POST", body: JSON.stringify(payload) }),
   login: (payload: LoginPayload) => request<LoginResponse>("/api/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+  linuxDoPendingRegistration: () => request<LinuxDoPendingRegistration>("/api/auth/linuxdo/pending-registration"),
+  linuxDoRegister: (payload: LinuxDoRegistrationPayload) => request<{ user: User }>("/api/auth/linuxdo/register", { method: "POST", body: JSON.stringify(payload) }),
+  linuxDoTwoFactor: (code: string) => request<{ user: User }>("/api/auth/linuxdo/2fa", { method: "POST", body: JSON.stringify({ code }) }),
   logout: () => request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
   me: () => request<{ user: User }>("/api/me"),
+  linuxDoIdentity: () => request<LinuxDoIdentity>("/api/me/auth/linuxdo"),
+  startLinuxDoLink: (payload: { currentPassword: string; twoFactorCode?: string }) => request<{ url: string }>("/api/me/auth/linuxdo/link", { method: "POST", body: JSON.stringify(payload) }),
+  unlinkLinuxDo: (payload: { currentPassword: string; twoFactorCode?: string }) => request<{ ok: boolean; unlinked: boolean }>("/api/me/auth/linuxdo", { method: "DELETE", body: JSON.stringify(payload) }),
   updateProfile: (payload: { displayName: string }) => request<{ user: User }>("/api/me/profile", { method: "POST", body: JSON.stringify(payload) }),
   changePassword: (payload: { currentPassword: string; newPassword: string }) => request<{ ok: boolean }>("/api/me/password", { method: "POST", body: JSON.stringify(payload) }),
   apiTokens: () => request<ListResponse<APIToken>>("/api/me/api-tokens"),

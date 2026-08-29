@@ -21,7 +21,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 - **Webmail client**: multiple mailbox switching, folders, reading and composing messages, drafts, scheduled sending, attachments, search, labels, stars, move/delete, read/unread status.
 - **Mailbox enhancements**: contacts, signatures, inbox rules (including automatic forwarding after delivery), sender blacklist, mail statistics, archive read messages, empty Trash/Spam.
 - **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, address aliases (delivery redirection, not inbox auto-forwarding), catch-all toggle.
-- **Accounts and permissions**: login/registration, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
+- **Accounts and permissions**: email/password login, Linux.do OAuth2 SSO, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
 - **Admin panel**: overview checklist, user/permission group/domain/mailbox/alias/all-message management, system settings, mail templates, SMTP testing.
 - **Mail service stack**: Postfix delivery, Dovecot IMAP/POP3, Rspamd anti-spam and DKIM signing, Maildir-to-SQLite sync.
 - **Deployment friendly**: default all-in-one single container, plus a multi-container stack for debugging Postfix/Dovecot/Rspamd.
@@ -136,6 +136,19 @@ See [`deploy/README.md`](./deploy/README.md) for more deployment details.
 4. Copy and configure MX, SPF, DKIM, and DMARC records from domain management, then run the DNS check.
 5. Create mailbox accounts, address aliases, or permission groups; enable registration, 2FA, Turnstile, and self-service mailbox requests as needed. Address aliases redirect delivery; configure post-delivery automatic forwarding under Profile > Inbox Rules after verifying the destination address by email code. The inbox copy is retained, while historical, auto-generated, and previously auto-forwarded messages are not forwarded again.
 6. Use the admin SMTP test and Webmail send/receive tests to confirm the full path works.
+
+## Linux.do SSO
+
+Linux.do SSO is disabled by default and is configured in **Admin > System Settings > Security**:
+
+1. Visit [Connect.Linux.Do](https://connect.linux.do/) and choose **My Application Access > Apply for New Access**.
+2. Set the callback URL to `https://your-lanqin-host/api/auth/linuxdo/callback`. It must exactly match the read-only callback URL shown in LanQin.
+3. Copy the issued Client ID and Client Secret into LanQin, then enable Linux.do login. The Client Secret is never returned to the browser; leaving the field blank on later saves preserves its current value.
+4. Optionally enable Linux.do registration independently of normal open registration. New users must choose an active local mail domain and prefix, then set a local password. Turnstile still applies when enabled.
+
+Existing users must sign in with their local account before linking Linux.do under **Profile > Account**. LanQin binds only the immutable Linux.do `id`; it never matches accounts by username or email prefix. Local passwords remain usable, and users with TOTP enabled must still complete TOTP during SSO login and link/unlink operations. Disabling SSO hides the login entry but does not delete existing bindings.
+
+Production SSO requires a valid HTTPS `LANQIN_PUBLIC_BASE_URL`. LanQin uses the fixed official OAuth endpoints and requests only the `user` scope.
 
 ## Key Environment Variables
 

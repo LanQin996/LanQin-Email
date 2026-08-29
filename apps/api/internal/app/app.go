@@ -36,6 +36,7 @@ type App struct {
 	syncEventsMu     sync.Mutex
 	syncEventClients map[chan struct{}]struct{}
 	externalIMAP     externalIMAPClientFactory
+	linuxDoOAuth     linuxDoOAuthClient
 	messageSearchFTS bool
 }
 
@@ -60,6 +61,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 
 	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker()}
 	a.externalIMAP = a
+	a.linuxDoOAuth = newLinuxDoHTTPClient()
 	if cfg.DBDriver == databaseDriverSQLite {
 		if err := a.configureSQLite(context.Background()); err != nil {
 			db.Close()
@@ -180,6 +182,35 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS oauth_identities (
+			provider TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			username TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(provider, subject),
+			UNIQUE(user_id, provider)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_oauth_identities_user ON oauth_identities(user_id, provider)`,
+		`CREATE TABLE IF NOT EXISTS oauth_login_states (
+			token_hash TEXT PRIMARY KEY,
+			purpose TEXT NOT NULL CHECK(purpose IN ('login','link')),
+			user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_oauth_login_states_expires ON oauth_login_states(expires_at)`,
+		`CREATE TABLE IF NOT EXISTS oauth_registration_challenges (
+			token_hash TEXT PRIMARY KEY,
+			provider TEXT NOT NULL,
+			subject TEXT NOT NULL,
+			username TEXT NOT NULL DEFAULT '',
+			display_name TEXT NOT NULL DEFAULT '',
+			expires_at TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_oauth_registration_challenges_expires ON oauth_registration_challenges(expires_at)`,
 		`CREATE TABLE IF NOT EXISTS api_tokens (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

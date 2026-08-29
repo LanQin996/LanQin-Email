@@ -111,6 +111,36 @@ func TestMySQLFreshSchemaUsesPortableIndexesAndBinaryCollation(t *testing.T) {
 	}
 }
 
+func TestLinuxDoExternalSchemaContract(t *testing.T) {
+	t.Parallel()
+	postgres := strings.Join(postgresFreshSchema(), "\n")
+	mysql := strings.Join(mysqlFreshSchema(), "\n")
+	for name, schema := range map[string]string{"postgres": postgres, "mysql": mysql} {
+		for _, fragment := range []string{
+			"CREATE TABLE oauth_identities",
+			"PRIMARY KEY(provider,subject)",
+			"UNIQUE(user_id,provider)",
+			"CREATE TABLE oauth_login_states",
+			"CREATE TABLE oauth_registration_challenges",
+			"idx_oauth_login_states_expires",
+			"idx_oauth_registration_challenges_expires",
+		} {
+			if !strings.Contains(schema, fragment) {
+				t.Errorf("%s Linux.do schema is missing %q", name, fragment)
+			}
+		}
+	}
+	statements := linuxDoExternalSchemaStatements()
+	if len(statements) != 6 {
+		t.Fatalf("v2 migration has %d statements, want 6", len(statements))
+	}
+	for _, statement := range statements {
+		if !strings.Contains(statement, "oauth_") {
+			t.Errorf("v2 migration contains unrelated statement: %.80s", statement)
+		}
+	}
+}
+
 func schemaTableNames(statements []string) []string {
 	names := make([]string, 0, len(externalSchemaTables))
 	for _, statement := range statements {

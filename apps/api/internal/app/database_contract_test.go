@@ -106,6 +106,7 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	}
 
 	assertExternalDeliveryCascade(t, ctx, a, adminID, now)
+	assertOAuthIdentityContract(t, ctx, a)
 
 	var migrationCount int
 	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=?`, externalSchemaVersion).Scan(&migrationCount); err != nil {
@@ -116,6 +117,43 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	}
 	if err := a.db.QueryRowContext(ctx, `SELECT id FROM users WHERE id=?`, "missing").Scan(new(string)); err != sql.ErrNoRows {
 		t.Fatalf("missing row error=%v, want sql.ErrNoRows", err)
+	}
+}
+
+func TestSQLiteOAuthIdentityContract(t *testing.T) {
+	a := newTestApp(t)
+	assertOAuthIdentityContract(t, context.Background(), a)
+}
+
+func assertOAuthIdentityContract(t *testing.T, ctx context.Context, a *App) {
+	t.Helper()
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	userID := newID("usr")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, userID, userID+"@oauth.test", "OAuth Contract", "user", "unused", 0, now, now); err != nil {
+		t.Fatalf("insert OAuth contract user: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO oauth_identities(provider,subject,user_id,username,created_at,updated_at) VALUES(?,?,?,?,?,?)`, linuxDoProvider, "contract-subject", userID, "contract", now, now); err != nil {
+		t.Fatalf("insert OAuth identity: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO oauth_identities(provider,subject,user_id,username,created_at,updated_at) VALUES(?,?,?,?,?,?)`, linuxDoProvider, "other-subject", userID, "other", now, now); !isUniqueViolation(err) {
+		t.Fatalf("duplicate user/provider error=%v, want unique violation", err)
+	}
+	stateHash := hashToken("contract-state")
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO oauth_login_states(token_hash,purpose,user_id,expires_at,created_at) VALUES(?,?,?,?,?)`, stateHash, "link", userID, a.now().UTC().Add(time.Minute).Format(time.RFC3339Nano), now); err != nil {
+		t.Fatalf("insert OAuth state: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM users WHERE id=?`, userID); err != nil {
+		t.Fatalf("delete OAuth contract user: %v", err)
+	}
+	for table, target := range map[string][2]string{
+		"oauth_identities":   {"subject", "contract-subject"},
+		"oauth_login_states": {"token_hash", stateHash},
+	} {
+		column, value := target[0], target[1]
+		var count int
+		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE `+column+`=?`, value).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("OAuth cascade %s count=%d err=%v", table, count, err)
+		}
 	}
 }
 
