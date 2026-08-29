@@ -2153,6 +2153,8 @@ function sendQueueSourceLabel(source: string) {
   if (normalized === "webmail") return "Webmail"
   if (normalized === "open_api") return "Open API"
   if (normalized === "scheduled") return "定时发送"
+  if (normalized === "forward_verification") return "转发邮箱验证"
+  if (normalized.startsWith("rule_forward:")) return "收件规则自动转发"
   return source || "未知"
 }
 

@@ -1186,6 +1186,9 @@ func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAc
 			if err := a.writeStoredMessageToMaildir(ctx, msgID, stored, attachments); err != nil {
 				a.log.Warn("failed to write external imap message to maildir", "message", msgID, "error", err)
 			}
+			if strings.EqualFold(folder.Name, "INBOX") {
+				a.applyInboundControls(ctx, msgID, account.MailboxID, stored.From, stored.Subject)
+			}
 			imported++
 		} else {
 			skipped++

@@ -1165,6 +1165,169 @@ func TestMailRulesConditionGroupsAndActions(t *testing.T) {
 	}
 }
 
+func TestMailRuleAutomaticForwardQueuesOnceAndKeepsInboxCopy(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.SMTPHost = "127.0.0.1"
+	a.cfg.SMTPPort = "1"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "forward-sender", "Forward Sender", "Password123!", nil)
+	recipient := createTestMailbox(t, admin, domainID, "forward-recipient", "Forward Recipient", "Password123!", nil)
+	target := "destination@example.test"
+
+	senderClient := &testClient{t: t, server: ts}
+	if code := senderClient.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("sender login=%d", code)
+	}
+	var existing MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "before forward rule", "text": "existing body"}, &existing); code != http.StatusCreated {
+		t.Fatalf("send existing code=%d body=%+v", code, existing)
+	}
+
+	rcpt := &testClient{t: t, server: ts}
+	if code := rcpt.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("recipient login=%d", code)
+	}
+	var invalid map[string]any
+	if code := rcpt.do("POST", "/api/me/rules", map[string]any{
+		"mailboxId": recipient.ID, "fromContains": sender.Address, "actions": []map[string]string{{"type": "forward", "value": "not-an-email"}},
+	}, &invalid); code != http.StatusBadRequest {
+		t.Fatalf("invalid forward target code=%d body=%v", code, invalid)
+	}
+	var rule MailRule
+	if code := rcpt.do("POST", "/api/me/rules", map[string]any{
+		"mailboxId": recipient.ID, "name": "forward incoming", "conditions": []map[string]string{{"field": "all"}},
+		"actions": []map[string]string{{"type": "forward", "value": target}},
+	}, &invalid); code != http.StatusBadRequest {
+		t.Fatalf("unverified forward target code=%d body=%v", code, invalid)
+	}
+	var forwardAddress ForwardAddress
+	if code := rcpt.do("POST", "/api/me/forward-addresses/request", map[string]string{"email": target}, &forwardAddress); code != http.StatusAccepted {
+		t.Fatalf("request forward verification code=%d address=%+v", code, forwardAddress)
+	}
+	if forwardAddress.Verified || forwardAddress.ID == "" || forwardAddress.Email != target {
+		t.Fatalf("unexpected pending forward address=%+v", forwardAddress)
+	}
+	var verificationMIMEBase64 string
+	if err := a.db.QueryRow(`SELECT mime_base64 FROM send_queue WHERE source=?`, sendSourceForwardVerification).Scan(&verificationMIMEBase64); err != nil {
+		t.Fatal(err)
+	}
+	verificationRaw, err := base64.StdEncoding.DecodeString(verificationMIMEBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verificationMessage, _, err := a.parseMaildirMessage(verificationRaw, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codeParts := strings.SplitN(verificationMessage.BodyText, "验证码：", 2)
+	if len(codeParts) != 2 || len(strings.Fields(codeParts[1])) == 0 {
+		t.Fatalf("verification code missing from body: %q", verificationMessage.BodyText)
+	}
+	verificationCode := strings.Fields(codeParts[1])[0]
+	if len(verificationCode) != 6 {
+		t.Fatalf("unexpected verification code: %q", verificationCode)
+	}
+	wrongVerificationCode := "000000"
+	if verificationCode == wrongVerificationCode {
+		wrongVerificationCode = "999999"
+	}
+	if code := rcpt.do("POST", "/api/me/forward-addresses/"+forwardAddress.ID+"/verify", map[string]string{"code": wrongVerificationCode}, &invalid); code != http.StatusUnauthorized {
+		t.Fatalf("wrong verification code status=%d body=%v", code, invalid)
+	}
+	if code := rcpt.do("POST", "/api/me/forward-addresses/"+forwardAddress.ID+"/verify", map[string]string{"code": verificationCode}, &forwardAddress); code != http.StatusOK {
+		t.Fatalf("verify forward address code=%d address=%+v", code, forwardAddress)
+	}
+	if !forwardAddress.Verified {
+		t.Fatalf("forward address was not verified: %+v", forwardAddress)
+	}
+	if code := senderClient.do("POST", "/api/me/rules", map[string]any{
+		"mailboxId": sender.ID, "name": "cannot reuse verification", "conditions": []map[string]string{{"field": "all"}},
+		"actions": []map[string]string{{"type": "forward", "value": target}},
+	}, &invalid); code != http.StatusBadRequest {
+		t.Fatalf("cross-user verification reuse code=%d body=%v", code, invalid)
+	}
+	if code := rcpt.do("POST", "/api/me/rules", map[string]any{
+		"mailboxId": recipient.ID, "name": "forward incoming", "conditions": []map[string]string{{"field": "all"}},
+		"actions": []map[string]string{{"type": "forward", "value": target}}, "applyToExisting": true,
+	}, &rule); code != http.StatusCreated {
+		t.Fatalf("create forward rule code=%d rule=%+v", code, rule)
+	}
+	if rule.AppliedExistingCount != 0 {
+		t.Fatalf("forward-only rule applied existing count=%d, want 0", rule.AppliedExistingCount)
+	}
+	var forwardCount int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&forwardCount); err != nil || forwardCount != 0 {
+		t.Fatalf("existing message forward queue count=%d err=%v", forwardCount, err)
+	}
+
+	var sent MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "forward this", "text": "forwarded body"}, &sent); code != http.StatusCreated {
+		t.Fatalf("send forwarded code=%d body=%+v", code, sent)
+	}
+	var source, mailFrom, headerFrom, recipientsJSON, mimeBase64 string
+	if err := a.db.QueryRow(`SELECT source,mail_from,header_from,recipients_json,mime_base64 FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&source, &mailFrom, &headerFrom, &recipientsJSON, &mimeBase64); err != nil {
+		t.Fatal(err)
+	}
+	forwardRecipients := jsonDecodeSlice(recipientsJSON)
+	if source == sendSourceRuleForward || mailFrom != recipient.Address || headerFrom != sender.Address || len(forwardRecipients) != 1 || forwardRecipients[0] != target {
+		t.Fatalf("forward queue source=%q mailFrom=%q headerFrom=%q recipients=%s", source, mailFrom, headerFrom, recipientsJSON)
+	}
+	forwardedRaw, err := base64.StdEncoding.DecodeString(mimeBase64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forwardedText := string(forwardedRaw)
+	if !strings.Contains(forwardedText, "Auto-Submitted: auto-generated") || !strings.Contains(forwardedText, "X-LanQin-Auto-Forwarded: "+recipient.Address) || !strings.Contains(forwardedText, "Subject: forward this") {
+		t.Fatalf("unexpected forwarded MIME: %s", forwardedText)
+	}
+
+	var inboxMessageID string
+	if err := a.db.QueryRow(`SELECT id FROM messages WHERE mailbox_id=? AND message_id=?`, recipient.ID, sent.MessageID).Scan(&inboxMessageID); err != nil {
+		t.Fatal(err)
+	}
+	a.applyInboundControls(context.Background(), inboxMessageID, recipient.ID, sender.Address, sent.Subject)
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&forwardCount); err != nil || forwardCount != 1 {
+		t.Fatalf("deduplicated forward queue count=%d err=%v", forwardCount, err)
+	}
+	var inboxCount int
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM messages m JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND f.role='inbox' AND m.message_id=?`, recipient.ID, sent.MessageID).Scan(&inboxCount); err != nil || inboxCount != 1 {
+		t.Fatalf("inbox copy count=%d err=%v", inboxCount, err)
+	}
+
+	if code := rcpt.do("DELETE", "/api/me/forward-addresses/"+forwardAddress.ID, nil, &map[string]any{}); code != http.StatusOK {
+		t.Fatalf("delete forward address code=%d", code)
+	}
+	var sentAfterDelete MailMessage
+	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "do not forward", "text": "forwarding verification removed"}, &sentAfterDelete); code != http.StatusCreated {
+		t.Fatalf("send after deleting verification code=%d body=%+v", code, sentAfterDelete)
+	}
+	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&forwardCount); err != nil || forwardCount != 1 {
+		t.Fatalf("forward queue count after deleting verification=%d err=%v", forwardCount, err)
+	}
+}
+
+func TestPrepareRuleForwardMIMESuppressesLoops(t *testing.T) {
+	raw := []byte("From: sender@example.test\r\nTo: user@example.test\r\nSubject: test\r\n\r\nbody")
+	forwarded, suppressed, err := prepareRuleForwardMIME(raw, "user@example.test")
+	if err != nil || suppressed || !bytes.HasPrefix(forwarded, []byte("Auto-Submitted: auto-generated\r\n")) {
+		t.Fatalf("prepare forward suppressed=%v err=%v raw=%q", suppressed, err, forwarded)
+	}
+	for _, header := range []string{"Auto-Submitted: auto-generated", "X-LanQin-Auto-Forwarded: user@example.test"} {
+		loopRaw := []byte("From: sender@example.test\r\n" + header + "\r\n\r\nbody")
+		if _, suppressed, err := prepareRuleForwardMIME(loopRaw, "user@example.test"); err != nil || !suppressed {
+			t.Fatalf("loop header %q suppressed=%v err=%v", header, suppressed, err)
+		}
+	}
+}
+
 func TestMailRulesMailboxIsolation(t *testing.T) {
 	a := newTestApp(t)
 	ts := httptest.NewServer(a.Router())

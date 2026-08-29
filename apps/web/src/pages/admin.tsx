@@ -688,7 +688,7 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <CardTitle>地址别名投递</CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">将某个收件地址投递到目标邮箱，不是用户收件后的自动转发；来源同时是实体邮箱时会保留本地投递。</p>
+            <p className="mt-1 text-sm text-muted-foreground">将某个收件地址投递到目标邮箱；用户收件后的自动转发请在“个人设置 → 收件规则”中配置。</p>
           </div>
           {canCreate && <CreateAliasDialog domains={domains} />}
         </div>

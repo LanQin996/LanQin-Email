@@ -125,11 +125,12 @@ export type SendQueueAuditEvent = {
 }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
-export type MailRuleConditionField = "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"
+export type MailRuleConditionField = "all" | "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"
 export type MailRuleConditionOperator = "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with" | "gt" | "gte" | "lt" | "lte" | "before" | "after" | "on"
 export type MailRuleCondition = { field?: MailRuleConditionField; operator?: MailRuleConditionOperator; value?: string; matchMode?: "all" | "any"; conditions?: MailRuleCondition[] }
-export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; value?: string; labelId?: string }
-export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: "archive" | "trash" | "star" | "mark-read" | "label" | "move"; enabled: boolean; createdAt: string; appliedExistingCount?: number }
+export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" | "label" | "move" | "forward"; value?: string; labelId?: string }
+export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: "archive" | "trash" | "star" | "mark-read" | "label" | "move" | "forward"; enabled: boolean; createdAt: string; appliedExistingCount?: number }
+export type ForwardAddress = { id: string; email: string; verified: boolean; expiresAt?: string; verifiedAt?: string; createdAt: string }
 export type BlockedSender = { id: string; mailboxId: string; email: string; reason: string; createdAt: string }
 export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; attachmentBytes: number; storageBytes: number; quotaBytes: number; quotaUsedPct: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
 export type ExternalImapStorageMode = "local" | "remote"

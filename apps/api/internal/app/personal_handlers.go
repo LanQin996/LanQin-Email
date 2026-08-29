@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -485,6 +486,17 @@ func (a *App) handleCreateRule(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("rule action is required"))
 		return
 	}
+	if len(ruleForwardRecipients(actions)) > maxRuleForwardRecipients {
+		badRequest(w, fmt.Errorf("at most %d forward recipients are allowed", maxRuleForwardRecipients))
+		return
+	}
+	if verified, err := a.ruleForwardAddressesVerified(r.Context(), user.ID, ruleForwardRecipients(actions)); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to check forward address verification")
+		return
+	} else if !verified {
+		badRequest(w, errors.New("forward address must be verified first"))
+		return
+	}
 	conditionsJSON, err := json.Marshal(conditions)
 	if err != nil {
 		badRequest(w, err)
@@ -914,7 +926,9 @@ func (a *App) applyInboundControls(ctx context.Context, messageID, mailboxID, fr
 		if !ruleMatches(rule, msg) {
 			continue
 		}
-		_ = a.applyRuleActions(ctx, mailboxID, messageID, rule.Actions)
+		if err := a.applyRuleActions(ctx, mailboxID, messageID, rule.ID, rule.Actions, true); err != nil {
+			a.log.Warn("failed to apply inbound mail rule", "rule", rule.ID, "message", messageID, "error", err)
+		}
 		if rule.StopProcessing {
 			break
 		}
@@ -1026,6 +1040,9 @@ func normalizeRuleCondition(item MailRuleCondition) (MailRuleCondition, bool) {
 	field := strings.ToLower(strings.TrimSpace(item.Field))
 	operator := strings.ToLower(strings.TrimSpace(item.Operator))
 	value := strings.TrimSpace(item.Value)
+	if field == "all" {
+		return MailRuleCondition{Field: "all", Operator: "equals", Value: "true"}, true
+	}
 	if value == "" {
 		return MailRuleCondition{}, false
 	}
@@ -1066,7 +1083,7 @@ func normalizeRuleActions(items []MailRuleAction, legacyAction string) []MailRul
 		typ := strings.TrimSpace(item.Type)
 		value := strings.TrimSpace(item.Value)
 		labelID := strings.TrimSpace(item.LabelID)
-		if typ != "archive" && typ != "trash" && typ != "star" && typ != "mark-read" && typ != "label" && typ != "move" {
+		if typ != "archive" && typ != "trash" && typ != "star" && typ != "mark-read" && typ != "label" && typ != "move" && typ != "forward" {
 			continue
 		}
 		if typ == "label" && value == "" && labelID == "" {
@@ -1074,6 +1091,12 @@ func normalizeRuleActions(items []MailRuleAction, legacyAction string) []MailRul
 		}
 		if typ == "move" && value == "" {
 			continue
+		}
+		if typ == "forward" {
+			value = normalizeRuleForwardAddress(value)
+			if value == "" {
+				continue
+			}
 		}
 		out = append(out, MailRuleAction{Type: typ, Value: value, LabelID: labelID})
 	}
@@ -1138,6 +1161,8 @@ func ruleConditionMatches(condition MailRuleCondition, msg ruleMessage) bool {
 	}
 	var source string
 	switch strings.ToLower(strings.TrimSpace(condition.Field)) {
+	case "all":
+		return true
 	case "from":
 		source = msg.From
 	case "to":
@@ -1268,9 +1293,10 @@ func parseRuleDateValue(raw string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string, actions []MailRuleAction) error {
+func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID, ruleID string, actions []MailRuleAction, allowForward bool) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	for _, action := range normalizeRuleActions(actions, "") {
+	normalizedActions := normalizeRuleActions(actions, "")
+	for _, action := range normalizedActions {
 		switch action.Type {
 		case "archive":
 			if folderID, err := a.ensureFolder(ctx, mailboxID, "Archive"); err == nil {
@@ -1321,6 +1347,11 @@ func (a *App) applyRuleActions(ctx context.Context, mailboxID, messageID string,
 			}
 		}
 	}
+	if allowForward {
+		if recipients := ruleForwardRecipients(normalizedActions); len(recipients) > 0 {
+			return a.enqueueRuleForward(ctx, mailboxID, messageID, ruleID, recipients)
+		}
+	}
 	return nil
 }
 
@@ -1365,6 +1396,15 @@ func ruleTargetFolder(value string) string {
 }
 
 func (a *App) applyRuleToExistingMessages(ctx context.Context, userID, mailboxID string, rule MailRule) (int64, error) {
+	existingActions := make([]MailRuleAction, 0, len(rule.Actions))
+	for _, action := range normalizeRuleActions(rule.Actions, "") {
+		if action.Type != "forward" {
+			existingActions = append(existingActions, action)
+		}
+	}
+	if len(existingActions) == 0 {
+		return 0, nil
+	}
 	args := []any{userID}
 	where := `mb.user_id=?`
 	if mailboxID != "" {
@@ -1396,7 +1436,7 @@ func (a *App) applyRuleToExistingMessages(ctx context.Context, userID, mailboxID
 	}
 	rows.Close()
 	for _, msg := range messages {
-		if err := a.applyRuleActions(ctx, msg.MailboxID, msg.ID, rule.Actions); err != nil {
+		if err := a.applyRuleActions(ctx, msg.MailboxID, msg.ID, rule.ID, existingActions, false); err != nil {
 			return count, err
 		}
 		count++

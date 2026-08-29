@@ -4,7 +4,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BarChart3, Ban, Bell, CalendarClock, Clock3, Contact, Copy, History, Info, KeyRound, Laptop, Link2, LogOut, Mail, MailCheck, MailX, Moon, PanelLeftClose, PanelLeftOpen, PencilLine, Plus, RefreshCcw, Search, Settings, Share2, ShieldCheck, SlidersHorizontal, Sun, Trash2, UserPlus, Users, X } from "lucide-react"
 import { QRCodeSVG } from "qrcode.react"
-import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, MailboxShare, MailboxShareAuditEvent, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser, UserNotification } from "@/lib/api"
+import { api, APIToken, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapStorageMode, ExternalImapSyncRun, ExternalImapTlsMode, ForwardAddress, MailboxShare, MailboxShareAuditEvent, MailboxSharePayload, MailboxShareUpdatePayload, MailLabel, MailRule, MailRuleAction, MailRuleCondition, Mailbox, MailboxApplyOptions, MailSignature, MailStats, PermissionLimits, ShareUser, UserNotification } from "@/lib/api"
 import { cn, formatBytes } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { DisplayMode, useDisplayMode } from "@/lib/display-mode"
@@ -105,6 +105,7 @@ export function ProfilePage() {
   const contacts = useQuery({ queryKey: ["contacts"], queryFn: api.contacts, enabled: canManageContacts })
   const signatures = useQuery({ queryKey: ["signatures"], queryFn: api.signatures, enabled: canManageSignatures })
   const rules = useQuery({ queryKey: ["rules"], queryFn: api.rules, enabled: canManageRules })
+  const forwardAddresses = useQuery({ queryKey: ["forward-addresses"], queryFn: api.forwardAddresses, enabled: canManageRules })
   const blocked = useQuery({ queryKey: ["blocked-senders"], queryFn: api.blockedSenders, enabled: canManageBlocked })
   const selectedMailbox = React.useMemo(() => mailboxes.data?.items.find((m) => m.id === mailboxId), [mailboxes.data?.items, mailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
@@ -209,6 +210,21 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "保存失败", description: error.message }),
   })
   const deleteRule = useMutation({ mutationFn: api.deleteRule, onSuccess: () => { qc.invalidateQueries({ queryKey: ["rules"] }); toast({ title: "规则已删除" }) } })
+  const requestForwardAddress = useMutation({
+    mutationFn: api.requestForwardAddressVerification,
+    onSuccess: (item) => { qc.invalidateQueries({ queryKey: ["forward-addresses"] }); toast({ title: item.verified ? "邮箱已验证" : "验证码已发送" }) },
+    onError: (error) => toast({ title: "发送失败", description: error.message }),
+  })
+  const verifyForwardAddress = useMutation({
+    mutationFn: ({ id, code }: { id: string; code: string }) => api.verifyForwardAddress(id, code),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["forward-addresses"] }); toast({ title: "转发邮箱验证成功" }) },
+    onError: (error) => toast({ title: "验证失败", description: error.message }),
+  })
+  const deleteForwardAddress = useMutation({
+    mutationFn: api.deleteForwardAddress,
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["forward-addresses"] }); toast({ title: "转发邮箱已移除" }) },
+    onError: (error) => toast({ title: "移除失败", description: error.message }),
+  })
   const createBlocked = useMutation({
     mutationFn: (form: FormData) => api.createBlockedSender({ mailboxId: blockedMailboxId === "all" ? "" : blockedMailboxId, email: String(form.get("email") || ""), reason: String(form.get("reason") || "") }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["blocked-senders"] }); toast({ title: "拦截规则已保存" }) },
@@ -392,7 +408,7 @@ export function ProfilePage() {
     if (tab === "signatures") return <SignaturesSection items={signatures.data?.items || []} mailboxes={mailboxes.data?.items || []} loading={signatures.isLoading} pending={createSignature.isPending || updateSignature.isPending || setDefaultSignature.isPending || deleteSignature.isPending} onCreate={(form) => createSignature.mutate(form)} onUpdate={(id, form) => updateSignature.mutate({ id, form })} onSetDefault={(id) => setDefaultSignature.mutate(id)} onDelete={(id) => deleteSignature.mutate(id)} />
     if (tab === "contacts") return <ContactsSection items={contacts.data?.items || []} loading={contacts.isLoading} pending={createContact.isPending} onCreate={(form) => createContact.mutate(form)} onDelete={(id) => deleteContact.mutate(id)} onCopy={copy} />
     if (tab === "cleanup") return <CleanupSection mailbox={selectedMailbox} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} pending={cleanup.isPending} onCleanup={(target) => cleanup.mutate(target)} />
-    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} pending={createRule.isPending} />
+    if (tab === "rules") return <RulesSection items={rules.data?.items || []} mailboxes={mailboxes.data?.items || []} labels={ruleLabels.data?.items || []} forwardAddresses={forwardAddresses.data?.items || []} open={ruleDialogOpen} onOpenChange={setRuleDialogOpen} onCreate={(payload) => createRule.mutate(payload)} onDelete={(id) => deleteRule.mutate(id)} onRequestForwardAddress={(email) => requestForwardAddress.mutateAsync(email)} onVerifyForwardAddress={(id, code) => verifyForwardAddress.mutateAsync({ id, code })} onDeleteForwardAddress={(id) => deleteForwardAddress.mutate(id)} pending={createRule.isPending || requestForwardAddress.isPending || verifyForwardAddress.isPending || deleteForwardAddress.isPending} />
     if (tab === "blocked") return <BlockedSection items={blocked.data?.items || []} mailboxes={mailboxes.data?.items || []} mailboxId={blockedMailboxId} spamCount={canViewStats ? stats.data?.byFolder.find((f) => f.role === "spam")?.count || 0 : 0} onMailboxChange={setBlockedMailboxId} onCreate={(form) => createBlocked.mutate(form)} onDelete={(id) => deleteBlocked.mutate(id)} pending={createBlocked.isPending} />
     if (tab === "stats") return <StatsSection stats={stats.data} mailbox={selectedMailbox} onRefresh={() => stats.refetch()} />
     return <ProfileOverview user={user!} profile={profile} password={password} passwordFormRef={passwordFormRef} stats={canViewStats ? stats.data : undefined} showStats={canViewStats} displayMode={displayMode} onDisplayModeChange={setDisplayMode} twoFactorFormRef={twoFactorFormRef} setupTwoFactor={setupTwoFactor} enableTwoFactor={enableTwoFactor} disableTwoFactor={disableTwoFactor} onCopy={copy} />
@@ -1324,18 +1340,19 @@ type RuleCreatePayload = {
 
 type RuleConditionField = NonNullable<MailRuleCondition["field"]>
 type RuleConditionOperator = NonNullable<MailRuleCondition["operator"]>
-const conditionFieldLabels: Record<RuleConditionField, string> = { from: "发件人地址", to: "收件人地址", cc: "抄送地址", subject: "邮件主题", body: "邮件正文", attachment: "附件名称", size: "邮件大小", date: "收信日期" }
+const conditionFieldLabels: Record<RuleConditionField, string> = { all: "所有邮件", from: "发件人地址", to: "收件人地址", cc: "抄送地址", subject: "邮件主题", body: "邮件正文", attachment: "附件名称", size: "邮件大小", date: "收信日期" }
 const conditionOperatorLabels: Record<RuleConditionOperator, string> = { contains: "包含", "not-contains": "不包含", equals: "等于", "not-equals": "不等于", "starts-with": "开头是", "ends-with": "结尾是", gt: "大于", gte: "大于等于", lt: "小于", lte: "小于等于", before: "早于", after: "晚于", on: "当天" }
 const textConditionOperators: RuleConditionOperator[] = ["contains", "not-contains", "equals", "not-equals", "starts-with", "ends-with"]
 const sizeConditionOperators: RuleConditionOperator[] = ["gt", "gte", "lt", "lte", "equals", "not-equals"]
 const dateConditionOperators: RuleConditionOperator[] = ["before", "after", "on", "equals", "not-equals"]
 const conditionFields = Object.keys(conditionFieldLabels) as RuleConditionField[]
 const commonRuleFolders = ["Inbox", "Archive", "Spam", "Trash"]
-const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到" }
+const ruleActionLabels: Record<MailRuleAction["type"], string> = { archive: "移入归档", trash: "移入回收站", star: "添加星标", "mark-read": "标记已读", label: "添加标签", move: "移动到", forward: "自动转发到" }
 
-function RulesSection({ items, mailboxes, labels, open, onOpenChange, onCreate, onDelete, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; pending: boolean }) {
+function RulesSection({ items, mailboxes, labels, forwardAddresses, open, onOpenChange, onCreate, onDelete, onRequestForwardAddress, onVerifyForwardAddress, onDeleteForwardAddress, pending }: { items: MailRule[]; mailboxes: Mailbox[]; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; open: boolean; onOpenChange: (open: boolean) => void; onCreate: (payload: RuleCreatePayload) => void; onDelete: (id: string) => void; onRequestForwardAddress: (email: string) => Promise<ForwardAddress>; onVerifyForwardAddress: (id: string, code: string) => Promise<ForwardAddress>; onDeleteForwardAddress: (id: string) => void; pending: boolean }) {
   return (
     <div className="space-y-4">
+      <ForwardAddressesCard items={forwardAddresses} pending={pending} onRequest={onRequestForwardAddress} onVerify={onVerifyForwardAddress} onDelete={onDeleteForwardAddress} />
       <div className="flex justify-end">
         <Button onClick={() => onOpenChange(true)}><Plus className="h-4 w-4" />新建规则</Button>
       </div>
@@ -1346,12 +1363,70 @@ function RulesSection({ items, mailboxes, labels, open, onOpenChange, onCreate, 
           {items.length === 0 && <EmptyState text="暂无收件规则" />}
         </CardContent>
       </Card>
-      <RuleDialog open={open} onOpenChange={onOpenChange} mailboxes={mailboxes} labels={labels} pending={pending} onCreate={onCreate} />
+      <RuleDialog open={open} onOpenChange={onOpenChange} mailboxes={mailboxes} labels={labels} forwardAddresses={forwardAddresses.filter((item) => item.verified)} pending={pending} onCreate={onCreate} />
     </div>
   )
 }
 
-function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: Mailbox[]; labels: MailLabel[]; pending: boolean; onCreate: (payload: RuleCreatePayload) => void }) {
+function ForwardAddressesCard({ items, pending, onRequest, onVerify, onDelete }: { items: ForwardAddress[]; pending: boolean; onRequest: (email: string) => Promise<ForwardAddress>; onVerify: (id: string, code: string) => Promise<ForwardAddress>; onDelete: (id: string) => void }) {
+  const [email, setEmail] = React.useState("")
+  async function requestVerification(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const value = email.trim()
+    if (!value) return
+    try {
+      await onRequest(value)
+      setEmail("")
+    } catch {
+      // Mutation-level error handling shows the failure and the input remains available for retry.
+    }
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>转发邮箱验证</CardTitle>
+        <p className="text-sm text-muted-foreground">自动转发只能使用已通过验证码确认的目标邮箱。</p>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        <form className="flex flex-col gap-2 sm:flex-row" onSubmit={requestVerification}>
+          <Input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="目标邮箱" required />
+          <Button type="submit" variant="outline" disabled={pending || !isForwardEmail(email)}><ShieldCheck className="h-4 w-4" />发送验证码</Button>
+        </form>
+        {items.map((item) => <ForwardAddressRow key={item.id} item={item} pending={pending} onVerify={onVerify} onDelete={onDelete} />)}
+        {items.length === 0 && <EmptyState text="暂无已验证的转发邮箱" />}
+      </CardContent>
+    </Card>
+  )
+}
+
+function ForwardAddressRow({ item, pending, onVerify, onDelete }: { item: ForwardAddress; pending: boolean; onVerify: (id: string, code: string) => Promise<ForwardAddress>; onDelete: (id: string) => void }) {
+  const [code, setCode] = React.useState("")
+  async function verify(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (code.length !== 6) return
+    try {
+      await onVerify(item.id, code)
+      setCode("")
+    } catch {
+      // Mutation-level error handling shows the failure and the code remains available for correction.
+    }
+  }
+  return (
+    <div className="flex flex-col gap-2 border-t pt-3 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{item.email}</div>
+        <Badge variant={item.verified ? "default" : "secondary"} className="mt-1">{item.verified ? "已验证" : "等待验证"}</Badge>
+      </div>
+      {!item.verified && <form className="flex min-w-0 gap-2" onSubmit={verify}>
+        <Input className="w-32" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))} placeholder="6 位验证码" />
+        <Button size="sm" disabled={pending || code.length !== 6}>验证</Button>
+      </form>}
+      <Button variant="ghost" size="icon" className="size-8 shrink-0 text-destructive" disabled={pending} onClick={() => onDelete(item.id)} aria-label="移除转发邮箱"><Trash2 className="h-4 w-4" /></Button>
+    </div>
+  )
+}
+
+function RuleDialog({ open, onOpenChange, mailboxes, labels, forwardAddresses, pending, onCreate }: { open: boolean; onOpenChange: (open: boolean) => void; mailboxes: Mailbox[]; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; pending: boolean; onCreate: (payload: RuleCreatePayload) => void }) {
   const [name, setName] = React.useState("我的规则")
   const [mailboxId, setMailboxId] = React.useState("all")
   const [matchMode, setMatchMode] = React.useState<"all" | "any">("all")
@@ -1380,6 +1455,10 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
     setConditions((items) => items.map((item, i) => {
       if (i !== index) return item
       const next = { ...item, ...patch }
+      if (patch.field === "all") {
+        next.operator = "equals"
+        next.value = "true"
+      }
       if (patch.field && !conditionOperatorsForField(patch.field).includes(next.operator || "contains")) {
         next.operator = defaultConditionOperator(patch.field)
       }
@@ -1394,8 +1473,8 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
   function removeCondition(index: number) { setConditions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
   function removeAction(index: number) { setActions((items) => items.length > 1 ? items.filter((_, i) => i !== index) : items) }
 
-  const validConditions = conditions.map((item) => ({ ...item, value: (item.value || "").trim() })).filter((item) => item.field && item.operator && item.value)
-  const validActions = actions.map((item) => normalizeDraftAction(item, availableLabels)).filter((item) => item.type !== "label" || item.value || item.labelId).filter((item) => item.type !== "move" || item.value)
+  const validConditions = conditions.map((item) => item.field === "all" ? { field: "all" as const, operator: "equals" as const, value: "true" } : { ...item, value: (item.value || "").trim() }).filter((item) => item.field && item.operator && item.value)
+  const validActions = actions.map((item) => normalizeDraftAction(item, availableLabels)).filter((item) => item.type !== "label" || item.value || item.labelId).filter((item) => item.type !== "move" || item.value).filter((item) => item.type !== "forward" || isForwardEmail(item.value))
   const canCreate = validConditions.length > 0 && validActions.length > 0 && !pending
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -1430,11 +1509,15 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>{conditionFields.map((value) => <SelectItem key={value} value={value}>{conditionFieldLabels[value]}</SelectItem>)}</SelectContent>
                     </Select>
-                    <Select value={condition.operator || defaultConditionOperator(condition.field)} onValueChange={(value) => updateCondition(index, { operator: value as RuleConditionOperator })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>{conditionOperatorsForField(condition.field).map((value) => <SelectItem key={value} value={value}>{conditionOperatorLabels[value]}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <Input type={condition.field === "date" ? "date" : "text"} value={condition.value || ""} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder={conditionPlaceholder(condition.field)} />
+                    {condition.field === "all" ? (
+                      <Input className="md:col-span-2" value="全部收到的邮件" readOnly />
+                    ) : <>
+                      <Select value={condition.operator || defaultConditionOperator(condition.field)} onValueChange={(value) => updateCondition(index, { operator: value as RuleConditionOperator })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>{conditionOperatorsForField(condition.field).map((value) => <SelectItem key={value} value={value}>{conditionOperatorLabels[value]}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <Input type={condition.field === "date" ? "date" : "text"} value={condition.value || ""} onChange={(event) => updateCondition(index, { value: event.target.value })} placeholder={conditionPlaceholder(condition.field)} />
+                    </>}
                     <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeCondition(index)} disabled={conditions.length === 1}><X className="h-4 w-4" /></Button>
                     <Button type="button" variant="ghost" size="icon" onClick={addCondition}><Plus className="h-4 w-4" /></Button>
                   </div>
@@ -1451,7 +1534,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>{(Object.keys(ruleActionLabels) as MailRuleAction["type"][]).map((value) => <SelectItem key={value} value={value}>{ruleActionLabels[value]}</SelectItem>)}</SelectContent>
                     </Select>
-                    <RuleActionValue action={action} labels={availableLabels} onChange={(patch) => updateAction(index, patch)} />
+                    <RuleActionValue action={action} labels={availableLabels} forwardAddresses={forwardAddresses} onChange={(patch) => updateAction(index, patch)} />
                     <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" onClick={() => removeAction(index)} disabled={actions.length === 1}><X className="h-4 w-4" /></Button>
                     <Button type="button" variant="ghost" size="icon" onClick={addAction}><Plus className="h-4 w-4" /></Button>
                   </div>
@@ -1463,7 +1546,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
 
             <div className="space-y-4">
               <RuleCheckbox checked={enabled} onCheckedChange={setEnabled} label="立即启用" />
-              <RuleCheckbox checked={applyToExisting} onCheckedChange={setApplyToExisting} label="应用于现有邮件" />
+              <RuleCheckbox checked={applyToExisting} onCheckedChange={setApplyToExisting} label="应用于现有邮件（不执行自动转发）" />
               <div className="flex items-center gap-2">
                 <RuleCheckbox checked={stopProcessing} onCheckedChange={setStopProcessing} label="终止规则：命中此规则后不再应用其他规则" />
                 <Info className="h-4 w-4 text-muted-foreground" />
@@ -1480,7 +1563,7 @@ function RuleDialog({ open, onOpenChange, mailboxes, labels, pending, onCreate }
   )
 }
 
-function RuleActionValue({ action, labels, onChange }: { action: MailRuleAction; labels: MailLabel[]; onChange: (patch: Partial<MailRuleAction>) => void }) {
+function RuleActionValue({ action, labels, forwardAddresses, onChange }: { action: MailRuleAction; labels: MailLabel[]; forwardAddresses: ForwardAddress[]; onChange: (patch: Partial<MailRuleAction>) => void }) {
   if (action.type === "label") {
     if (labels.length > 0) {
       return (
@@ -1508,6 +1591,14 @@ function RuleActionValue({ action, labels, onChange }: { action: MailRuleAction;
         </Select>
         <Input value={value} onChange={(event) => onChange({ value: event.target.value })} placeholder="输入或选择文件夹名" />
       </div>
+    )
+  }
+  if (action.type === "forward") {
+    return (
+      <Select value={action.value || ""} onValueChange={(value) => onChange({ value })} disabled={forwardAddresses.length === 0}>
+        <SelectTrigger><SelectValue placeholder={forwardAddresses.length > 0 ? "选择已验证邮箱" : "请先验证转发邮箱"} /></SelectTrigger>
+        <SelectContent>{forwardAddresses.map((item) => <SelectItem key={item.id} value={item.email}>{item.email}</SelectItem>)}</SelectContent>
+      </Select>
     )
   }
   return <Input value="无需填写" readOnly />
@@ -1543,16 +1634,23 @@ function normalizeDraftAction(action: MailRuleAction, labels: MailLabel[]): Mail
     return { type: "label", value, labelId: labels.find((label) => label.name === value)?.id || action.labelId || "" }
   }
   if (action.type === "move") return { type: "move", value: action.value || "Archive" }
+  if (action.type === "forward") return { type: "forward", value: (action.value || "").trim() }
   return { type: action.type }
 }
 
+function isForwardEmail(value?: string) {
+  return /^[^\s@]+@[^\s@]+$/.test((value || "").trim())
+}
+
 function conditionOperatorsForField(field?: MailRuleCondition["field"]) {
+  if (field === "all") return ["equals"] as RuleConditionOperator[]
   if (field === "size") return sizeConditionOperators
   if (field === "date") return dateConditionOperators
   return textConditionOperators
 }
 
 function defaultConditionOperator(field?: MailRuleCondition["field"]): RuleConditionOperator {
+  if (field === "all") return "equals"
   if (field === "size") return "gte"
   if (field === "date") return "on"
   return "contains"
@@ -1576,6 +1674,7 @@ function conditionItemSummary(item: MailRuleCondition): string {
     return `${mode}(${item.conditions.map(conditionItemSummary).join("；")})`
   }
   const field = item.field || "from"
+  if (field === "all") return "所有邮件"
   const operator = item.operator || defaultConditionOperator(field)
   return `${conditionFieldLabels[field]} ${conditionOperatorLabels[operator]} ${item.value || ""}`
 }
@@ -1583,6 +1682,7 @@ function conditionItemSummary(item: MailRuleCondition): string {
 function actionSummary(action: MailRuleAction) {
   if (action.type === "label") return `${ruleActionLabels[action.type]}${action.value ? `：${action.value}` : ""}`
   if (action.type === "move") return `${ruleActionLabels[action.type]}：${folderLabel(action.value || "Archive")}`
+  if (action.type === "forward") return `${ruleActionLabels[action.type]}：${action.value || ""}`
   return ruleActionLabels[action.type]
 }
 

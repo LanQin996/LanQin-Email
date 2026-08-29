@@ -127,7 +127,7 @@ docker compose -f docker-compose.stack.yml -f docker-compose.stack.build.yml up 
 - 第三方客户端可使用 IMAP SSL `993`、POP3 SSL `995`、SMTP SSL `465` 或 Submission `587`。
 - Rspamd 通过 milter 接入 Postfix，负责 DKIM 签名和垃圾邮件标记。
 - Rspamd 会周期性从 SQLite 导出域名 DKIM 私钥到容器内 `/var/lib/rspamd/dkim`。
-- 后台“别名转发”是 Postfix 地址别名投递，不是用户收件箱的自动转发规则；来源同时是实体邮箱时，查询会同时返回实体邮箱和别名目标，保留本地投递。
+- 后台“别名转发”是 Postfix 地址别名投递；用户收件箱保留邮件后再自动转发，请先在“个人设置 → 收件规则”中通过验证码验证目标邮箱，再添加“自动转发到”动作。历史邮件、自动生成邮件和已自动转发邮件不会再次转发。
 - Go API 是 Webmail 和管理后台入口；浏览器不直接连接 SMTP/IMAP/POP3。
 - Go API 会读取 `LANQIN_MAILDIR_ROOT=/var/mail/vhosts`，周期扫描 Maildir，把 Postfix/Dovecot 入站邮件同步成 Webmail 索引。
 - 第三方客户端可通过 LanQin API 提供的 SMTP `465/587` 发信；Webmail/API 和第三方客户端的“已发送”都由 API 写入，外发投递进入发送队列并由 API worker relay/retry，客户端后续 IMAP APPEND 到 Sent 会按 `Message-ID` 去重。

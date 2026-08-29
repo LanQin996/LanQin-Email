@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, ForwardAddress, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -58,6 +58,10 @@ export const api = {
   rules: () => request<ListResponse<MailRule>>("/api/me/rules"),
   createRule: (payload: { mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; enabled: boolean }) => request<MailRule>("/api/me/rules", { method: "POST", body: JSON.stringify(payload) }),
   deleteRule: (id: string) => request<{ ok: boolean }>(`/api/me/rules/${id}`, { method: "DELETE" }),
+  forwardAddresses: () => request<ListResponse<ForwardAddress>>("/api/me/forward-addresses"),
+  requestForwardAddressVerification: (email: string) => request<ForwardAddress>("/api/me/forward-addresses/request", { method: "POST", body: JSON.stringify({ email }) }),
+  verifyForwardAddress: (id: string, code: string) => request<ForwardAddress>(`/api/me/forward-addresses/${id}/verify`, { method: "POST", body: JSON.stringify({ code }) }),
+  deleteForwardAddress: (id: string) => request<{ ok: boolean }>(`/api/me/forward-addresses/${id}`, { method: "DELETE" }),
   blockedSenders: () => request<ListResponse<BlockedSender>>("/api/me/blocked-senders"),
   createBlockedSender: (payload: { mailboxId: string; email: string; reason: string }) => request<BlockedSender>("/api/me/blocked-senders", { method: "POST", body: JSON.stringify(payload) }),
   deleteBlockedSender: (id: string) => request<{ ok: boolean }>(`/api/me/blocked-senders/${id}`, { method: "DELETE" }),
