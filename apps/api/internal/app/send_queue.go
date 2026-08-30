@@ -63,6 +63,7 @@ type sendQueueItem struct {
 	MIMEBytes     []byte
 	AttemptCount  int
 	MaxAttempts   int
+	LeaseToken    string
 }
 
 func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error) {
@@ -92,7 +93,7 @@ func (a *App) enqueueSend(ctx context.Context, in sendQueueInput) (string, error
 		}
 		if existingID != id {
 			if status == sendQueueStatusDelivered || status == sendQueueStatusCanceled || (status == sendQueueStatusFailed && attemptCount >= maxAttempts) {
-				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL WHERE id=? AND status=?`,
+				_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET user_id=?,sent_message_id=?,mail_from=?,header_from=?,recipients_json=?,mime_base64=?,status=?,attempt_count=0,next_attempt_at=?,last_error='',updated_at=?,delivered_at=NULL,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND status=?`,
 					in.UserID, in.SentMessageID, normalizeEmail(in.MailFrom), normalizeEmail(in.HeaderFrom), recipientsJSON, mimeBase64, sendQueueStatusQueued, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano), existingID, status)
 				if err != nil {
 					return "", err
@@ -199,7 +200,8 @@ func (a *App) processDueSendQueue(ctx context.Context) error {
 
 func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 	cutoff := a.now().UTC().Add(-sendQueueStaleAfter).Format(time.RFC3339Nano)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,attempt_count,max_attempts FROM send_queue WHERE status=? AND updated_at<=? AND attempt_count<max_attempts LIMIT 20`, sendQueueStatusSending, cutoff)
+	nowText := a.now().UTC().Format(time.RFC3339Nano)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,attempt_count,max_attempts,lease_token FROM send_queue WHERE status=? AND (lease_until<=? OR (lease_until IS NULL AND updated_at<=?)) AND attempt_count<max_attempts LIMIT 20`, sendQueueStatusSending, nowText, cutoff)
 	if err != nil {
 		return err
 	}
@@ -208,7 +210,7 @@ func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 	for rows.Next() {
 		var item sendQueueItem
 		var recipientsJSON, mimeBase64 string
-		if err := rows.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.SentMessageID, &item.MessageID, &item.Source, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &mimeBase64, &item.AttemptCount, &item.MaxAttempts); err != nil {
+		if err := rows.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.SentMessageID, &item.MessageID, &item.Source, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &mimeBase64, &item.AttemptCount, &item.MaxAttempts, &item.LeaseToken); err != nil {
 			return err
 		}
 		item.Recipients = jsonDecodeSlice(recipientsJSON)
@@ -242,7 +244,7 @@ func (a *App) recoverStaleSendQueueItems(ctx context.Context) error {
 			}
 			continue
 		}
-		res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND status=?`, sendQueueStatusQueued, now, "send attempt interrupted", now, item.ID, sendQueueStatusSending)
+		res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND status=? AND lease_token=?`, sendQueueStatusQueued, now, "send attempt interrupted", now, item.ID, sendQueueStatusSending, item.LeaseToken)
 		if err != nil {
 			return err
 		}
@@ -276,8 +278,12 @@ func (a *App) processSendQueueItem(ctx context.Context, id string) {
 
 func (a *App) markSendQueueDelivered(ctx context.Context, item sendQueueItem) error {
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='',mime_base64='' WHERE id=?`, sendQueueStatusDelivered, now, now, item.ID); err != nil {
+	res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,delivered_at=?,updated_at=?,last_error='',mime_base64='',lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND status=? AND lease_token=?`, sendQueueStatusDelivered, now, now, item.ID, sendQueueStatusSending, item.LeaseToken)
+	if err != nil {
 		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return sql.ErrNoRows
 	}
 	a.deleteSendQueueDeliveredMarker(item.ID)
 	a.recordSendAudit(ctx, sendAuditDelivered, sendQueueStatusDelivered, sendAuditInputFromQueue(item, ""))
@@ -285,8 +291,11 @@ func (a *App) markSendQueueDelivered(ctx context.Context, item sendQueueItem) er
 }
 
 func (a *App) claimSendQueueItem(ctx context.Context, id string) (sendQueueItem, error) {
-	now := a.now().UTC().Format(time.RFC3339Nano)
-	res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,attempt_count=attempt_count+1,updated_at=? WHERE id=? AND (status=? OR (status=? AND attempt_count<max_attempts)) AND next_attempt_at<=?`, sendQueueStatusSending, now, id, sendQueueStatusQueued, sendQueueStatusFailed, now)
+	nowTime := a.now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
+	leaseToken := newID("lease")
+	leaseUntil := nowTime.Add(sendQueueLeaseDuration).Format(time.RFC3339Nano)
+	res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,attempt_count=attempt_count+1,updated_at=?,lease_owner=?,lease_token=?,lease_until=? WHERE id=? AND (status=? OR (status=? AND attempt_count<max_attempts)) AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?)`, sendQueueStatusSending, now, a.workerID, leaseToken, leaseUntil, id, sendQueueStatusQueued, sendQueueStatusFailed, now, now)
 	if err != nil {
 		return sendQueueItem{}, err
 	}
@@ -295,8 +304,8 @@ func (a *App) claimSendQueueItem(ctx context.Context, id string) (sendQueueItem,
 	}
 	var item sendQueueItem
 	var recipientsJSON, mimeBase64 string
-	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,attempt_count,max_attempts FROM send_queue WHERE id=?`, id)
-	if err := row.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.SentMessageID, &item.MessageID, &item.Source, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &mimeBase64, &item.AttemptCount, &item.MaxAttempts); err != nil {
+	row := a.db.QueryRowContext(ctx, `SELECT id,user_id,mailbox_id,sent_message_id,message_id,source,mail_from,header_from,recipients_json,mime_base64,attempt_count,max_attempts,lease_token FROM send_queue WHERE id=? AND lease_token=?`, id, leaseToken)
+	if err := row.Scan(&item.ID, &item.UserID, &item.MailboxID, &item.SentMessageID, &item.MessageID, &item.Source, &item.MailFrom, &item.HeaderFrom, &recipientsJSON, &mimeBase64, &item.AttemptCount, &item.MaxAttempts, &item.LeaseToken); err != nil {
 		return sendQueueItem{}, err
 	}
 	item.Recipients = jsonDecodeSlice(recipientsJSON)
@@ -315,9 +324,13 @@ func (a *App) markSendQueueFailed(ctx context.Context, item sendQueueItem, sendE
 	if item.AttemptCount >= item.MaxAttempts {
 		nextAttempt = now.Add(365 * 24 * time.Hour)
 	}
-	_, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=?`, status, nextAttempt.Format(time.RFC3339Nano), sendErr.Error(), now.Format(time.RFC3339Nano), item.ID)
+	res, err := a.db.ExecContext(ctx, `UPDATE send_queue SET status=?,next_attempt_at=?,last_error=?,updated_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND status=? AND lease_token=?`, status, nextAttempt.Format(time.RFC3339Nano), sendErr.Error(), now.Format(time.RFC3339Nano), item.ID, sendQueueStatusSending, item.LeaseToken)
 	if err != nil {
 		a.log.Warn("failed to mark send queue failed", "id", item.ID, "error", err)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return
 	}
 	event := sendAuditRetry
 	if item.AttemptCount >= item.MaxAttempts {

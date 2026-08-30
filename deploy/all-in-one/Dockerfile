@@ -53,4 +53,10 @@ COPY deploy/rspamd/sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
 RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim /usr/local/bin/lanqin-postfix-configure-db /usr/local/bin/lanqin-dovecot-configure-db && mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim
 
 EXPOSE 80 443 25 465 587 993 995
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+  CMD curl --fail --silent --show-error http://127.0.0.1/readyz >/dev/null \
+    && postfix status >/dev/null 2>&1 \
+    && doveadm service status >/dev/null 2>&1 \
+    && rspamadm control stat >/dev/null 2>&1 \
+    || exit 1
 CMD ["/entrypoint.sh"]

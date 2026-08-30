@@ -375,56 +375,83 @@ func (a *App) processDueTelegramNotifications(ctx context.Context) error {
 		return nil
 	}
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM telegram_notification_outbox WHERE updated_at<? AND (delivered_at IS NOT NULL OR attempt_count>=?)`, a.now().UTC().Add(-30*24*time.Hour).Format(time.RFC3339Nano), telegramNotificationMaxAttempts)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,user_id,payload_json,attempt_count FROM telegram_notification_outbox
-		WHERE delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? ORDER BY next_attempt_at,created_at LIMIT 20`, telegramNotificationMaxAttempts, a.now().UTC().Format(time.RFC3339Nano))
+	nowText := a.now().UTC().Format(time.RFC3339Nano)
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM telegram_notification_outbox
+		WHERE delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_attempt_at,created_at LIMIT 20`, telegramNotificationMaxAttempts, nowText, nowText)
 	if err != nil {
 		return err
 	}
-	type item struct {
-		id, userID, payload string
-		attempt             int
-	}
-	items := []item{}
+	ids := []string{}
 	for rows.Next() {
-		var value item
-		if err := rows.Scan(&value.id, &value.userID, &value.payload, &value.attempt); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return err
 		}
-		items = append(items, value)
+		ids = append(ids, id)
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, value := range items {
+	for _, id := range ids {
+		value, err := a.claimTelegramNotification(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
 		var payload telegramNotificationPayload
 		if err := json.Unmarshal([]byte(value.payload), &payload); err != nil {
-			a.failTelegramNotification(ctx, value.id, value.userID, value.attempt, &telegramDeliveryError{message: "invalid Telegram notification payload", permanent: true})
+			a.failTelegramNotification(ctx, value.id, value.userID, value.attempt, value.leaseToken, &telegramDeliveryError{message: "invalid Telegram notification payload", permanent: true})
 			continue
 		}
 		settings, err := a.telegramSettingsRecord(ctx, value.userID)
 		if errors.Is(err, sql.ErrNoRows) || (err == nil && !settings.Enabled) {
-			_, _ = a.db.ExecContext(ctx, `DELETE FROM telegram_notification_outbox WHERE id=?`, value.id)
+			_, _ = a.db.ExecContext(ctx, `DELETE FROM telegram_notification_outbox WHERE id=? AND lease_token=?`, value.id, value.leaseToken)
 			continue
 		}
 		if err != nil {
 			return err
 		}
 		if err := a.deliverTelegramMessage(ctx, settings, payload); err != nil {
-			a.failTelegramNotification(ctx, value.id, value.userID, value.attempt, err)
+			a.failTelegramNotification(ctx, value.id, value.userID, value.attempt, value.leaseToken, err)
 			continue
 		}
 		now := a.now().UTC().Format(time.RFC3339Nano)
-		_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_outbox SET attempt_count=attempt_count+1,last_error='',updated_at=?,delivered_at=? WHERE id=? AND delivered_at IS NULL`, now, now, value.id)
-		_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_settings SET last_delivered_at=?,last_error='',updated_at=? WHERE user_id=?`, now, now, value.userID)
+		res, _ := a.db.ExecContext(ctx, `UPDATE telegram_notification_outbox SET last_error='',updated_at=?,delivered_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND delivered_at IS NULL AND lease_token=?`, now, now, value.id, value.leaseToken)
+		if changed, _ := res.RowsAffected(); changed > 0 {
+			_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_settings SET last_delivered_at=?,last_error='',updated_at=? WHERE user_id=?`, now, now, value.userID)
+		}
 	}
 	return nil
 }
 
-func (a *App) failTelegramNotification(ctx context.Context, id, userID string, attempt int, sendErr error) {
+type telegramNotificationOutboxItem struct {
+	id, userID, payload, leaseToken string
+	attempt                         int
+}
+
+func (a *App) claimTelegramNotification(ctx context.Context, id string) (telegramNotificationOutboxItem, error) {
 	now := a.now().UTC()
-	nextAttempt := attempt + 1
-	delay := sendRetryDelay(nextAttempt)
+	nowText := now.Format(time.RFC3339Nano)
+	token := newID("lease")
+	res, err := a.db.ExecContext(ctx, `UPDATE telegram_notification_outbox SET attempt_count=attempt_count+1,updated_at=?,lease_owner=?,lease_token=?,lease_until=? WHERE id=? AND delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?)`, nowText, a.workerID, token, now.Add(outboxLeaseDuration).Format(time.RFC3339Nano), id, telegramNotificationMaxAttempts, nowText, nowText)
+	if err != nil {
+		return telegramNotificationOutboxItem{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return telegramNotificationOutboxItem{}, sql.ErrNoRows
+	}
+	var item telegramNotificationOutboxItem
+	err = a.db.QueryRowContext(ctx, `SELECT id,user_id,payload_json,attempt_count,lease_token FROM telegram_notification_outbox WHERE id=? AND lease_token=?`, id, token).Scan(&item.id, &item.userID, &item.payload, &item.attempt, &item.leaseToken)
+	return item, err
+}
+
+func (a *App) failTelegramNotification(ctx context.Context, id, userID string, attempt int, leaseToken string, sendErr error) {
+	now := a.now().UTC()
+	nextAttempt := attempt
+	delay := sendRetryDelay(attempt)
 	var deliveryErr *telegramDeliveryError
 	if errors.As(sendErr, &deliveryErr) {
 		if deliveryErr.retryAfter > 0 {
@@ -435,8 +462,10 @@ func (a *App) failTelegramNotification(ctx context.Context, id, userID string, a
 		}
 	}
 	message := truncateWebhookError(sendErr.Error())
-	_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_outbox SET attempt_count=?,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND delivered_at IS NULL`, nextAttempt, now.Add(delay).Format(time.RFC3339Nano), message, now.Format(time.RFC3339Nano), id)
-	_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_settings SET last_error=?,updated_at=? WHERE user_id=?`, message, now.Format(time.RFC3339Nano), userID)
+	res, _ := a.db.ExecContext(ctx, `UPDATE telegram_notification_outbox SET attempt_count=?,next_attempt_at=?,last_error=?,updated_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND delivered_at IS NULL AND lease_token=?`, nextAttempt, now.Add(delay).Format(time.RFC3339Nano), message, now.Format(time.RFC3339Nano), id, leaseToken)
+	if changed, _ := res.RowsAffected(); changed > 0 {
+		_, _ = a.db.ExecContext(ctx, `UPDATE telegram_notification_settings SET last_error=?,updated_at=? WHERE user_id=?`, message, now.Format(time.RFC3339Nano), userID)
+	}
 }
 
 func (a *App) recordTelegramSettingsError(ctx context.Context, userID string, err error) {

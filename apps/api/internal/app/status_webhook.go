@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -18,6 +19,11 @@ import (
 )
 
 const statusWebhookMaxAttempts = 10
+
+type statusWebhookOutboxItem struct {
+	id, payload, leaseToken string
+	attempt                 int
+}
 
 type statusWebhookEnvelope struct {
 	ID        string `json:"id"`
@@ -65,38 +71,58 @@ func (a *App) processDueStatusWebhooks(ctx context.Context) error {
 	}
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM status_webhook_outbox
 		WHERE updated_at<? AND (delivered_at IS NOT NULL OR attempt_count>=?)`, a.now().UTC().Add(-30*24*time.Hour).Format(time.RFC3339Nano), statusWebhookMaxAttempts)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,payload_json,attempt_count FROM status_webhook_outbox
-		WHERE delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? ORDER BY next_attempt_at,created_at LIMIT 20`, statusWebhookMaxAttempts, a.now().UTC().Format(time.RFC3339Nano))
+	nowText := a.now().UTC().Format(time.RFC3339Nano)
+	rows, err := a.db.QueryContext(ctx, `SELECT id FROM status_webhook_outbox
+		WHERE delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?) ORDER BY next_attempt_at,created_at LIMIT 20`, statusWebhookMaxAttempts, nowText, nowText)
 	if err != nil {
 		return err
 	}
-	type item struct {
-		id, payload string
-		attempt     int
-	}
-	items := []item{}
+	ids := []string{}
 	for rows.Next() {
-		var value item
-		if err := rows.Scan(&value.id, &value.payload, &value.attempt); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			rows.Close()
 			return err
 		}
-		items = append(items, value)
+		ids = append(ids, id)
 	}
 	if err := rows.Close(); err != nil {
 		return err
 	}
-	for _, value := range items {
+	for _, id := range ids {
+		value, err := a.claimStatusWebhook(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
 		if err := a.deliverStatusWebhook(ctx, value.id, []byte(value.payload)); err != nil {
 			now := a.now().UTC()
-			next := now.Add(sendRetryDelay(value.attempt + 1))
-			_, _ = a.db.ExecContext(ctx, `UPDATE status_webhook_outbox SET attempt_count=attempt_count+1,next_attempt_at=?,last_error=?,updated_at=? WHERE id=? AND delivered_at IS NULL`, next.Format(time.RFC3339Nano), truncateWebhookError(err.Error()), now.Format(time.RFC3339Nano), value.id)
+			next := now.Add(sendRetryDelay(value.attempt))
+			_, _ = a.db.ExecContext(ctx, `UPDATE status_webhook_outbox SET next_attempt_at=?,last_error=?,updated_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND delivered_at IS NULL AND lease_token=?`, next.Format(time.RFC3339Nano), truncateWebhookError(err.Error()), now.Format(time.RFC3339Nano), value.id, value.leaseToken)
 			continue
 		}
 		now := a.now().UTC().Format(time.RFC3339Nano)
-		_, _ = a.db.ExecContext(ctx, `UPDATE status_webhook_outbox SET attempt_count=attempt_count+1,last_error='',updated_at=?,delivered_at=? WHERE id=? AND delivered_at IS NULL`, now, now, value.id)
+		_, _ = a.db.ExecContext(ctx, `UPDATE status_webhook_outbox SET last_error='',updated_at=?,delivered_at=?,lease_owner='',lease_token='',lease_until=NULL WHERE id=? AND delivered_at IS NULL AND lease_token=?`, now, now, value.id, value.leaseToken)
 	}
 	return nil
+}
+
+func (a *App) claimStatusWebhook(ctx context.Context, id string) (statusWebhookOutboxItem, error) {
+	now := a.now().UTC()
+	nowText := now.Format(time.RFC3339Nano)
+	token := newID("lease")
+	res, err := a.db.ExecContext(ctx, `UPDATE status_webhook_outbox SET attempt_count=attempt_count+1,updated_at=?,lease_owner=?,lease_token=?,lease_until=? WHERE id=? AND delivered_at IS NULL AND attempt_count<? AND next_attempt_at<=? AND (lease_until IS NULL OR lease_until<=?)`, nowText, a.workerID, token, now.Add(outboxLeaseDuration).Format(time.RFC3339Nano), id, statusWebhookMaxAttempts, nowText, nowText)
+	if err != nil {
+		return statusWebhookOutboxItem{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return statusWebhookOutboxItem{}, sql.ErrNoRows
+	}
+	var item statusWebhookOutboxItem
+	err = a.db.QueryRowContext(ctx, `SELECT id,payload_json,attempt_count,lease_token FROM status_webhook_outbox WHERE id=? AND lease_token=?`, id, token).Scan(&item.id, &item.payload, &item.attempt, &item.leaseToken)
+	return item, err
 }
 
 func (a *App) deliverStatusWebhook(ctx context.Context, eventID string, payload []byte) error {

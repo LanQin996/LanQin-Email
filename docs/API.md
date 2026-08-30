@@ -40,6 +40,18 @@ Validation failures — including a duplicate domain name — return `400 Bad Re
 
 校验失败（包括域名重复）会返回 `400 Bad Request`，而不是 `409`。
 
+## Health Endpoints / 健康检查
+
+Health endpoints do not require authentication and never include database DSNs, storage paths, or underlying errors in their responses.
+
+健康检查接口无需认证，响应不会包含数据库 DSN、存储路径或底层错误。
+
+| Endpoint | Semantics / 语义 |
+|------|---------|
+| `GET /livez` | Process liveness only; returns `200` while the API process can serve HTTP / 仅检查 API 进程存活，能处理 HTTP 时返回 `200` |
+| `GET /readyz` | Checks database, schema, storage, and enabled workers; returns `503` when unavailable / 检查数据库、schema、存储和已启用 worker，不可用时返回 `503` |
+| `GET /healthz` | Backward-compatible alias of `/readyz` / `/readyz` 的向后兼容别名 |
+
 ## Error Responses
 
 All API errors return JSON with this structure:
@@ -684,6 +696,15 @@ The target must be a public HTTPS URL by default. Redirects, URL credentials, lo
 
 目标地址默认必须是公网 HTTPS。重定向、URL 用户信息、loopback、私网、链路本地和未指定地址都会被拒绝。只有明确可信的私有部署才应设置 `LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=true`；开启后也允许 HTTP。
 
+## Webmail Message Threads / Webmail 邮件会话
+
+Authenticated Webmail users with `mail.read` can list one representative message per conversation and load all messages in a conversation:
+
+- `GET /api/mail/threads?mailboxId={id}` lists the latest message for each thread in the selected mailbox.
+- `GET /api/mail/messages/{messageId}/thread` returns all messages sharing that message's thread, ordered oldest first.
+
+已登录且具备 `mail.read` 权限的用户可以按会话查看邮件：以上接口都会校验当前用户对邮箱的读取权限；跨用户或无权邮箱统一返回 `404`，不会因线程 ID 泄露其他用户邮件。
+
 ## Telegram Incoming Mail Notifications / Telegram 收件通知
 
 Set `LANQIN_NOTIFICATION_SECRET_KEY` to enable per-user Telegram notification settings. The following authenticated endpoints require the `mail.rules.manage` permission:
@@ -698,3 +719,13 @@ Set `LANQIN_NOTIFICATION_SECRET_KEY` to enable per-user Telegram notification se
 Add `{ "type": "telegram" }` to a mail rule's `actions` array. Matching new Inbox messages are written to a persistent outbox and delivered asynchronously. The event key is unique per rule and message. Telegram rate-limit responses honor `retry_after`; other transient failures use exponential backoff, up to 10 attempts. Applying a rule to existing messages never sends Telegram notifications.
 
 在收件规则的 `actions` 中加入 `{ "type": "telegram" }`。新进入 Inbox 且命中规则的邮件会先写入持久化 outbox，再异步发送；同一规则和邮件只会入队一次。Telegram 限流响应会遵循 `retry_after`，其他临时失败按退避策略最多重试 10 次。“应用于现有邮件”不会补发 Telegram 通知。
+
+## Admin Delivery Queue / 管理员投递队列
+
+Administrators with `admin.settings.view` can inspect the unified delivery queue via `GET /api/admin/delivery-queue`. Use `queueType=send|webhook|telegram`, `status=pending|failed|delivered|canceled`, `page` (1-based), and `limit` (1-100) filters. Responses contain only task metadata, attempt counters, timestamps, and a short redacted error; message MIME, webhook payloads, Telegram content, and credentials are never returned.
+
+具有 `admin.settings.view` 权限的管理员可通过 `GET /api/admin/delivery-queue` 查看统一投递队列。支持 `queueType=send|webhook|telegram`、`status=pending|failed|delivered|canceled`、从 1 开始的 `page` 和 1-100 的 `limit` 参数。响应只包含任务元数据、尝试次数、时间戳和脱敏后的短错误信息，不会返回邮件 MIME、Webhook payload、Telegram 内容或任何凭据。
+
+Retry and cancellation require `admin.settings.update`: `POST /api/admin/delivery-queue/{queueType}/{id}/retry` retries an eligible failed task, while `DELETE /api/admin/delivery-queue/{queueType}/{id}` cancels/cleans an undelivered task. Both operations use state and lease conditions, so delivered or concurrently claimed tasks are rejected.
+
+重试和取消需要 `admin.settings.update` 权限：`POST /api/admin/delivery-queue/{queueType}/{id}/retry` 重新投递符合条件的失败任务，`DELETE /api/admin/delivery-queue/{queueType}/{id}` 取消并清理未投递任务。操作均带状态和租约条件，已投递或已被其他 worker 占用的任务会被拒绝。

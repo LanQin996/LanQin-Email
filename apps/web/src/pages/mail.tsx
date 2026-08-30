@@ -34,6 +34,31 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import {
+  buildMailFrameSrcDoc,
+  escapeHtml,
+  htmlComposerValue,
+  htmlContainsMeaningfulContent,
+  plainTextComposerValue,
+  plainTextToHtml,
+  plainTextToHtmlFragment,
+  sanitizeComposerHtml,
+  type ComposerValue,
+} from "@/components/mail-content"
+import {
+  defaultScheduledSendValue,
+  defaultScheduleStartValue,
+  durationLabel,
+  formatTimeOnly,
+  normalizeSchedule,
+  parseScheduleStart,
+  reminderLabel,
+  repeatLabel,
+  scheduledSendPresets,
+  scheduleToFile,
+  toDateTimeLocalValue,
+  type ScheduleDraft,
+} from "@/components/mail-schedule-utils"
+import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -284,6 +309,7 @@ export function MailPage() {
     setCompactSelectedIds([])
   }, [activeMailboxId, externalFolder, folder, mailFilter, mailView, messagePageSize, query, selectedExternalAccountId, selectedLabelId])
   const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)) })
+  const thread = useQuery({ queryKey: ["message-thread", selectedId], queryFn: () => api.messageThread(selectedId!), enabled: !!selectedId && mailView !== "external" && !!detail.data?.threadId })
   const notificationItems = isPlainInboxView ? messages.data?.pages[0]?.items : inboxProbe.data?.items
   const autoRefreshing = Boolean(publicSettings.data?.mailAutoRefresh && (listAutoRefreshing || inboxProbe.isRefetching))
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
@@ -1454,6 +1480,7 @@ export function MailPage() {
       selectedId={selectedId}
       selected={selected}
       detailLoading={detail.isLoading}
+      threadMessages={thread.data?.items || []}
       labels={labelItems}
       labelPending={addLabel.isPending || removeLabel.isPending}
       onSelect={openMessage}
@@ -2507,6 +2534,7 @@ function CompactMailView({
   emptyMessage,
   selectedId,
   selected,
+  threadMessages,
   detailLoading,
   labels,
   labelPending,
@@ -2553,6 +2581,7 @@ function CompactMailView({
   emptyMessage: string
   selectedId: string | null
   selected?: MailMessage
+  threadMessages: MailMessage[]
   detailLoading: boolean
   labels: MailLabel[]
   labelPending: boolean
@@ -2590,6 +2619,7 @@ function CompactMailView({
     return (
       <CompactMessageDetail
         selected={selected}
+        threadMessages={threadMessages}
         loading={detailLoading}
         labels={labels}
         labelPending={labelPending}
@@ -2659,6 +2689,7 @@ function CompactMailView({
 
 function CompactMessageDetail({
   selected,
+  threadMessages,
   loading,
   labels,
   labelPending,
@@ -2682,6 +2713,7 @@ function CompactMessageDetail({
   language,
 }: {
   selected?: MailMessage
+  threadMessages: MailMessage[]
   loading: boolean
   labels: MailLabel[]
   labelPending: boolean
@@ -2784,6 +2816,7 @@ function CompactMessageDetail({
                 />
               </div>
               <div className="py-6 sm:py-8">
+                {threadMessages.length > 1 && <div className="mb-5 rounded-lg border bg-muted/20 p-3"><div className="mb-2 text-sm font-medium">同会话邮件 ({threadMessages.length})</div><div className="space-y-1">{threadMessages.filter((item) => item.id !== selected.id).map((item) => <Button type="button" variant="ghost" key={item.id} onClick={() => onSelect(item.id)} className="h-auto w-full justify-start truncate px-2 py-1 text-left text-sm font-normal">{item.subject || "(无主题)"} <span className="ml-1 text-muted-foreground">{formatDate(item.receivedAt)}</span></Button>)}</div></div>}
                 <TranslatableMailBody message={selected} language={language} />
                 {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={attachmentHref(selected, a.id)} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between" key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
               </div>
@@ -3756,7 +3789,6 @@ function ScheduleSendDialog({ open, pending, onOpenChange, onConfirm }: { open: 
   )
 }
 
-type ComposerValue = { text: string; html: string }
 type InsertDialogState = { kind: "link" | "image"; selectedText: string; url?: string; alt?: string; editing?: boolean }
 type InsertDialogValue = { url: string; text: string; alt: string }
 const composerFontOptions = ["Arial", "Georgia", "Times New Roman", "Courier New", "Microsoft YaHei"]
@@ -4280,20 +4312,6 @@ function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: Insert
   )
 }
 
-type ScheduleDraft = {
-  title: string
-  start: string
-  durationMinutes: number
-  reminderMinutes: number
-  repeat: "none" | "daily" | "weekly" | "monthly" | "yearly"
-  allDay: boolean
-  customDuration: boolean
-  customReminder: boolean
-  lunar: boolean
-  location: string
-  description: string
-}
-
 const durationOptions = [
   { value: "15", label: "15分钟" },
   { value: "30", label: "30分钟" },
@@ -4461,193 +4479,6 @@ function ToolbarButton({ label, children, active, onClick, disabled }: { label: 
 }
 
 function splitEmails(s: string) { return s.split(/[;,，\s]+/).map((v) => v.trim()).filter(Boolean) }
-function defaultScheduledSendValue() {
-  const date = new Date(Date.now() + 30 * 60 * 1000)
-  const minute = date.getMinutes()
-  date.setMinutes(minute + (5 - (minute % 5 || 5)))
-  return toDateTimeLocalValue(date)
-}
-function scheduledSendPresets() {
-  return [
-    { label: "30 分钟后", value: toDateTimeLocalValue(new Date(Date.now() + 30 * 60 * 1000)) },
-    { label: "2 小时后", value: toDateTimeLocalValue(new Date(Date.now() + 2 * 60 * 60 * 1000)) },
-    { label: "明早 9 点", value: toDateTimeLocalValue(nextMorningAtNine()) },
-    { label: "下周一 9 点", value: toDateTimeLocalValue(nextMondayAtNine()) },
-  ]
-}
-function nextMorningAtNine() {
-  const date = new Date()
-  date.setDate(date.getDate() + 1)
-  date.setHours(9, 0, 0, 0)
-  return date
-}
-function nextMondayAtNine() {
-  const date = new Date()
-  const day = date.getDay()
-  const daysUntilMonday = (8 - day) % 7 || 7
-  date.setDate(date.getDate() + daysUntilMonday)
-  date.setHours(9, 0, 0, 0)
-  return date
-}
-function defaultScheduleStartValue() {
-  const date = new Date()
-  date.setMinutes(date.getMinutes() + (60 - (date.getMinutes() % 60 || 60)))
-  return toDateTimeLocalValue(date)
-}
-function toDateTimeLocalValue(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
-}
-function normalizeSchedule(schedule: ScheduleDraft): ScheduleDraft {
-  return { ...schedule, title: schedule.title.trim(), location: schedule.location.trim(), description: schedule.description.trim() }
-}
-function scheduleToHtml(schedule: ScheduleDraft) {
-  const start = parseScheduleStart(schedule)
-  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
-  const rows = [
-    ["时间", schedule.allDay ? formatDate(start.toISOString()) : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`],
-    ["持续", schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes)],
-    ["提醒", reminderLabel(schedule.reminderMinutes)],
-    ["重复", repeatLabel(schedule.repeat)],
-    schedule.location ? ["位置", schedule.location] : undefined,
-    schedule.description ? ["描述", schedule.description] : undefined,
-  ].filter(Boolean) as string[][]
-  return DOMPurify.sanitize(`
-    <div style="border:1px solid #d4d4d8;border-radius:8px;padding:14px 16px;margin:16px 0;background:#fafafa;">
-      <div style="font-weight:600;font-size:16px;margin-bottom:10px;">${escapeHtml(schedule.title)}</div>
-      ${rows.map(([label, value]) => `<div style="margin:6px 0;"><span style="color:#71717a;">${label}：</span>${escapeHtml(value)}</div>`).join("")}
-    </div>
-  `)
-}
-function scheduleToFile(schedule: ScheduleDraft) {
-  const ics = scheduleToIcs(schedule)
-  const filename = `${safeFilename(schedule.title || "schedule")}.ics`
-  return new File([ics], filename, { type: "text/calendar;charset=utf-8" })
-}
-function scheduleToIcs(schedule: ScheduleDraft) {
-  const start = parseScheduleStart(schedule)
-  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
-  const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@lanqin-email`
-  const lines = [
-    "BEGIN:VCALENDAR",
-    "VERSION:2.0",
-    "PRODID:-//LanQin Email//Webmail//CN",
-    "CALSCALE:GREGORIAN",
-    "METHOD:PUBLISH",
-    "BEGIN:VEVENT",
-    `UID:${uid}`,
-    `DTSTAMP:${toIcsDateTime(new Date())}`,
-    schedule.allDay ? `DTSTART;VALUE=DATE:${toIcsDate(start)}` : `DTSTART:${toIcsDateTime(start)}`,
-    schedule.allDay ? `DTEND;VALUE=DATE:${toIcsDate(end)}` : `DTEND:${toIcsDateTime(end)}`,
-    `SUMMARY:${escapeIcs(schedule.title)}`,
-    schedule.location ? `LOCATION:${escapeIcs(schedule.location)}` : "",
-    schedule.description ? `DESCRIPTION:${escapeIcs(schedule.description)}` : "",
-    schedule.repeat !== "none" ? `RRULE:FREQ=${schedule.repeat.toUpperCase()}` : "",
-  ].filter(Boolean)
-  if (schedule.reminderMinutes > 0) {
-    lines.push("BEGIN:VALARM", `TRIGGER:-PT${schedule.reminderMinutes}M`, "ACTION:DISPLAY", `DESCRIPTION:${escapeIcs(schedule.title)}`, "END:VALARM")
-  }
-  lines.push("END:VEVENT", "END:VCALENDAR")
-  return `${lines.join("\r\n")}\r\n`
-}
-function parseScheduleStart(schedule: ScheduleDraft) {
-  const value = schedule.allDay ? `${schedule.start.slice(0, 10)}T00:00` : schedule.start
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? new Date() : date
-}
-function toIcsDateTime(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${date.getUTCFullYear()}${pad(date.getUTCMonth() + 1)}${pad(date.getUTCDate())}T${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}${pad(date.getUTCSeconds())}Z`
-}
-function toIcsDate(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
-}
-function formatTimeOnly(date: Date) {
-  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
-}
-function durationLabel(minutes: number) {
-  if (minutes % 1440 === 0) return `${minutes / 1440}天`
-  if (minutes % 60 === 0) return `${minutes / 60}小时`
-  return `${minutes}分钟`
-}
-function reminderLabel(minutes: number) {
-  if (minutes <= 0) return "准时"
-  return `${durationLabel(minutes)}前`
-}
-function repeatLabel(repeat: ScheduleDraft["repeat"]) {
-  return ({ none: "永不", daily: "每天", weekly: "每周", monthly: "每月", yearly: "每年" } as Record<ScheduleDraft["repeat"], string>)[repeat]
-}
-function safeFilename(value: string) {
-  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").slice(0, 64) || "schedule"
-}
-function escapeIcs(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;")
-}
-function plainTextComposerValue(value: string): ComposerValue { return { text: value, html: plainTextToHtml(value) } }
-function htmlComposerValue(value: string): ComposerValue {
-  const html = sanitizeComposerHtml(value || "")
-  const text = stripHtml(html)
-  return { text, html: html || plainTextToHtml(text) }
-}
-function plainTextToHtml(value: string) {
-  const normalized = value.replace(/\r\n/g, "\n")
-  if (!normalized.trim()) return ""
-  return sanitizeComposerHtml(normalized.split(/\n{2,}/).map((paragraph) => `<p>${plainTextToHtmlFragment(paragraph) || "<br>"}</p>`).join(""))
-}
-function plainTextToHtmlFragment(value: string) { return value.split("\n").map((line) => escapeHtml(line)).join("<br>") }
-function escapeHtml(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
-}
-function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
-  const rawBody = bodyHtml.trim() ? bodyHtml : `<pre>${escapeHtml(bodyText || "")}</pre>`
-  const sanitized = DOMPurify.sanitize(rawBody, {
-    ADD_ATTR: ["style", "type", "align", "valign", "bgcolor", "border", "cellpadding", "cellspacing", "width", "height"],
-    ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
-    WHOLE_DOCUMENT: /<html[\s>]/i.test(rawBody) || /<body[\s>]/i.test(rawBody),
-  })
-  if (/<html[\s>]/i.test(sanitized) || /<body[\s>]/i.test(sanitized)) {
-    const hasHead = /<head[\s>]/i.test(sanitized)
-    const withBase = hasHead
-      ? sanitized.replace(/<head([^>]*)>/i, `<head$1><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base target="_blank">${mailFrameBaseStyle()}`)
-      : sanitized.replace(/<html([^>]*)>/i, `<html$1><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base target="_blank">${mailFrameBaseStyle()}</head>`)
-    return /<!doctype/i.test(withBase) ? withBase : `<!doctype html>${withBase}`
-  }
-  return `<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<base target="_blank">
-${mailFrameBaseStyle()}
-</head>
-<body>${sanitized}</body>
-</html>`
-}
-function mailFrameBaseStyle() {
-  return `<style>
-  html, body { margin: 0; padding: 0; background: #fff; color: #111827; }
-  body {
-    box-sizing: border-box;
-    overflow-wrap: anywhere;
-    -webkit-text-size-adjust: 100%;
-    font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
-    font-size: 14px;
-    line-height: 1.5;
-  }
-  *, *::before, *::after { box-sizing: border-box; }
-  img { max-width: 100%; height: auto; }
-  table { max-width: 100%; }
-  pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-  a { color: #2563eb; }
-</style>`
-}
-function sanitizeComposerHtml(value: string) {
-  return DOMPurify.sanitize(value || "")
-}
-function htmlContainsMeaningfulContent(html: string) {
-  return /<(img|hr|table|ul|ol|li|blockquote|pre|div)[\s>]/i.test(html) || stripHtml(html).trim().length > 0
-}
 function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>) {
   const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
   if (!AudioContextCtor) return

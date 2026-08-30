@@ -26,9 +26,10 @@ func (a *App) Router() http.Handler {
 	r.Use(a.corsMiddleware)
 
 	r.Post("/auth-policy", a.handleAuthPolicy)
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "time": a.now().UTC()})
-	})
+	r.Get("/livez", a.handleLiveness)
+	r.Get("/readyz", a.handleReadiness)
+	// Keep the historical endpoint as a readiness alias for existing deployments.
+	r.Get("/healthz", a.handleReadiness)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/public/settings", a.handlePublicSettings)
@@ -117,8 +118,10 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionMailLabels)).Post("/mail/labels", a.handleCreateMailLabel)
 			r.With(a.requirePermission(PermissionMailLabels)).Delete("/mail/labels/{id}", a.handleDeleteMailLabel)
 			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/messages", a.handleMailMessages)
+			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/threads", a.handleMailThreads)
 			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/starred", a.handleStarredMessages)
 			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/messages/{id}", a.handleMailMessage)
+			r.With(a.requirePermission(PermissionMailRead)).Get("/mail/messages/{id}/thread", a.handleMailMessageThread)
 			r.With(a.requirePermission(PermissionMailRead)).Post("/mail/messages/{id}/translate", a.handleTranslateMailMessage)
 			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Get("/mail/external-accounts", a.handleMailExternalAccounts)
 			r.With(a.requirePermission(PermissionMailRead), a.requireExternalIMAPEnabled).Get("/mail/external-accounts/{id}/folders", a.handleExternalIMAPFolders)
@@ -183,6 +186,9 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/registration-invites", a.handleCreateRegistrationInvite)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/registration-invites/{id}", a.handleDeleteRegistrationInvite)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/maildir-sync/health", a.handleMaildirSyncHealth)
+			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/delivery-queue", a.handleAdminDeliveryQueue)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/delivery-queue/{queueType}/{id}/retry", a.handleAdminDeliveryQueueRetry)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/delivery-queue/{queueType}/{id}", a.handleAdminDeliveryQueueCancel)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings", a.handleUpdateSystemSettings)
 			r.With(a.requirePermission(PermissionSettingsTestSMTP)).Post("/admin/settings/test-smtp", a.handleTestSMTP)
 			r.With(a.requirePermission(PermissionTemplatesView)).Get("/admin/mail-templates", a.handleListMailTemplates)

@@ -533,7 +533,7 @@ func (a *App) handleOpenAPIMailboxMessages(w http.ResponseWriter, r *http.Reques
 		args = append(args, cursorReceivedAt, cursorID)
 	}
 	args = append(args, limit+1)
-	query := `SELECT m.id,m.mailbox_id,m.folder_id,f.name,m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,f.name,m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id)
 		FROM messages m JOIN folders f ON f.id=m.folder_id
 		WHERE ` + where + `
 		ORDER BY m.received_at DESC,m.id DESC LIMIT ?`

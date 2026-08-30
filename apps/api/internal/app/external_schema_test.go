@@ -198,6 +198,77 @@ func TestTelegramNotificationExternalSchemaContract(t *testing.T) {
 	}
 }
 
+func TestLoginRateLimitExternalSchemaContract(t *testing.T) {
+	t.Parallel()
+	for name, schema := range map[string]string{
+		"postgres": strings.Join(postgresFreshSchema(), "\n"),
+		"mysql":    strings.Join(mysqlFreshSchema(), "\n"),
+	} {
+		for _, fragment := range []string{
+			"CREATE TABLE login_rate_limits",
+			"PRIMARY KEY(scope,subject_hash)",
+			"CHECK(scope IN ('account','ip'))",
+			"idx_login_rate_limits_updated",
+		} {
+			if !strings.Contains(schema, fragment) {
+				t.Errorf("%s login rate-limit schema is missing %q", name, fragment)
+			}
+		}
+	}
+
+	statements := loginRateLimitExternalSchemaStatements()
+	if len(statements) != 2 {
+		t.Fatalf("v5 migration has %d statements, want 2", len(statements))
+	}
+	for _, statement := range statements {
+		if !strings.Contains(statement, "login_rate_limits") {
+			t.Errorf("v5 migration contains unrelated statement: %.80s", statement)
+		}
+	}
+}
+
+func TestQueueLeaseExternalSchemaContract(t *testing.T) {
+	t.Parallel()
+	for name, schema := range map[string][]string{
+		"postgres": postgresFreshSchema(),
+		"mysql":    mysqlFreshSchema(),
+	} {
+		for _, table := range []string{"send_queue", "status_webhook_outbox", "telegram_notification_outbox"} {
+			fragment := ""
+			for _, statement := range schema {
+				if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE "+table+" ") {
+					fragment = statement
+					break
+				}
+			}
+			if fragment == "" {
+				t.Fatalf("%s schema is missing %s", name, table)
+			}
+			for _, column := range []string{"lease_owner", "lease_token", "lease_until"} {
+				if !strings.Contains(fragment, column) {
+					t.Errorf("%s %s is missing %s", name, table, column)
+				}
+			}
+		}
+	}
+
+	statements := queueLeaseExternalSchemaStatements()
+	if len(statements) != 9 {
+		t.Fatalf("v6 migration has %d statements, want 9", len(statements))
+	}
+	for _, table := range []string{"send_queue", "status_webhook_outbox", "telegram_notification_outbox"} {
+		count := 0
+		for _, statement := range statements {
+			if strings.Contains(statement, "ALTER TABLE "+table+" ADD COLUMN lease_") {
+				count++
+			}
+		}
+		if count != 3 {
+			t.Errorf("v6 migration has %d lease columns for %s, want 3", count, table)
+		}
+	}
+}
+
 func schemaTableNames(statements []string) []string {
 	names := make([]string, 0, len(externalSchemaTables))
 	for _, statement := range statements {

@@ -218,6 +218,8 @@ LANQIN_STATUS_WEBHOOK_ALLOW_PRIVATE_HOSTS=false
 LANQIN_NOTIFICATION_SECRET_KEY=replace-with-a-long-random-secret
 ```
 
+该值不需要向 Telegram 申请：它是部署级 AES-GCM 根密钥，只用于加密数据库中的 Bot Token。请在部署机使用密码学安全随机源生成并写入 `.env`（PowerShell：`$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`；OpenSSL：`openssl rand -base64 32`），然后重启 API。务必备份并限制 `.env` 权限；更换或丢失此密钥会使已有 Token 无法解密。出于密钥分层和轮换安全，系统不会通过后台 UI 保存该根密钥。
+
 重启服务后，拥有“管理收件规则”权限的用户可在“个人中心 > 收件规则”中填写自己的 Bot Token 和 Chat ID，并把“发送 Telegram 通知”添加为规则动作。Token 使用该主密钥加密后保存；更换或丢失主密钥会导致已有 Token 无法解密。通知先写入 outbox，再异步投递并按退避策略最多重试 10 次。
 
 Split stack 使用 `docker-compose.stack.yml` 时，API 容器默认会把 `LANQIN_SMTP_HOST` 覆盖为 `postfix`，让 Webmail 和 SMTP 提交都 relay 到 Postfix service。只有改用外部 SMTP 时才需要在 `.env` 明确填写 `LANQIN_STACK_SMTP_HOST` / `LANQIN_STACK_SMTP_PORT`。
@@ -262,4 +264,14 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/doc
 - 建议在服务器或边缘网关配置 HTTPS。
 - 云厂商通常默认封禁 25 端口，需要单独申请解封。
 - SQLite 适合轻量单机部署；MySQL/PostgreSQL 版本必须使用对应 Compose override，使 API、Postfix、Dovecot 与 Rspamd 保持同库。
+
+## 健康检查
+
+API 提供三个无需认证的健康端点，响应不会包含数据库 DSN、文件路径或底层错误：
+
+- `GET /livez`：只表示 API 进程仍在运行，始终不检查外部依赖，适合作为 Kubernetes liveness probe。
+- `GET /readyz`：检查数据库连接、schema 初始化/外部数据库版本、附件与 Maildir 目录，以及所有实际启用的后台 worker；任一检查失败返回 `503`，适合作为 readiness probe 和负载均衡摘流量依据。
+- `GET /healthz`：保留给旧部署的兼容入口，语义与 `/readyz` 相同。
+
+Compose 已为单容器及 split stack 配置 healthcheck。单容器还会检查 Nginx、Postfix、Dovecot 和 Rspamd；split stack 会分别检查 API、Web、反向代理及邮件组件。初次启动或数据库迁移期间短暂显示 `starting` 属正常现象。
 

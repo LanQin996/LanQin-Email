@@ -29,6 +29,7 @@ type App struct {
 	policy             *HTMLPolicy
 	workerCancel       context.CancelFunc
 	workerWG           sync.WaitGroup
+	health             *appHealthState
 	maildirHealth      *maildirSyncHealthTracker
 	maildirSyncMu      sync.Mutex
 	maildirDirs        map[string]maildirDirectorySignature
@@ -39,6 +40,7 @@ type App struct {
 	linuxDoOAuth       linuxDoOAuthClient
 	telegramAPIBaseURL string
 	messageSearchFTS   bool
+	workerID           string
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -60,7 +62,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL}
+	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), health: &appHealthState{}, maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL, workerID: newID("worker")}
 	a.externalIMAP = a
 	a.linuxDoOAuth = newLinuxDoHTTPClient()
 	if cfg.DBDriver == databaseDriverSQLite {
@@ -85,6 +87,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		db.Close()
 		return nil, err
 	}
+	a.health.schemaInitialized.Store(true)
 	workerCtx, cancel := context.WithCancel(context.Background())
 	a.workerCancel = cancel
 	a.startWorker(func() { a.scheduledSendWorker(workerCtx) })
@@ -94,17 +97,27 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
-	a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
-	a.startWorker(func() { a.telegramNotificationWorker(workerCtx) })
+	if strings.TrimSpace(a.cfg.StatusWebhookURL) != "" {
+		a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
+	}
+	if strings.TrimSpace(a.cfg.NotificationSecretKey) != "" {
+		a.startWorker(func() { a.telegramNotificationWorker(workerCtx) })
+	}
 	return a, nil
 }
 
 func (a *App) startWorker(fn func()) {
+	a.health.workersExpected.Add(1)
 	a.workerWG.Add(1)
+	started := make(chan struct{})
 	go func() {
 		defer a.workerWG.Done()
+		a.health.workersRunning.Add(1)
+		close(started)
+		defer a.health.workersRunning.Add(-1)
 		fn()
 	}()
+	<-started
 }
 
 func (a *App) Close() error {
@@ -184,6 +197,16 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS login_rate_limits (
+			scope TEXT NOT NULL CHECK(scope IN ('account','ip')),
+			subject_hash TEXT NOT NULL,
+			failure_count INTEGER NOT NULL CHECK(failure_count > 0),
+			window_started_at TEXT NOT NULL,
+			blocked_until TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(scope, subject_hash)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_login_rate_limits_updated ON login_rate_limits(updated_at)`,
 		`CREATE TABLE IF NOT EXISTS oauth_identities (
 			provider TEXT NOT NULL,
 			subject TEXT NOT NULL,
@@ -353,7 +376,10 @@ func (a *App) migrate(ctx context.Context) error {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			delivered_at TEXT
+			delivered_at TEXT,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_token TEXT NOT NULL DEFAULT '',
+			lease_until TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_telegram_notification_outbox_due ON telegram_notification_outbox(delivered_at,next_attempt_at,created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_telegram_notification_outbox_user ON telegram_notification_outbox(user_id,created_at)`,
@@ -385,6 +411,7 @@ func (a *App) migrate(ctx context.Context) error {
 			recipient_addr TEXT NOT NULL DEFAULT '',
 			message_uid TEXT NOT NULL,
 			message_id TEXT NOT NULL,
+			thread_id TEXT NOT NULL DEFAULT '',
 			subject TEXT NOT NULL,
 			from_addr TEXT NOT NULL,
 			from_name TEXT NOT NULL DEFAULT '',
@@ -458,7 +485,10 @@ func (a *App) migrate(ctx context.Context) error {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			delivered_at TEXT
+			delivered_at TEXT,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_token TEXT NOT NULL DEFAULT '',
+			lease_until TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_send_queue_due ON send_queue(status, next_attempt_at, created_at)`,
 		`CREATE TABLE IF NOT EXISTS send_audit_events (
@@ -508,7 +538,10 @@ func (a *App) migrate(ctx context.Context) error {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
-			delivered_at TEXT
+			delivered_at TEXT,
+			lease_owner TEXT NOT NULL DEFAULT '',
+			lease_token TEXT NOT NULL DEFAULT '',
+			lease_until TEXT
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_due ON status_webhook_outbox(delivered_at,next_attempt_at,created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_status_webhook_outbox_mailbox ON status_webhook_outbox(mailbox_id,created_at)`,
@@ -744,6 +777,12 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateSendQueueMessageID(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateQueueLeases(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateMessageThreads(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateIMAPMetadata(ctx); err != nil {
 		return err
 	}
@@ -761,6 +800,68 @@ func (a *App) migrate(ctx context.Context) error {
 	}
 	if err := a.ensureDefaultPermissionGroups(ctx); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (a *App) migrateMessageThreads(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(messages)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notnull, pk int
+		var name, typ string
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	rows.Close()
+	if !columns["thread_id"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN thread_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
+	// Backfill deterministically; existing messages without RFC references each
+	// become their own thread, while replies inherit the referenced message.
+	rows, err = a.db.QueryContext(ctx, `SELECT id,mailbox_id,message_id,thread_id FROM messages WHERE thread_id='' ORDER BY received_at,id`)
+	if err != nil {
+		return err
+	}
+	type threadBackfillItem struct {
+		id, mailboxID, messageID, threadID string
+	}
+	items := make([]threadBackfillItem, 0)
+	for rows.Next() {
+		var item threadBackfillItem
+		if err := rows.Scan(&item.id, &item.mailboxID, &item.messageID, &item.threadID); err != nil {
+			rows.Close()
+			return err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, item := range items {
+		threadID := item.threadID
+		if threadID == "" {
+			threadID = normalizeMessageID(item.messageID)
+			if threadID == "" {
+				threadID = item.id
+			}
+			if _, err := a.db.ExecContext(ctx, `UPDATE messages SET thread_id=? WHERE id=?`, threadID, item.id); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }
@@ -1256,6 +1357,7 @@ func (a *App) migrateMessagesForUnregistered(ctx context.Context) error {
 		recipient_addr TEXT NOT NULL DEFAULT '',
 		message_uid TEXT NOT NULL,
 		message_id TEXT NOT NULL,
+		thread_id TEXT NOT NULL DEFAULT '',
 		subject TEXT NOT NULL,
 		from_addr TEXT NOT NULL,
 		from_name TEXT NOT NULL DEFAULT '',
@@ -1277,8 +1379,8 @@ func (a *App) migrateMessagesForUnregistered(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_new(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
-		SELECT id,mailbox_id,folder_id,'',message_uid,message_id,subject,from_addr,'',to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at FROM messages`); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO messages_new(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,thread_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at)
+		SELECT id,mailbox_id,folder_id,'',message_uid,message_id,'',subject,from_addr,'',to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,raw_path,created_at,updated_at FROM messages`); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `DROP TABLE messages`); err != nil {

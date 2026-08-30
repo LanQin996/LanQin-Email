@@ -1,4 +1,4 @@
-import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, ForwardAddress, TelegramSettings, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, LinuxDoIdentity, LinuxDoPendingRegistration, LinuxDoRegistrationPayload, RegistrationInvite, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
+import type { User, AdminUser, AdminOverview, Domain, Mailbox, MailboxShare, MailboxSharePayload, MailboxShareUpdatePayload, MailboxShareAuditEvent, UserNotification, ShareUser, Alias, MailFolder, Attachment, MailLabel, MailMessage, MailTranslation, DNSRecord, DNSCheckResult, ListResponse, SendPayload, DraftPayload, ScheduleSendPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, AdminDeliveryQueueItem, Contact, MailSignature, MailRule, MailRuleCondition, MailRuleAction, ForwardAddress, TelegramSettings, BlockedSender, MailStats, ExternalImapAccount, ExternalImapAccountPayload, ExternalImapFolder, ExternalImapOAuthProvider, ExternalImapOAuthStartPayload, ExternalImapSyncRun, MailboxApplyOptions, MailTemplate, MaildirSyncHealth, SystemSettings, SystemSettingsPayload, PublicSettings, LoginPayload, LoginResponse, RegisterPayload, LinuxDoIdentity, LinuxDoPendingRegistration, LinuxDoRegistrationPayload, RegistrationInvite, PermissionGroup, PermissionInfo, PermissionKey, PermissionLimits, APIToken } from "./api-types"
 export * from "./api-types"
 
 const REQUEST_TIMEOUT_MS = 15_000
@@ -142,6 +142,17 @@ export const api = {
     const suffix = query.toString()
     return request<ListResponse<SendQueueAuditEvent>>(`/api/admin/send-audit${suffix ? `?${suffix}` : ""}`)
   },
+  adminDeliveryQueue: (params: { queueType?: string; status?: string; page?: number; limit?: number } = {}) => {
+    const query = new URLSearchParams()
+    if (params.queueType && params.queueType !== "all") query.set("queueType", params.queueType)
+    if (params.status && params.status !== "all") query.set("status", params.status)
+    if (params.page) query.set("page", String(params.page))
+    if (params.limit) query.set("limit", String(params.limit))
+    const suffix = query.toString()
+    return request<ListResponse<AdminDeliveryQueueItem> & { page: number; limit: number }>(`/api/admin/delivery-queue${suffix ? `?${suffix}` : ""}`)
+  },
+  retryAdminDeliveryQueue: (queueType: AdminDeliveryQueueItem["queueType"], id: string) => request<{ ok: boolean }>(`/api/admin/delivery-queue/${queueType}/${encodeURIComponent(id)}/retry`, { method: "POST" }),
+  cancelAdminDeliveryQueue: (queueType: AdminDeliveryQueueItem["queueType"], id: string) => request<{ ok: boolean }>(`/api/admin/delivery-queue/${queueType}/${encodeURIComponent(id)}`, { method: "DELETE" }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   registrationInvites: () => request<ListResponse<RegistrationInvite>>("/api/admin/registration-invites"),
   createRegistrationInvite: (payload: { code?: string; maxUses: number }) => request<RegistrationInvite>("/api/admin/registration-invites", { method: "POST", body: JSON.stringify(payload) }),
@@ -187,6 +198,8 @@ export const api = {
     if (mailboxId) params.set("mailboxId", mailboxId)
     return request<ListResponse<MailMessage>>(`/api/mail/messages?${params.toString()}`)
   },
+  threads: (mailboxId?: string) => request<ListResponse<MailMessage>>(`/api/mail/threads${mailboxId ? `?mailboxId=${encodeURIComponent(mailboxId)}` : ""}`),
+  messageThread: (id: string) => request<ListResponse<MailMessage>>(`/api/mail/messages/${id}/thread`),
   labelMessages: (labelId: string, q = "", cursor = "", mailboxId?: string, limit = 30) => {
     const params = new URLSearchParams({ labelId, q, cursor })
     params.set("limit", String(limit))

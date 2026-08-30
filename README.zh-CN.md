@@ -183,6 +183,8 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/outlook/callback` | 空 |
 | `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置 | 随机长字符串 |
 
+该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密。
+
 ## 架构
 
 ```text

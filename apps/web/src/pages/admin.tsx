@@ -20,42 +20,25 @@ import { Switch } from "@/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog } from "@/components/confirm-dialog"
+import {
+  adminSectionKeys as sectionKeys,
+  adminSectionLabels as sectionLabels,
+  adminSectionPermissions as sectionPermissions,
+  defaultPermissionLimits,
+  groupPermissionCatalog,
+  permissionLimitText as limitText,
+  type AdminSection as Section,
+} from "@/components/admin-config"
 import { useMe } from "@/hooks/use-me"
 import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
 import type { PermissionKey } from "@/lib/api-types"
 
-type Section = "overview" | "users" | "permissionGroups" | "domains" | "mailboxes" | "aliases" | "messages" | "sendAudit" | "settings"
 type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
-
-const sectionLabels: Record<Section, string> = {
-  overview: "概览",
-  users: "用户",
-  permissionGroups: "权限组",
-  domains: "域名",
-  mailboxes: "邮箱账号",
-  aliases: "别名转发",
-  messages: "全部邮件",
-  sendAudit: "发送审计",
-  settings: "系统设置",
-}
-const sectionKeys = Object.keys(sectionLabels) as Section[]
-const sectionPermissions: Record<Section, PermissionKey[]> = {
-  overview: ["admin.overview.view"],
-  users: ["admin.users.view"],
-  permissionGroups: ["admin.permission_groups.view"],
-  domains: ["admin.domains.view", "admin.dns.view"],
-  mailboxes: ["admin.mailboxes.view"],
-  aliases: ["admin.aliases.view"],
-  messages: ["admin.messages.view"],
-  sendAudit: ["admin.messages.view"],
-  settings: ["admin.settings.view", "admin.templates.view"],
-}
 const projectRepositoryUrl = "https://github.com/LanQin996/LanQin-Email"
 const projectTelegramUrl = "https://t.me/+EhII7MSyi3QwNDQ5"
 const projectTag = import.meta.env.VITE_APP_VERSION || ""
 const projectReleaseUrl = import.meta.env.VITE_RELEASE_URL || (projectTag ? `${projectRepositoryUrl}/releases/tag/${projectTag}` : "")
-const defaultPermissionLimits: PermissionLimits = { maxAttachmentMb: 25, smtpDailyLimit: 200, smtpMinuteLimit: 20, imapMinuteLimit: 200, pop3MinuteLimit: 150 }
 
 export function AdminPage() {
   const me = useMe()
@@ -70,6 +53,7 @@ export function AdminPage() {
   const canAliasesView = hasPermission(user, "admin.aliases.view")
   const canMessagesView = hasPermission(user, "admin.messages.view")
   const canSettingsView = hasPermission(user, "admin.settings.view")
+  const canSettingsUpdate = hasPermission(user, "admin.settings.update")
   const canTemplatesView = hasPermission(user, "admin.templates.view")
   const visibleSections = sectionKeys.filter((key) => hasAnyPermission(user, sectionPermissions[key]))
   const rawSection = params.get("section") as Section | null
@@ -82,6 +66,7 @@ export function AdminPage() {
   const mailboxes = useQuery({ queryKey: ["admin", "mailboxes"], queryFn: api.mailboxes, enabled: !!user && ((section === "mailboxes" && canMailboxesView) || ((section === "messages" || section === "sendAudit") && canMessagesView)) })
   const aliases = useQuery({ queryKey: ["admin", "aliases"], queryFn: api.aliases, enabled: !!user && canAliasesView && section === "aliases" })
   const settings = useQuery({ queryKey: ["admin", "settings"], queryFn: api.systemSettings, enabled: !!user && canSettingsView && (section === "overview" || section === "settings") })
+  const deliveryQueue = useQuery({ queryKey: ["admin", "delivery-queue"], queryFn: () => api.adminDeliveryQueue({ limit: 100 }), enabled: !!user && canSettingsView && section === "deliveryQueue", refetchInterval: 15000 })
 
   const domainItems = domains.data?.items || []
   const mailboxItems = mailboxes.data?.items || []
@@ -112,6 +97,7 @@ export function AdminPage() {
         {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
         {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
         {section === "sendAudit" && <AdminSendAuditSection mailboxes={mailboxItems} />}
+        {section === "deliveryQueue" && <AdminDeliveryQueueSection items={deliveryQueue.data?.items || []} canUpdate={canSettingsUpdate} />}
         {section === "settings" && <SystemSettingsSection settings={settings.data} domains={domainItems} />}
       </main>
     </ScrollArea>
@@ -534,23 +520,6 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
       <Badge variant="secondary" className="font-normal">POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}</Badge>
     </div>
   )
-}
-
-function limitText(value: number, unit: string) {
-  return value > 0 ? `${value} ${unit}` : "不限"
-}
-
-function groupPermissionCatalog(catalog: PermissionInfo[]) {
-  const order: string[] = []
-  const grouped = new Map<string, PermissionInfo[]>()
-  for (const item of catalog) {
-    if (!grouped.has(item.category)) {
-      grouped.set(item.category, [])
-      order.push(item.category)
-    }
-    grouped.get(item.category)!.push(item)
-  }
-  return order.map((category) => ({ category, items: grouped.get(category)! }))
 }
 
 function DomainsSection({ domains }: { domains: Domain[] }) {
@@ -998,6 +967,25 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
       </CardContent>
     </Card>
   )
+}
+
+function AdminDeliveryQueueSection({ items, canUpdate }: { items: import("@/lib/api-types").AdminDeliveryQueueItem[]; canUpdate: boolean }) {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const [type, setType] = React.useState("all")
+  const [status, setStatus] = React.useState("failed")
+  const filtered = items.filter((item) => (type === "all" || item.queueType === type) && (status === "all" || item.status === status))
+  const retry = useMutation({ mutationFn: (item: import("@/lib/api-types").AdminDeliveryQueueItem) => api.retryAdminDeliveryQueue(item.queueType, item.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "delivery-queue"] }); toast({ title: "已重新加入队列" }) }, onError: (e) => toast({ title: "重试失败", description: e.message }) })
+  const cancel = useMutation({ mutationFn: (item: import("@/lib/api-types").AdminDeliveryQueueItem) => api.cancelAdminDeliveryQueue(item.queueType, item.id), onSuccess: () => { qc.invalidateQueries({ queryKey: ["admin", "delivery-queue"] }); toast({ title: "任务已取消" }) }, onError: (e) => toast({ title: "取消失败", description: e.message }) })
+  const label = (value: string) => ({ send: "发信", webhook: "状态 Webhook", telegram: "Telegram", pending: "待处理", failed: "失败", delivered: "已投递", canceled: "已取消" } as Record<string, string>)[value] || value
+  return <Card>
+    <CardHeader><div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between"><CardTitle className="flex items-center gap-2"><RefreshCcw className="h-5 w-5" />投递队列</CardTitle><div className="flex flex-wrap gap-2"><Select value={type} onValueChange={setType}><SelectTrigger className="w-[140px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部类型</SelectItem><SelectItem value="send">发信</SelectItem><SelectItem value="webhook">状态 Webhook</SelectItem><SelectItem value="telegram">Telegram</SelectItem></SelectContent></Select><Select value={status} onValueChange={setStatus}><SelectTrigger className="w-[120px]"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="pending">待处理</SelectItem><SelectItem value="failed">失败</SelectItem><SelectItem value="delivered">已投递</SelectItem><SelectItem value="canceled">已取消</SelectItem></SelectContent></Select></div></div></CardHeader>
+    <CardContent>
+      <div className="space-y-3 md:hidden">{filtered.map((item) => <div key={`${item.queueType}:${item.id}`} className="rounded-lg border p-4"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><div className="font-medium">{label(item.queueType)}</div><div className="truncate text-xs text-muted-foreground">{item.id}</div></div><Badge variant={item.status === "failed" ? "destructive" : "secondary"}>{label(item.status)}</Badge></div><div className="mt-3 space-y-1 text-xs text-muted-foreground"><div>尝试：{item.attemptCount}/{item.maxAttempts}</div><div>下次重试：{item.nextAttemptAt ? formatDate(item.nextAttemptAt) : "-"}</div><div>更新时间：{formatDate(item.updatedAt)}</div>{item.lastError && <div className="line-clamp-2 text-destructive">{item.lastError}</div>}</div><div className="mt-3 flex gap-2">{canUpdate && item.status === "failed" && <Button size="sm" variant="outline" onClick={() => retry.mutate(item)} disabled={retry.isPending}>重试</Button>}{canUpdate && item.status !== "delivered" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(item)} disabled={cancel.isPending}>取消</Button>}</div></div>)}</div>
+      <div className="hidden md:block"><Table><TableHeader><TableRow><TableHead>类型</TableHead><TableHead>任务 ID</TableHead><TableHead>状态</TableHead><TableHead>尝试</TableHead><TableHead>下次重试</TableHead><TableHead>错误</TableHead><TableHead>更新时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader><TableBody>{filtered.map((item) => <TableRow key={`${item.queueType}:${item.id}`}><TableCell>{label(item.queueType)}</TableCell><TableCell className="max-w-[220px] truncate" title={item.id}>{item.id}</TableCell><TableCell><Badge variant={item.status === "failed" ? "destructive" : "secondary"}>{label(item.status)}</Badge></TableCell><TableCell>{item.attemptCount}/{item.maxAttempts}</TableCell><TableCell className="whitespace-nowrap">{item.nextAttemptAt ? formatDate(item.nextAttemptAt) : "-"}</TableCell><TableCell className="max-w-[240px] truncate text-destructive" title={item.lastError || ""}>{item.lastError || "-"}</TableCell><TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.updatedAt)}</TableCell><TableCell><div className="flex justify-end gap-1">{canUpdate && item.status === "failed" && <Button size="sm" variant="outline" onClick={() => retry.mutate(item)} disabled={retry.isPending}>重试</Button>}{canUpdate && item.status !== "delivered" && <Button size="sm" variant="ghost" onClick={() => cancel.mutate(item)} disabled={cancel.isPending}>取消</Button>}</div></TableCell></TableRow>)}</TableBody></Table></div>
+      {filtered.length === 0 && <Empty text="暂无队列任务" />}
+    </CardContent>
+  </Card>
 }
 
 function SystemSettingsSection({ settings, domains }: { settings?: SystemSettings; domains: Domain[] }) {

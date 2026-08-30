@@ -11,5 +11,7 @@ COPY dovecot-sql.conf.ext /etc/dovecot/dovecot-sql.conf.ext
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 993 995 24 12345
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
+  CMD doveadm service status >/dev/null 2>&1 || exit 1
 CMD ["/entrypoint.sh"]
 

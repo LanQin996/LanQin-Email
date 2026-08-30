@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"net/http"
 	"strings"
@@ -8,6 +10,14 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 )
+
+var dummyLoginPasswordHash = func() []byte {
+	hash, err := bcrypt.GenerateFromPassword([]byte(randomToken()), bcrypt.DefaultCost)
+	if err != nil {
+		panic(err)
+	}
+	return hash
+}()
 
 func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -21,19 +31,75 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
+	clientIP := r.RemoteAddr
 	if strings.TrimSpace(req.ChallengeToken) != "" {
+		if retryAfter, err := a.checkLoginRateLimit(r.Context(), "", clientIP); err != nil {
+			a.log.Warn("failed to check authentication rate limit", "stage", "totp", "error", err)
+			respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+			return
+		} else if retryAfter > 0 {
+			a.auditLoginAttempt("totp", "rate_limited", "", clientIP)
+			respondLoginRateLimited(w, retryAfter)
+			return
+		}
 		challenge, err := a.loginChallengeByToken(r.Context(), req.ChallengeToken)
 		if err != nil {
+			retryAfter, recordErr := a.recordLoginFailure(r.Context(), "", clientIP)
+			if recordErr != nil {
+				a.log.Warn("failed to record authentication failure", "stage", "totp", "error", recordErr)
+				respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+				return
+			}
+			a.auditLoginAttempt("totp", "failed", "", clientIP)
+			if retryAfter > 0 {
+				respondLoginRateLimited(w, retryAfter)
+				return
+			}
 			respondError(w, http.StatusUnauthorized, "验证已过期，请重新登录")
 			return
 		}
 		user, secret, err := a.loadUserAuthByID(r.Context(), challenge.UserID)
 		if err != nil || user.Disabled || !user.TwoFactorEnabled || strings.TrimSpace(secret) == "" {
 			a.deleteLoginChallenge(r.Context(), challenge.ID)
+			account := ""
+			if user != nil {
+				account = user.Email
+			}
+			retryAfter, recordErr := a.recordLoginFailure(r.Context(), account, clientIP)
+			if recordErr != nil {
+				a.log.Warn("failed to record authentication failure", "stage", "totp", "error", recordErr)
+				respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+				return
+			}
+			a.auditLoginAttempt("totp", "failed", account, clientIP)
+			if retryAfter > 0 {
+				respondLoginRateLimited(w, retryAfter)
+				return
+			}
 			respondError(w, http.StatusUnauthorized, "验证已过期，请重新登录")
 			return
 		}
+		if retryAfter, err := a.checkLoginRateLimit(r.Context(), user.Email, clientIP); err != nil {
+			a.log.Warn("failed to check authentication rate limit", "stage", "totp", "error", err)
+			respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+			return
+		} else if retryAfter > 0 {
+			a.auditLoginAttempt("totp", "rate_limited", user.Email, clientIP)
+			respondLoginRateLimited(w, retryAfter)
+			return
+		}
 		if !verifyTOTP(secret, req.TwoFactorCode, a.now().UTC()) {
+			retryAfter, recordErr := a.recordLoginFailure(r.Context(), user.Email, clientIP)
+			if recordErr != nil {
+				a.log.Warn("failed to record authentication failure", "stage", "totp", "error", recordErr)
+				respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+				return
+			}
+			a.auditLoginAttempt("totp", "failed", user.Email, clientIP)
+			if retryAfter > 0 {
+				respondLoginRateLimited(w, retryAfter)
+				return
+			}
 			respondError(w, http.StatusUnauthorized, "验证码错误")
 			return
 		}
@@ -42,21 +108,56 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
 			return
 		}
+		if err := a.clearLoginAccountFailures(r.Context(), user.Email); err != nil {
+			a.log.Warn("failed to clear authentication failures", "stage", "totp", "error", err)
+		}
+		a.auditLoginAttempt("totp", "success", user.Email, clientIP)
 		respondJSON(w, http.StatusOK, map[string]any{"user": user})
 		return
 	}
+	email := normalizeEmail(req.Email)
+	if retryAfter, err := a.checkLoginRateLimit(r.Context(), email, clientIP); err != nil {
+		a.log.Warn("failed to check authentication rate limit", "stage", "password", "error", err)
+		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+		return
+	} else if retryAfter > 0 {
+		a.auditLoginAttempt("password", "rate_limited", email, clientIP)
+		respondLoginRateLimited(w, retryAfter)
+		return
+	}
 	if err := a.verifyTurnstile(r.Context(), req.TurnstileToken, r.RemoteAddr); err != nil {
+		a.auditLoginAttempt("turnstile", "failed", email, clientIP)
 		respondError(w, http.StatusUnauthorized, "人机验证失败，请重试")
 		return
 	}
-	email := normalizeEmail(req.Email)
-	user, passwordHash, err := a.userByEmail(r.Context(), email)
-	if err != nil || user.Disabled {
+	user, passwordHash, err := a.loadLoginUserByEmail(r.Context(), email)
+	if err != nil && !errors.Is(err, errNotFound) {
+		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+		return
+	}
+	validUser := err == nil && user != nil && !user.Disabled
+	hash := dummyLoginPasswordHash
+	if err == nil && user != nil {
+		hash = []byte(passwordHash)
+	}
+	passwordValid := bcrypt.CompareHashAndPassword(hash, []byte(req.Password)) == nil
+	if !validUser || !passwordValid {
+		retryAfter, recordErr := a.recordLoginFailure(r.Context(), email, clientIP)
+		if recordErr != nil {
+			a.log.Warn("failed to record authentication failure", "stage", "password", "error", recordErr)
+			respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
+			return
+		}
+		a.auditLoginAttempt("password", "failed", email, clientIP)
+		if retryAfter > 0 {
+			respondLoginRateLimited(w, retryAfter)
+			return
+		}
 		respondError(w, http.StatusUnauthorized, "邮箱或密码错误")
 		return
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
-		respondError(w, http.StatusUnauthorized, "邮箱或密码错误")
+	if err := a.attachUserAuthorization(r.Context(), user); err != nil {
+		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
 		return
 	}
 	if a.cfg.TwoFactorEnabled && user.TwoFactorEnabled {
@@ -65,6 +166,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusInternalServerError, "验证码生成失败，请稍后重试")
 			return
 		}
+		a.auditPasswordStageSuccess(user.Email, clientIP, true)
 		respondJSON(w, http.StatusOK, map[string]any{"twoFactorRequired": true, "challengeToken": challengeToken})
 		return
 	}
@@ -72,7 +174,28 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
 		return
 	}
+	if err := a.clearLoginAccountFailures(r.Context(), user.Email); err != nil {
+		a.log.Warn("failed to clear authentication failures", "stage", "password", "error", err)
+	}
+	a.auditPasswordStageSuccess(user.Email, clientIP, false)
 	respondJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+func (a *App) loadLoginUserByEmail(ctx context.Context, email string) (*User, string, error) {
+	row := a.db.QueryRowContext(ctx, `SELECT id,email,display_name,role,password_hash,disabled,two_factor_enabled,created_at FROM users WHERE email=?`, email)
+	var user User
+	var passwordHash, created string
+	var disabled, twoFactorEnabled int
+	if err := row.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &passwordHash, &disabled, &twoFactorEnabled, &created); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", errNotFound
+		}
+		return nil, "", err
+	}
+	user.Disabled = intBool(disabled)
+	user.TwoFactorEnabled = intBool(twoFactorEnabled)
+	user.CreatedAt = parseTime(created)
+	return &user, passwordHash, nil
 }
 
 func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {

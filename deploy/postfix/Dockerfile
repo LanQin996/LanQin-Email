@@ -12,4 +12,6 @@ COPY sqlite-*.cf /etc/postfix/
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 EXPOSE 25
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
+  CMD postfix status >/dev/null 2>&1 || exit 1
 CMD ["/entrypoint.sh"]

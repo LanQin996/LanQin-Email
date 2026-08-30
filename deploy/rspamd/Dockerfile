@@ -11,4 +11,6 @@ COPY sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh /usr/local/bin/lanqin-rspamd-sync-dkim && mkdir -p /run/rspamd /var/lib/rspamd/dkim
 EXPOSE 11332 11334
+HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=6 \
+  CMD rspamadm control stat >/dev/null 2>&1 || exit 1
 CMD ["/entrypoint.sh"]

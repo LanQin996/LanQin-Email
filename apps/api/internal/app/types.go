@@ -163,6 +163,8 @@ type MailMessage struct {
 	IMAPUID           int64              `json:"imapUid"`
 	IMAPModSeq        int64              `json:"imapModseq"`
 	MessageID         string             `json:"messageId"`
+	ThreadID          string             `json:"threadId,omitempty"`
+	ThreadCount       int                `json:"threadCount,omitempty"`
 	Subject           string             `json:"subject"`
 	From              string             `json:"from"`
 	FromName          string             `json:"fromName,omitempty"`

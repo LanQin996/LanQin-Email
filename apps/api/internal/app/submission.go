@@ -300,6 +300,8 @@ func (a *App) prepareSubmittedMessage(ctx context.Context, raw []byte, mb *Mailb
 	if msg.MessageID == "" {
 		msg.MessageID = messageID
 	}
+	msg.InReplyTo = strings.TrimSpace(header.Get("In-Reply-To"))
+	msg.References = strings.TrimSpace(header.Get("References"))
 	if msg.SentAt.IsZero() {
 		msg.SentAt = sentAt
 	}

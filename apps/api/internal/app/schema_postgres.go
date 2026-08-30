@@ -50,6 +50,16 @@ func postgresFreshSchema() []string {
 			expires_at VARCHAR(35) NOT NULL,
 			created_at VARCHAR(35) NOT NULL
 		)`,
+		`CREATE TABLE login_rate_limits (
+			scope VARCHAR(16) NOT NULL CHECK(scope IN ('account','ip')),
+			subject_hash VARCHAR(64) NOT NULL,
+			failure_count INTEGER NOT NULL CHECK(failure_count > 0),
+			window_started_at VARCHAR(35) NOT NULL,
+			blocked_until VARCHAR(35) NOT NULL DEFAULT '',
+			updated_at VARCHAR(35) NOT NULL,
+			PRIMARY KEY(scope,subject_hash)
+		)`,
+		`CREATE INDEX idx_login_rate_limits_updated ON login_rate_limits(updated_at)`,
 		`CREATE TABLE oauth_identities (
 			provider VARCHAR(32) NOT NULL,
 			subject VARCHAR(255) NOT NULL,
@@ -219,7 +229,10 @@ func postgresFreshSchema() []string {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL,
-			delivered_at VARCHAR(35)
+			delivered_at VARCHAR(35),
+			lease_owner VARCHAR(128) NOT NULL DEFAULT '',
+			lease_token VARCHAR(128) NOT NULL DEFAULT '',
+			lease_until VARCHAR(35)
 		)`,
 		`CREATE INDEX idx_telegram_notification_outbox_due ON telegram_notification_outbox(delivered_at,next_attempt_at,created_at)`,
 		`CREATE INDEX idx_telegram_notification_outbox_user ON telegram_notification_outbox(user_id,created_at)`,
@@ -256,6 +269,7 @@ func postgresFreshSchema() []string {
 			recipient_addr VARCHAR(320) NOT NULL DEFAULT '',
 			message_uid VARCHAR(255) NOT NULL,
 			message_id VARCHAR(512) NOT NULL,
+			thread_id VARCHAR(512) NOT NULL DEFAULT '',
 			subject TEXT NOT NULL,
 			from_addr VARCHAR(320) NOT NULL,
 			from_name VARCHAR(255) NOT NULL DEFAULT '',
@@ -328,7 +342,10 @@ func postgresFreshSchema() []string {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL,
-			delivered_at VARCHAR(35)
+			delivered_at VARCHAR(35),
+			lease_owner VARCHAR(128) NOT NULL DEFAULT '',
+			lease_token VARCHAR(128) NOT NULL DEFAULT '',
+			lease_until VARCHAR(35)
 		)`,
 		`CREATE INDEX idx_send_queue_due ON send_queue(status,next_attempt_at,created_at)`,
 		`CREATE UNIQUE INDEX idx_send_queue_mailbox_source_message_id ON send_queue(mailbox_id,source,message_id) WHERE message_id<>''`,
@@ -378,7 +395,10 @@ func postgresFreshSchema() []string {
 			last_error TEXT NOT NULL DEFAULT '',
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL,
-			delivered_at VARCHAR(35)
+			delivered_at VARCHAR(35),
+			lease_owner VARCHAR(128) NOT NULL DEFAULT '',
+			lease_token VARCHAR(128) NOT NULL DEFAULT '',
+			lease_until VARCHAR(35)
 		)`,
 		`CREATE INDEX idx_status_webhook_outbox_due ON status_webhook_outbox(delivered_at,next_attempt_at,created_at)`,
 		`CREATE INDEX idx_status_webhook_outbox_mailbox ON status_webhook_outbox(mailbox_id,created_at)`,

@@ -68,7 +68,7 @@ export type MailFolder = { id: string; name: string; role: string; sortOrder: nu
 export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
 export type MailLabel = { id: string; mailboxId?: string; name: string; color: string; messageCount?: number }
 export type MailMessage = {
-  id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
+  id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; threadId?: string; threadCount?: number; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
   labels?: MailLabel[]
   sendQueueId?: string
   sendQueueStatus?: SendQueueStatus
@@ -122,6 +122,18 @@ export type SendQueueAuditEvent = {
   error?: string
   attemptCount?: number
   createdAt: string
+}
+export type AdminDeliveryQueueItem = {
+  id: string
+  queueType: "send" | "webhook" | "telegram"
+  status: "pending" | "failed" | "delivered" | "canceled"
+  attemptCount: number
+  maxAttempts: number
+  nextAttemptAt?: string
+  lastError?: string
+  createdAt: string
+  updatedAt: string
+  deliveredAt?: string
 }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
 export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }

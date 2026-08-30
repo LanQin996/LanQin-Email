@@ -63,6 +63,9 @@ type storedMessage struct {
 	RecipientAddr  string
 	MessageUID     string
 	MessageID      string
+	ThreadID       string
+	InReplyTo      string
+	References     string
 	Subject        string
 	From           string
 	FromName       string
@@ -424,6 +427,63 @@ func (a *App) handleMailMessages(w http.ResponseWriter, r *http.Request) {
 	a.respondMailMessageList(w, r, access, `m.mailbox_id=? AND m.folder_id=?`, []any{mb.ID, folderID})
 }
 
+func (a *App) handleMailThreads(w http.ResponseWriter, r *http.Request) {
+	access, err := a.mailboxReadAccessForRequest(r)
+	if err != nil {
+		respondError(w, http.StatusNotFound, "mailbox not found")
+		return
+	}
+	mb := access.Mailbox
+	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id) FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND m.id=(SELECT m2.id FROM messages m2 WHERE m2.mailbox_id=m.mailbox_id AND m2.thread_id=m.thread_id ORDER BY m2.received_at DESC,m2.id DESC LIMIT 1) ORDER BY m.received_at DESC,m.id DESC`, mb.ID)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load threads")
+		return
+	}
+	defer rows.Close()
+	items := []MailMessage{}
+	for rows.Next() {
+		msg, err := scanMessageSummary(rows)
+		if err != nil {
+			respondError(w, 500, "failed to scan threads")
+			return
+		}
+		items = append(items, msg)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load threads")
+		return
+	}
+	respondJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+func (a *App) handleMailMessageThread(w http.ResponseWriter, r *http.Request) {
+	msg, err := a.loadMessageForReadRequest(r, chi.URLParam(r, "id"), false)
+	if err != nil {
+		respondError(w, 404, "message not found")
+		return
+	}
+	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id) FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND m.thread_id=? ORDER BY m.received_at,m.id`, msg.MailboxID, msg.ThreadID)
+	if err != nil {
+		respondError(w, 500, "failed to load thread")
+		return
+	}
+	defer rows.Close()
+	items := []MailMessage{}
+	for rows.Next() {
+		item, e := scanMessageSummary(rows)
+		if e != nil {
+			respondError(w, 500, "failed to scan thread")
+			return
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to load thread")
+		return
+	}
+	respondJSON(w, 200, map[string]any{"items": items})
+}
+
 func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
 	access, err := a.mailboxReadAccessForRequest(r)
 	if err != nil {
@@ -472,7 +532,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 		args = append(args, cursorReceivedAt, cursorID)
 	}
 	args = append(args, limit+1)
-	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes
+	query := `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id)
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE ` + where + ` ORDER BY m.received_at DESC,m.id DESC LIMIT ?`
 	if offset > 0 {
 		query += ` OFFSET ?`
@@ -2125,7 +2185,7 @@ func (a *App) loadMessageForRequest(r *http.Request, id string, includeBody bool
 }
 
 func (a *App) messageByID(ctx context.Context, id string, includeBody bool) (*MailMessage, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,COALESCE(m.auth_results,''),COALESCE(m.auth_spf,'unknown'),COALESCE(m.auth_dkim,'unknown'),COALESCE(m.auth_dmarc,'unknown'),COALESCE(m.received_spf,'')
+	row := a.db.QueryRowContext(ctx, `SELECT m.id,COALESCE(m.mailbox_id,''),COALESCE(m.recipient_addr,''),COALESCE(m.folder_id,''),COALESCE(f.name,'Unregistered'),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.body_text,m.body_html,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,COALESCE(m.auth_results,''),COALESCE(m.auth_spf,'unknown'),COALESCE(m.auth_dkim,'unknown'),COALESCE(m.auth_dmarc,'unknown'),COALESCE(m.received_spf,'')
 		FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.id=?`, id)
 	msg, err := scanMessageFull(row, includeBody)
 	if err != nil {
@@ -2193,8 +2253,12 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 	}
 	recipientAddr := normalizeEmail(msg.RecipientAddr)
 	auth := normalizeMailAuthentication(msg.Authentication)
-	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,auth_results,auth_spf,auth_dkim,auth_dmarc,received_spf,raw_path,imap_uid,imap_modseq,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, auth.AuthenticationResults, auth.SPF, auth.DKIM, auth.DMARC, auth.ReceivedSPF, msg.RawPath, imapUID, imapModSeq, now, now)
+	threadID := msg.ThreadID
+	if threadID == "" {
+		threadID = a.resolveThreadID(ctx, msg.MailboxID, msg.MessageID, msg.InReplyTo, msg.References)
+	}
+	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,thread_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,auth_results,auth_spf,auth_dkim,auth_dmarc,received_spf,raw_path,imap_uid,imap_modseq,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, threadID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, auth.AuthenticationResults, auth.SPF, auth.DKIM, auth.DMARC, auth.ReceivedSPF, msg.RawPath, imapUID, imapModSeq, now, now)
 	if err != nil {
 		return "", err
 	}
@@ -2461,7 +2525,7 @@ func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	var msg MailMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred, hasAtt int
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.ThreadID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &read, &starred, &hasAtt, &msg.SizeBytes, &msg.ThreadCount)
 	if err != nil {
 		return msg, err
 	}
@@ -2477,7 +2541,7 @@ func scanMessageFull(row messageSummaryScanner, includeBody bool) (MailMessage, 
 	var auth MailAuthentication
 	var read, starred, hasAtt int
 	var bodyText, bodyHTML string
-	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes, &auth.AuthenticationResults, &auth.SPF, &auth.DKIM, &auth.DMARC, &auth.ReceivedSPF)
+	err := row.Scan(&msg.ID, &msg.MailboxID, &msg.RecipientAddr, &msg.FolderID, &msg.Folder, &msg.MessageUID, &msg.IMAPUID, &msg.IMAPModSeq, &msg.MessageID, &msg.ThreadID, &msg.Subject, &msg.From, &msg.FromName, &toJSON, &ccJSON, &bccJSON, &sent, &received, &msg.Snippet, &bodyText, &bodyHTML, &read, &starred, &hasAtt, &msg.SizeBytes, &auth.AuthenticationResults, &auth.SPF, &auth.DKIM, &auth.DMARC, &auth.ReceivedSPF)
 	if err != nil {
 		return msg, err
 	}

@@ -20,10 +20,24 @@ services:
     depends_on:
       - dovecot
       - postfix
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - 'curl --fail --silent --show-error http://127.0.0.1:8080/readyz >/dev/null'
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   web:
     image: ${LANQIN_WEB_IMAGE:-ghcr.io/lanqin996/lanqin-email-web:latest}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     restart: unless-stopped
 
   nginx:
@@ -36,6 +50,12 @@ services:
     depends_on:
       - api
       - web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   postfix:
@@ -51,6 +71,12 @@ services:
     depends_on:
       - dovecot
       - rspamd
+    healthcheck:
+      test: ["CMD-SHELL", "postfix status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   dovecot:
@@ -66,6 +92,12 @@ services:
     ports:
       - "993:993"
       - "995:995"
+    healthcheck:
+      test: ["CMD-SHELL", "doveadm service status >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
 
   rspamd:
@@ -74,4 +106,10 @@ services:
     volumes:
       - ./data:/data:ro
       - ./dkim:/var/lib/rspamd/dkim
+    healthcheck:
+      test: ["CMD-SHELL", "rspamadm control stat >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
     restart: unless-stopped
