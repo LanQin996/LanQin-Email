@@ -9,7 +9,11 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "check:shadcn": "node scripts/check-shadcn.mjs",
-    "check": "pnpm run check:shadcn && pnpm run build"
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext ts,tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,json,css}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,json,css}\"",
+    "check": "pnpm run check:shadcn && pnpm run lint && pnpm run format:check && pnpm run build"
   },
   "dependencies": {
     "@radix-ui/react-avatar": "^1.1.12",
@@ -53,9 +57,15 @@
     "@types/node": "24.13.2",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
     "@vitejs/plugin-react": "6.0.2",
     "autoprefixer": "10.4.20",
+    "eslint": "^9.0.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-plugin-react-refresh": "^0.4.0",
     "postcss": "8.5.15",
+    "prettier": "^3.0.0",
     "tailwindcss": "3.4.15",
     "tailwindcss-animate": "^1.0.7",
     "typescript": "5.6.3",

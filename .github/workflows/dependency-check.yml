@@ -1,0 +1,41 @@
+name: Dependency Check
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # 每周一运行
+  workflow_dispatch:
+
+jobs:
+  check-dependencies:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Check Go vulnerabilities
+        run: |
+          cd apps/api
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install pnpm
+        run: corepack prepare pnpm@10.28.2 --activate
+
+      - name: Check npm vulnerabilities
+        run: |
+          cd apps/web
+          pnpm install
+          pnpm audit --audit-level moderate

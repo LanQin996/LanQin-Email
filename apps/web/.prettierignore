@@ -1,0 +1,10 @@
+dist
+node_modules
+.next
+build
+coverage
+*.min.js
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+*.generated.*
