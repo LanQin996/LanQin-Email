@@ -285,4 +285,4 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
  </picture>
 </a>
 
-Friends: [LINUX DO](https://linux.do/) — a new ideal community
+Friends: [LINUX DO](https://linux.do/)  —  a new ideal community
