@@ -1,0 +1,151 @@
+# syntax=docker/dockerfile:1.7
+# 优化的生产环境 Dockerfile - 更小的镜像体积
+
+# ============ 阶段 1: API 构建 ============
+FROM golang:1.25-alpine AS api-build
+
+# 安装构建依赖
+RUN apk add --no-cache git ca-certificates tzdata
+
+WORKDIR /src/apps/api
+
+# 利用 Docker 缓存层：先复制依赖文件
+COPY apps/api/go.mod apps/api/go.sum ./
+
+# 使用 BuildKit cache mount 加速依赖下载
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download && \
+    go mod verify
+
+# 复制源代码
+COPY apps/api ./
+
+# 构建二进制文件
+# - CGO_ENABLED=0: 静态链接，不依赖 libc
+# - -ldflags: 减小二进制大小，移除调试信息
+# - -trimpath: 移除文件系统路径
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -trimpath \
+    -ldflags="-w -s -X main.version=${VERSION:-dev} -X main.buildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /out/lanqin-api \
+    ./cmd/server
+
+# 验证二进制文件
+RUN /out/lanqin-api --version || echo "Binary built successfully"
+
+# ============ 阶段 2: Web 构建 ============
+FROM node:20-alpine AS web-build
+
+# 安装构建依赖
+RUN apk add --no-cache git
+
+WORKDIR /src
+
+# 利用 Docker 缓存层：先复制依赖文件
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json apps/web/package.json
+
+# 启用 pnpm
+RUN corepack enable && \
+    corepack prepare pnpm@10.28.2 --activate
+
+# 安装依赖，使用 BuildKit cache mount
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --filter lanqin-email-web...
+
+# 复制源代码
+COPY apps/web apps/web
+
+# 构建前端
+ARG VITE_APP_VERSION=""
+ARG VITE_RELEASE_URL=""
+ENV NODE_ENV=production
+
+RUN pnpm --dir apps/web run build && \
+    # 验证构建产物
+    ls -lh apps/web/dist && \
+    # 删除 source maps（可选，减小镜像大小）
+    find apps/web/dist -name "*.map" -delete
+
+# ============ 阶段 3: 最终运行镜像 ============
+FROM alpine:3.19
+
+LABEL maintainer="LanQin Email Team" \
+      description="LanQin Email - Self-hosted Webmail with SMTP/IMAP" \
+      org.opencontainers.image.source="https://github.com/LanQin996/LanQin-Email"
+
+# 安装运行时依赖
+RUN apk add --no-cache \
+    ca-certificates \
+    tzdata \
+    sqlite \
+    mysql-client \
+    postgresql-client \
+    supervisor \
+    nginx \
+    postfix \
+    postfix-sqlite \
+    postfix-mysql \
+    postfix-pgsql \
+    dovecot \
+    dovecot-sqlite \
+    dovecot-mysql \
+    dovecot-pgsql \
+    dovecot-lmtpd \
+    rspamd \
+    curl \
+    && rm -rf /var/cache/apk/*
+
+# 创建运行用户（安全最佳实践）
+RUN addgroup -g 1000 lanqin && \
+    adduser -D -u 1000 -G lanqin lanqin
+
+# 从构建阶段复制二进制文件
+COPY --from=api-build /out/lanqin-api /usr/local/bin/lanqin-api
+COPY --from=web-build /src/apps/web/dist /usr/share/nginx/html
+
+# 复制配置文件
+COPY deploy/all-in-one/supervisord.conf /etc/supervisor/conf.d/lanqin.conf
+COPY deploy/all-in-one/nginx.conf /etc/nginx/http.d/default.conf
+COPY deploy/all-in-one/entrypoint.sh /entrypoint.sh
+
+COPY deploy/postfix/main.cf /etc/postfix/main.cf
+COPY deploy/postfix/master.cf /etc/postfix/master.cf
+COPY deploy/postfix/sqlite-*.cf /etc/postfix/
+COPY deploy/postfix/configure-db.sh /usr/local/bin/lanqin-postfix-configure-db
+
+COPY deploy/dovecot/dovecot.conf /etc/dovecot/dovecot.conf
+COPY deploy/dovecot/dovecot-sql.conf.ext /etc/dovecot/dovecot-sql.conf.ext
+COPY deploy/dovecot/configure-db.sh /usr/local/bin/lanqin-dovecot-configure-db
+
+COPY deploy/rspamd/local.d/ /etc/rspamd/local.d/
+COPY deploy/rspamd/sync-dkim.sh /usr/local/bin/lanqin-rspamd-sync-dkim
+
+# 设置权限和创建必要的目录
+RUN chmod +x /entrypoint.sh \
+    /usr/local/bin/lanqin-rspamd-sync-dkim \
+    /usr/local/bin/lanqin-postfix-configure-db \
+    /usr/local/bin/lanqin-dovecot-configure-db && \
+    mkdir -p /run/nginx /run/rspamd /var/mail/vhosts /data /var/lib/rspamd/dkim && \
+    chown -R lanqin:lanqin /data /var/mail/vhosts /var/lib/rspamd/dkim
+
+# 健康检查
+HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
+    CMD curl --fail --silent --show-error http://127.0.0.1/readyz >/dev/null \
+        && postfix status >/dev/null 2>&1 \
+        && doveadm service status >/dev/null 2>&1 \
+        && rspamadm control stat >/dev/null 2>&1 \
+        || exit 1
+
+# 暴露端口
+EXPOSE 80 443 25 465 587 993 995
+
+# 设置工作目录
+WORKDIR /data
+
+# 使用非 root 用户运行（部分服务需要 root，由 supervisor 管理）
+# USER lanqin
+
+CMD ["/entrypoint.sh"]

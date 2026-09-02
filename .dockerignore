@@ -1,51 +1,83 @@
+# .dockerignore - 减少 Docker 构建上下文大小
+
+# Git 相关
 .git
+.gitignore
+.gitattributes
 .github
-.claude
-.cursor
-.vscode
-.idea
 
-node_modules
-**/node_modules
-dist
-**/dist
-build
-**/build
-.vite
-**/.vite
-.cache
-**/.cache
-coverage
-**/coverage
-*.tsbuildinfo
+# 文档
+*.md
+docs/
+LICENSE
+CONTRIBUTING.md
 
-tmp
-data
-maildata
-rspamd-dkim
-logs
-*.log
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
 
+# 开发环境配置
 .env
-.env.*
-!*.env.example
-!**/.env.example
+.env.local
+.env.*.local
+docker-compose.dev.yml
+Dockerfile.dev
+Dockerfile.optimized
 
+# 依赖和构建产物
+**/node_modules/
+**/dist/
+**/build/
+**/tmp/
+**/.next/
+**/.cache/
+**/coverage/
+
+# Go 相关
+**/vendor/
+**/*.test
+**/*.out
+apps/api/tmp/
+
+# 测试文件
+**/*_test.go
+**/testdata/
+apps/web/src/**/*.test.ts
+apps/web/src/**/*.test.tsx
+apps/web/src/**/*.spec.ts
+apps/web/src/**/*.spec.tsx
+
+# 数据文件
 *.db
 *.db-shm
 *.db-wal
-*.sqlite
-*.sqlite3
+**/data/
+**/mail/
+**/dkim/
 
-*.pem
-*.key
-*.crt
+# 日志
+*.log
+logs/
 
-*.exe
-*.test
-*.out
-coverage.out
+# 部署相关（不需要在镜像中）
+deploy/.env
+deploy/.env.example
+deploy/data/
+deploy/mail/
+deploy/dkim/
 
-.DS_Store
-Thumbs.db
-desktop.ini
+# CI/CD
+.ai-reviewignore
+
+# 包管理器锁文件（已在 Dockerfile 中单独 COPY）
+# pnpm-lock.yaml
+# go.sum
+
+# 其他
+*.bak
+*.tmp
+*.temp

@@ -1,0 +1,22 @@
+# syntax=docker/dockerfile:1.7
+# 开发环境 Dockerfile - 仅构建 API，前端通过 Vite 独立运行
+
+FROM golang:1.25-bookworm AS development
+
+WORKDIR /workspace/apps/api
+
+# 安装开发工具
+RUN go install github.com/air-verse/air@latest && \
+    go install honnef.co/go/tools/cmd/staticcheck@latest && \
+    go install golang.org/x/vuln/cmd/govulncheck@latest
+
+# 复制 go.mod 和 go.sum 以利用 Docker 缓存
+COPY apps/api/go.mod apps/api/go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
+
+# 开发环境暴露的端口
+EXPOSE 8080
+
+# 使用 air 进行热重载
+CMD ["air", "-c", ".air.toml"]

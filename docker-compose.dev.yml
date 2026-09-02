@@ -1,0 +1,144 @@
+# Docker Compose 开发环境配置
+version: '3.8'
+
+services:
+  # API 后端服务 - 使用热重载
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      cache_from:
+        - golang:1.25-bookworm
+    container_name: lanqin-api-dev
+    working_dir: /workspace/apps/api
+    volumes:
+      # 挂载整个项目代码以支持热重载
+      - ./apps/api:/workspace/apps/api
+      # 使用命名卷缓存 Go 模块和构建缓存
+      - go-pkg-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    ports:
+      - "8080:8080"
+    environment:
+      - LANQIN_ADDR=:8080
+      - LANQIN_DB_DRIVER=sqlite
+      - LANQIN_DB_PATH=/data/lanqin.db
+      - LANQIN_DATA_DIR=/data
+      - LANQIN_ADMIN_EMAIL=admin@lanqin.local
+      - LANQIN_ADMIN_PASSWORD=DevPassword123!
+      - LANQIN_PUBLIC_HOSTNAME=localhost
+      - LANQIN_PUBLIC_BASE_URL=http://localhost:5173
+      - LANQIN_ALLOW_INSECURE_HTTP=true
+      - LANQIN_LOG_LEVEL=debug
+    volumes:
+      - ./apps/api:/workspace/apps/api
+      - go-pkg-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+      - dev-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - lanqin-dev
+
+  # Web 前端服务 - Vite 开发服务器
+  web:
+    image: node:20-bookworm-slim
+    container_name: lanqin-web-dev
+    working_dir: /workspace/apps/web
+    volumes:
+      - ./apps/web:/workspace/apps/web
+      - ./pnpm-lock.yaml:/workspace/pnpm-lock.yaml
+      - ./pnpm-workspace.yaml:/workspace/pnpm-workspace.yaml
+      # 使用命名卷缓存 node_modules 和 pnpm store
+      - web-node-modules:/workspace/apps/web/node_modules
+      - pnpm-store:/root/.local/share/pnpm/store
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8080
+    command: >
+      sh -c "
+        corepack enable &&
+        corepack prepare pnpm@10.28.2 --activate &&
+        pnpm install &&
+        pnpm run dev
+      "
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - lanqin-dev
+
+  # PostgreSQL 数据库（可选，用于测试 PostgreSQL 支持）
+  postgres:
+    image: postgres:16-alpine
+    container_name: lanqin-postgres-dev
+    environment:
+      - POSTGRES_DB=lanqin
+      - POSTGRES_USER=lanqin
+      - POSTGRES_PASSWORD=lanqin_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lanqin -d lanqin"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - lanqin-dev
+    profiles:
+      - postgres
+
+  # MySQL 数据库（可选，用于测试 MySQL 支持）
+  mysql:
+    image: mysql:8.4
+    container_name: lanqin-mysql-dev
+    environment:
+      - MYSQL_DATABASE=lanqin
+      - MYSQL_USER=lanqin
+      - MYSQL_PASSWORD=lanqin_dev_password
+      - MYSQL_ROOT_PASSWORD=root_dev_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ulanqin", "-planqin_dev_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - lanqin-dev
+    profiles:
+      - mysql
+
+  # Mailhog - 邮件测试工具（捕获所有发出的邮件）
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: lanqin-mailhog-dev
+    ports:
+      - "1025:1025"  # SMTP 端口
+      - "8025:8025"  # Web UI 端口
+    networks:
+      - lanqin-dev
+    profiles:
+      - mail-testing
+
+networks:
+  lanqin-dev:
+    driver: bridge
+
+volumes:
+  go-pkg-cache:
+  go-build-cache:
+  web-node-modules:
+  pnpm-store:
+  dev-data:
+  postgres-data:
+  mysql-data:

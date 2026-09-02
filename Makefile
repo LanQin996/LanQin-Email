@@ -54,3 +54,43 @@ clean: ## 清理构建文件
 	rm -rf apps/web/dist
 	rm -rf apps/api/tmp
 	@echo "清理完成"
+
+# Docker 开发环境命令
+.PHONY: dev-up dev-down dev-logs dev-restart dev-clean docker-build
+
+dev-up: ## 启动开发环境
+	docker compose -f docker-compose.dev.yml up -d
+	@echo "开发环境已启动"
+	@echo "Web: http://localhost:5173"
+	@echo "API: http://localhost:8080"
+
+dev-up-postgres: ## 启动开发环境（使用 PostgreSQL）
+	docker compose -f docker-compose.dev.yml --profile postgres up -d
+
+dev-up-mysql: ## 启动开发环境（使用 MySQL）
+	docker compose -f docker-compose.dev.yml --profile mysql up -d
+
+dev-up-all: ## 启动开发环境（包含所有服务）
+	docker compose -f docker-compose.dev.yml --profile postgres --profile mysql --profile mail-testing up -d
+
+dev-down: ## 停止开发环境
+	docker compose -f docker-compose.dev.yml down
+
+dev-logs: ## 查看开发环境日志
+	docker compose -f docker-compose.dev.yml logs -f
+
+dev-restart: ## 重启开发环境
+	docker compose -f docker-compose.dev.yml restart
+
+dev-clean: ## 停止并清理开发环境（删除数据卷）
+	docker compose -f docker-compose.dev.yml down -v
+	@echo "开发环境已清理"
+
+docker-build: ## 构建 Docker 镜像
+	docker build -f deploy/all-in-one/Dockerfile -t lanqin-email:latest .
+
+docker-build-optimized: ## 构建优化的 Docker 镜像（Alpine 基础）
+	docker build -f Dockerfile.optimized -t lanqin-email:optimized .
+
+docker-build-dev: ## 构建开发 Docker 镜像
+	docker build -f Dockerfile.dev -t lanqin-email:dev .
