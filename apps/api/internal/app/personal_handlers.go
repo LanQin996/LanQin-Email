@@ -106,6 +106,10 @@ func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
 			respondError(w, http.StatusConflict, mailboxCountLimitMessage(user))
 			return
 		}
+		if errors.Is(err, errMailboxDailyLimitReached) {
+			respondError(w, http.StatusTooManyRequests, mailboxDailyLimitMessage(user))
+			return
+		}
 		if isUniqueViolation(err) {
 			respondError(w, http.StatusConflict, "该邮箱地址已被占用")
 			return

@@ -96,12 +96,20 @@ func postgresFreshSchema() []string {
 			code VARCHAR(64) NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
 			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+			permission_group_ids_json TEXT NOT NULL DEFAULT '[]',
 			created_by VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL,
 			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX idx_registration_invites_created ON registration_invites(created_at)`,
+		`CREATE TABLE mailbox_creation_events (
+			id VARCHAR(64) PRIMARY KEY,
+			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id VARCHAR(64) NOT NULL,
+			created_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE INDEX idx_mailbox_creation_events_user ON mailbox_creation_events(user_id,created_at)`,
 		`CREATE TABLE api_tokens (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

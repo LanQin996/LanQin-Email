@@ -498,6 +498,14 @@ function PermissionLimitEditor({ value, onChange }: { value: PermissionLimits; o
           <Input type="number" min={0} value={value.maxMailboxes} onChange={(event) => update("maxMailboxes", event.target.value)} />
           <span className="block text-xs text-muted-foreground">删除邮箱不会释放额度</span>
         </div>
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <Label>每日新建邮箱上限</Label>
+            <span className="text-xs text-muted-foreground">滚动 24 小时</span>
+          </div>
+          <Input type="number" min={0} value={value.maxMailboxesPerDay} onChange={(event) => update("maxMailboxesPerDay", event.target.value)} />
+          <span className="block text-xs text-muted-foreground">额度不累积，与数量上限同时生效</span>
+        </div>
       </div>
     </div>
   )
@@ -527,6 +535,7 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
       <Badge variant="secondary" className="font-normal">IMAP 每分钟 {limitText(value.imapMinuteLimit, "次")}</Badge>
       <Badge variant="secondary" className="font-normal">POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}</Badge>
       <Badge variant="secondary" className="font-normal">邮箱数量 {limitText(value.maxMailboxes, "个")}</Badge>
+      <Badge variant="secondary" className="font-normal">每日新建 {limitText(value.maxMailboxesPerDay, "个")}</Badge>
     </div>
   )
 }
@@ -1019,6 +1028,8 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const [turnstileEnabled, setTurnstileEnabled] = React.useState(false)
   const [linuxDoSSOEnabled, setLinuxDoSSOEnabled] = React.useState(false)
   const [linuxDoRegistrationEnabled, setLinuxDoRegistrationEnabled] = React.useState(false)
+  const [linuxDoRegistrationGroupIds, setLinuxDoRegistrationGroupIds] = React.useState<string[]>([])
+  const settingsPermissionGroups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: linuxDoRegistrationEnabled })
   const [catchAllEnabled, setCatchAllEnabled] = React.useState(false)
   const [mailAutoRefresh, setMailAutoRefresh] = React.useState(true)
   const [userMailboxApplyEnabled, setUserMailboxApplyEnabled] = React.useState(false)
@@ -1035,6 +1046,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     setTurnstileEnabled(settings.turnstileEnabled)
     setLinuxDoSSOEnabled(settings.linuxDoSSOEnabled)
     setLinuxDoRegistrationEnabled(settings.linuxDoRegistrationEnabled)
+    setLinuxDoRegistrationGroupIds(settings.linuxDoRegistrationGroupIds || [])
     setCatchAllEnabled(settings.catchAllEnabled)
     setMailAutoRefresh(settings.mailAutoRefresh)
     setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
@@ -1063,6 +1075,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
       turnstileSecretKey: fieldValue(form, "turnstileSecretKey", ""),
       linuxDoSSOEnabled,
       linuxDoRegistrationEnabled,
+      linuxDoRegistrationGroupIds,
       linuxDoClientId: fieldValue(form, "linuxDoClientId", settings?.linuxDoClientId || ""),
       linuxDoClientSecret: fieldValue(form, "linuxDoClientSecret", ""),
       catchAllEnabled,
@@ -1109,6 +1122,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
     settings.turnstileSecretSet,
     settings.linuxDoSSOEnabled,
     settings.linuxDoRegistrationEnabled,
+    settings.linuxDoRegistrationGroupIds,
     settings.linuxDoClientId,
     settings.linuxDoClientSecretSet,
     settings.linuxDoCallbackUrl,
@@ -1312,6 +1326,26 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
             </div>
             <SwitchRow label="启用 Linux.do 登录" checked={linuxDoSSOEnabled} onCheckedChange={setLinuxDoSSOEnabled} />
             <SwitchRow label="允许 Linux.do 用户注册本站账号" checked={linuxDoRegistrationEnabled} onCheckedChange={setLinuxDoRegistrationEnabled} />
+            {linuxDoRegistrationEnabled && (
+              <div className="space-y-2">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <Label>Linux.do 注册后加入的用户组</Label>
+                  <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                </div>
+                <Select
+                  value={linuxDoRegistrationGroupIds[0] || "none"}
+                  onValueChange={(value) => setLinuxDoRegistrationGroupIds(value === "none" ? [] : [value])}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">默认用户组</SelectItem>
+                    {(settingsPermissionGroups.data?.items || [])
+                      .filter((item) => item.id !== "pg_super_admin" && item.id !== "pg_regular_user")
+                      .map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-2">
               <Field name="linuxDoClientId" label="Client ID" defaultValue={settings?.linuxDoClientId || ""} required={linuxDoSSOEnabled} />
               <Field name="linuxDoClientSecret" label={settings?.linuxDoClientSecretSet ? "Client Secret（留空不变）" : "Client Secret"} type="password" required={linuxDoSSOEnabled && !settings?.linuxDoClientSecretSet} />
@@ -1337,14 +1371,20 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
   const [createOpen, setCreateOpen] = React.useState(false)
   const [code, setCode] = React.useState("")
   const [maxUses, setMaxUses] = React.useState(1)
+  const [groupId, setGroupId] = React.useState("")
   const [removeItem, setRemoveItem] = React.useState<RegistrationInvite | null>(null)
+  const groups = useQuery({ queryKey: ["admin", "permission-groups"], queryFn: api.permissionGroups, enabled: createOpen })
+  // pg_super_admin and pg_regular_user are not assignable: the former would let a
+  // code hand out super administrator rights, the latter is inherited by everyone.
+  const assignableGroups = (groups.data?.items || []).filter((item) => item.id !== "pg_super_admin" && item.id !== "pg_regular_user")
   const create = useMutation({
-    mutationFn: () => api.createRegistrationInvite({ code: code.trim() || undefined, maxUses }),
+    mutationFn: () => api.createRegistrationInvite({ code: code.trim() || undefined, maxUses, permissionGroupIds: groupId ? [groupId] : [] }),
     onSuccess: (item) => {
       qc.invalidateQueries({ queryKey: ["admin", "registration-invites"] })
       setCreateOpen(false)
       setCode("")
       setMaxUses(1)
+      setGroupId("")
       toast({ title: "邀请码已创建", description: item.code })
     },
     onError: (error) => toast({ title: "创建失败", description: error.message }),
@@ -1387,6 +1427,19 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
                   <Label htmlFor="registrationInviteMaxUses">可用次数</Label>
                   <Input id="registrationInviteMaxUses" type="number" min={1} max={1_000_000} value={maxUses} onChange={(event) => setMaxUses(Number(event.target.value))} />
                 </div>
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <Label>注册后加入的用户组</Label>
+                    <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                  </div>
+                  <Select value={groupId || "none"} onValueChange={(value) => setGroupId(value === "none" ? "" : value)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">默认用户组</SelectItem>
+                      {assignableGroups.map((item) => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={create.isPending}>取消</Button>
@@ -1398,7 +1451,7 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
       </div>
       <div className="overflow-x-auto rounded-md border">
         <Table>
-          <TableHeader><TableRow><TableHead>邀请码</TableHead><TableHead>使用情况</TableHead><TableHead>创建人</TableHead><TableHead>创建时间</TableHead>{canUpdate && <TableHead className="w-14" />}</TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>邀请码</TableHead><TableHead>用户组</TableHead><TableHead>使用情况</TableHead><TableHead>创建人</TableHead><TableHead>创建时间</TableHead>{canUpdate && <TableHead className="w-14" />}</TableRow></TableHeader>
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id}>
@@ -1407,6 +1460,11 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
                     <span className="font-mono text-sm">{item.code}</span>
                     <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="复制邀请码" aria-label="复制邀请码" onClick={() => navigator.clipboard.writeText(item.code).then(() => toast({ title: "邀请码已复制" }))}><Copy className="h-4 w-4" /></Button>
                   </div>
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {(item.permissionGroups || []).length === 0
+                    ? <span className="text-sm text-muted-foreground">默认用户组</span>
+                    : <div className="flex flex-wrap gap-1">{item.permissionGroups.map((group) => <Badge key={group.id} variant="secondary" className="font-normal">{group.name}</Badge>)}</div>}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">{item.usedCount} / {item.maxUses} <span className="text-muted-foreground">（剩余 {item.remainingUses}）</span></TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">{item.createdByEmail || "-"}</TableCell>

@@ -49,6 +49,7 @@ type Config struct {
 	LinuxDoRegistrationEnabled      bool
 	LinuxDoClientID                 string
 	LinuxDoClientSecret             string
+	LinuxDoRegistrationGroupIDs     string
 	CatchAllEnabled                 bool
 	MailAutoRefresh                 bool
 	MailRefreshSeconds              int
@@ -115,6 +116,7 @@ func LoadConfig() Config {
 		LinuxDoRegistrationEnabled:      false,
 		LinuxDoClientID:                 "",
 		LinuxDoClientSecret:             "",
+		LinuxDoRegistrationGroupIDs:     getenv("LANQIN_LINUXDO_REGISTRATION_GROUP_IDS", ""),
 		CatchAllEnabled:                 getenvBool("LANQIN_CATCH_ALL_ENABLED", false),
 		MailAutoRefresh:                 getenvBool("LANQIN_MAIL_AUTO_REFRESH", true),
 		MailRefreshSeconds:              getenvInt("LANQIN_MAIL_REFRESH_SECONDS", 30),

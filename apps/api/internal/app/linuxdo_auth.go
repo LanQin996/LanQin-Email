@@ -465,6 +465,17 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
 	}
+	// Linux.do registrations may be placed into preconfigured permission groups.
+	// Like the invite path, this has no actor, so the actor-based grant checks do
+	// not apply; the IDs are validated here instead. A stale group ID is skipped
+	// rather than fatal, because an administrator deleting a group should not break
+	// the SSO sign-up flow.
+	if groupIDs := a.linuxDoRegistrationGroupIDs(r.Context(), tx); len(groupIDs) > 0 {
+		if err := a.writeUserPermissionGroups(r.Context(), tx, userID, groupIDs); err != nil {
+			a.respondLinuxDoRegistrationDBError(w, err)
+			return
+		}
+	}
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM oauth_registration_challenges WHERE token_hash=?`, hashToken(token))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
@@ -727,4 +738,26 @@ func (a *App) redirectLinuxDoResult(w http.ResponseWriter, r *http.Request, path
 	base.RawQuery = query.Encode()
 	base.Fragment = ""
 	http.Redirect(w, r, base.String(), http.StatusFound)
+}
+
+// linuxDoRegistrationGroupIDs returns the configured groups for Linux.do sign-ups,
+// dropping any that no longer exist or are not assignable.
+//
+// Unknown IDs are skipped instead of failing: the setting is a static list that an
+// administrator may leave stale after deleting a group, and blocking registration
+// on that would be a worse outcome than granting only the groups that remain.
+func (a *App) linuxDoRegistrationGroupIDs(ctx context.Context, tx *sql.Tx) []string {
+	configured := cleanIDList(strings.Split(a.cfg.LinuxDoRegistrationGroupIDs, ","))
+	if len(configured) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(configured))
+	for _, groupID := range configured {
+		if err := a.validateAssignableGroupIDsTx(ctx, tx, []string{groupID}); err != nil {
+			a.log.Warn("skipping unavailable Linux.do registration group", "group_id", groupID, "error", err)
+			continue
+		}
+		out = append(out, groupID)
+	}
+	return out
 }

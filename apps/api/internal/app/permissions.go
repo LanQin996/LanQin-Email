@@ -147,6 +147,10 @@ type PermissionLimits struct {
 	// cumulative and includes deleted mailboxes, so deleting a mailbox does not
 	// free up quota; see users.mailboxes_created_total.
 	MaxMailboxes int `json:"maxMailboxes"`
+	// MaxMailboxesPerDay caps creations within a rolling 24 hour window and
+	// applies on top of MaxMailboxes, so both must pass. Unused allowance does
+	// not accumulate: skipping a day never grants two the next day.
+	MaxMailboxesPerDay int `json:"maxMailboxesPerDay"`
 }
 
 func defaultPermissionLimits() PermissionLimits {
@@ -155,8 +159,9 @@ func defaultPermissionLimits() PermissionLimits {
 		SMTPDailyLimit:  200,
 		SMTPMinuteLimit: 20,
 		IMAPMinuteLimit: 200,
-		POP3MinuteLimit: 150,
-		MaxMailboxes:    3,
+		POP3MinuteLimit:    150,
+		MaxMailboxes:       3,
+		MaxMailboxesPerDay: 1,
 	}
 }
 
@@ -178,6 +183,9 @@ func normalizePermissionLimits(limits PermissionLimits) (PermissionLimits, error
 	}
 	if limits.MaxMailboxes < 0 {
 		return PermissionLimits{}, errors.New("maxMailboxes cannot be negative")
+	}
+	if limits.MaxMailboxesPerDay < 0 {
+		return PermissionLimits{}, errors.New("maxMailboxesPerDay cannot be negative")
 	}
 	return limits, nil
 }
@@ -211,7 +219,8 @@ func mergePermissionLimits(left, right PermissionLimits) PermissionLimits {
 		SMTPMinuteLimit:  mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
 		IMAPMinuteLimit:  mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
 		POP3MinuteLimit:  mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
-		MaxMailboxes:     mergeLimitValue(left.MaxMailboxes, right.MaxMailboxes),
+		MaxMailboxes:       mergeLimitValue(left.MaxMailboxes, right.MaxMailboxes),
+		MaxMailboxesPerDay: mergeLimitValue(left.MaxMailboxesPerDay, right.MaxMailboxesPerDay),
 	}
 }
 
@@ -239,8 +248,9 @@ func minimalLimits() PermissionLimits {
 		SMTPDailyLimit:  1,
 		SMTPMinuteLimit: 1,
 		IMAPMinuteLimit: 1,
-		POP3MinuteLimit: 1,
-		MaxMailboxes:    1,
+		POP3MinuteLimit:    1,
+		MaxMailboxes:       1,
+		MaxMailboxesPerDay: 1,
 	}
 }
 
@@ -256,7 +266,8 @@ func actorCanGrantLimits(actor *User, limits PermissionLimits) bool {
 		canGrantLimitValue(actor.Limits.SMTPMinuteLimit, limits.SMTPMinuteLimit) &&
 		canGrantLimitValue(actor.Limits.IMAPMinuteLimit, limits.IMAPMinuteLimit) &&
 		canGrantLimitValue(actor.Limits.POP3MinuteLimit, limits.POP3MinuteLimit) &&
-		canGrantLimitValue(actor.Limits.MaxMailboxes, limits.MaxMailboxes)
+		canGrantLimitValue(actor.Limits.MaxMailboxes, limits.MaxMailboxes) &&
+		canGrantLimitValue(actor.Limits.MaxMailboxesPerDay, limits.MaxMailboxesPerDay)
 }
 
 func canGrantLimitValue(actorLimit, requestedLimit int) bool {
@@ -1024,6 +1035,28 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	if !actorCanGrantLimits(actor, groupLimits) {
 		return errors.New("cannot assign limits above your own")
 	}
+	return a.writeUserPermissionGroups(ctx, tx, userID, groupIDs)
+}
+
+// writeUserPermissionGroups replaces a user's group membership without checking
+// an actor's authority to grant it.
+//
+// This bypasses actorCanGrantPermissions / actorCanGrantLimits, which is only
+// correct because self-registration has no actor at all: actorCanGrantPermissions
+// returns false for a nil actor, so setUserPermissionGroups can never be used on
+// the registration path. Do not call this from anything an authenticated user
+// drives — that is what setUserPermissionGroups is for.
+//
+// Callers must still validate the group IDs. The invite path does so twice: once
+// when the code is created and again when it is consumed, because a group may
+// have been deleted in between.
+func (a *App) writeUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID string, groupIDs []string) error {
+	groupIDs = cleanIDList(groupIDs)
+	for _, groupID := range groupIDs {
+		if !isAssignablePermissionGroupID(groupID) {
+			return fmt.Errorf("permission group not assignable: %s", groupID)
+		}
+	}
 	exec := func(query string, args ...any) error {
 		var err error
 		if tx != nil {
@@ -1039,6 +1072,31 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	for _, groupID := range groupIDs {
 		if err := exec(`INSERT INTO user_permission_groups(user_id,group_id,created_at) VALUES(?,?,?)`, userID, groupID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAssignableGroupIDsTx confirms every ID is an existing, assignable
+// group. Used when binding groups to an invite code and again when consuming it.
+func (a *App) validateAssignableGroupIDsTx(ctx context.Context, tx *sql.Tx, groupIDs []string) error {
+	for _, groupID := range cleanIDList(groupIDs) {
+		if !isAssignablePermissionGroupID(groupID) {
+			return fmt.Errorf("permission group not assignable: %s", groupID)
+		}
+		var exists string
+		query := `SELECT id FROM permission_groups WHERE id=?`
+		var err error
+		if tx != nil {
+			err = tx.QueryRowContext(ctx, query, groupID).Scan(&exists)
+		} else {
+			err = a.db.QueryRowContext(ctx, query, groupID).Scan(&exists)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("permission group not found: %s", groupID)
+		}
+		if err != nil {
 			return err
 		}
 	}

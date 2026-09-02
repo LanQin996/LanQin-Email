@@ -38,6 +38,7 @@ export const defaultPermissionLimits: PermissionLimits = {
   imapMinuteLimit: 200,
   pop3MinuteLimit: 150,
   maxMailboxes: 3,
+  maxMailboxesPerDay: 1,
 }
 
 export function groupPermissionCatalog(catalog: PermissionInfo[]) {

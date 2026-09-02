@@ -47,6 +47,13 @@ func setupQuotaTest(t *testing.T) (*App, *testClient, *testClient, AdminUser, Do
 // setRegularGroupMailboxLimit updates the limit inherited by every regular user.
 func setRegularGroupMailboxLimit(t *testing.T, admin *testClient, limit int) {
 	t.Helper()
+	// A per-day limit of 0 keeps the lifetime limit the only constraint under test.
+	setRegularGroupMailboxLimits(t, admin, limit, 0)
+}
+
+// setRegularGroupMailboxLimits sets both the lifetime and the per-day allowance.
+func setRegularGroupMailboxLimits(t *testing.T, admin *testClient, limit, perDay int) {
+	t.Helper()
 	var groups struct {
 		Items []PermissionGroup `json:"items"`
 	}
@@ -65,6 +72,7 @@ func setRegularGroupMailboxLimit(t *testing.T, admin *testClient, limit int) {
 	}
 	limits := target.Limits
 	limits.MaxMailboxes = limit
+	limits.MaxMailboxesPerDay = perDay
 	var updated PermissionGroup
 	if code := admin.do("POST", "/api/admin/permission-groups/"+target.ID, map[string]any{
 		"name":        target.Name,
@@ -74,8 +82,8 @@ func setRegularGroupMailboxLimit(t *testing.T, admin *testClient, limit int) {
 	}, &updated); code != http.StatusOK {
 		t.Fatalf("update group code=%d", code)
 	}
-	if updated.Limits.MaxMailboxes != limit {
-		t.Fatalf("limit not persisted: got %d want %d", updated.Limits.MaxMailboxes, limit)
+	if updated.Limits.MaxMailboxes != limit || updated.Limits.MaxMailboxesPerDay != perDay {
+		t.Fatalf("limits not persisted: got %d/%d want %d/%d", updated.Limits.MaxMailboxes, updated.Limits.MaxMailboxesPerDay, limit, perDay)
 	}
 }
 

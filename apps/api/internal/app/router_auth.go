@@ -182,9 +182,14 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionMessagesRead)).Get("/admin/messages/{id}", a.handleAdminMessage)
 			r.With(a.requirePermission(PermissionMessagesAttachment)).Get("/admin/attachments/{id}", a.handleAdminAttachment)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings", a.handleGetSystemSettings)
-			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/registration-invites", a.handleListRegistrationInvites)
-			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/registration-invites", a.handleCreateRegistrationInvite)
-			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/registration-invites/{id}", a.handleDeleteRegistrationInvite)
+			// Invite codes can grant permission groups, which makes creating one an
+			// authorization decision rather than a settings tweak. They are therefore
+			// restricted to actual super administrators: leaving them on
+			// admin.settings.update would let a settings operator mint a code bound to
+			// a high-privilege group and register into it.
+			r.With(a.requireSuperAdmin).Get("/admin/registration-invites", a.handleListRegistrationInvites)
+			r.With(a.requireSuperAdmin).Post("/admin/registration-invites", a.handleCreateRegistrationInvite)
+			r.With(a.requireSuperAdmin).Delete("/admin/registration-invites/{id}", a.handleDeleteRegistrationInvite)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/maildir-sync/health", a.handleMaildirSyncHealth)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/delivery-queue", a.handleAdminDeliveryQueue)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/delivery-queue/{queueType}/{id}/retry", a.handleAdminDeliveryQueueRetry)

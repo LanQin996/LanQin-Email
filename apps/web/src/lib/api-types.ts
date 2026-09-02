@@ -47,7 +47,7 @@ export type PermissionKey =
   | "admin.templates.update"
   | "admin.templates.reset"
 export type PermissionInfo = { key: PermissionKey; label: string; description: string; category: string }
-export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number; maxMailboxes: number }
+export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number; maxMailboxes: number; maxMailboxesPerDay: number }
 export type PermissionGroupSummary = { id: string; name: string }
 export type PermissionGroup = { id: string; name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits; system: boolean; userCount: number; createdAt: string; updatedAt: string }
 export type User = { id: string; email: string; displayName: string; role: "admin" | "user"; disabled: boolean; protected: boolean; twoFactorEnabled: boolean; permissions: PermissionKey[]; limits: PermissionLimits; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; mailboxesCreatedTotal: number; mailboxQuotaBonus: number; createdAt: string }
@@ -196,6 +196,7 @@ export type SystemSettings = {
   linuxDoClientId: string
   linuxDoClientSecretSet: boolean
   linuxDoCallbackUrl: string
+  linuxDoRegistrationGroupIds: string[]
   catchAllEnabled: boolean
   mailAutoRefresh: boolean
   mailRefreshSeconds: number
@@ -217,7 +218,7 @@ export type PublicSettings = { openRegistration: boolean; inviteRegistrationEnab
 export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
 export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string; inviteCode?: string }
-export type RegistrationInvite = { id: string; code: string; maxUses: number; usedCount: number; remainingUses: number; createdByEmail?: string; createdAt: string }
+export type RegistrationInvite = { id: string; code: string; maxUses: number; usedCount: number; remainingUses: number; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; createdByEmail?: string; createdAt: string }
 export type LinuxDoIdentity = { linked: boolean; username?: string }
 export type LinuxDoPendingRegistration = { username: string; displayName: string; domains: PublicDomain[] }
 export type LinuxDoRegistrationPayload = { domainId: string; localPart: string; displayName: string; password: string; turnstileToken?: string }

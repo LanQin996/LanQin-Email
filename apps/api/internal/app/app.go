@@ -243,12 +243,23 @@ func (a *App) migrate(ctx context.Context) error {
 			code TEXT NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
 			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+			permission_group_ids_json TEXT NOT NULL DEFAULT '[]',
 			created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_registration_invites_created ON registration_invites(created_at)`,
+		// mailbox_id deliberately has no foreign key: deleting a mailbox must not
+		// erase the creation record, otherwise create-delete-create would reset the
+		// per-day rate limit.
+		`CREATE TABLE IF NOT EXISTS mailbox_creation_events (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_creation_events_user ON mailbox_creation_events(user_id,created_at)`,
 		`CREATE TABLE IF NOT EXISTS api_tokens (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -779,6 +790,9 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migrateMailboxQuota(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateInviteGroupsAndMailboxRate(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateSendQueueMessageID(ctx); err != nil {
 		return err
 	}
@@ -1115,6 +1129,40 @@ func (a *App) migrateMailboxQuota(ctx context.Context) error {
 	}
 	if !columns["mailbox_quota_bonus"] {
 		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateInviteGroupsAndMailboxRate adds the invite-to-group binding column.
+//
+// mailbox_creation_events is created by the inline DDL above and needs no
+// backfill: an empty table simply means nobody has consumed today's allowance
+// yet, which is the correct state after an upgrade.
+func (a *App) migrateInviteGroupsAndMailboxRate(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(registration_invites)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !columns["permission_group_ids_json"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE registration_invites ADD COLUMN permission_group_ids_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
 			return err
 		}
 	}
@@ -1683,6 +1731,9 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 	if err != nil {
 		return "", err
 	}
+	if err := a.recordMailboxCreationTx(ctx, tx, userID, id, now); err != nil {
+		return "", err
+	}
 	for _, f := range defaultFolderDefs() {
 		_, err = tx.ExecContext(ctx, `INSERT INTO folders(id,mailbox_id,name,role,sort_order,uid_validity,uid_next,highest_modseq,created_at) VALUES(?,?,?,?,?,?,?,?,?)`, newID("fld"), id, f.name, f.role, 0, a.newUIDValidity(), 1, 1, now)
 		if err != nil {
@@ -1699,6 +1750,10 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 // storage size in bytes.
 var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
 
+// errMailboxDailyLimitReached is returned when a self-service mailbox creation
+// would exceed the per-day allowance of the user's permission group.
+var errMailboxDailyLimitReached = errors.New("mailbox daily creation limit reached")
+
 // consumeMailboxQuotaTx increments the user's lifetime mailbox counter and, when
 // enforceQuotaFor is set, refuses to do so once the effective limit is reached.
 //
@@ -1708,6 +1763,12 @@ var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
 // an isolation level that would prevent it by default. This mirrors how
 // consumeRegistrationInviteTx guards invite codes.
 func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
+	if enforceQuotaFor != nil {
+		if err := a.checkMailboxDailyLimitTx(ctx, tx, userID, now, enforceQuotaFor); err != nil {
+			return err
+		}
+	}
+
 	query := `UPDATE users SET mailboxes_created_total=mailboxes_created_total+1, updated_at=? WHERE id=?`
 	args := []any{now, userID}
 
@@ -1741,6 +1802,42 @@ func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now
 	return nil
 }
 
+// checkMailboxDailyLimitTx enforces the rolling 24 hour creation allowance and
+// records the attempt.
+//
+// The window is deliberately rolling rather than calendar-day: with a limit of
+// one, a midnight boundary would let a user create at 23:59 and again at 00:01.
+// This matches how recordSMTPRate bounds daily sending.
+//
+// Events are kept even after the mailbox itself is deleted, which is what stops
+// create-delete-create from resetting the allowance.
+func (a *App) checkMailboxDailyLimitTx(ctx context.Context, tx *sql.Tx, userID, now string, user *User) error {
+	limit := user.Limits.MaxMailboxesPerDay
+	if limit <= 0 {
+		return nil
+	}
+	windowStart := a.now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
+	var used int
+	if err := tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?`,
+		userID, windowStart).Scan(&used); err != nil {
+		return err
+	}
+	if used >= limit {
+		return errMailboxDailyLimitReached
+	}
+	return nil
+}
+
+// recordMailboxCreationTx appends to the creation log. It runs for every path,
+// including administrative ones, so that the log stays a complete history.
+func (a *App) recordMailboxCreationTx(ctx context.Context, tx *sql.Tx, userID, mailboxID, now string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO mailbox_creation_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`,
+		newID("mce"), userID, mailboxID, now)
+	return err
+}
+
 // mailboxCountLimitMessage explains the limit in the user's own terms. The
 // cumulative wording matters: deleting a mailbox does not free up an allowance,
 // which is otherwise counter-intuitive.
@@ -1750,6 +1847,15 @@ func mailboxCountLimitMessage(u *User) string {
 		return "邮箱数量已达上限"
 	}
 	return fmt.Sprintf("邮箱数量已达上限（%d 个，按累计创建数计算，删除邮箱不会释放额度）", limit)
+}
+
+// mailboxDailyLimitMessage states the per-day allowance. The rolling window is
+// spelled out because users otherwise expect the count to reset at midnight.
+func mailboxDailyLimitMessage(u *User) string {
+	if u == nil || u.Limits.MaxMailboxesPerDay <= 0 {
+		return "今日创建邮箱数已达上限"
+	}
+	return fmt.Sprintf("今日创建邮箱数已达上限（每 24 小时最多 %d 个，额度不累积）", u.Limits.MaxMailboxesPerDay)
 }
 
 func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {

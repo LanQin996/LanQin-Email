@@ -288,15 +288,21 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	var inviteGroupIDs []string
 	if !a.cfg.OpenRegistration {
-		if err := a.consumeRegistrationInviteTx(r.Context(), tx, req.InviteCode); err != nil {
-			if errors.Is(err, errRegistrationInviteInvalid) {
+		granted, err := a.consumeRegistrationInviteTx(r.Context(), tx, req.InviteCode)
+		if err != nil {
+			switch {
+			case errors.Is(err, errRegistrationInviteInvalid):
 				respondError(w, http.StatusForbidden, "邀请码无效或可用次数已耗尽")
-			} else {
+			case errors.Is(err, errRegistrationInviteGroupUnavailable):
+				respondError(w, http.StatusConflict, "该邀请码绑定的用户组已不存在，请联系管理员")
+			default:
 				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 			}
 			return
 		}
+		inviteGroupIDs = granted
 	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(passwordHash), 0, now, now); err != nil {
@@ -306,6 +312,15 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 		return
+	}
+	// Self-registration has no actor, so the actor-based grant checks in
+	// setUserPermissionGroups cannot apply here. The groups were validated when
+	// the invite was created and again when it was consumed.
+	if len(inviteGroupIDs) > 0 {
+		if err := a.writeUserPermissionGroups(r.Context(), tx, userID, inviteGroupIDs); err != nil {
+			respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")

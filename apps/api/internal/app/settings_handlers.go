@@ -32,6 +32,7 @@ type SystemSettings struct {
 	LinuxDoClientID                    string   `json:"linuxDoClientId"`
 	LinuxDoClientSecretSet             bool     `json:"linuxDoClientSecretSet"`
 	LinuxDoCallbackURL                 string   `json:"linuxDoCallbackUrl"`
+	LinuxDoRegistrationGroupIDs        []string `json:"linuxDoRegistrationGroupIds"`
 	CatchAllEnabled                    bool     `json:"catchAllEnabled"`
 	MailAutoRefresh                    bool     `json:"mailAutoRefresh"`
 	MailRefreshSeconds                 int      `json:"mailRefreshSeconds"`
@@ -70,6 +71,7 @@ type systemSettingsUpdate struct {
 	LinuxDoRegistrationEnabled      bool     `json:"linuxDoRegistrationEnabled"`
 	LinuxDoClientID                 string   `json:"linuxDoClientId"`
 	LinuxDoClientSecret             string   `json:"linuxDoClientSecret"`
+	LinuxDoRegistrationGroupIDs     []string `json:"linuxDoRegistrationGroupIds"`
 	CatchAllEnabled                 bool     `json:"catchAllEnabled"`
 	MailAutoRefresh                 bool     `json:"mailAutoRefresh"`
 	MailRefreshSeconds              int      `json:"mailRefreshSeconds"`
@@ -195,6 +197,7 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(req.LinuxDoClientSecret) != "" {
 		next.LinuxDoClientSecret = strings.TrimSpace(req.LinuxDoClientSecret)
 	}
+	next.LinuxDoRegistrationGroupIDs = strings.Join(cleanIDList(req.LinuxDoRegistrationGroupIDs), ",")
 	if err := validateLinuxDoSettings(next); err != nil {
 		badRequest(w, err)
 		return
@@ -334,6 +337,7 @@ func (a *App) systemSettingsSnapshot() SystemSettings {
 		LinuxDoClientID:                    a.cfg.LinuxDoClientID,
 		LinuxDoClientSecretSet:             strings.TrimSpace(a.cfg.LinuxDoClientSecret) != "",
 		LinuxDoCallbackURL:                 a.linuxDoCallbackURL(),
+		LinuxDoRegistrationGroupIDs:        cleanIDList(strings.Split(a.cfg.LinuxDoRegistrationGroupIDs, ",")),
 		CatchAllEnabled:                    a.cfg.CatchAllEnabled,
 		MailAutoRefresh:                    a.cfg.MailAutoRefresh,
 		MailRefreshSeconds:                 a.cfg.MailRefreshSeconds,
@@ -406,6 +410,8 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			a.cfg.LinuxDoSSOEnabled = value == "true"
 		case "linuxDoRegistrationEnabled":
 			a.cfg.LinuxDoRegistrationEnabled = value == "true"
+		case "linuxDoRegistrationGroupIds":
+			a.cfg.LinuxDoRegistrationGroupIDs = value
 		case "linuxDoClientId":
 			a.cfg.LinuxDoClientID = value
 		case "linuxDoClientSecret":
@@ -468,6 +474,7 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		"turnstileSecretKey":              cfg.TurnstileSecretKey,
 		"linuxDoSSOEnabled":               strconv.FormatBool(cfg.LinuxDoSSOEnabled),
 		"linuxDoRegistrationEnabled":      strconv.FormatBool(cfg.LinuxDoRegistrationEnabled),
+		"linuxDoRegistrationGroupIds":     strings.Join(cleanIDList(strings.Split(cfg.LinuxDoRegistrationGroupIDs, ",")), ","),
 		"linuxDoClientId":                 cfg.LinuxDoClientID,
 		"linuxDoClientSecret":             cfg.LinuxDoClientSecret,
 		"catchAllEnabled":                 strconv.FormatBool(cfg.CatchAllEnabled),
