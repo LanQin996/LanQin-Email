@@ -33,4 +33,3 @@ export function useDisplayMode() {
   }, [])
   return [displayMode, setDisplayMode] as const
 }
-

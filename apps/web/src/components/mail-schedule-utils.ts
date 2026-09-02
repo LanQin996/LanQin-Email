@@ -60,14 +60,26 @@ export function toDateTimeLocalValue(date: Date) {
 }
 
 export function normalizeSchedule(schedule: ScheduleDraft): ScheduleDraft {
-  return { ...schedule, title: schedule.title.trim(), location: schedule.location.trim(), description: schedule.description.trim() }
+  return {
+    ...schedule,
+    title: schedule.title.trim(),
+    location: schedule.location.trim(),
+    description: schedule.description.trim(),
+  }
 }
 
 export function scheduleToHtml(schedule: ScheduleDraft) {
   const start = parseScheduleStart(schedule)
-  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
+  const end = schedule.allDay
+    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+    : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
   const rows = [
-    ["时间", schedule.allDay ? formatDate(start.toISOString()) : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`],
+    [
+      "时间",
+      schedule.allDay
+        ? formatDate(start.toISOString())
+        : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
+    ],
     ["持续", schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes)],
     ["提醒", reminderLabel(schedule.reminderMinutes)],
     ["重复", repeatLabel(schedule.repeat)],
@@ -90,7 +102,9 @@ export function scheduleToFile(schedule: ScheduleDraft) {
 
 function scheduleToIcs(schedule: ScheduleDraft) {
   const start = parseScheduleStart(schedule)
-  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
+  const end = schedule.allDay
+    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+    : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
   const uid = `${Date.now()}-${Math.random().toString(36).slice(2)}@lanqin-email`
   const lines = [
     "BEGIN:VCALENDAR",
@@ -109,7 +123,13 @@ function scheduleToIcs(schedule: ScheduleDraft) {
     schedule.repeat !== "none" ? `RRULE:FREQ=${schedule.repeat.toUpperCase()}` : "",
   ].filter(Boolean)
   if (schedule.reminderMinutes > 0) {
-    lines.push("BEGIN:VALARM", `TRIGGER:-PT${schedule.reminderMinutes}M`, "ACTION:DISPLAY", `DESCRIPTION:${escapeIcs(schedule.title)}`, "END:VALARM")
+    lines.push(
+      "BEGIN:VALARM",
+      `TRIGGER:-PT${schedule.reminderMinutes}M`,
+      "ACTION:DISPLAY",
+      `DESCRIPTION:${escapeIcs(schedule.title)}`,
+      "END:VALARM"
+    )
   }
   lines.push("END:VEVENT", "END:VCALENDAR")
   return `${lines.join("\r\n")}\r\n`
@@ -147,13 +167,28 @@ export function reminderLabel(minutes: number) {
 }
 
 export function repeatLabel(repeat: ScheduleDraft["repeat"]) {
-  return ({ none: "永不", daily: "每天", weekly: "每周", monthly: "每月", yearly: "每年" } as Record<ScheduleDraft["repeat"], string>)[repeat]
+  return (
+    { none: "永不", daily: "每天", weekly: "每周", monthly: "每月", yearly: "每年" } as Record<
+      ScheduleDraft["repeat"],
+      string
+    >
+  )[repeat]
 }
 
 function safeFilename(value: string) {
-  return value.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "-").slice(0, 64) || "schedule"
+  return (
+    value
+      .trim()
+      .replace(/[\\/:*?"<>|]+/g, "-")
+      .replace(/\s+/g, "-")
+      .slice(0, 64) || "schedule"
+  )
 }
 
 function escapeIcs(value: string) {
-  return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;")
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;")
 }

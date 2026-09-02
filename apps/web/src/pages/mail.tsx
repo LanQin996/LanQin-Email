@@ -1,6 +1,12 @@
 import * as React from "react"
 import DOMPurify from "dompurify"
-import { type InfiniteData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import {
+  type InfiniteData,
+  useInfiniteQuery,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import { Node, mergeAttributes, type Editor } from "@tiptap/core"
 import { DOMParser as ProseMirrorDOMParser } from "@tiptap/pm/model"
 import { EditorContent, useEditor } from "@tiptap/react"
@@ -9,12 +15,100 @@ import LinkExtension from "@tiptap/extension-link"
 import ImageExtension from "@tiptap/extension-image"
 import TextAlign from "@tiptap/extension-text-align"
 import Placeholder from "@tiptap/extension-placeholder"
-import { BackgroundColor, Color, FontFamily, FontSize, TextStyle } from "@tiptap/extension-text-style"
+import {
+  BackgroundColor,
+  Color,
+  FontFamily,
+  FontSize,
+  TextStyle,
+} from "@tiptap/extension-text-style"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import type { ImperativePanelHandle } from "react-resizable-panels"
-import { AlignCenter, AlignLeft, AlignRight, Archive, ArrowLeft, Bold, Calendar, Check, ChevronDown, ChevronLeft, ChevronRight, ChevronsUpDown, Clock3, Code2, Copy, Ellipsis, Eraser, Eye, FileText, Forward, Highlighter, History, Image, Inbox, IndentDecrease, IndentIncrease, Italic, Link, List, ListOrdered, Mail, MailCheck, Moon, PanelLeftClose, PanelLeftOpen, Paperclip, Pencil, PencilLine, Plus, Quote, Redo2, RefreshCcw, Reply, RotateCcw, Search, Send, Settings, ShieldCheck, Signature, SlidersHorizontal, Smile, Star, Strikethrough, Sun, Tag, Trash2, Type, Underline, Undo2, X } from "lucide-react"
-import { api, ExternalImapAccount, ExternalImapFolder, ListResponse, Mailbox, MailFolder, MailLabel, MailMessage, SendPayload, DraftPayload, ScheduledSend, SendQueueItem, SendQueueAuditEvent, SendQueueStatus, PermissionLimits } from "@/lib/api"
-import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime, generateLabelColor } from "@/lib/utils"
+import {
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
+  Archive,
+  ArrowLeft,
+  Bold,
+  Calendar,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Clock3,
+  Code2,
+  Copy,
+  Ellipsis,
+  Eraser,
+  Eye,
+  FileText,
+  Forward,
+  Highlighter,
+  History,
+  Image,
+  Inbox,
+  IndentDecrease,
+  IndentIncrease,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
+  Mail,
+  MailCheck,
+  Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Paperclip,
+  Pencil,
+  PencilLine,
+  Plus,
+  Quote,
+  Redo2,
+  RefreshCcw,
+  Reply,
+  RotateCcw,
+  Search,
+  Send,
+  Settings,
+  ShieldCheck,
+  Signature,
+  SlidersHorizontal,
+  Smile,
+  Star,
+  Strikethrough,
+  Sun,
+  Trash2,
+  Type,
+  Underline,
+  Undo2,
+  X,
+} from "lucide-react"
+import {
+  api,
+  ExternalImapAccount,
+  ListResponse,
+  Mailbox,
+  MailFolder,
+  MailLabel,
+  MailMessage,
+  SendPayload,
+  DraftPayload,
+  ScheduledSend,
+  SendQueueItem,
+  SendQueueAuditEvent,
+  SendQueueStatus,
+  PermissionLimits,
+} from "@/lib/api"
+import {
+  cn,
+  decodeMimeHeader,
+  formatBytes,
+  formatDate,
+  formatDateTime,
+  generateLabelColor,
+} from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
 import { Language, languageOptions, useLanguage } from "@/lib/language"
@@ -22,11 +116,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
 import { Label } from "@/components/ui/label"
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -75,7 +189,14 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
 import { hasPermission } from "@/lib/permissions"
 
-const folderIcons: Record<string, React.ReactNode> = { inbox: <Inbox className="h-4 w-4" />, sent: <Send className="h-4 w-4" />, drafts: <FileText className="h-4 w-4" />, archive: <Archive className="h-4 w-4" />, spam: <Trash2 className="h-4 w-4" />, trash: <Trash2 className="h-4 w-4" /> }
+const folderIcons: Record<string, React.ReactNode> = {
+  inbox: <Inbox className="h-4 w-4" />,
+  sent: <Send className="h-4 w-4" />,
+  drafts: <FileText className="h-4 w-4" />,
+  archive: <Archive className="h-4 w-4" />,
+  spam: <Trash2 className="h-4 w-4" />,
+  trash: <Trash2 className="h-4 w-4" />,
+}
 const folderLabels: Record<string, string> = {
   Inbox: "收件箱",
   Sent: "已发送",
@@ -85,14 +206,36 @@ const folderLabels: Record<string, string> = {
   Trash: "回收站",
 }
 
-type ComposeDraft = { key: string; id?: string; mailboxId?: string; to?: string; cc?: string; bcc?: string; subject?: string; text?: string; html?: string; files?: File[]; isDraft?: boolean }
+type ComposeDraft = {
+  key: string
+  id?: string
+  mailboxId?: string
+  to?: string
+  cc?: string
+  bcc?: string
+  subject?: string
+  text?: string
+  html?: string
+  files?: File[]
+  isDraft?: boolean
+}
 type MailFilter = "all" | "unread" | "starred" | "attachments"
 type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue" | "external"
 type MailListResponse = { items?: MailMessage[]; nextCursor?: string; totalCount?: number }
 type MailPageSize = 20 | 30 | 50
-type PendingConfirm = { title: string; description?: string; confirmText: string; onConfirm: () => void }
+type PendingConfirm = {
+  title: string
+  description?: string
+  confirmText: string
+  onConfirm: () => void
+}
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
-type ComposeSendIntent = { title: string; description: string; confirmText: string; onConfirm: () => void }
+type ComposeSendIntent = {
+  title: string
+  description: string
+  confirmText: string
+  onConfirm: () => void
+}
 type MessageContextMenuState = { message: MailMessage; x: number; y: number }
 type SidebarContextMenuState = { item: MailMenuItem; x: number; y: number }
 type FolderDropTarget = { key: string; edge: "before" | "after" | "end" }
@@ -104,7 +247,11 @@ function getInitialMailPageSize(): MailPageSize {
   return stored === 20 || stored === 50 ? stored : 30
 }
 
-async function runWithConcurrency<T>(items: readonly T[], limit: number, task: (item: T, index: number) => Promise<unknown>) {
+async function runWithConcurrency<T>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<unknown>
+) {
   let nextIndex = 0
   let hasError = false
   let firstError: unknown
@@ -126,10 +273,41 @@ async function runWithConcurrency<T>(items: readonly T[], limit: number, task: (
 }
 
 type MailMenuItem =
-  | { type: "starred"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
-  | { type: "scheduled"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
-  | { type: "sendQueue"; key: string; label: string; icon: React.ReactNode; count: number; order: number }
-  | { type: "folder"; key: string; folderId: string; folderName: string; label: string; icon: React.ReactNode; count: number; custom: boolean; order: number }
+  | {
+      type: "starred"
+      key: string
+      label: string
+      icon: React.ReactNode
+      count: number
+      order: number
+    }
+  | {
+      type: "scheduled"
+      key: string
+      label: string
+      icon: React.ReactNode
+      count: number
+      order: number
+    }
+  | {
+      type: "sendQueue"
+      key: string
+      label: string
+      icon: React.ReactNode
+      count: number
+      order: number
+    }
+  | {
+      type: "folder"
+      key: string
+      folderId: string
+      folderName: string
+      label: string
+      icon: React.ReactNode
+      count: number
+      custom: boolean
+      order: number
+    }
 
 const filterLabels: Record<MailFilter, string> = {
   all: "全部邮件",
@@ -158,7 +336,9 @@ export function MailPage() {
   const [composeDraft, setComposeDraft] = React.useState<ComposeDraft | undefined>()
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [mailFilter, setMailFilter] = React.useState<MailFilter>("all")
-  const [selectedMailboxId, setSelectedMailboxId] = React.useState(() => localStorage.getItem("lanqin:selected-mailbox") || "")
+  const [selectedMailboxId, setSelectedMailboxId] = React.useState(
+    () => localStorage.getItem("lanqin:selected-mailbox") || ""
+  )
   const [selectedExternalAccountId, setSelectedExternalAccountId] = React.useState("")
   const [expandedExternalAccountIds, setExpandedExternalAccountIds] = React.useState<string[]>([])
   const [externalFolder, setExternalFolder] = React.useState("INBOX")
@@ -182,8 +362,10 @@ export function MailPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
   const [labelEditMode, setLabelEditMode] = React.useState(false)
   const [newLabelEditing, setNewLabelEditing] = React.useState(false)
-  const [messageContextMenu, setMessageContextMenu] = React.useState<MessageContextMenuState | null>(null)
-  const [sidebarContextMenu, setSidebarContextMenu] = React.useState<SidebarContextMenuState | null>(null)
+  const [messageContextMenu, setMessageContextMenu] =
+    React.useState<MessageContextMenuState | null>(null)
+  const [sidebarContextMenu, setSidebarContextMenu] =
+    React.useState<SidebarContextMenuState | null>(null)
   const [folderDialogOpen, setFolderDialogOpen] = React.useState(false)
   const [draggingFolderId, setDraggingFolderId] = React.useState("")
   const [folderDropTarget, setFolderDropTarget] = React.useState<FolderDropTarget | null>(null)
@@ -204,32 +386,66 @@ export function MailPage() {
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const externalImapEnabled = publicSettings.data?.externalImapEnabled ?? false
 
-  const mailboxList = useQuery({ queryKey: ["mailboxes", "mine"], queryFn: api.myMailboxes, enabled: canAccessMail })
-  const externalMailAccounts = useQuery({ queryKey: ["mail-external-accounts"], queryFn: api.externalMailAccounts, enabled: canAccessMail && canReadMail && externalImapEnabled })
-  const selectedExternalAccount = React.useMemo(() => externalImapEnabled ? externalMailAccounts.data?.items.find((item) => item.id === selectedExternalAccountId) : undefined, [externalImapEnabled, externalMailAccounts.data?.items, selectedExternalAccountId])
-  const externalFolders = useQuery({ queryKey: ["mail-external-folders", selectedExternalAccountId], queryFn: () => api.externalFolders(selectedExternalAccountId), enabled: !!selectedExternalAccountId && canReadMail && externalImapEnabled })
+  const mailboxList = useQuery({
+    queryKey: ["mailboxes", "mine"],
+    queryFn: api.myMailboxes,
+    enabled: canAccessMail,
+  })
+  const externalMailAccounts = useQuery({
+    queryKey: ["mail-external-accounts"],
+    queryFn: api.externalMailAccounts,
+    enabled: canAccessMail && canReadMail && externalImapEnabled,
+  })
+  const selectedExternalAccount = React.useMemo(
+    () =>
+      externalImapEnabled
+        ? externalMailAccounts.data?.items.find((item) => item.id === selectedExternalAccountId)
+        : undefined,
+    [externalImapEnabled, externalMailAccounts.data?.items, selectedExternalAccountId]
+  )
+  const externalFolders = useQuery({
+    queryKey: ["mail-external-folders", selectedExternalAccountId],
+    queryFn: () => api.externalFolders(selectedExternalAccountId),
+    enabled: !!selectedExternalAccountId && canReadMail && externalImapEnabled,
+  })
   const selectedMailbox = React.useMemo(() => {
     const items = mailboxList.data?.items || []
     return items.find((item) => item.id === selectedMailboxId) || items[0]
   }, [mailboxList.data?.items, selectedMailboxId])
   const activeMailboxId = selectedMailbox?.id || ""
   const selectedMailboxOwned = selectedMailbox?.access !== "read"
-  const canDownloadAttachments = hasAttachmentPermission && (selectedMailboxOwned || selectedMailbox?.shareAllowsAttachments !== false)
+  const canDownloadAttachments =
+    hasAttachmentPermission &&
+    (selectedMailboxOwned || selectedMailbox?.shareAllowsAttachments !== false)
   const canSendSelectedMailbox = canSendMail && selectedMailboxOwned
   const canManageSelectedDrafts = canManageDrafts && selectedMailboxOwned
   const canScheduleSelectedMailbox = canScheduleMail && selectedMailboxOwned
   const canOrganizeSelectedMailbox = canOrganizeMail && selectedMailboxOwned
   const canManageSelectedLabels = canManageLabels && selectedMailboxOwned
-  const restrictedSharedMailbox = selectedMailbox?.access === "read" && selectedMailbox.shareScope === "custom"
+  const restrictedSharedMailbox =
+    selectedMailbox?.access === "read" && selectedMailbox.shareScope === "custom"
   const hasMailboxes = (mailboxList.data?.items.length || 0) > 0
-  const folders = useQuery({ queryKey: ["folders", activeMailboxId], queryFn: () => api.folders(activeMailboxId), enabled: !!activeMailboxId && canReadMail })
-  const labels = useQuery({ queryKey: ["labels", activeMailboxId], queryFn: () => api.labels(activeMailboxId), enabled: !!activeMailboxId && (canReadMail || canManageLabels) })
-  const sharedSelectionReady = !restrictedSharedMailbox
-    || mailView === "external"
-    || (mailView === "folder" && !!folders.data?.items.some((item) => item.name === folder))
-    || (mailView === "label" && !!labels.data?.items.some((item) => item.id === selectedLabelId))
-    || (mailView === "starred" && !!selectedMailbox?.shareIncludesStarred)
-  const mailStats = useQuery({ queryKey: ["mail-stats", activeMailboxId], queryFn: () => api.mailStats(activeMailboxId), enabled: !!activeMailboxId && selectedMailboxOwned && hasPermission(user, "mail.stats.view") })
+  const folders = useQuery({
+    queryKey: ["folders", activeMailboxId],
+    queryFn: () => api.folders(activeMailboxId),
+    enabled: !!activeMailboxId && canReadMail,
+  })
+  const labels = useQuery({
+    queryKey: ["labels", activeMailboxId],
+    queryFn: () => api.labels(activeMailboxId),
+    enabled: !!activeMailboxId && (canReadMail || canManageLabels),
+  })
+  const sharedSelectionReady =
+    !restrictedSharedMailbox ||
+    mailView === "external" ||
+    (mailView === "folder" && !!folders.data?.items.some((item) => item.name === folder)) ||
+    (mailView === "label" && !!labels.data?.items.some((item) => item.id === selectedLabelId)) ||
+    (mailView === "starred" && !!selectedMailbox?.shareIncludesStarred)
+  const mailStats = useQuery({
+    queryKey: ["mail-stats", activeMailboxId],
+    queryFn: () => api.mailStats(activeMailboxId),
+    enabled: !!activeMailboxId && selectedMailboxOwned && hasPermission(user, "mail.stats.view"),
+  })
   const scheduledSends = useQuery({
     queryKey: ["scheduled-sends", activeMailboxId],
     queryFn: () => api.scheduledSends(activeMailboxId),
@@ -238,13 +454,35 @@ export function MailPage() {
   })
   const canViewSendQueue = canReadMail && selectedMailboxOwned
   const sendQueue = useQuery({
-    queryKey: ["send-queue", activeMailboxId, sendQueueStatus, sendQueueMessageId, sendQueueRecipient, sendQueueFrom, sendQueueTo],
-    queryFn: () => api.sendQueue({ mailboxId: activeMailboxId, status: sendQueueStatus, messageId: sendQueueMessageId.trim(), recipient: sendQueueRecipient.trim(), from: datetimeLocalToISO(sendQueueFrom), to: datetimeLocalToISO(sendQueueTo) }),
+    queryKey: [
+      "send-queue",
+      activeMailboxId,
+      sendQueueStatus,
+      sendQueueMessageId,
+      sendQueueRecipient,
+      sendQueueFrom,
+      sendQueueTo,
+    ],
+    queryFn: () =>
+      api.sendQueue({
+        mailboxId: activeMailboxId,
+        status: sendQueueStatus,
+        messageId: sendQueueMessageId.trim(),
+        recipient: sendQueueRecipient.trim(),
+        from: datetimeLocalToISO(sendQueueFrom),
+        to: datetimeLocalToISO(sendQueueTo),
+      }),
     enabled: !!activeMailboxId && canViewSendQueue,
     refetchInterval: mailView === "sendQueue" ? 15000 : false,
   })
-  const sendQueueAudit = useQuery({ queryKey: ["send-queue-audit", sendQueueAuditId], queryFn: () => api.sendQueueAudit(sendQueueAuditId), enabled: mailView === "sendQueue" && !!sendQueueAuditId && canViewSendQueue })
-  const mailRefreshInterval = publicSettings.data?.mailAutoRefresh ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000) : false
+  const sendQueueAudit = useQuery({
+    queryKey: ["send-queue-audit", sendQueueAuditId],
+    queryFn: () => api.sendQueueAudit(sendQueueAuditId),
+    enabled: mailView === "sendQueue" && !!sendQueueAuditId && canViewSendQueue,
+  })
+  const mailRefreshInterval = publicSettings.data?.mailAutoRefresh
+    ? Math.max(publicSettings.data.mailRefreshMs || 30000, 5000)
+    : false
   const isPlainInboxView = mailView === "folder" && folder === "Inbox" && query.trim() === ""
   React.useEffect(() => {
     if (externalImapEnabled) return
@@ -262,7 +500,8 @@ export function MailPage() {
   React.useEffect(() => {
     if (!restrictedSharedMailbox || !folders.isSuccess || !labels.isSuccess) return
     if (mailView === "folder" && folders.data.items.some((item) => item.name === folder)) return
-    if (mailView === "label" && labels.data.items.some((item) => item.id === selectedLabelId)) return
+    if (mailView === "label" && labels.data.items.some((item) => item.id === selectedLabelId))
+      return
     if (mailView === "starred" && selectedMailbox?.shareIncludesStarred) return
     const firstFolder = folders.data.items[0]
     if (firstFolder) {
@@ -277,63 +516,148 @@ export function MailPage() {
       setSelectedLabelId("")
     }
     setSelectedId(null)
-  }, [folder, folders.data?.items, folders.isSuccess, labels.data?.items, labels.isSuccess, mailView, restrictedSharedMailbox, selectedLabelId, selectedMailbox?.shareIncludesStarred])
+  }, [
+    folder,
+    folders.data?.items,
+    folders.isSuccess,
+    labels.data?.items,
+    labels.isSuccess,
+    mailView,
+    restrictedSharedMailbox,
+    selectedLabelId,
+    selectedMailbox?.shareIncludesStarred,
+  ])
   const inboxProbe = useQuery({
     queryKey: ["mail-notifications", activeMailboxId],
     queryFn: () => api.messages("Inbox", "", "", activeMailboxId),
-    enabled: !!activeMailboxId && canReadMail && !isPlainInboxView && (!restrictedSharedMailbox || !!folders.data?.items.some((item) => item.name === "Inbox")),
+    enabled:
+      !!activeMailboxId &&
+      canReadMail &&
+      !isPlainInboxView &&
+      (!restrictedSharedMailbox || !!folders.data?.items.some((item) => item.name === "Inbox")),
     refetchInterval: mailRefreshInterval,
     refetchIntervalInBackground: true,
   })
   const messages = useInfiniteQuery({
-    queryKey: ["messages", activeMailboxId, mailView, folder, selectedLabelId, query, messagePageSize],
+    queryKey: [
+      "messages",
+      activeMailboxId,
+      mailView,
+      folder,
+      selectedLabelId,
+      query,
+      messagePageSize,
+    ],
     queryFn: ({ pageParam }) => {
       const cursor = typeof pageParam === "string" ? pageParam : ""
-      if (mailView === "starred") return api.starredMessages(query, cursor, activeMailboxId, messagePageSize)
-      if (mailView === "label") return api.labelMessages(selectedLabelId, query, cursor, activeMailboxId, messagePageSize)
+      if (mailView === "starred")
+        return api.starredMessages(query, cursor, activeMailboxId, messagePageSize)
+      if (mailView === "label")
+        return api.labelMessages(selectedLabelId, query, cursor, activeMailboxId, messagePageSize)
       return api.messages(folder, query, cursor, activeMailboxId, messagePageSize)
     },
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!activeMailboxId && canReadMail && sharedSelectionReady && mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "external" && (mailView !== "label" || !!selectedLabelId),
+    enabled:
+      !!activeMailboxId &&
+      canReadMail &&
+      sharedSelectionReady &&
+      mailView !== "scheduled" &&
+      mailView !== "sendQueue" &&
+      mailView !== "external" &&
+      (mailView !== "label" || !!selectedLabelId),
   })
   const externalMessages = useInfiniteQuery({
-    queryKey: ["external-messages", selectedExternalAccountId, externalFolder, query, messagePageSize],
-    queryFn: ({ pageParam }) => api.externalMessages(selectedExternalAccountId, externalFolder, typeof pageParam === "string" ? pageParam : "", query, messagePageSize),
+    queryKey: [
+      "external-messages",
+      selectedExternalAccountId,
+      externalFolder,
+      query,
+      messagePageSize,
+    ],
+    queryFn: ({ pageParam }) =>
+      api.externalMessages(
+        selectedExternalAccountId,
+        externalFolder,
+        typeof pageParam === "string" ? pageParam : "",
+        query,
+        messagePageSize
+      ),
     initialPageParam: "",
     getNextPageParam: (lastPage) => lastPage.nextCursor || undefined,
-    enabled: !!selectedExternalAccountId && canReadMail && mailView === "external" && externalImapEnabled,
+    enabled:
+      !!selectedExternalAccountId && canReadMail && mailView === "external" && externalImapEnabled,
   })
   React.useEffect(() => {
     setMessagePageIndex(0)
     setCompactSelectedIds([])
-  }, [activeMailboxId, externalFolder, folder, mailFilter, mailView, messagePageSize, query, selectedExternalAccountId, selectedLabelId])
-  const detail = useQuery({ queryKey: ["message", selectedId, mailView, selectedExternalAccountId], queryFn: () => mailView === "external" ? api.externalMessage(selectedExternalAccountId, selectedId!) : api.message(selectedId!, { markRead: false }), enabled: !!selectedId && canReadMail && (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)) })
-  const thread = useQuery({ queryKey: ["message-thread", selectedId], queryFn: () => api.messageThread(selectedId!), enabled: !!selectedId && mailView !== "external" && !!detail.data?.threadId })
-  const notificationItems = isPlainInboxView ? messages.data?.pages[0]?.items : inboxProbe.data?.items
-  const autoRefreshing = Boolean(publicSettings.data?.mailAutoRefresh && (listAutoRefreshing || inboxProbe.isRefetching))
+  }, [
+    activeMailboxId,
+    externalFolder,
+    folder,
+    mailFilter,
+    mailView,
+    messagePageSize,
+    query,
+    selectedExternalAccountId,
+    selectedLabelId,
+  ])
+  const detail = useQuery({
+    queryKey: ["message", selectedId, mailView, selectedExternalAccountId],
+    queryFn: () =>
+      mailView === "external"
+        ? api.externalMessage(selectedExternalAccountId, selectedId!)
+        : api.message(selectedId!, { markRead: false }),
+    enabled:
+      !!selectedId &&
+      canReadMail &&
+      (mailView !== "external" || (!!selectedExternalAccountId && externalImapEnabled)),
+  })
+  const thread = useQuery({
+    queryKey: ["message-thread", selectedId],
+    queryFn: () => api.messageThread(selectedId!),
+    enabled: !!selectedId && mailView !== "external" && !!detail.data?.threadId,
+  })
+  const notificationItems = isPlainInboxView
+    ? messages.data?.pages[0]?.items
+    : inboxProbe.data?.items
+  const autoRefreshing = Boolean(
+    publicSettings.data?.mailAutoRefresh && (listAutoRefreshing || inboxProbe.isRefetching)
+  )
   function updateCachedMessage(id: string, patch: Partial<MailMessage>) {
-    qc.setQueryData(["message", id], (current: MailMessage | undefined) => current ? { ...current, ...patch } : current)
-    qc.setQueriesData({ queryKey: ["messages"] }, (current: InfiniteData<MailListResponse> | undefined) => {
-      if (!current?.pages) return current
-      return {
-        ...current,
-        pages: current.pages.map((page) => ({
-          ...page,
-          items: (page.items || []).map((message) => message.id === id ? { ...message, ...patch } : message),
-        })),
+    qc.setQueryData(["message", id], (current: MailMessage | undefined) =>
+      current ? { ...current, ...patch } : current
+    )
+    qc.setQueriesData(
+      { queryKey: ["messages"] },
+      (current: InfiniteData<MailListResponse> | undefined) => {
+        if (!current?.pages) return current
+        return {
+          ...current,
+          pages: current.pages.map((page) => ({
+            ...page,
+            items: (page.items || []).map((message) =>
+              message.id === id ? { ...message, ...patch } : message
+            ),
+          })),
+        }
       }
-    })
-    qc.setQueriesData({ queryKey: ["external-messages"] }, (current: InfiniteData<MailListResponse> | undefined) => {
-      if (!current?.pages) return current
-      return {
-        ...current,
-        pages: current.pages.map((page) => ({
-          ...page,
-          items: (page.items || []).map((message) => message.id === id ? { ...message, ...patch } : message),
-        })),
+    )
+    qc.setQueriesData(
+      { queryKey: ["external-messages"] },
+      (current: InfiniteData<MailListResponse> | undefined) => {
+        if (!current?.pages) return current
+        return {
+          ...current,
+          pages: current.pages.map((page) => ({
+            ...page,
+            items: (page.items || []).map((message) =>
+              message.id === id ? { ...message, ...patch } : message
+            ),
+          })),
+        }
       }
-    })
+    )
   }
   const star = useMutation({
     mutationFn: ({ id, starred }: { id: string; starred: boolean }) => api.star(id, starred),
@@ -358,7 +682,8 @@ export function MailPage() {
     onError: (error) => toast({ title: "操作失败", description: error.message }),
   })
   const markExternalRead = useMutation({
-    mutationFn: ({ id, remoteId, read }: { id: string; remoteId: string; read: boolean }) => api.markExternalRead(id, remoteId, read),
+    mutationFn: ({ id, remoteId, read }: { id: string; remoteId: string; read: boolean }) =>
+      api.markExternalRead(id, remoteId, read),
     onMutate: ({ remoteId, read }) => updateCachedMessage(remoteId, { isRead: read }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["external-messages"] })
@@ -368,38 +693,85 @@ export function MailPage() {
     onError: (error) => toast({ title: "操作失败", description: error.message }),
   })
   const addLabel = useMutation({
-    mutationFn: ({ id, label }: { id: string; label: MailLabel }) => api.addLabel(id, { name: label.name, color: label.color }),
+    mutationFn: ({ id, label }: { id: string; label: MailLabel }) =>
+      api.addLabel(id, { name: label.name, color: label.color }),
     onMutate: async ({ id, label }) => {
       await qc.cancelQueries({ queryKey: ["messages"] })
       if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
-      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
-      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: [...(current.labels || []), label] } : current)
-      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => m.id === id ? { ...m, labels: [...(m.labels || []), label] } : m) })) } : current)
+      const prevMessage = selectedId
+        ? qc.getQueryData<MailMessage>(["message", selectedId])
+        : undefined
+      if (selectedId)
+        qc.setQueryData<MailMessage>(["message", selectedId], (current) =>
+          current ? { ...current, labels: [...(current.labels || []), label] } : current
+        )
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                items: (page.items || []).map((m) =>
+                  m.id === id ? { ...m, labels: [...(m.labels || []), label] } : m
+                ),
+              })),
+            }
+          : current
+      )
       return { prevMessage }
     },
     onError: (_error, _vars, context) => {
-      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      if (selectedId && context?.prevMessage)
+        qc.setQueryData(["message", selectedId], context.prevMessage)
       qc.invalidateQueries({ queryKey: ["messages"] })
       toast({ title: "添加标签失败" })
     },
-    onSettled: () => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["labels"] }) },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      qc.invalidateQueries({ queryKey: ["labels"] })
+    },
   })
   const removeLabel = useMutation({
     mutationFn: ({ id, labelId }: { id: string; labelId: string }) => api.removeLabel(id, labelId),
     onMutate: async ({ id, labelId }) => {
       await qc.cancelQueries({ queryKey: ["messages"] })
       if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
-      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
-      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: (current.labels || []).filter((l) => l.id !== labelId) } : current)
-      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => m.id === id ? { ...m, labels: (m.labels || []).filter((l) => l.id !== labelId) } : m) })) } : current)
+      const prevMessage = selectedId
+        ? qc.getQueryData<MailMessage>(["message", selectedId])
+        : undefined
+      if (selectedId)
+        qc.setQueryData<MailMessage>(["message", selectedId], (current) =>
+          current
+            ? { ...current, labels: (current.labels || []).filter((l) => l.id !== labelId) }
+            : current
+        )
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                items: (page.items || []).map((m) =>
+                  m.id === id
+                    ? { ...m, labels: (m.labels || []).filter((l) => l.id !== labelId) }
+                    : m
+                ),
+              })),
+            }
+          : current
+      )
       return { prevMessage }
     },
     onError: (_error, _vars, context) => {
-      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      if (selectedId && context?.prevMessage)
+        qc.setQueryData(["message", selectedId], context.prevMessage)
       qc.invalidateQueries({ queryKey: ["messages"] })
       toast({ title: "移除标签失败" })
     },
-    onSettled: () => { qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["labels"] }) },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["messages"] })
+      qc.invalidateQueries({ queryKey: ["labels"] })
+    },
   })
   const createLabel = useMutation({
     mutationFn: (name: string) => api.createLabel({ mailboxId: activeMailboxId, name }),
@@ -407,7 +779,11 @@ export function MailPage() {
       await qc.cancelQueries({ queryKey: ["labels"] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
       const tempLabel: MailLabel = { id: `temp-${Date.now()}`, name, color: "" }
-      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: [...(current.items || []), tempLabel] } : { items: [tempLabel] })
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) =>
+        current
+          ? { ...current, items: [...(current.items || []), tempLabel] }
+          : { items: [tempLabel] }
+      )
       return { prevLabels }
     },
     onError: (_error, _name, context) => {
@@ -423,10 +799,32 @@ export function MailPage() {
       await qc.cancelQueries({ queryKey: ["messages"] })
       if (selectedId) await qc.cancelQueries({ queryKey: ["message", selectedId] })
       const prevLabels = qc.getQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId])
-      const prevMessage = selectedId ? qc.getQueryData<MailMessage>(["message", selectedId]) : undefined
-      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) => current ? { ...current, items: (current.items || []).filter((l) => l.id !== id) } : current)
-      if (selectedId) qc.setQueryData<MailMessage>(["message", selectedId], (current) => current ? { ...current, labels: (current.labels || []).filter((l) => l.id !== id) } : current)
-      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) => current ? { ...current, pages: current.pages.map((page) => ({ ...page, items: (page.items || []).map((m) => ({ ...m, labels: (m.labels || []).filter((l) => l.id !== id) })) })) } : current)
+      const prevMessage = selectedId
+        ? qc.getQueryData<MailMessage>(["message", selectedId])
+        : undefined
+      qc.setQueryData<ListResponse<MailLabel>>(["labels", activeMailboxId], (current) =>
+        current ? { ...current, items: (current.items || []).filter((l) => l.id !== id) } : current
+      )
+      if (selectedId)
+        qc.setQueryData<MailMessage>(["message", selectedId], (current) =>
+          current
+            ? { ...current, labels: (current.labels || []).filter((l) => l.id !== id) }
+            : current
+        )
+      qc.setQueriesData<InfiniteData<MailListResponse>>({ queryKey: ["messages"] }, (current) =>
+        current
+          ? {
+              ...current,
+              pages: current.pages.map((page) => ({
+                ...page,
+                items: (page.items || []).map((m) => ({
+                  ...m,
+                  labels: (m.labels || []).filter((l) => l.id !== id),
+                })),
+              })),
+            }
+          : current
+      )
       return { prevLabels, prevMessage }
     },
     onSuccess: (_data, id) => {
@@ -439,14 +837,40 @@ export function MailPage() {
     },
     onError: (_error, _id, context) => {
       if (context?.prevLabels) qc.setQueryData(["labels", activeMailboxId], context.prevLabels)
-      if (selectedId && context?.prevMessage) qc.setQueryData(["message", selectedId], context.prevMessage)
+      if (selectedId && context?.prevMessage)
+        qc.setQueryData(["message", selectedId], context.prevMessage)
       qc.invalidateQueries({ queryKey: ["messages"] })
       toast({ title: "删除标签失败" })
     },
-    onSettled: () => { qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["messages"] }) },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ["labels"] })
+      qc.invalidateQueries({ queryKey: ["messages"] })
+    },
   })
-  const del = useMutation({ mutationFn: (id: string) => api.delete(id), onSuccess: async () => { setSelectedId(null); setPendingConfirm(null); await qc.invalidateQueries({ queryKey: ["messages"] }); await qc.invalidateQueries({ queryKey: ["folders"] }); await qc.invalidateQueries({ queryKey: ["mail-stats"] }); await qc.invalidateQueries({ queryKey: ["labels"] }); toast({ title: "已删除" }) }, onError: (error) => toast({ title: "删除失败", description: error.message }) })
-  const move = useMutation({ mutationFn: ({ id, folder }: { id: string; folder: string }) => api.move(id, folder), onSuccess: async () => { setSelectedId(null); await qc.invalidateQueries({ queryKey: ["messages"] }); await qc.invalidateQueries({ queryKey: ["folders"] }); await qc.invalidateQueries({ queryKey: ["mail-stats"] }); await qc.invalidateQueries({ queryKey: ["labels"] }); toast({ title: "已移动" }) } })
+  const del = useMutation({
+    mutationFn: (id: string) => api.delete(id),
+    onSuccess: async () => {
+      setSelectedId(null)
+      setPendingConfirm(null)
+      await qc.invalidateQueries({ queryKey: ["messages"] })
+      await qc.invalidateQueries({ queryKey: ["folders"] })
+      await qc.invalidateQueries({ queryKey: ["mail-stats"] })
+      await qc.invalidateQueries({ queryKey: ["labels"] })
+      toast({ title: "已删除" })
+    },
+    onError: (error) => toast({ title: "删除失败", description: error.message }),
+  })
+  const move = useMutation({
+    mutationFn: ({ id, folder }: { id: string; folder: string }) => api.move(id, folder),
+    onSuccess: async () => {
+      setSelectedId(null)
+      await qc.invalidateQueries({ queryKey: ["messages"] })
+      await qc.invalidateQueries({ queryKey: ["folders"] })
+      await qc.invalidateQueries({ queryKey: ["mail-stats"] })
+      await qc.invalidateQueries({ queryKey: ["labels"] })
+      toast({ title: "已移动" })
+    },
+  })
   const cancelScheduledSend = useMutation({
     mutationFn: (item: ScheduledSend) => api.cancelScheduledSend(item.id),
     onMutate: (item) => setCancelingScheduledId(item.id),
@@ -454,7 +878,11 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["scheduled-sends"] })
       toast({ title: item.status === "failed" ? "已移除失败记录" : "已取消定时发送" })
     },
-    onError: (error) => toast({ title: "操作失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "操作失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
     onSettled: () => setCancelingScheduledId(""),
   })
   const createFolder = useMutation({
@@ -465,10 +893,19 @@ export function MailPage() {
       openFolder(created.name)
       toast({ title: "文件夹已创建" })
     },
-    onError: (error) => toast({ title: "创建文件夹失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "创建文件夹失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
   })
   const reorderFolders = useMutation({
-    mutationFn: (items: { id: string; sortOrder: number }[]) => api.reorderFolders({ mailboxId: activeMailboxId, folderIds: items.map((item) => item.id), folders: items }),
+    mutationFn: (items: { id: string; sortOrder: number }[]) =>
+      api.reorderFolders({
+        mailboxId: activeMailboxId,
+        folderIds: items.map((item) => item.id),
+        folders: items,
+      }),
     onMutate: async (items) => {
       await qc.cancelQueries({ queryKey: ["folders", activeMailboxId] })
       const previous = qc.getQueryData<ListResponse<MailFolder>>(["folders", activeMailboxId])
@@ -478,7 +915,11 @@ export function MailPage() {
         return {
           ...current,
           items: current.items
-            .map((item) => order.has(item.id) ? { ...item, sortOrder: order.get(item.id) || item.sortOrder } : item)
+            .map((item) =>
+              order.has(item.id)
+                ? { ...item, sortOrder: order.get(item.id) || item.sortOrder }
+                : item
+            )
             .sort(compareMailFolders),
         }
       })
@@ -486,12 +927,16 @@ export function MailPage() {
     },
     onError: (error, _items, context) => {
       if (context?.previous) qc.setQueryData(["folders", activeMailboxId], context.previous)
-      toast({ title: "文件夹排序失败", description: error instanceof Error ? error.message : "请稍后重试" })
+      toast({
+        title: "文件夹排序失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      })
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["folders", activeMailboxId] }),
   })
   const deleteFolder = useMutation({
-    mutationFn: (item: Extract<MailMenuItem, { type: "folder" }>) => api.deleteFolder(item.folderId, activeMailboxId),
+    mutationFn: (item: Extract<MailMenuItem, { type: "folder" }>) =>
+      api.deleteFolder(item.folderId, activeMailboxId),
     onSuccess: async (result, item) => {
       setPendingConfirm(null)
       if (mailView === "folder" && folder === item.folderName) {
@@ -499,9 +944,16 @@ export function MailPage() {
         setSelectedId(null)
       }
       await refreshMailData()
-      toast({ title: "文件夹已删除", description: result.moved > 0 ? `已将 ${result.moved} 封邮件移回收件箱` : undefined })
+      toast({
+        title: "文件夹已删除",
+        description: result.moved > 0 ? `已将 ${result.moved} 封邮件移回收件箱` : undefined,
+      })
     },
-    onError: (error) => toast({ title: "删除文件夹失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "删除文件夹失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
   })
   const retrySendQueue = useMutation({
     mutationFn: (item: SendQueueItem) => api.retrySendQueue(item.id),
@@ -511,7 +963,11 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["send-queue-audit"] })
       toast({ title: "已重新加入发送队列" })
     },
-    onError: (error) => toast({ title: "重试失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "重试失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
     onSettled: () => setSendQueuePendingId(""),
   })
   const cancelSendQueue = useMutation({
@@ -522,7 +978,11 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["send-queue-audit"] })
       toast({ title: "已取消发送任务" })
     },
-    onError: (error) => toast({ title: "取消失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "取消失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
     onSettled: () => setSendQueuePendingId(""),
   })
   const markAllRead = useMutation({
@@ -595,7 +1055,18 @@ export function MailPage() {
     next.delete("mailboxId")
     next.delete("messageId")
     setURLParams(next, { replace: true })
-  }, [deepLinkMailboxId, deepLinkMessageId, folder, mailView, mailboxList.data?.items, mailboxList.isSuccess, selectedMailboxId, setURLParams, toast, urlParams])
+  }, [
+    deepLinkMailboxId,
+    deepLinkMessageId,
+    folder,
+    mailView,
+    mailboxList.data?.items,
+    mailboxList.isSuccess,
+    selectedMailboxId,
+    setURLParams,
+    toast,
+    urlParams,
+  ])
 
   React.useEffect(() => {
     setCompactSelectedIds([])
@@ -608,7 +1079,9 @@ export function MailPage() {
 
   React.useEffect(() => {
     const unlock = () => {
-      const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      const AudioContextCtor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       if (AudioContextCtor && !mailAudioContextRef.current) {
         const ctx = new AudioContextCtor()
         mailAudioContextRef.current = ctx
@@ -637,7 +1110,9 @@ export function MailPage() {
       return
     }
     if (nextState.latestReceivedAt < prevState.latestReceivedAt) return
-    const newMessages = items.filter((item) => item.receivedAt > prevState.latestReceivedAt && item.id !== prevState.latestId)
+    const newMessages = items.filter(
+      (item) => item.receivedAt > prevState.latestReceivedAt && item.id !== prevState.latestId
+    )
     mailNotifyStateRef.current[activeMailboxId] = nextState
     if (newMessages.length === 0) return
 
@@ -647,8 +1122,14 @@ export function MailPage() {
 
     const first = newMessages[0]
     const firstSender = senderDisplayName(first)
-    const title = newMessages.length > 1 ? `收到 ${newMessages.length} 封新邮件` : `新邮件：${first.subject || "(无主题)"}`
-    const description = newMessages.length > 1 ? `${firstSender} 等发来新邮件` : `${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`
+    const title =
+      newMessages.length > 1
+        ? `收到 ${newMessages.length} 封新邮件`
+        : `新邮件：${first.subject || "(无主题)"}`
+    const description =
+      newMessages.length > 1
+        ? `${firstSender} 等发来新邮件`
+        : `${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`
     const openFirstMessage = () => {
       setMailView("folder")
       setFolder("Inbox")
@@ -693,7 +1174,14 @@ export function MailPage() {
   }, [qc])
 
   React.useEffect(() => {
-    if (!mailRefreshInterval || !activeMailboxId || !canReadMail || mailView === "scheduled" || mailView === "sendQueue") return
+    if (
+      !mailRefreshInterval ||
+      !activeMailboxId ||
+      !canReadMail ||
+      mailView === "scheduled" ||
+      mailView === "sendQueue"
+    )
+      return
     if (mailView === "label" && !selectedLabelId) return
     if (mailView === "external" && (!externalImapEnabled || !selectedExternalAccountId)) return
 
@@ -704,16 +1192,44 @@ export function MailPage() {
       inFlight = true
       setListAutoRefreshing(true)
       try {
-        const queryKey = mailView === "external"
-          ? ["external-messages", selectedExternalAccountId, externalFolder, query, messagePageSize]
-          : ["messages", activeMailboxId, mailView, folder, selectedLabelId, query, messagePageSize]
-        const nextPage = mailView === "external"
-          ? await api.externalMessages(selectedExternalAccountId, externalFolder, "", query, messagePageSize)
-          : mailView === "starred"
-            ? await api.starredMessages(query, "", activeMailboxId, messagePageSize)
-            : mailView === "label"
-              ? await api.labelMessages(selectedLabelId, query, "", activeMailboxId, messagePageSize)
-              : await api.messages(folder, query, "", activeMailboxId, messagePageSize)
+        const queryKey =
+          mailView === "external"
+            ? [
+                "external-messages",
+                selectedExternalAccountId,
+                externalFolder,
+                query,
+                messagePageSize,
+              ]
+            : [
+                "messages",
+                activeMailboxId,
+                mailView,
+                folder,
+                selectedLabelId,
+                query,
+                messagePageSize,
+              ]
+        const nextPage =
+          mailView === "external"
+            ? await api.externalMessages(
+                selectedExternalAccountId,
+                externalFolder,
+                "",
+                query,
+                messagePageSize
+              )
+            : mailView === "starred"
+              ? await api.starredMessages(query, "", activeMailboxId, messagePageSize)
+              : mailView === "label"
+                ? await api.labelMessages(
+                    selectedLabelId,
+                    query,
+                    "",
+                    activeMailboxId,
+                    messagePageSize
+                  )
+                : await api.messages(folder, query, "", activeMailboxId, messagePageSize)
         const current = qc.getQueryData<InfiniteData<MailListResponse>>(queryKey)
         if (current?.pages[0] && JSON.stringify(current.pages[0]) !== JSON.stringify(nextPage)) {
           await qc.invalidateQueries({ queryKey, exact: true })
@@ -736,7 +1252,20 @@ export function MailPage() {
       window.clearInterval(timer)
       setListAutoRefreshing(false)
     }
-  }, [activeMailboxId, canReadMail, externalFolder, externalImapEnabled, folder, mailRefreshInterval, mailView, messagePageSize, qc, query, selectedExternalAccountId, selectedLabelId])
+  }, [
+    activeMailboxId,
+    canReadMail,
+    externalFolder,
+    externalImapEnabled,
+    folder,
+    mailRefreshInterval,
+    mailView,
+    messagePageSize,
+    qc,
+    query,
+    selectedExternalAccountId,
+    selectedLabelId,
+  ])
 
   React.useEffect(() => {
     if (publicSettings.data?.mailAutoRefresh && inboxProbe.dataUpdatedAt > 0 && !isPlainInboxView) {
@@ -745,12 +1274,17 @@ export function MailPage() {
   }, [inboxProbe.dataUpdatedAt, isPlainInboxView, publicSettings.data?.mailAutoRefresh])
 
   const selected = detail.data
-  const messagePages = (mailView === "external" ? externalMessages.data?.pages : messages.data?.pages) || []
+  const messagePages =
+    (mailView === "external" ? externalMessages.data?.pages : messages.data?.pages) || []
   const currentMessagePage = messagePages[messagePageIndex] || messagePages[0]
   const allMessages = currentMessagePage?.items || []
   const messageTotalCount = currentMessagePage?.totalCount
   React.useEffect(() => {
-    if (messagePageIndex > 0 && currentMessagePage && (currentMessagePage.items?.length || 0) === 0) {
+    if (
+      messagePageIndex > 0 &&
+      currentMessagePage &&
+      (currentMessagePage.items?.length || 0) === 0
+    ) {
       setMessagePageIndex((page) => Math.max(0, page - 1))
     }
   }, [currentMessagePage, messagePageIndex])
@@ -761,37 +1295,83 @@ export function MailPage() {
     return true
   })
   const unreadCount = allMessages.filter((message) => !message.isRead).length
-  const starredCount = mailStats.data?.starredMessages ?? (mailView === "starred" ? allMessages.length : 0)
+  const starredCount =
+    mailStats.data?.starredMessages ?? (mailView === "starred" ? allMessages.length : 0)
   const scheduledItems = scheduledSends.data?.items || []
-  const scheduledDraftIds = new Set(scheduledItems.map((item) => item.draftId).filter((draftId): draftId is string => Boolean(draftId)))
+  const scheduledDraftIds = new Set(
+    scheduledItems
+      .map((item) => item.draftId)
+      .filter((draftId): draftId is string => Boolean(draftId))
+  )
   const scheduledCount = scheduledItems.length
   const scheduledQuery = query.trim().toLowerCase()
   const visibleScheduledItems = scheduledQuery
-    ? scheduledItems.filter((item) => [item.subject, item.snippet, ...(item.to || [])].join(" ").toLowerCase().includes(scheduledQuery))
+    ? scheduledItems.filter((item) =>
+        [item.subject, item.snippet, ...(item.to || [])]
+          .join(" ")
+          .toLowerCase()
+          .includes(scheduledQuery)
+      )
     : scheduledItems
   const sendQueueItems = sendQueue.data?.items || []
-  const sendQueueCount = sendQueueItems.filter((item) => item.status === "failed" || item.status === "queued" || item.status === "sending").length
+  const sendQueueCount = sendQueueItems.filter(
+    (item) => item.status === "failed" || item.status === "queued" || item.status === "sending"
+  ).length
   const visibleSendQueueItems = sendQueueItems
-  const includeStarredView = selectedMailboxOwned || selectedMailbox?.shareScope === "all" || !!selectedMailbox?.shareIncludesStarred
-  const mailMenuItems = buildMailMenuItems(folders.data?.items || [], starredCount, includeStarredView, selectedMailbox?.access === "read" && selectedMailbox.shareScope === "custom", canScheduleSelectedMailbox ? scheduledCount : 0, canScheduleSelectedMailbox, canViewSendQueue ? sendQueueCount : 0, canViewSendQueue)
+  const includeStarredView =
+    selectedMailboxOwned ||
+    selectedMailbox?.shareScope === "all" ||
+    !!selectedMailbox?.shareIncludesStarred
+  const mailMenuItems = buildMailMenuItems(
+    folders.data?.items || [],
+    starredCount,
+    includeStarredView,
+    selectedMailbox?.access === "read" && selectedMailbox.shareScope === "custom",
+    canScheduleSelectedMailbox ? scheduledCount : 0,
+    canScheduleSelectedMailbox,
+    canViewSendQueue ? sendQueueCount : 0,
+    canViewSendQueue
+  )
   const externalAccountItems = externalImapEnabled ? externalMailAccounts.data?.items || [] : []
   const externalFolderItems = externalImapEnabled ? externalFolders.data?.items || [] : []
   const labelItems = labels.data?.items || []
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
-  const viewTitle = mailView === "external" ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}` : mailView === "sendQueue" ? "发送队列" : mailView === "scheduled" ? "待发送" : mailView === "starred" ? "星标邮件" : mailView === "label" ? selectedLabel?.name || "标签" : folderLabels[folder] || folder
-  const emptyMessage = getEmptyMessage(mailView, mailView === "external" ? externalFolder : folder, allMessages.length)
+  const viewTitle =
+    mailView === "external"
+      ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}`
+      : mailView === "sendQueue"
+        ? "发送队列"
+        : mailView === "scheduled"
+          ? "待发送"
+          : mailView === "starred"
+            ? "星标邮件"
+            : mailView === "label"
+              ? selectedLabel?.name || "标签"
+              : folderLabels[folder] || folder
+  const emptyMessage = getEmptyMessage(
+    mailView,
+    mailView === "external" ? externalFolder : folder,
+    allMessages.length
+  )
   const visibleMessageIds = visibleMessages.map((message) => message.id)
-  const selectedCountOnPage = compactSelectedIds.filter((id) => visibleMessageIds.includes(id)).length
-  const compactAllSelected = visibleMessageIds.length > 0 && selectedCountOnPage === visibleMessageIds.length
+  const selectedCountOnPage = compactSelectedIds.filter((id) =>
+    visibleMessageIds.includes(id)
+  ).length
+  const compactAllSelected =
+    visibleMessageIds.length > 0 && selectedCountOnPage === visibleMessageIds.length
   const compactSomeSelected = selectedCountOnPage > 0 && !compactAllSelected
   const hasPreviousMessagePage = messagePageIndex > 0
-  const hasNextMessagePage = !!messagePages[messagePageIndex + 1] || !!currentMessagePage?.nextCursor
-  const messagePageLoading = mailView === "external" ? externalMessages.isFetchingNextPage : messages.isFetchingNextPage
+  const hasNextMessagePage =
+    !!messagePages[messagePageIndex + 1] || !!currentMessagePage?.nextCursor
+  const messagePageLoading =
+    mailView === "external" ? externalMessages.isFetchingNextPage : messages.isFetchingNextPage
   function toggleCompactSelectAll(checked: boolean) {
     setCompactSelectedIds(checked ? visibleMessageIds : [])
   }
   function toggleCompactSelect(messageId: string, checked: boolean) {
-    setCompactSelectedIds((ids) => checked ? Array.from(new Set([...ids, messageId])) : ids.filter((id) => id !== messageId))
+    setCompactSelectedIds((ids) =>
+      checked ? Array.from(new Set([...ids, messageId])) : ids.filter((id) => id !== messageId)
+    )
   }
   function setMailPageSize(size: MailPageSize) {
     localStorage.setItem(MAIL_PAGE_SIZE_KEY, String(size))
@@ -812,7 +1392,10 @@ export function MailPage() {
       setCompactSelectedIds([])
       return
     }
-    const result = mailView === "external" ? await externalMessages.fetchNextPage() : await messages.fetchNextPage()
+    const result =
+      mailView === "external"
+        ? await externalMessages.fetchNextPage()
+        : await messages.fetchNextPage()
     if (result.data?.pages[nextIndex]) {
       setMessagePageIndex(nextIndex)
       setCompactSelectedIds([])
@@ -867,7 +1450,10 @@ export function MailPage() {
       await refreshMailData()
       toast({ title: `已处理 ${ids.length} 封邮件` })
     } catch (error) {
-      toast({ title: "批量操作失败", description: error instanceof Error ? error.message : "请稍后重试" })
+      toast({
+        title: "批量操作失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      })
     } finally {
       setBulkPending(false)
     }
@@ -888,11 +1474,20 @@ export function MailPage() {
   }
   function openReply(message: MailMessage) {
     if (!canSendSelectedMailbox) return
-    openCompose({ key: `reply-${message.id}-${Date.now()}`, to: message.from, subject: withPrefix(message.subject, "Re:"), text: quoteMessage(message) })
+    openCompose({
+      key: `reply-${message.id}-${Date.now()}`,
+      to: message.from,
+      subject: withPrefix(message.subject, "Re:"),
+      text: quoteMessage(message),
+    })
   }
   function openForward(message: MailMessage) {
     if (!canSendSelectedMailbox) return
-    openCompose({ key: `forward-${message.id}-${Date.now()}`, subject: withPrefix(message.subject, "Fwd:"), text: quoteMessage(message) })
+    openCompose({
+      key: `forward-${message.id}-${Date.now()}`,
+      subject: withPrefix(message.subject, "Fwd:"),
+      text: quoteMessage(message),
+    })
   }
   async function openDraft(message: MailMessage) {
     if (!canManageSelectedDrafts) return
@@ -918,7 +1513,10 @@ export function MailPage() {
       })
       setSelectedId(null)
     } catch (error) {
-      toast({ title: "打开草稿失败", description: error instanceof Error ? error.message : "请稍后重试" })
+      toast({
+        title: "打开草稿失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      })
     }
   }
   function switchMailbox(mailboxId: string) {
@@ -1010,7 +1608,9 @@ export function MailPage() {
     const foldersByID = new Map((folders.data?.items || []).map((item) => [item.id, item]))
     const dragged = foldersByID.get(draggedId)
     if (!dragged || !isCustomMailFolder(dragged)) return
-    const menuWithoutDragged = mailMenuItems.filter((item) => !(item.type === "folder" && item.folderId === draggedId))
+    const menuWithoutDragged = mailMenuItems.filter(
+      (item) => !(item.type === "folder" && item.folderId === draggedId)
+    )
     let insertIndex = menuWithoutDragged.length
     if (target.edge !== "end") {
       const targetIndex = menuWithoutDragged.findIndex((item) => item.key === target.key)
@@ -1038,7 +1638,10 @@ export function MailPage() {
     const currentIndex = mailMenuItems.findIndex((entry) => entry.key === item.key)
     if (currentIndex < 0) return
     if (action === "top") {
-      reorderCustomFolder(item.folderId, { key: mailMenuItems[0]?.key || "__end__", edge: "before" })
+      reorderCustomFolder(item.folderId, {
+        key: mailMenuItems[0]?.key || "__end__",
+        edge: "before",
+      })
       return
     }
     if (action === "bottom") {
@@ -1048,7 +1651,10 @@ export function MailPage() {
     const targetIndex = action === "up" ? currentIndex - 1 : currentIndex + 1
     const target = mailMenuItems[targetIndex]
     if (!target) return
-    reorderCustomFolder(item.folderId, { key: target.key, edge: action === "up" ? "before" : "after" })
+    reorderCustomFolder(item.folderId, {
+      key: target.key,
+      edge: action === "up" ? "before" : "after",
+    })
   }
   function confirmDeleteFolder(item: MailMenuItem) {
     if (item.type !== "folder" || !item.custom) return
@@ -1060,7 +1666,8 @@ export function MailPage() {
     })
   }
   function handleFolderDragStart(event: React.DragEvent, item: MailMenuItem) {
-    if (item.type !== "folder" || !item.custom || sidebarCollapsed || !canOrganizeSelectedMailbox) return
+    if (item.type !== "folder" || !item.custom || sidebarCollapsed || !canOrganizeSelectedMailbox)
+      return
     event.dataTransfer.effectAllowed = "move"
     event.dataTransfer.setData("text/plain", item.folderId)
     setDraggingFolderId(item.folderId)
@@ -1070,7 +1677,10 @@ export function MailPage() {
     event.preventDefault()
     event.dataTransfer.dropEffect = "move"
     const rect = event.currentTarget.getBoundingClientRect()
-    setFolderDropTarget({ key: item.key, edge: event.clientY < rect.top + rect.height / 2 ? "before" : "after" })
+    setFolderDropTarget({
+      key: item.key,
+      edge: event.clientY < rect.top + rect.height / 2 ? "before" : "after",
+    })
   }
   function handleFolderDrop(event: React.DragEvent, item: MailMenuItem) {
     if (!draggingFolderId) return
@@ -1094,7 +1704,11 @@ export function MailPage() {
     setDraggingFolderId("")
     setFolderDropTarget(null)
   }
-  function runMessageContextAction(action: "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete", message: MailMessage) {
+  function runMessageContextAction(
+    action:
+      "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete",
+    message: MailMessage
+  ) {
     closeMessageContextMenu()
     if (action === "open") {
       openMessage(message.id)
@@ -1162,7 +1776,8 @@ export function MailPage() {
     }
     setSelectedId(messageId)
     if (message && !message.isRead && canOrganizeSelectedMailbox) {
-      if (mailView === "external" && selectedExternalAccountId) markExternalRead.mutate({ id: selectedExternalAccountId, remoteId: message.id, read: true })
+      if (mailView === "external" && selectedExternalAccountId)
+        markExternalRead.mutate({ id: selectedExternalAccountId, remoteId: message.id, read: true })
       else markRead.mutate({ id: message.id, read: true })
     }
   }
@@ -1208,13 +1823,25 @@ export function MailPage() {
             onSelect={switchMailbox}
           />
           {!sidebarCollapsed && (
-            <Button type="button" variant="outline" size="icon" className="h-9 w-9 shrink-0 rounded-md" onClick={copyCurrentMailbox} disabled={!selectedMailbox}>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0 rounded-md"
+              onClick={copyCurrentMailbox}
+              disabled={!selectedMailbox}
+            >
               <Copy className="h-4 w-4" />
             </Button>
           )}
         </div>
         {canSendSelectedMailbox && (
-          <Button className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")} size={sidebarCollapsed ? "icon" : "default"} onClick={() => openCompose()} disabled={!selectedMailbox}>
+          <Button
+            className={cn("mt-2 h-10 w-full rounded-md text-sm", sidebarCollapsed && "px-0")}
+            size={sidebarCollapsed ? "icon" : "default"}
+            onClick={() => openCompose()}
+            disabled={!selectedMailbox}
+          >
             <PencilLine className="h-4 w-4" />
             {!sidebarCollapsed && <span>写邮件</span>}
           </Button>
@@ -1226,7 +1853,14 @@ export function MailPage() {
             <div className="flex items-center justify-between px-2 py-1.5">
               <SidebarGroupLabel className="m-0 p-0">邮件夹</SidebarGroupLabel>
               {canOrganizeSelectedMailbox && (
-                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setFolderDialogOpen(true)} disabled={!activeMailboxId}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5"
+                  onClick={() => setFolderDialogOpen(true)}
+                  disabled={!activeMailboxId}
+                >
                   <Plus className="h-3.5 w-3.5" />
                 </Button>
               )}
@@ -1237,42 +1871,77 @@ export function MailPage() {
               {mailMenuItems.map((item) => (
                 <SidebarMenuItem
                   key={item.key}
-                  draggable={item.type === "folder" && item.custom && canOrganizeSelectedMailbox && !sidebarCollapsed}
+                  draggable={
+                    item.type === "folder" &&
+                    item.custom &&
+                    canOrganizeSelectedMailbox &&
+                    !sidebarCollapsed
+                  }
                   onDragStart={(event) => handleFolderDragStart(event, item)}
                   onDragOver={(event) => handleFolderDragOver(event, item)}
-                  onDragLeave={() => { if (folderDropTarget?.key === item.key) setFolderDropTarget(null) }}
+                  onDragLeave={() => {
+                    if (folderDropTarget?.key === item.key) setFolderDropTarget(null)
+                  }}
                   onDrop={(event) => handleFolderDrop(event, item)}
                   onDragEnd={clearFolderDragState}
                   onContextMenu={(event) => openSidebarContextMenu(event, item)}
                 >
                   <SidebarMenuButton
-                    isActive={item.type === "starred" ? mailView === "starred" : item.type === "scheduled" ? mailView === "scheduled" : item.type === "sendQueue" ? mailView === "sendQueue" : mailView === "folder" && folder === item.folderName}
+                    isActive={
+                      item.type === "starred"
+                        ? mailView === "starred"
+                        : item.type === "scheduled"
+                          ? mailView === "scheduled"
+                          : item.type === "sendQueue"
+                            ? mailView === "sendQueue"
+                            : mailView === "folder" && folder === item.folderName
+                    }
                     className={cn(
                       sidebarCollapsed && "justify-center px-0",
-                      item.type === "folder" && item.custom && canOrganizeSelectedMailbox && !sidebarCollapsed && "cursor-grab active:cursor-grabbing",
-                      item.type === "folder" && item.custom && draggingFolderId === item.folderId && "opacity-50",
+                      item.type === "folder" &&
+                        item.custom &&
+                        canOrganizeSelectedMailbox &&
+                        !sidebarCollapsed &&
+                        "cursor-grab active:cursor-grabbing",
+                      item.type === "folder" &&
+                        item.custom &&
+                        draggingFolderId === item.folderId &&
+                        "opacity-50",
                       folderDropTarget?.key === item.key && "bg-accent/60",
-                      folderDropTarget?.key === item.key && folderDropTarget.edge === "before" && "border-t-2 border-t-primary",
-                      folderDropTarget?.key === item.key && folderDropTarget.edge === "after" && "border-b-2 border-b-primary"
+                      folderDropTarget?.key === item.key &&
+                        folderDropTarget.edge === "before" &&
+                        "border-t-2 border-t-primary",
+                      folderDropTarget?.key === item.key &&
+                        folderDropTarget.edge === "after" &&
+                        "border-b-2 border-b-primary"
                     )}
                     onClick={() => activateSidebarItem(item)}
                   >
                     {item.icon}
                     {!sidebarCollapsed && <span>{item.label}</span>}
-                    {!sidebarCollapsed && item.count > 0 && <Badge variant="secondary" className="ml-auto">{item.count}</Badge>}
+                    {!sidebarCollapsed && item.count > 0 && (
+                      <Badge variant="secondary" className="ml-auto">
+                        {item.count}
+                      </Badge>
+                    )}
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
               {!sidebarCollapsed && canOrganizeSelectedMailbox && (
                 <div
-                  className={cn("mx-2 h-4 rounded-sm border border-dashed border-transparent", folderDropTarget?.edge === "end" && "border-primary bg-accent/60")}
+                  className={cn(
+                    "mx-2 h-4 rounded-sm border border-dashed border-transparent",
+                    folderDropTarget?.edge === "end" && "border-primary bg-accent/60"
+                  )}
                   onDragOver={(event) => {
                     if (!draggingFolderId) return
                     event.preventDefault()
                     event.dataTransfer.dropEffect = "move"
                     setFolderDropTarget({ key: "__end__", edge: "end" })
                   }}
-                  onDragLeave={() => { if (folderDropTarget?.edge === "end") setFolderDropTarget(null) }}
+                  onDragLeave={() => {
+                    if (folderDropTarget?.edge === "end") setFolderDropTarget(null)
+                  }}
                   onDrop={handleFolderDropEnd}
                 />
               )}
@@ -1280,123 +1949,210 @@ export function MailPage() {
             {folders.isLoading && <FolderSkeleton />}
           </SidebarGroupContent>
         </SidebarGroup>
-        {externalAccountItems.length > 0 && <SidebarGroup>
-          {!sidebarCollapsed && <SidebarGroupLabel>外部邮箱</SidebarGroupLabel>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {externalAccountItems.map((account) => {
-                const expanded = expandedExternalAccountIds.includes(account.id)
-                return (
-                <React.Fragment key={account.id}>
-                  <SidebarMenuItem>
-                    <SidebarMenuButton
-                      isActive={mailView === "external" && selectedExternalAccountId === account.id}
-                      size={sidebarCollapsed ? "default" : "lg"}
-                      className={cn(sidebarCollapsed && "justify-center px-0")}
-                      title={`${externalAccountLabel(account)}${account.name && account.name !== externalAccountLabel(account) ? ` · ${account.name}` : ""}`}
-                      onClick={() => toggleExternalAccount(account)}
-                    >
-                      <Mail className="h-4 w-4" />
-                      {!sidebarCollapsed && (
-                        <>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate">{externalAccountLabel(account)}</span>
-                            <span className="block truncate text-xs font-normal text-muted-foreground">{externalAccountSubtitle(account)}</span>
-                          </span>
-                          <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", expanded && "rotate-180")} />
-                        </>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                  {!sidebarCollapsed && expanded && externalFolderItems.map((item) => (
-                    <SidebarMenuItem key={`${account.id}-${item.name}`}>
-                      <SidebarMenuButton
-                        isActive={externalFolder === item.name}
-                        className="pl-8"
-                        onClick={() => openExternalFolder(account, item.name)}
-                      >
-                        {folderIcons[item.role.toLowerCase()] || <Inbox className="h-4 w-4" />}
-                        <span>{folderLabels[item.role] || folderLabels[item.name] || item.name}</span>
-                        {item.unreadCount > 0 && <Badge variant="secondary" className="ml-auto">{item.unreadCount}</Badge>}
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  ))}
-                  {!sidebarCollapsed && expanded && externalFolders.isLoading && <FolderSkeleton />}
-                </React.Fragment>
-              )})}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>}
-        {canReadMail && <SidebarGroup>
-          {!sidebarCollapsed && (
-            <div className="flex items-center justify-between px-2 py-1.5">
-              <SidebarGroupLabel className="m-0 p-0">标签</SidebarGroupLabel>
-              {canManageSelectedLabels && (
-                <div className="flex items-center gap-0.5">
-                <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => { setNewLabelEditing(true); setLabelEditMode(true) }}>
-                  <Plus className="h-3.5 w-3.5" />
-                </Button>
-                {labelItems.length > 0 && (
-                  <Button type="button" variant="ghost" size="icon" className="h-5 w-5" onClick={() => setLabelEditMode((v) => !v)}>
-                    {labelEditMode ? <Check className="h-3 w-3" /> : <Pencil className="h-3 w-3" />}
-                  </Button>
-                )}
-                </div>
-              )}
-            </div>
-          )}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {canReadMail && labelItems.map((label) => {
-                const colors = generateLabelColor(label.name)
-                return (
-                  <SidebarMenuItem key={label.id}>
-                    <SidebarMenuButton
-                      isActive={!labelEditMode && mailView === "label" && selectedLabelId === label.id}
-                      className={cn(sidebarCollapsed && "justify-center px-0")}
-                      onClick={() => { if (!labelEditMode) openLabel(label.id) }}
-                    >
-                      {sidebarCollapsed ? (
-                        <span className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
-                      ) : (
-                        <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
-                          {label.name}
-                        </Badge>
-                      )}
-                      {!sidebarCollapsed && !labelEditMode && !!label.messageCount && (
-                        <span className="ml-auto text-[11px] text-muted-foreground">{label.messageCount}</span>
-                      )}
-                      {!sidebarCollapsed && labelEditMode && canManageSelectedLabels && (
-                        <button
-                          type="button"
-                          className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          onClick={(e) => { e.stopPropagation(); deleteLabel.mutate(label.id) }}
-                          disabled={deleteLabel.isPending}
-                          aria-label={`删除标签 ${label.name}`}
+        {externalAccountItems.length > 0 && (
+          <SidebarGroup>
+            {!sidebarCollapsed && <SidebarGroupLabel>外部邮箱</SidebarGroupLabel>}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {externalAccountItems.map((account) => {
+                  const expanded = expandedExternalAccountIds.includes(account.id)
+                  return (
+                    <React.Fragment key={account.id}>
+                      <SidebarMenuItem>
+                        <SidebarMenuButton
+                          isActive={
+                            mailView === "external" && selectedExternalAccountId === account.id
+                          }
+                          size={sidebarCollapsed ? "default" : "lg"}
+                          className={cn(sidebarCollapsed && "justify-center px-0")}
+                          title={`${externalAccountLabel(account)}${account.name && account.name !== externalAccountLabel(account) ? ` · ${account.name}` : ""}`}
+                          onClick={() => toggleExternalAccount(account)}
                         >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                          <Mail className="h-4 w-4" />
+                          {!sidebarCollapsed && (
+                            <>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate">
+                                  {externalAccountLabel(account)}
+                                </span>
+                                <span className="block truncate text-xs font-normal text-muted-foreground">
+                                  {externalAccountSubtitle(account)}
+                                </span>
+                              </span>
+                              <ChevronDown
+                                className={cn(
+                                  "h-4 w-4 text-muted-foreground transition-transform",
+                                  expanded && "rotate-180"
+                                )}
+                              />
+                            </>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                      {!sidebarCollapsed &&
+                        expanded &&
+                        externalFolderItems.map((item) => (
+                          <SidebarMenuItem key={`${account.id}-${item.name}`}>
+                            <SidebarMenuButton
+                              isActive={externalFolder === item.name}
+                              className="pl-8"
+                              onClick={() => openExternalFolder(account, item.name)}
+                            >
+                              {folderIcons[item.role.toLowerCase()] || (
+                                <Inbox className="h-4 w-4" />
+                              )}
+                              <span>
+                                {folderLabels[item.role] || folderLabels[item.name] || item.name}
+                              </span>
+                              {item.unreadCount > 0 && (
+                                <Badge variant="secondary" className="ml-auto">
+                                  {item.unreadCount}
+                                </Badge>
+                              )}
+                            </SidebarMenuButton>
+                          </SidebarMenuItem>
+                        ))}
+                      {!sidebarCollapsed && expanded && externalFolders.isLoading && (
+                        <FolderSkeleton />
                       )}
-                    </SidebarMenuButton>
+                    </React.Fragment>
+                  )
+                })}
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+        {canReadMail && (
+          <SidebarGroup>
+            {!sidebarCollapsed && (
+              <div className="flex items-center justify-between px-2 py-1.5">
+                <SidebarGroupLabel className="m-0 p-0">标签</SidebarGroupLabel>
+                {canManageSelectedLabels && (
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={() => {
+                        setNewLabelEditing(true)
+                        setLabelEditMode(true)
+                      }}
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                    </Button>
+                    {labelItems.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-5 w-5"
+                        onClick={() => setLabelEditMode((v) => !v)}
+                      >
+                        {labelEditMode ? (
+                          <Check className="h-3 w-3" />
+                        ) : (
+                          <Pencil className="h-3 w-3" />
+                        )}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            <SidebarGroupContent>
+              <SidebarMenu>
+                {canReadMail &&
+                  labelItems.map((label) => {
+                    const colors = generateLabelColor(label.name)
+                    return (
+                      <SidebarMenuItem key={label.id}>
+                        <SidebarMenuButton
+                          isActive={
+                            !labelEditMode && mailView === "label" && selectedLabelId === label.id
+                          }
+                          className={cn(sidebarCollapsed && "justify-center px-0")}
+                          onClick={() => {
+                            if (!labelEditMode) openLabel(label.id)
+                          }}
+                        >
+                          {sidebarCollapsed ? (
+                            <span
+                              className="h-2 w-2 rounded-full"
+                              style={{ backgroundColor: colors.backgroundColor }}
+                            />
+                          ) : (
+                            <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
+                              <span
+                                className="h-2 w-2 shrink-0 rounded-full"
+                                style={{ backgroundColor: colors.backgroundColor }}
+                              />
+                              {label.name}
+                            </Badge>
+                          )}
+                          {!sidebarCollapsed && !labelEditMode && !!label.messageCount && (
+                            <span className="ml-auto text-[11px] text-muted-foreground">
+                              {label.messageCount}
+                            </span>
+                          )}
+                          {!sidebarCollapsed && labelEditMode && canManageSelectedLabels && (
+                            <button
+                              type="button"
+                              className="ml-auto flex h-5 w-5 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                deleteLabel.mutate(label.id)
+                              }}
+                              disabled={deleteLabel.isPending}
+                              aria-label={`删除标签 ${label.name}`}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
+                  })}
+                {canReadMail &&
+                  !sidebarCollapsed &&
+                  !labels.isLoading &&
+                  labelItems.length === 0 && (
+                    <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>
+                  )}
+                {canManageSelectedLabels && labelEditMode && newLabelEditing && (
+                  <SidebarMenuItem>
+                    <NewLabelButton
+                      collapsed={sidebarCollapsed}
+                      pending={createLabel.isPending}
+                      onCreate={(name) => {
+                        createLabel.mutate(name)
+                        setNewLabelEditing(false)
+                      }}
+                      editing={newLabelEditing}
+                      onEditingChange={setNewLabelEditing}
+                    />
                   </SidebarMenuItem>
-                )
-              })}
-              {canReadMail && !sidebarCollapsed && !labels.isLoading && labelItems.length === 0 && <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>}
-              {canManageSelectedLabels && labelEditMode && newLabelEditing && (
-                <SidebarMenuItem>
-                  <NewLabelButton collapsed={sidebarCollapsed} pending={createLabel.isPending} onCreate={(name) => { createLabel.mutate(name); setNewLabelEditing(false) }} editing={newLabelEditing} onEditingChange={setNewLabelEditing} />
-                </SidebarMenuItem>
-              )}
-            </SidebarMenu>
-            {labels.isLoading && <FolderSkeleton />}
-          </SidebarGroupContent>
-        </SidebarGroup>}
+                )}
+              </SidebarMenu>
+              {labels.isLoading && <FolderSkeleton />}
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
       {!isMobile && (
         <div className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex justify-center" : "")}>
-          <Button type="button" variant="ghost" size={sidebarCollapsed ? "icon" : "sm"} className={cn(!sidebarCollapsed && "w-full justify-start")} onClick={toggleSidebar}>
-            {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+          <Button
+            type="button"
+            variant="ghost"
+            size={sidebarCollapsed ? "icon" : "sm"}
+            className={cn(!sidebarCollapsed && "w-full justify-start")}
+            onClick={toggleSidebar}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
             {!sidebarCollapsed && <span>收起侧栏</span>}
           </Button>
         </div>
@@ -1414,9 +2170,17 @@ export function MailPage() {
   }
 
   const contentView = !canAccessMail ? (
-    <PermissionEmptyState title="无邮箱前台权限" description="当前账号未开启邮箱前台访问权限。" onOpenSettings={openSettings} />
+    <PermissionEmptyState
+      title="无邮箱前台权限"
+      description="当前账号未开启邮箱前台访问权限。"
+      onOpenSettings={openSettings}
+    />
   ) : !canReadMail ? (
-    <PermissionEmptyState title="无邮件查看权限" description="当前账号可以访问邮箱前台，但未开启邮件查看权限。" onOpenSettings={openSettings} />
+    <PermissionEmptyState
+      title="无邮件查看权限"
+      description="当前账号可以访问邮箱前台，但未开启邮件查看权限。"
+      onOpenSettings={openSettings}
+    />
   ) : !mailboxList.isLoading && !hasMailboxes ? (
     <NoMailboxState onOpenSettings={openSettings} />
   ) : mailView === "scheduled" && canScheduleSelectedMailbox ? (
@@ -1430,7 +2194,11 @@ export function MailPage() {
       onCancel={(item) => cancelScheduledSend.mutate(item)}
     />
   ) : mailView === "scheduled" ? (
-    <PermissionEmptyState title="无定时发送权限" description="当前账号不能查看或管理定时发送任务。" onOpenSettings={openSettings} />
+    <PermissionEmptyState
+      title="无定时发送权限"
+      description="当前账号不能查看或管理定时发送任务。"
+      onOpenSettings={openSettings}
+    />
   ) : mailView === "sendQueue" && canViewSendQueue ? (
     <SendQueueView
       mobile={isMobile}
@@ -1449,18 +2217,38 @@ export function MailPage() {
       onRecipientChange={setSendQueueRecipient}
       onFromChange={setSendQueueFrom}
       onToChange={setSendQueueTo}
-      onClearFilters={() => { setSendQueueMessageId(""); setSendQueueRecipient(""); setSendQueueFrom(""); setSendQueueTo(""); setSendQueueStatus("all") }}
+      onClearFilters={() => {
+        setSendQueueMessageId("")
+        setSendQueueRecipient("")
+        setSendQueueFrom("")
+        setSendQueueTo("")
+        setSendQueueStatus("all")
+      }}
       onRetry={(item) => retrySendQueue.mutate(item)}
       onCancel={(item) => cancelSendQueue.mutate(item)}
       onAudit={(item) => setSendQueueAuditId(item.id)}
       canMutate={canSendSelectedMailbox}
     />
   ) : mailView === "sendQueue" ? (
-    <PermissionEmptyState title="无发送队列权限" description="当前账号不能查看发送队列。" onOpenSettings={openSettings} />
+    <PermissionEmptyState
+      title="无发送队列权限"
+      description="当前账号不能查看发送队列。"
+      onOpenSettings={openSettings}
+    />
   ) : isMobile || displayMode === "compact" ? (
     <CompactMailView
       title={viewTitle}
-      icon={mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : undefined}
+      icon={
+        mailView === "label" && selectedLabel ? (
+          <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
+            <span
+              className="h-2 w-2 shrink-0 rounded-full"
+              style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }}
+            />
+            {selectedLabel.name}
+          </Badge>
+        ) : undefined
+      }
       messages={visibleMessages}
       pageItemCount={allMessages.length}
       total={messageTotalCount}
@@ -1488,19 +2276,37 @@ export function MailPage() {
       onToggleSelected={toggleCompactSelect}
       scheduledDraftIds={scheduledDraftIds}
       onCloseReader={() => setSelectedId(null)}
-      onStar={(message) => { if (mailView !== "external") star.mutate({ id: message.id, starred: !message.isStarred }) }}
+      onStar={(message) => {
+        if (mailView !== "external") star.mutate({ id: message.id, starred: !message.isStarred })
+      }}
       onReply={openReply}
       onForward={openForward}
       onSendTimeline={openMessageSendTimeline}
-      onArchive={(message) => { if (mailView !== "external") move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" }) }}
-      onDelete={(message) => { if (mailView !== "external") confirmDeleteMessage(message) }}
-      onToggleRead={(message) => mailView === "external" && selectedExternalAccountId ? markExternalRead.mutate({ id: selectedExternalAccountId, remoteId: message.id, read: !message.isRead }) : markRead.mutate({ id: message.id, read: !message.isRead })}
+      onArchive={(message) => {
+        if (mailView !== "external")
+          move.mutate({
+            id: message.id,
+            folder: message.folder === "Archive" ? "Inbox" : "Archive",
+          })
+      }}
+      onDelete={(message) => {
+        if (mailView !== "external") confirmDeleteMessage(message)
+      }}
+      onToggleRead={(message) =>
+        mailView === "external" && selectedExternalAccountId
+          ? markExternalRead.mutate({
+              id: selectedExternalAccountId,
+              remoteId: message.id,
+              read: !message.isRead,
+            })
+          : markRead.mutate({ id: message.id, read: !message.isRead })
+      }
       onAddLabel={(message, label) => addLabel.mutate({ id: message.id, label })}
       onRemoveLabel={(message, labelId) => removeLabel.mutate({ id: message.id, labelId })}
       bulkPending={bulkPending}
-        onBulkAction={runBulkAction}
-        onContextMenu={openMessageContextMenu}
-        canSend={canSendSelectedMailbox}
+      onBulkAction={runBulkAction}
+      onContextMenu={openMessageContextMenu}
+      canSend={canSendSelectedMailbox}
       canOrganize={canOrganizeSelectedMailbox && mailView !== "external"}
       canManageLabels={canManageSelectedLabels && mailView !== "external"}
       canDownloadAttachments={canDownloadAttachments}
@@ -1512,18 +2318,63 @@ export function MailPage() {
         <div className="flex h-full min-h-0 flex-col">
           <div className="flex h-14 shrink-0 items-center justify-between border-b px-5">
             <div className="flex min-w-0 items-center gap-3">
-              {canOrganizeSelectedMailbox && <Checkbox aria-label="选择当前页邮件" checked={compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false} onCheckedChange={(value) => toggleCompactSelectAll(value === true)} />}
+              {canOrganizeSelectedMailbox && (
+                <Checkbox
+                  aria-label="选择当前页邮件"
+                  checked={
+                    compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false
+                  }
+                  onCheckedChange={(value) => toggleCompactSelectAll(value === true)}
+                />
+              )}
               <div className="min-w-0">
-                <div className="flex items-center gap-2 text-sm font-semibold">{mailView === "label" && selectedLabel && <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge>}{mailView !== "label" && viewTitle}</div>
-                <div className="text-xs text-muted-foreground">{selectedCountOnPage > 0 ? `已选 ${selectedCountOnPage} 封` : `${visibleMessages.length} / ${messageTotalCount ?? allMessages.length} 封邮件`}</div>
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  {mailView === "label" && selectedLabel && (
+                    <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor,
+                        }}
+                      />
+                      {selectedLabel.name}
+                    </Badge>
+                  )}
+                  {mailView !== "label" && viewTitle}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {selectedCountOnPage > 0
+                    ? `已选 ${selectedCountOnPage} 封`
+                    : `${visibleMessages.length} / ${messageTotalCount ?? allMessages.length} 封邮件`}
+                </div>
               </div>
             </div>
-            {selectedCountOnPage > 0 && canOrganizeSelectedMailbox && <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />}
+            {selectedCountOnPage > 0 && canOrganizeSelectedMailbox && (
+              <BulkActionMenu pending={bulkPending} onAction={runBulkAction} />
+            )}
           </div>
           <ScrollArea key={`mail-page-${messagePageIndex}`} className="min-h-0 flex-1">
-            {(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && <MessageSkeleton />}
-            {visibleMessages.map((m) => <MessageRow key={m.id} message={m} active={selectedId === m.id} checked={compactSelectedIds.includes(m.id)} scheduled={scheduledDraftIds.has(m.id)} onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)} onClick={() => openMessage(m.id)} onContextMenu={(event) => openMessageContextMenu(event, m)} onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })} canOrganize={canOrganizeSelectedMailbox} />)}
-            {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && visibleMessages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
+            {(mailView === "external" ? externalMessages.isLoading : messages.isLoading) && (
+              <MessageSkeleton />
+            )}
+            {visibleMessages.map((m) => (
+              <MessageRow
+                key={m.id}
+                message={m}
+                active={selectedId === m.id}
+                checked={compactSelectedIds.includes(m.id)}
+                scheduled={scheduledDraftIds.has(m.id)}
+                onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)}
+                onClick={() => openMessage(m.id)}
+                onContextMenu={(event) => openMessageContextMenu(event, m)}
+                onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })}
+                canOrganize={canOrganizeSelectedMailbox}
+              />
+            ))}
+            {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) &&
+              visibleMessages.length === 0 && (
+                <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>
+              )}
           </ScrollArea>
           <MailPagination
             pageIndex={messagePageIndex}
@@ -1543,36 +2394,133 @@ export function MailPage() {
 
       <ResizablePanel defaultSize={68} minSize={44}>
         <section className="h-full min-h-0">
-          {!selectedId && <div className="grid h-full place-items-center text-muted-foreground">选择一封邮件阅读</div>}
-          {detail.isLoading && <div className="space-y-4 p-6"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-40 w-full" /></div>}
-          {selected && <div className="flex h-full min-h-0 flex-col">
-            <div className="border-b p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <h2 className="text-xl font-semibold">{selected.subject}</h2>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {canSendSelectedMailbox && <Button variant="outline" size="sm" onClick={() => openReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
-                  {canSendSelectedMailbox && <Button variant="outline" size="sm" onClick={() => openForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
-                  {mailView !== "external" && selected.sendQueueId && <Button variant="outline" size="sm" onClick={() => openMessageSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</Button>}
-                  {mailView !== "external" && canOrganizeSelectedMailbox && (selected.folder === "Archive" ? (
-                    <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}>取消归档</Button>
-                  ) : (
-                    <Button variant="outline" size="sm" onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}>归档</Button>
-                  ))}
-                  {mailView !== "external" && canOrganizeSelectedMailbox && <Button variant="destructive" size="sm" onClick={() => confirmDeleteMessage(selected)}>删除</Button>}
-                </div>
-              </div>
-              <MessageMetaPanel
-                message={selected}
-                {...(canManageSelectedLabels ? { availableLabels: labelItems, onAddLabel: (label: MailLabel) => addLabel.mutate({ id: selected.id, label }), onRemoveLabel: (labelId: string) => removeLabel.mutate({ id: selected.id, labelId }), labelPending: addLabel.isPending || removeLabel.isPending } : {})}
-              />
+          {!selectedId && (
+            <div className="grid h-full place-items-center text-muted-foreground">
+              选择一封邮件阅读
             </div>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="p-6">
-                <TranslatableMailBody message={selected} language={language} />
-                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent" href={attachmentHref(selected, a.id)} key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground" key={a.id}><span className="flex items-center gap-2"><Paperclip className="h-4 w-4" />{a.filename}</span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
+          )}
+          {detail.isLoading && (
+            <div className="space-y-4 p-6">
+              <Skeleton className="h-8 w-2/3" />
+              <Skeleton className="h-4 w-1/3" />
+              <Separator />
+              <Skeleton className="h-40 w-full" />
+            </div>
+          )}
+          {selected && (
+            <div className="flex h-full min-h-0 flex-col">
+              <div className="border-b p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h2 className="text-xl font-semibold">{selected.subject}</h2>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    {canSendSelectedMailbox && (
+                      <Button variant="outline" size="sm" onClick={() => openReply(selected)}>
+                        <Reply className="h-4 w-4" />
+                        回复
+                      </Button>
+                    )}
+                    {canSendSelectedMailbox && (
+                      <Button variant="outline" size="sm" onClick={() => openForward(selected)}>
+                        <Forward className="h-4 w-4" />
+                        转发
+                      </Button>
+                    )}
+                    {mailView !== "external" && selected.sendQueueId && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openMessageSendTimeline(selected)}
+                      >
+                        <History className="h-4 w-4" />
+                        投递时间线
+                      </Button>
+                    )}
+                    {mailView !== "external" &&
+                      canOrganizeSelectedMailbox &&
+                      (selected.folder === "Archive" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}
+                        >
+                          取消归档
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}
+                        >
+                          归档
+                        </Button>
+                      ))}
+                    {mailView !== "external" && canOrganizeSelectedMailbox && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => confirmDeleteMessage(selected)}
+                      >
+                        删除
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                <MessageMetaPanel
+                  message={selected}
+                  {...(canManageSelectedLabels
+                    ? {
+                        availableLabels: labelItems,
+                        onAddLabel: (label: MailLabel) =>
+                          addLabel.mutate({ id: selected.id, label }),
+                        onRemoveLabel: (labelId: string) =>
+                          removeLabel.mutate({ id: selected.id, labelId }),
+                        labelPending: addLabel.isPending || removeLabel.isPending,
+                      }
+                    : {})}
+                />
               </div>
-            </ScrollArea>
-          </div>}
+              <ScrollArea className="min-h-0 flex-1">
+                <div className="p-6">
+                  <TranslatableMailBody message={selected} language={language} />
+                  {selected.attachments && selected.attachments.length > 0 && (
+                    <div className="mt-8 rounded-lg border p-4">
+                      <div className="mb-3 font-medium">附件</div>
+                      <div className="space-y-2">
+                        {selected.attachments.map((a) =>
+                          canDownloadAttachments ? (
+                            <a
+                              className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent"
+                              href={attachmentHref(selected, a.id)}
+                              key={a.id}
+                            >
+                              <span className="flex items-center gap-2">
+                                <Paperclip className="h-4 w-4" />
+                                {a.filename}
+                              </span>
+                              <span className="text-muted-foreground">
+                                {formatBytes(a.sizeBytes)}
+                              </span>
+                            </a>
+                          ) : (
+                            <div
+                              className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground"
+                              key={a.id}
+                            >
+                              <span className="flex items-center gap-2">
+                                <Paperclip className="h-4 w-4" />
+                                {a.filename}
+                              </span>
+                              <span>{formatBytes(a.sizeBytes)}</span>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+          )}
         </section>
       </ResizablePanel>
     </ResizablePanelGroup>
@@ -1587,22 +2535,75 @@ export function MailPage() {
               <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
                 <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
                   <SheetTrigger asChild>
-                    <Button size="icon" variant="ghost" aria-label="打开导航"><PanelLeftOpen className="h-4 w-4" /></Button>
+                    <Button size="icon" variant="ghost" aria-label="打开导航">
+                      <PanelLeftOpen className="h-4 w-4" />
+                    </Button>
                   </SheetTrigger>
-                  <SheetContent side="left" className="w-[86vw] max-w-80 p-0 [&>button]:hidden" aria-describedby={undefined}>
+                  <SheetContent
+                    side="left"
+                    className="w-[86vw] max-w-80 p-0 [&>button]:hidden"
+                    aria-describedby={undefined}
+                  >
                     <SheetTitle className="sr-only">邮箱导航</SheetTitle>
                     <div className="h-svh">{sidebarContent}</div>
                   </SheetContent>
                 </Sheet>
-                <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing || autoRefreshing} className={cn("transition-all", (refreshing || autoRefreshing) && "bg-primary/5 text-primary")} title={autoRefreshing ? "自动刷新中" : "刷新邮件"}>
-                  <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={refreshMail}
+                  disabled={refreshing || autoRefreshing}
+                  className={cn(
+                    "transition-all",
+                    (refreshing || autoRefreshing) && "bg-primary/5 text-primary"
+                  )}
+                  title={autoRefreshing ? "自动刷新中" : "刷新邮件"}
+                >
+                  <RefreshCcw
+                    className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")}
+                  />
                 </Button>
-                <div className="min-w-0 flex-1 text-sm font-semibold">{mailView === "label" && selectedLabel ? <Badge variant="outline" className="gap-1.5 rounded-md font-normal"><span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor }} />{selectedLabel.name}</Badge> : viewTitle}</div>
-                {canSendSelectedMailbox && <Button type="button" size="icon" onClick={() => openCompose()} disabled={!selectedMailbox} aria-label="写邮件"><PencilLine className="h-4 w-4" /></Button>}
+                <div className="min-w-0 flex-1 text-sm font-semibold">
+                  {mailView === "label" && selectedLabel ? (
+                    <Badge variant="outline" className="gap-1.5 rounded-md font-normal">
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: generateLabelColor(selectedLabel.name).backgroundColor,
+                        }}
+                      />
+                      {selectedLabel.name}
+                    </Badge>
+                  ) : (
+                    viewTitle
+                  )}
+                </div>
+                {canSendSelectedMailbox && (
+                  <Button
+                    type="button"
+                    size="icon"
+                    onClick={() => openCompose()}
+                    disabled={!selectedMailbox}
+                    aria-label="写邮件"
+                  >
+                    <PencilLine className="h-4 w-4" />
+                  </Button>
+                )}
                 {mailView !== "sendQueue" && (
                   <div className="relative basis-full">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="h-10 pl-9" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder={
+                        mailView === "external"
+                          ? "搜索远端邮件"
+                          : mailView === "scheduled"
+                            ? "搜索待发送"
+                            : "搜索邮件"
+                      }
+                      className="h-10 pl-9"
+                    />
                   </div>
                 )}
               </header>
@@ -1611,7 +2612,16 @@ export function MailPage() {
           </div>
         ) : (
           <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
-            <ResizablePanel ref={sidebarPanelRef} collapsible collapsedSize={4} defaultSize={15} minSize={11} maxSize={24} onCollapse={() => setSidebarCollapsed(true)} onExpand={() => setSidebarCollapsed(false)}>
+            <ResizablePanel
+              ref={sidebarPanelRef}
+              collapsible
+              collapsedSize={4}
+              defaultSize={15}
+              minSize={11}
+              maxSize={24}
+              onCollapse={() => setSidebarCollapsed(true)}
+              onExpand={() => setSidebarCollapsed(false)}
+            >
               {sidebarContent}
             </ResizablePanel>
             <ResizableHandle withHandle />
@@ -1619,36 +2629,80 @@ export function MailPage() {
               <section className="flex h-full min-h-0 flex-col">
                 <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
                   <div className="flex items-center gap-2">
-                    <Button size="icon" variant="ghost" onClick={refreshMail} disabled={refreshing || autoRefreshing} className={cn("transition-all", (refreshing || autoRefreshing) && "bg-primary/5 text-primary")} title={autoRefreshing ? "自动刷新中" : "刷新邮件"}>
-                      <RefreshCcw className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")} />
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={refreshMail}
+                      disabled={refreshing || autoRefreshing}
+                      className={cn(
+                        "transition-all",
+                        (refreshing || autoRefreshing) && "bg-primary/5 text-primary"
+                      )}
+                      title={autoRefreshing ? "自动刷新中" : "刷新邮件"}
+                    >
+                      <RefreshCcw
+                        className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")}
+                      />
                     </Button>
                     {(publicSettings.data?.mailAutoRefresh || autoRefreshing) && (
                       <div className="hidden min-w-[118px] text-xs text-muted-foreground sm:block">
-                        {autoRefreshing ? "自动刷新中..." : lastAutoRefreshAt ? `已刷新 ${lastAutoRefreshAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "自动刷新已开启"}
+                        {autoRefreshing
+                          ? "自动刷新中..."
+                          : lastAutoRefreshAt
+                            ? `已刷新 ${lastAutoRefreshAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                            : "自动刷新已开启"}
                       </div>
                     )}
-                    {mailView !== "scheduled" && mailView !== "sendQueue" && mailView !== "external" && (
-                      <>
-                        {canOrganizeSelectedMailbox && <Button variant="outline" size="sm" disabled={!activeMailboxId || markAllRead.isPending || unreadCount === 0} onClick={() => markAllRead.mutate(allMessages)}><MailCheck className="h-4 w-4" />全部已读</Button>}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm"><SlidersHorizontal className="h-4 w-4" />{filterLabels[mailFilter]}</Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start">
-                            {(Object.keys(filterLabels) as MailFilter[]).map((value) => (
-                              <DropdownMenuItem key={value} onSelect={() => setMailFilter(value)}>
-                                {filterLabels[value]}
-                              </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                      </>
-                    )}
+                    {mailView !== "scheduled" &&
+                      mailView !== "sendQueue" &&
+                      mailView !== "external" && (
+                        <>
+                          {canOrganizeSelectedMailbox && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={
+                                !activeMailboxId || markAllRead.isPending || unreadCount === 0
+                              }
+                              onClick={() => markAllRead.mutate(allMessages)}
+                            >
+                              <MailCheck className="h-4 w-4" />
+                              全部已读
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="outline" size="sm">
+                                <SlidersHorizontal className="h-4 w-4" />
+                                {filterLabels[mailFilter]}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="start">
+                              {(Object.keys(filterLabels) as MailFilter[]).map((value) => (
+                                <DropdownMenuItem key={value} onSelect={() => setMailFilter(value)}>
+                                  {filterLabels[value]}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </>
+                      )}
                   </div>
                   {mailView !== "sendQueue" && (
                     <div className="relative w-full max-w-md">
                       <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                      <Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={mailView === "external" ? "搜索远端邮件" : mailView === "scheduled" ? "搜索待发送" : "搜索邮件"} className="pl-9" />
+                      <Input
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder={
+                          mailView === "external"
+                            ? "搜索远端邮件"
+                            : mailView === "scheduled"
+                              ? "搜索待发送"
+                              : "搜索邮件"
+                        }
+                        className="pl-9"
+                      />
                     </div>
                   )}
                 </header>
@@ -1659,12 +2713,37 @@ export function MailPage() {
         )}
       </SidebarProvider>
 
-      <ComposeDialog mailbox={selectedMailbox} open={composeOpen} draft={composeDraft} limits={user?.limits} canSend={canSendSelectedMailbox} canManageDrafts={canManageSelectedDrafts} canSchedule={canScheduleSelectedMailbox} canManageSignatures={canManageSignatures && selectedMailboxOwned} onOpenChange={(open) => { setComposeOpen(open); if (!open) setComposeDraft(undefined) }} onSent={() => { setComposeOpen(false); setComposeDraft(undefined); qc.invalidateQueries({ queryKey: ["messages"] }); qc.invalidateQueries({ queryKey: ["folders"] }); qc.invalidateQueries({ queryKey: ["mail-stats"] }); qc.invalidateQueries({ queryKey: ["labels"] }); qc.invalidateQueries({ queryKey: ["scheduled-sends"] }); qc.invalidateQueries({ queryKey: ["send-queue"] }) }} />
+      <ComposeDialog
+        mailbox={selectedMailbox}
+        open={composeOpen}
+        draft={composeDraft}
+        limits={user?.limits}
+        canSend={canSendSelectedMailbox}
+        canManageDrafts={canManageSelectedDrafts}
+        canSchedule={canScheduleSelectedMailbox}
+        canManageSignatures={canManageSignatures && selectedMailboxOwned}
+        onOpenChange={(open) => {
+          setComposeOpen(open)
+          if (!open) setComposeDraft(undefined)
+        }}
+        onSent={() => {
+          setComposeOpen(false)
+          setComposeDraft(undefined)
+          qc.invalidateQueries({ queryKey: ["messages"] })
+          qc.invalidateQueries({ queryKey: ["folders"] })
+          qc.invalidateQueries({ queryKey: ["mail-stats"] })
+          qc.invalidateQueries({ queryKey: ["labels"] })
+          qc.invalidateQueries({ queryKey: ["scheduled-sends"] })
+          qc.invalidateQueries({ queryKey: ["send-queue"] })
+        }}
+      />
       <SendQueueAuditDialog
         open={!!sendQueueAuditId}
         loading={sendQueueAudit.isLoading}
         events={sendQueueAudit.data?.items || []}
-        onOpenChange={(open) => { if (!open) setSendQueueAuditId("") }}
+        onOpenChange={(open) => {
+          if (!open) setSendQueueAuditId("")
+        }}
       />
       <MessageContextMenu
         state={messageContextMenu}
@@ -1682,7 +2761,8 @@ export function MailPage() {
         }}
         onToggleLabel={(message, label) => {
           const active = (message.labels || []).some((item) => item.id === label.id)
-          active ? removeLabel.mutate({ id: message.id, labelId: label.id }) : addLabel.mutate({ id: message.id, label })
+          if (active) removeLabel.mutate({ id: message.id, labelId: label.id })
+          else addLabel.mutate({ id: message.id, label })
         }}
       />
       <SidebarContextMenu
@@ -1724,16 +2804,42 @@ export function MailPage() {
         confirmText={pendingConfirm?.confirmText || "确认"}
         destructive
         pending={del.isPending || bulkPending}
-        onOpenChange={(open) => { if (!open) setPendingConfirm(null) }}
+        onOpenChange={(open) => {
+          if (!open) setPendingConfirm(null)
+        }}
         onConfirm={() => pendingConfirm?.onConfirm()}
       />
     </div>
   )
 }
 
-function buildMailMenuItems(folders: MailFolder[], starredCount: number, includeStarred: boolean, restrictedFolders: boolean, scheduledCount: number, includeScheduled: boolean, sendQueueCount: number, includeSendQueue: boolean): MailMenuItem[] {
+function buildMailMenuItems(
+  folders: MailFolder[],
+  starredCount: number,
+  includeStarred: boolean,
+  restrictedFolders: boolean,
+  scheduledCount: number,
+  includeScheduled: boolean,
+  sendQueueCount: number,
+  includeSendQueue: boolean
+): MailMenuItem[] {
   const byName = new Map(folders.map((item) => [item.name, item]))
-  const normalizedFolders = restrictedFolders ? [...folders] : ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map((name) => byName.get(name) || { id: `virtual-${name}`, name, role: name.toLowerCase(), sortOrder: 0, unreadCount: 0, totalCount: 0, uidValidity: 0, uidNext: 1, highestModseq: 1 })
+  const normalizedFolders = restrictedFolders
+    ? [...folders]
+    : ["Inbox", "Drafts", "Sent", "Archive", "Spam", "Trash"].map(
+        (name) =>
+          byName.get(name) || {
+            id: `virtual-${name}`,
+            name,
+            role: name.toLowerCase(),
+            sortOrder: 0,
+            unreadCount: 0,
+            totalCount: 0,
+            uidValidity: 0,
+            uidNext: 1,
+            highestModseq: 1,
+          }
+      )
   for (const item of folders) {
     if (!normalizedFolders.some((folder) => folder.name === item.name)) normalizedFolders.push(item)
   }
@@ -1748,21 +2854,53 @@ function buildMailMenuItems(folders: MailFolder[], starredCount: number, include
     custom: isCustomMailFolder(item),
     order: isCustomMailFolder(item) ? item.sortOrder || 100000 : menuAnchorOrder(item.name),
   }))
-  const starredItem: MailMenuItem = { type: "starred", key: "starred", label: "星标邮件", icon: <Star className="h-4 w-4" />, count: starredCount, order: 2000 }
-  const scheduledItem: MailMenuItem = { type: "scheduled", key: "scheduled", label: "待发送", icon: <Clock3 className="h-4 w-4" />, count: scheduledCount, order: 3000 }
-  const sendQueueItem: MailMenuItem = { type: "sendQueue", key: "send-queue", label: "发送队列", icon: <History className="h-4 w-4" />, count: sendQueueCount, order: 4000 }
+  const starredItem: MailMenuItem = {
+    type: "starred",
+    key: "starred",
+    label: "星标邮件",
+    icon: <Star className="h-4 w-4" />,
+    count: starredCount,
+    order: 2000,
+  }
+  const scheduledItem: MailMenuItem = {
+    type: "scheduled",
+    key: "scheduled",
+    label: "待发送",
+    icon: <Clock3 className="h-4 w-4" />,
+    count: scheduledCount,
+    order: 3000,
+  }
+  const sendQueueItem: MailMenuItem = {
+    type: "sendQueue",
+    key: "send-queue",
+    label: "发送队列",
+    icon: <History className="h-4 w-4" />,
+    count: sendQueueCount,
+    order: 4000,
+  }
   const specialItems: MailMenuItem[] = includeStarred ? [starredItem] : []
   if (includeScheduled) specialItems.push(scheduledItem)
   if (includeSendQueue) specialItems.push(sendQueueItem)
-  return [...folderItems, ...specialItems].sort((a, b) => a.order - b.order || a.label.localeCompare(b.label))
+  return [...folderItems, ...specialItems].sort(
+    (a, b) => a.order - b.order || a.label.localeCompare(b.label)
+  )
 }
 
 function isCustomMailFolder(folder: Pick<MailFolder, "name" | "id">) {
-  return !folder.id.startsWith("virtual-") && !["inbox", "sent", "drafts", "archive", "spam", "trash"].includes(folder.name.trim().toLowerCase())
+  return (
+    !folder.id.startsWith("virtual-") &&
+    !["inbox", "sent", "drafts", "archive", "spam", "trash"].includes(
+      folder.name.trim().toLowerCase()
+    )
+  )
 }
 
 function compareMailFolders(a: MailFolder, b: MailFolder) {
-  return (isCustomMailFolder(a) ? a.sortOrder || 100000 : menuAnchorOrder(a.name)) - (isCustomMailFolder(b) ? b.sortOrder || 100000 : menuAnchorOrder(b.name)) || a.name.localeCompare(b.name)
+  return (
+    (isCustomMailFolder(a) ? a.sortOrder || 100000 : menuAnchorOrder(a.name)) -
+      (isCustomMailFolder(b) ? b.sortOrder || 100000 : menuAnchorOrder(b.name)) ||
+    a.name.localeCompare(b.name)
+  )
 }
 
 function assignCustomFolderOrders(items: MailMenuItem[]) {
@@ -1803,21 +2941,49 @@ function isCustomMenuFolder(item: MailMenuItem): item is Extract<MailMenuItem, {
 
 function menuAnchorOrder(name: string) {
   switch (name) {
-    case "Inbox": return 1000
-    case "Sent": return 5000
-    case "Drafts": return 6000
-    case "Archive": return 7000
-    case "Spam": return 8000
-    case "Trash": return 9000
-    default: return 100000
+    case "Inbox":
+      return 1000
+    case "Sent":
+      return 5000
+    case "Drafts":
+      return 6000
+    case "Archive":
+      return 7000
+    case "Spam":
+      return 8000
+    case "Trash":
+      return 9000
+    default:
+      return 100000
   }
 }
 
-function FolderSkeleton() { return <div className="space-y-2 p-2"><Skeleton className="h-8 w-full" /><Skeleton className="h-8 w-4/5" /><Skeleton className="h-8 w-3/4" /></div> }
-function MessageSkeleton() { return <div className="space-y-0">{Array.from({ length: 6 }).map((_, i) => <div className="space-y-2 border-b p-4" key={i}><Skeleton className="h-4 w-1/2" /><Skeleton className="h-4 w-4/5" /><Skeleton className="h-3 w-full" /></div>)}</div> }
+function FolderSkeleton() {
+  return (
+    <div className="space-y-2 p-2">
+      <Skeleton className="h-8 w-full" />
+      <Skeleton className="h-8 w-4/5" />
+      <Skeleton className="h-8 w-3/4" />
+    </div>
+  )
+}
+function MessageSkeleton() {
+  return (
+    <div className="space-y-0">
+      {Array.from({ length: 6 }).map((_, i) => (
+        <div className="space-y-2 border-b p-4" key={i}>
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-3 w-full" />
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function getEmptyMessage(mailView: MailView, folder: string, total: number) {
-  if (mailView === "external") return total === 0 ? "远端文件夹没有邮件" : "当前筛选条件下没有远端邮件"
+  if (mailView === "external")
+    return total === 0 ? "远端文件夹没有邮件" : "当前筛选条件下没有远端邮件"
   if (mailView === "scheduled") return total === 0 ? "没有待发送邮件" : "当前搜索没有匹配的定时邮件"
   if (mailView === "sendQueue") return total === 0 ? "发送队列为空" : "当前搜索没有匹配的发送任务"
   if (total > 0) return "当前筛选条件下没有邮件"
@@ -1850,16 +3016,27 @@ function NoMailboxState({ onOpenSettings }: { onOpenSettings: () => void }) {
           <Mail className="h-5 w-5 text-muted-foreground" />
         </div>
         <div className="text-lg font-semibold">还没有可用邮箱</div>
-        <div className="mt-2 text-sm text-muted-foreground">请在个人中心申请邮箱，或联系管理员为当前账号分配邮箱。</div>
+        <div className="mt-2 text-sm text-muted-foreground">
+          请在个人中心申请邮箱，或联系管理员为当前账号分配邮箱。
+        </div>
         <Button className="mt-5" onClick={onOpenSettings}>
-          <Settings className="h-4 w-4" />前往个人中心
+          <Settings className="h-4 w-4" />
+          前往个人中心
         </Button>
       </div>
     </div>
   )
 }
 
-function PermissionEmptyState({ title, description, onOpenSettings }: { title: string; description: string; onOpenSettings: () => void }) {
+function PermissionEmptyState({
+  title,
+  description,
+  onOpenSettings,
+}: {
+  title: string
+  description: string
+  onOpenSettings: () => void
+}) {
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-6">
       <div className="w-full max-w-md rounded-lg border border-dashed p-8 text-center">
@@ -1869,29 +3046,65 @@ function PermissionEmptyState({ title, description, onOpenSettings }: { title: s
         <div className="text-lg font-semibold">{title}</div>
         <div className="mt-2 text-sm text-muted-foreground">{description}</div>
         <Button className="mt-5" onClick={onOpenSettings}>
-          <Settings className="h-4 w-4" />前往个人中心
+          <Settings className="h-4 w-4" />
+          前往个人中心
         </Button>
       </div>
     </div>
   )
 }
 
-function ScheduledSendView({ compact, items, total, loading, query, cancelingId, onCancel }: { compact: boolean; items: ScheduledSend[]; total: number; loading: boolean; query: string; cancelingId: string; onCancel: (item: ScheduledSend) => void }) {
+function ScheduledSendView({
+  compact,
+  items,
+  total,
+  loading,
+  query,
+  cancelingId,
+  onCancel,
+}: {
+  compact: boolean
+  items: ScheduledSend[]
+  total: number
+  loading: boolean
+  query: string
+  cancelingId: string
+  onCancel: (item: ScheduledSend) => void
+}) {
   const empty = query.trim() ? "当前搜索没有匹配的定时邮件" : "没有待发送邮件"
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
-      <div className={cn("flex shrink-0 items-center justify-between gap-3 border-b", compact ? "h-12 px-4" : "h-14 px-5")}>
+      <div
+        className={cn(
+          "flex shrink-0 items-center justify-between gap-3 border-b",
+          compact ? "h-12 px-4" : "h-14 px-5"
+        )}
+      >
         <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-semibold"><Clock3 className="h-4 w-4" />待发送</div>
-          <div className="text-xs text-muted-foreground">{items.length} / {total} 封定时邮件</div>
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Clock3 className="h-4 w-4" />
+            待发送
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {items.length} / {total} 封定时邮件
+          </div>
         </div>
       </div>
       <ScrollArea className="min-h-0 flex-1">
         {loading && <ScheduledSendSkeleton />}
-        {!loading && items.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div>}
-        {!loading && items.map((item) => (
-          <ScheduledSendRow key={item.id} item={item} compact={compact} pending={cancelingId === item.id} onCancel={() => onCancel(item)} />
-        ))}
+        {!loading && items.length === 0 && (
+          <div className="p-8 text-center text-sm text-muted-foreground">{empty}</div>
+        )}
+        {!loading &&
+          items.map((item) => (
+            <ScheduledSendRow
+              key={item.id}
+              item={item}
+              compact={compact}
+              pending={cancelingId === item.id}
+              onCancel={() => onCancel(item)}
+            />
+          ))}
       </ScrollArea>
     </div>
   )
@@ -1911,27 +3124,54 @@ function ScheduledSendSkeleton() {
   )
 }
 
-function ScheduledSendRow({ item, compact, pending, onCancel }: { item: ScheduledSend; compact: boolean; pending: boolean; onCancel: () => void }) {
+function ScheduledSendRow({
+  item,
+  compact,
+  pending,
+  onCancel,
+}: {
+  item: ScheduledSend
+  compact: boolean
+  pending: boolean
+  onCancel: () => void
+}) {
   const recipients = item.to?.length ? item.to.join(", ") : "未填写收件人"
   const failed = item.status === "failed"
   return (
-    <div className={cn("border-b transition-colors hover:bg-accent/40", compact ? "p-4" : "px-5 py-4")}>
-      <div className={cn("gap-4", compact ? "space-y-3" : "grid grid-cols-[minmax(0,1fr)_180px_116px] items-center")}>
+    <div
+      className={cn("border-b transition-colors hover:bg-accent/40", compact ? "p-4" : "px-5 py-4")}
+    >
+      <div
+        className={cn(
+          "gap-4",
+          compact ? "space-y-3" : "grid grid-cols-[minmax(0,1fr)_180px_116px] items-center"
+        )}
+      >
         <div className="min-w-0">
           <div className="mb-1 flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-semibold">{item.subject || "(无主题)"}</span>
             <ScheduledStatusBadge status={item.status} />
           </div>
           <div className="truncate text-xs text-muted-foreground">发给 {recipients}</div>
-          {item.snippet && <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{item.snippet}</div>}
-          {failed && item.error && <div className="mt-2 text-xs text-destructive">{item.error}</div>}
+          {item.snippet && (
+            <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{item.snippet}</div>
+          )}
+          {failed && item.error && (
+            <div className="mt-2 text-xs text-destructive">{item.error}</div>
+          )}
         </div>
         <div className="text-sm">
           <div className="text-xs text-muted-foreground">发送时间</div>
           <div className="mt-1 font-medium">{formatDateTime(item.sendAt)}</div>
         </div>
         <div className={cn("flex", compact ? "justify-start" : "justify-end")}>
-          <Button type="button" variant={failed ? "outline" : "destructive"} size="sm" disabled={pending || item.status === "sending"} onClick={onCancel}>
+          <Button
+            type="button"
+            variant={failed ? "outline" : "destructive"}
+            size="sm"
+            disabled={pending || item.status === "sending"}
+            onClick={onCancel}
+          >
             {pending ? "处理中..." : failed ? "移除记录" : "取消发送"}
           </Button>
         </div>
@@ -1941,9 +3181,21 @@ function ScheduledSendRow({ item, compact, pending, onCancel }: { item: Schedule
 }
 
 function ScheduledStatusBadge({ status }: { status: ScheduledSend["status"] }) {
-  const label = status === "pending" ? "等待发送" : status === "sending" ? "发送中" : status === "failed" ? "发送失败" : status === "sent" ? "已发送" : "已取消"
+  const label =
+    status === "pending"
+      ? "等待发送"
+      : status === "sending"
+        ? "发送中"
+        : status === "failed"
+          ? "发送失败"
+          : status === "sent"
+            ? "已发送"
+            : "已取消"
   return (
-    <Badge variant={status === "failed" ? "destructive" : status === "sending" ? "secondary" : "outline"} className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">
+    <Badge
+      variant={status === "failed" ? "destructive" : status === "sending" ? "secondary" : "outline"}
+      className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
+    >
       {label}
     </Badge>
   )
@@ -2012,52 +3264,126 @@ function SendQueueView({
 }) {
   const [filtersOpen, setFiltersOpen] = React.useState(false)
   const hasFilters = status !== "all" || messageId.trim() || recipient.trim() || from || to
-  const activeFilterCount = [status !== "all", !!messageId.trim(), !!recipient.trim(), !!from, !!to].filter(Boolean).length
+  const activeFilterCount = [
+    status !== "all",
+    !!messageId.trim(),
+    !!recipient.trim(),
+    !!from,
+    !!to,
+  ].filter(Boolean).length
   const empty = hasFilters ? "当前筛选没有匹配的发送任务" : "发送队列为空"
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className={cn("shrink-0 border-b bg-muted/15", mobile ? "px-4 py-3" : "px-5 py-3")}>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="flex items-center gap-2 text-base font-semibold"><History className="h-4 w-4" />发送队列</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">{items.length} / {total} 个发送任务</div>
+            <div className="flex items-center gap-2 text-base font-semibold">
+              <History className="h-4 w-4" />
+              发送队列
+            </div>
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {items.length} / {total} 个发送任务
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {mobile && (
-              <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>
-                <SlidersHorizontal className="h-4 w-4" />筛选
-                {activeFilterCount > 0 && <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[11px] text-background">{activeFilterCount}</span>}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 gap-1.5"
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+              >
+                <SlidersHorizontal className="h-4 w-4" />
+                筛选
+                {activeFilterCount > 0 && (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[11px] text-background">
+                    {activeFilterCount}
+                  </span>
+                )}
               </Button>
             )}
-            <Select value={status} onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}>
+            <Select
+              value={status}
+              onValueChange={(value) => onStatusChange(value as SendQueueStatus | "all")}
+            >
               <SelectTrigger className="h-9 w-[116px] bg-background sm:w-[132px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {sendQueueStatusOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                {sendQueueStatusOptions.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
         </div>
         {(!mobile || filtersOpen) && (
-          <div className={cn("mt-3 grid gap-2", mobile ? "grid-cols-1" : "grid-cols-2 xl:grid-cols-[minmax(220px,1.15fr)_minmax(190px,1fr)_minmax(420px,1.5fr)_auto]")}>
+          <div
+            className={cn(
+              "mt-3 grid gap-2",
+              mobile
+                ? "grid-cols-1"
+                : "grid-cols-2 xl:grid-cols-[minmax(220px,1.15fr)_minmax(190px,1fr)_minmax(420px,1.5fr)_auto]"
+            )}
+          >
             <div className="relative min-w-0">
               <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input value={messageId} onChange={(event) => onMessageIdChange(event.target.value)} placeholder="搜索 Message-ID" className="h-9 bg-background pl-9" />
+              <Input
+                value={messageId}
+                onChange={(event) => onMessageIdChange(event.target.value)}
+                placeholder="搜索 Message-ID"
+                className="h-9 bg-background pl-9"
+              />
             </div>
             <div className="relative min-w-0">
               <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input value={recipient} onChange={(event) => onRecipientChange(event.target.value)} placeholder="搜索收件人" className="h-9 bg-background pl-9" />
+              <Input
+                value={recipient}
+                onChange={(event) => onRecipientChange(event.target.value)}
+                placeholder="搜索收件人"
+                className="h-9 bg-background pl-9"
+              />
             </div>
-            <div className={cn("flex min-w-0 items-center rounded-md border bg-background px-2 shadow-sm focus-within:ring-1 focus-within:ring-ring", mobile ? "flex-col items-stretch gap-1 p-2" : "col-span-2 xl:col-span-1")}>
+            <div
+              className={cn(
+                "flex min-w-0 items-center rounded-md border bg-background px-2 shadow-sm focus-within:ring-1 focus-within:ring-ring",
+                mobile ? "flex-col items-stretch gap-1 p-2" : "col-span-2 xl:col-span-1"
+              )}
+            >
               <div className="flex shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
-                <Clock3 className="h-4 w-4" />时间
+                <Clock3 className="h-4 w-4" />
+                时间
               </div>
-              <Input aria-label="开始时间" type="datetime-local" value={from} onChange={(event) => onFromChange(event.target.value)} className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0" />
+              <Input
+                aria-label="开始时间"
+                type="datetime-local"
+                value={from}
+                onChange={(event) => onFromChange(event.target.value)}
+                className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0"
+              />
               {!mobile && <span className="shrink-0 text-xs text-muted-foreground">至</span>}
-              <Input aria-label="结束时间" type="datetime-local" value={to} onChange={(event) => onToChange(event.target.value)} className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0" />
+              <Input
+                aria-label="结束时间"
+                type="datetime-local"
+                value={to}
+                onChange={(event) => onToChange(event.target.value)}
+                className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0"
+              />
             </div>
-            <Button type="button" variant="ghost" size="icon" className={cn("h-9 w-9 text-muted-foreground", mobile && "justify-self-end")} disabled={!hasFilters} onClick={onClearFilters} title="重置筛选" aria-label="重置筛选">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className={cn("h-9 w-9 text-muted-foreground", mobile && "justify-self-end")}
+              disabled={!hasFilters}
+              onClick={onClearFilters}
+              title="重置筛选"
+              aria-label="重置筛选"
+            >
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -2067,9 +3393,21 @@ function SendQueueView({
         {loading && <ScheduledSendSkeleton />}
         {!loading && items.length === 0 && (
           <div className="flex min-h-52 flex-col items-center justify-center px-6 py-10 text-center">
-            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground"><History className="h-5 w-5" /></div>
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <History className="h-5 w-5" />
+            </div>
             <div className="text-sm font-medium">{empty}</div>
-            {hasFilters && <Button type="button" variant="link" size="sm" className="mt-1 text-muted-foreground" onClick={onClearFilters}>重置筛选</Button>}
+            {hasFilters && (
+              <Button
+                type="button"
+                variant="link"
+                size="sm"
+                className="mt-1 text-muted-foreground"
+                onClick={onClearFilters}
+              >
+                重置筛选
+              </Button>
+            )}
           </div>
         )}
         {!loading && !mobile && items.length > 0 && (
@@ -2081,66 +3419,157 @@ function SendQueueView({
             <div className="text-right">操作</div>
           </div>
         )}
-        {!loading && items.map((item) => (
-          <SendQueueRow
-            key={item.id}
-            item={item}
-            mobile={mobile}
-            dense={dense}
-            pending={pendingId === item.id}
-            onRetry={() => onRetry(item)}
-            onCancel={() => onCancel(item)}
-            onAudit={() => onAudit(item)}
-            canMutate={canMutate}
-          />
-        ))}
+        {!loading &&
+          items.map((item) => (
+            <SendQueueRow
+              key={item.id}
+              item={item}
+              mobile={mobile}
+              dense={dense}
+              pending={pendingId === item.id}
+              onRetry={() => onRetry(item)}
+              onCancel={() => onCancel(item)}
+              onAudit={() => onAudit(item)}
+              canMutate={canMutate}
+            />
+          ))}
       </ScrollArea>
     </div>
   )
 }
 
-function SendQueueRow({ item, mobile, dense, pending, onRetry, onCancel, onAudit, canMutate }: { item: SendQueueItem; mobile: boolean; dense: boolean; pending: boolean; onRetry: () => void; onCancel: () => void; onAudit: () => void; canMutate: boolean }) {
+function SendQueueRow({
+  item,
+  mobile,
+  dense,
+  pending,
+  onRetry,
+  onCancel,
+  onAudit,
+  canMutate,
+}: {
+  item: SendQueueItem
+  mobile: boolean
+  dense: boolean
+  pending: boolean
+  onRetry: () => void
+  onCancel: () => void
+  onAudit: () => void
+  canMutate: boolean
+}) {
   const recipients = item.recipients?.length ? item.recipients.join(", ") : "未记录收件人"
   const failure = item.lastError || item.error || item.failureReason || ""
   const canRetry = item.status === "failed"
   const canCancel = item.status === "queued" || item.status === "failed"
   return (
-    <div className={cn("border-b transition-colors hover:bg-accent/30", mobile ? "px-4 py-4" : dense ? "px-5 py-2.5" : "px-5 py-3.5")}>
-      <div className={cn("gap-4 space-y-3 xl:grid xl:grid-cols-[120px_minmax(260px,1.5fr)_minmax(180px,0.75fr)_190px_104px] xl:items-center xl:space-y-0")}>
+    <div
+      className={cn(
+        "border-b transition-colors hover:bg-accent/30",
+        mobile ? "px-4 py-4" : dense ? "px-5 py-2.5" : "px-5 py-3.5"
+      )}
+    >
+      <div
+        className={cn(
+          "gap-4 space-y-3 xl:grid xl:grid-cols-[120px_minmax(260px,1.5fr)_minmax(180px,0.75fr)_190px_104px] xl:items-center xl:space-y-0"
+        )}
+      >
         <div className="flex items-center justify-between gap-3">
           <SendQueueStatusBadge status={item.status} />
-          <span className="text-xs text-muted-foreground xl:hidden">{formatDateTime(item.updatedAt || item.createdAt)}</span>
+          <span className="text-xs text-muted-foreground xl:hidden">
+            {formatDateTime(item.updatedAt || item.createdAt)}
+          </span>
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold" title={item.subject || "(无主题)"}>{item.subject || "(无主题)"}</div>
-          <div className="mt-1 truncate text-xs text-muted-foreground" title={recipients}>发给 {recipients}</div>
-          {failure && <div className="mt-2 line-clamp-2 rounded bg-destructive/[0.08] px-2 py-1 text-xs text-destructive" title={failure}>{failure}</div>}
+          <div className="truncate text-sm font-semibold" title={item.subject || "(无主题)"}>
+            {item.subject || "(无主题)"}
+          </div>
+          <div className="mt-1 truncate text-xs text-muted-foreground" title={recipients}>
+            发给 {recipients}
+          </div>
+          {failure && (
+            <div
+              className="mt-2 line-clamp-2 rounded bg-destructive/[0.08] px-2 py-1 text-xs text-destructive"
+              title={failure}
+            >
+              {failure}
+            </div>
+          )}
         </div>
         <div className="min-w-0 text-xs">
-          <div className="truncate font-medium" title={sendQueueSourceLabel(item.source)}>{sendQueueSourceLabel(item.source)}</div>
-          <div className="mt-1 text-muted-foreground">尝试 {item.attemptCount}/{item.maxAttempts}</div>
-          {item.nextAttemptAt && <div className="mt-1 truncate text-muted-foreground" title={formatDateTime(item.nextAttemptAt)}>下次 {formatDateTime(item.nextAttemptAt)}</div>}
+          <div className="truncate font-medium" title={sendQueueSourceLabel(item.source)}>
+            {sendQueueSourceLabel(item.source)}
+          </div>
+          <div className="mt-1 text-muted-foreground">
+            尝试 {item.attemptCount}/{item.maxAttempts}
+          </div>
+          {item.nextAttemptAt && (
+            <div
+              className="mt-1 truncate text-muted-foreground"
+              title={formatDateTime(item.nextAttemptAt)}
+            >
+              下次 {formatDateTime(item.nextAttemptAt)}
+            </div>
+          )}
         </div>
         <div className="hidden min-w-0 text-xs xl:block">
-          <div className="font-medium text-foreground">{formatDateTime(item.updatedAt || item.createdAt)}</div>
-          {item.deliveredAt && <div className="mt-1 truncate text-muted-foreground">投递于 {formatDateTime(item.deliveredAt)}</div>}
+          <div className="font-medium text-foreground">
+            {formatDateTime(item.updatedAt || item.createdAt)}
+          </div>
+          {item.deliveredAt && (
+            <div className="mt-1 truncate text-muted-foreground">
+              投递于 {formatDateTime(item.deliveredAt)}
+            </div>
+          )}
         </div>
         <div className="flex items-center justify-end gap-1">
-          <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" onClick={onAudit} title="查看时间线" aria-label="查看时间线">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-muted-foreground"
+            onClick={onAudit}
+            title="查看时间线"
+            aria-label="查看时间线"
+          >
             <History className="h-4 w-4" />
           </Button>
           {canMutate && canRetry && (
-            <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground" disabled={pending} onClick={onRetry} title={pending ? "处理中..." : "重试任务"} aria-label={pending ? "处理中..." : "重试任务"}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground"
+              disabled={pending}
+              onClick={onRetry}
+              title={pending ? "处理中..." : "重试任务"}
+              aria-label={pending ? "处理中..." : "重试任务"}
+            >
               <RotateCcw className={cn("h-4 w-4", pending && "animate-spin")} />
             </Button>
           )}
           {canMutate && canCancel && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground" disabled={pending} title="更多操作" aria-label="更多操作"><Ellipsis className="h-4 w-4" /></Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 text-muted-foreground"
+                  disabled={pending}
+                  title="更多操作"
+                  aria-label="更多操作"
+                >
+                  <Ellipsis className="h-4 w-4" />
+                </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem className="text-destructive focus:text-destructive" onSelect={onCancel}><X className="h-4 w-4" />取消任务</DropdownMenuItem>
+                <DropdownMenuItem
+                  className="text-destructive focus:text-destructive"
+                  onSelect={onCancel}
+                >
+                  <X className="h-4 w-4" />
+                  取消任务
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           )}
@@ -2151,24 +3580,48 @@ function SendQueueRow({ item, mobile, dense, pending, onRetry, onCancel, onAudit
 }
 
 function SendQueueStatusBadge({ status }: { status: SendQueueStatus }) {
-  const label = status === "queued" ? "排队中" : status === "sending" ? "发送中" : status === "delivered" ? "已投递" : status === "failed" ? "发送失败" : "已取消"
-  const styles = status === "queued"
-    ? "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300"
-    : status === "sending"
-      ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300"
-      : status === "delivered"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
-        : status === "failed"
-          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300"
-          : "border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
+  const label =
+    status === "queued"
+      ? "排队中"
+      : status === "sending"
+        ? "发送中"
+        : status === "delivered"
+          ? "已投递"
+          : status === "failed"
+            ? "发送失败"
+            : "已取消"
+  const styles =
+    status === "queued"
+      ? "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300"
+      : status === "sending"
+        ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-300"
+        : status === "delivered"
+          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
+          : status === "failed"
+            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300"
+            : "border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400"
   return (
-    <Badge variant="outline" className={cn("h-6 shrink-0 gap-1.5 rounded-md px-2 text-[11px] font-medium", styles)}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />{label}
+    <Badge
+      variant="outline"
+      className={cn("h-6 shrink-0 gap-1.5 rounded-md px-2 text-[11px] font-medium", styles)}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {label}
     </Badge>
   )
 }
 
-function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: boolean; loading: boolean; events: SendQueueAuditEvent[]; onOpenChange: (open: boolean) => void }) {
+function SendQueueAuditDialog({
+  open,
+  loading,
+  events,
+  onOpenChange,
+}: {
+  open: boolean
+  loading: boolean
+  events: SendQueueAuditEvent[]
+  onOpenChange: (open: boolean) => void
+}) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(92vw,42rem)] max-w-none">
@@ -2176,8 +3629,18 @@ function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: b
           <DialogTitle>投递时间线</DialogTitle>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-auto pr-1">
-          {loading && <div className="space-y-3">{Array.from({ length: 4 }).map((_, index) => <Skeleton key={index} className="h-14 w-full" />)}</div>}
-          {!loading && events.length === 0 && <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">暂无投递事件</div>}
+          {loading && (
+            <div className="space-y-3">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} className="h-14 w-full" />
+              ))}
+            </div>
+          )}
+          {!loading && events.length === 0 && (
+            <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+              暂无投递事件
+            </div>
+          )}
           {!loading && events.length > 0 && (
             <div className="ml-2 border-l">
               {events.map((event) => (
@@ -2188,11 +3651,19 @@ function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: b
                       {event.status && <SendQueueStatusBadge status={event.status} />}
                       <span>{event.message || event.event || event.eventType || "队列事件"}</span>
                     </div>
-                    <span className="text-xs text-muted-foreground">{formatDateTime(event.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {formatDateTime(event.createdAt)}
+                    </span>
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                    {typeof event.attemptCount === "number" && <span>尝试次数：{event.attemptCount}</span>}
-                    {event.error && <span className="w-full rounded bg-destructive/[0.08] px-2 py-1.5 text-destructive">{event.error}</span>}
+                    {typeof event.attemptCount === "number" && (
+                      <span>尝试次数：{event.attemptCount}</span>
+                    )}
+                    {event.error && (
+                      <span className="w-full rounded bg-destructive/[0.08] px-2 py-1.5 text-destructive">
+                        {event.error}
+                      </span>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2200,7 +3671,9 @@ function SendQueueAuditDialog({ open, loading, events, onOpenChange }: { open: b
           )}
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>关闭</Button>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            关闭
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -2226,7 +3699,13 @@ function datetimeLocalToISO(value: string) {
 
 type BulkAction = "read" | "unread" | "star" | "unstar" | "archive" | "trash" | "spam" | "delete"
 
-function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (action: BulkAction) => void }) {
+function BulkActionMenu({
+  pending,
+  onAction,
+}: {
+  pending: boolean
+  onAction: (action: BulkAction) => void
+}) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -2242,13 +3721,35 @@ function BulkActionMenu({ pending, onAction }: { pending: boolean; onAction: (ac
         <DropdownMenuItem onSelect={() => onAction("archive")}>归档</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAction("trash")}>移入回收站</DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAction("spam")}>移入垃圾邮件</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("delete")} className="text-destructive">删除</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("delete")} className="text-destructive">
+          删除
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
 
-function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRefresh, onCreateFolder, onMove, onDelete }: { state: SidebarContextMenuState | null; canOrganize: boolean; pending: boolean; onClose: () => void; onOpen: (item: MailMenuItem) => void; onRefresh: () => void; onCreateFolder: () => void; onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void; onDelete: (item: MailMenuItem) => void }) {
+function SidebarContextMenu({
+  state,
+  canOrganize,
+  pending,
+  onClose,
+  onOpen,
+  onRefresh,
+  onCreateFolder,
+  onMove,
+  onDelete,
+}: {
+  state: SidebarContextMenuState | null
+  canOrganize: boolean
+  pending: boolean
+  onClose: () => void
+  onOpen: (item: MailMenuItem) => void
+  onRefresh: () => void
+  onCreateFolder: () => void
+  onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void
+  onDelete: (item: MailMenuItem) => void
+}) {
   React.useEffect(() => {
     if (!state) return
     const close = () => onClose()
@@ -2281,34 +3782,74 @@ function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRe
       role="menu"
     >
       <Button type="button" variant="ghost" className={itemClass} onClick={() => onOpen(item)}>
-        <Inbox className="h-4 w-4" />打开
+        <Inbox className="h-4 w-4" />
+        打开
       </Button>
       <Button type="button" variant="ghost" className={itemClass} onClick={onRefresh}>
-        <RefreshCcw className="h-4 w-4" />刷新
+        <RefreshCcw className="h-4 w-4" />
+        刷新
       </Button>
       {canOrganize && (
         <Button type="button" variant="ghost" className={itemClass} onClick={onCreateFolder}>
-          <Plus className="h-4 w-4" />新建文件夹
+          <Plus className="h-4 w-4" />
+          新建文件夹
         </Button>
       )}
       {canOrganize && customFolder && (
         <>
           <div className="my-1 h-px bg-border" />
-          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "top")}>
-            <ArrowLeft className="h-4 w-4 rotate-90" />移到最上
+          <Button
+            type="button"
+            variant="ghost"
+            className={itemClass}
+            disabled={pending}
+            onClick={() => onMove(item, "top")}
+          >
+            <ArrowLeft className="h-4 w-4 rotate-90" />
+            移到最上
           </Button>
-          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "up")}>
-            <ChevronDown className="h-4 w-4 rotate-180" />上移一位
+          <Button
+            type="button"
+            variant="ghost"
+            className={itemClass}
+            disabled={pending}
+            onClick={() => onMove(item, "up")}
+          >
+            <ChevronDown className="h-4 w-4 rotate-180" />
+            上移一位
           </Button>
-          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "down")}>
-            <ChevronDown className="h-4 w-4" />下移一位
+          <Button
+            type="button"
+            variant="ghost"
+            className={itemClass}
+            disabled={pending}
+            onClick={() => onMove(item, "down")}
+          >
+            <ChevronDown className="h-4 w-4" />
+            下移一位
           </Button>
-          <Button type="button" variant="ghost" className={itemClass} disabled={pending} onClick={() => onMove(item, "bottom")}>
-            <ArrowLeft className="h-4 w-4 -rotate-90" />移到最下
+          <Button
+            type="button"
+            variant="ghost"
+            className={itemClass}
+            disabled={pending}
+            onClick={() => onMove(item, "bottom")}
+          >
+            <ArrowLeft className="h-4 w-4 -rotate-90" />
+            移到最下
           </Button>
           <div className="my-1 h-px bg-border" />
-          <Button type="button" variant="ghost" className={cn(itemClass, "text-destructive hover:bg-destructive/10 hover:text-destructive")} onClick={() => onDelete(item)}>
-            <Trash2 className="h-4 w-4" />删除文件夹
+          <Button
+            type="button"
+            variant="ghost"
+            className={cn(
+              itemClass,
+              "text-destructive hover:bg-destructive/10 hover:text-destructive"
+            )}
+            onClick={() => onDelete(item)}
+          >
+            <Trash2 className="h-4 w-4" />
+            删除文件夹
           </Button>
         </>
       )}
@@ -2316,7 +3857,35 @@ function SidebarContextMenu({ state, canOrganize, pending, onClose, onOpen, onRe
   )
 }
 
-function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canManageLabels, labelPending, onClose, onAction, onMoveToFolder, onToggleLabel }: { state: MessageContextMenuState | null; labels: MailLabel[]; folders: MailFolder[]; canSend: boolean; canOrganize: boolean; canManageLabels: boolean; labelPending: boolean; onClose: () => void; onAction: (action: "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete", message: MailMessage) => void; onMoveToFolder: (message: MailMessage, folderName: string) => void; onToggleLabel: (message: MailMessage, label: MailLabel) => void }) {
+function MessageContextMenu({
+  state,
+  labels,
+  folders,
+  canSend,
+  canOrganize,
+  canManageLabels,
+  labelPending,
+  onClose,
+  onAction,
+  onMoveToFolder,
+  onToggleLabel,
+}: {
+  state: MessageContextMenuState | null
+  labels: MailLabel[]
+  folders: MailFolder[]
+  canSend: boolean
+  canOrganize: boolean
+  canManageLabels: boolean
+  labelPending: boolean
+  onClose: () => void
+  onAction: (
+    action:
+      "open" | "reply" | "forward" | "read" | "star" | "archive" | "trash" | "spam" | "delete",
+    message: MailMessage
+  ) => void
+  onMoveToFolder: (message: MailMessage, folderName: string) => void
+  onToggleLabel: (message: MailMessage, label: MailLabel) => void
+}) {
   React.useEffect(() => {
     if (!state) return
     const close = () => onClose()
@@ -2341,9 +3910,19 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
   const draft = message.folder === "Drafts"
   const itemClass = "h-auto w-full justify-start rounded-sm px-3 py-2 text-left font-normal"
 
-  function item(label: string, icon: React.ReactNode, action: Parameters<typeof onAction>[0], destructive = false) {
+  function item(
+    label: string,
+    icon: React.ReactNode,
+    action: Parameters<typeof onAction>[0],
+    destructive = false
+  ) {
     return (
-      <Button type="button" variant="ghost" className={cn(itemClass, destructive && "text-destructive hover:text-destructive")} onClick={() => onAction(action, message)}>
+      <Button
+        type="button"
+        variant="ghost"
+        className={cn(itemClass, destructive && "text-destructive hover:text-destructive")}
+        onClick={() => onAction(action, message)}
+      >
         {icon}
         <span>{label}</span>
       </Button>
@@ -2357,7 +3936,9 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
     onMoveToFolder(message, folderName)
     onClose()
   }
-  const movableFolders = folders.filter((folder) => folder.name !== message.folder && folder.name !== "Drafts")
+  const movableFolders = folders.filter(
+    (folder) => folder.name !== message.folder && folder.name !== "Drafts"
+  )
 
   return (
     <div
@@ -2368,7 +3949,11 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
       onPointerDown={(event) => event.stopPropagation()}
       role="menu"
     >
-      {item(draft ? "编辑草稿" : "打开邮件", draft ? <PencilLine className="h-4 w-4" /> : <Mail className="h-4 w-4" />, "open")}
+      {item(
+        draft ? "编辑草稿" : "打开邮件",
+        draft ? <PencilLine className="h-4 w-4" /> : <Mail className="h-4 w-4" />,
+        "open"
+      )}
       {!draft && canSend && (
         <>
           {item("回复", <Reply className="h-4 w-4" />, "reply")}
@@ -2378,11 +3963,27 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
       {!draft && canOrganize && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
-          {item(message.isRead ? "标为未读" : "标为已读", <MailCheck className="h-4 w-4" />, "read")}
-          {item(message.isStarred ? "取消星标" : "添加星标", <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />, "star")}
-          {item(message.folder === "Archive" ? "取消归档" : "归档", <Archive className="h-4 w-4" />, "archive")}
-          {message.folder !== "Trash" && item("移入回收站", <Trash2 className="h-4 w-4" />, "trash")}
-          {message.folder !== "Spam" && item("移入垃圾邮件", <Trash2 className="h-4 w-4" />, "spam")}
+          {item(
+            message.isRead ? "标为未读" : "标为已读",
+            <MailCheck className="h-4 w-4" />,
+            "read"
+          )}
+          {item(
+            message.isStarred ? "取消星标" : "添加星标",
+            <Star
+              className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")}
+            />,
+            "star"
+          )}
+          {item(
+            message.folder === "Archive" ? "取消归档" : "归档",
+            <Archive className="h-4 w-4" />,
+            "archive"
+          )}
+          {message.folder !== "Trash" &&
+            item("移入回收站", <Trash2 className="h-4 w-4" />, "trash")}
+          {message.folder !== "Spam" &&
+            item("移入垃圾邮件", <Trash2 className="h-4 w-4" />, "spam")}
         </>
       )}
       {!draft && canOrganize && movableFolders.length > 0 && (
@@ -2391,10 +3992,20 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
           <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">移动到</div>
           <div className="max-h-44 overflow-y-auto">
             {movableFolders.map((folder) => (
-              <Button key={folder.id} type="button" variant="ghost" className={itemClass} onClick={() => moveToFolder(folder.name)}>
+              <Button
+                key={folder.id}
+                type="button"
+                variant="ghost"
+                className={itemClass}
+                onClick={() => moveToFolder(folder.name)}
+              >
                 {folderIcons[folder.role] || <Inbox className="h-4 w-4" />}
-                <span className="min-w-0 flex-1 truncate text-left">{folderLabels[folder.name] || folder.name}</span>
-                {folder.totalCount > 0 && <span className="text-xs text-muted-foreground">{folder.totalCount}</span>}
+                <span className="min-w-0 flex-1 truncate text-left">
+                  {folderLabels[folder.name] || folder.name}
+                </span>
+                {folder.totalCount > 0 && (
+                  <span className="text-xs text-muted-foreground">{folder.totalCount}</span>
+                )}
               </Button>
             ))}
           </div>
@@ -2409,10 +4020,22 @@ function MessageContextMenu({ state, labels, folders, canSend, canOrganize, canM
               const active = (message.labels || []).some((item) => item.id === label.id)
               const colors = generateLabelColor(label.name)
               return (
-                <Button key={label.id} type="button" variant="ghost" className={itemClass} disabled={labelPending} onClick={() => toggleLabel(label)}>
+                <Button
+                  key={label.id}
+                  type="button"
+                  variant="ghost"
+                  className={itemClass}
+                  disabled={labelPending}
+                  onClick={() => toggleLabel(label)}
+                >
                   <Check className={cn("h-4 w-4", active ? "opacity-100" : "opacity-0")} />
-                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
-                  <span className="min-w-0 flex-1 truncate text-left">{active ? `移除 ${label.name}` : label.name}</span>
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: colors.backgroundColor }}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {active ? `移除 ${label.name}` : label.name}
+                  </span>
                 </Button>
               )
             })}
@@ -2438,7 +4061,17 @@ function contextMenuPosition(x: number, y: number) {
   return { x: Math.min(Math.max(x, padding), maxX), y: Math.min(Math.max(y, padding), maxY) }
 }
 
-function CreateFolderDialog({ open, pending, onOpenChange, onCreate }: { open: boolean; pending: boolean; onOpenChange: (open: boolean) => void; onCreate: (name: string) => void }) {
+function CreateFolderDialog({
+  open,
+  pending,
+  onOpenChange,
+  onCreate,
+}: {
+  open: boolean
+  pending: boolean
+  onOpenChange: (open: boolean) => void
+  onCreate: (name: string) => void
+}) {
   const [name, setName] = React.useState("")
   React.useEffect(() => {
     if (open) setName("")
@@ -2459,10 +4092,18 @@ function CreateFolderDialog({ open, pending, onOpenChange, onCreate }: { open: b
         >
           <div className="space-y-2">
             <Label htmlFor="new-folder-name">文件夹名称</Label>
-            <Input id="new-folder-name" autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder="例如：客户、账单、项目归档" />
+            <Input
+              id="new-folder-name"
+              autoFocus
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="例如：客户、账单、项目归档"
+            />
           </div>
           <DialogFooter className="gap-2">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
             <Button disabled={!trimmed || pending}>{pending ? "创建中..." : "创建"}</Button>
           </DialogFooter>
         </form>
@@ -2471,7 +4112,18 @@ function CreateFolderDialog({ open, pending, onOpenChange, onCreate }: { open: b
   )
 }
 
-function MailPagination({ pageIndex, pageSize, itemCount, totalCount, hasPreviousPage, hasNextPage, loading, onPageSizeChange, onPreviousPage, onNextPage }: {
+function MailPagination({
+  pageIndex,
+  pageSize,
+  itemCount,
+  totalCount,
+  hasPreviousPage,
+  hasNextPage,
+  loading,
+  onPageSizeChange,
+  onPreviousPage,
+  onNextPage,
+}: {
   pageIndex: number
   pageSize: MailPageSize
   itemCount: number
@@ -2484,17 +4136,25 @@ function MailPagination({ pageIndex, pageSize, itemCount, totalCount, hasPreviou
   onNextPage: () => void
 }) {
   const pageNumber = pageIndex + 1
-  const totalPages = typeof totalCount === "number" ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
+  const totalPages =
+    typeof totalCount === "number" ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
   const rangeStart = itemCount > 0 ? pageIndex * pageSize + 1 : 0
-  const rangeEnd = itemCount > 0 ? Math.min(totalCount ?? Number.MAX_SAFE_INTEGER, rangeStart + itemCount - 1) : 0
+  const rangeEnd =
+    itemCount > 0 ? Math.min(totalCount ?? Number.MAX_SAFE_INTEGER, rangeStart + itemCount - 1) : 0
   return (
     <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-t bg-background px-3 py-2 text-xs text-muted-foreground">
       <div className="min-w-0 truncate whitespace-nowrap">
-        {typeof totalCount === "number" ? `${rangeStart}–${rangeEnd} / ${totalCount}` : `第 ${pageNumber} 页`}
+        {typeof totalCount === "number"
+          ? `${rangeStart}–${rangeEnd} / ${totalCount}`
+          : `第 ${pageNumber} 页`}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <span className="hidden whitespace-nowrap min-[420px]:inline">每页</span>
-        <Select value={String(pageSize)} onValueChange={(value) => onPageSizeChange(Number(value) as MailPageSize)} disabled={loading}>
+        <Select
+          value={String(pageSize)}
+          onValueChange={(value) => onPageSizeChange(Number(value) as MailPageSize)}
+          disabled={loading}
+        >
           <SelectTrigger className="h-8 w-[68px] bg-background px-2" aria-label="每页邮件数">
             <SelectValue />
           </SelectTrigger>
@@ -2504,11 +4164,32 @@ function MailPagination({ pageIndex, pageSize, itemCount, totalCount, hasPreviou
             <SelectItem value="50">50</SelectItem>
           </SelectContent>
         </Select>
-        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={!hasPreviousPage || loading} onClick={onPreviousPage} title="上一页" aria-label="上一页">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          disabled={!hasPreviousPage || loading}
+          onClick={onPreviousPage}
+          title="上一页"
+          aria-label="上一页"
+        >
           <ChevronLeft className="h-4 w-4" />
         </Button>
-        <span className="min-w-10 whitespace-nowrap text-center text-foreground">{pageNumber}{totalPages ? ` / ${totalPages}` : ""}</span>
-        <Button type="button" variant="ghost" size="icon" className="h-8 w-8" disabled={!hasNextPage || loading} onClick={onNextPage} title="下一页" aria-label="下一页">
+        <span className="min-w-10 whitespace-nowrap text-center text-foreground">
+          {pageNumber}
+          {totalPages ? ` / ${totalPages}` : ""}
+        </span>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          disabled={!hasNextPage || loading}
+          onClick={onNextPage}
+          title="下一页"
+          aria-label="下一页"
+        >
           <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
@@ -2613,7 +4294,10 @@ function CompactMailView({
 }) {
   const selectedIndex = selectedId ? messages.findIndex((message) => message.id === selectedId) : -1
   const previousMessage = selectedIndex > 0 ? messages[selectedIndex - 1] : undefined
-  const nextMessage = selectedIndex >= 0 && selectedIndex < messages.length - 1 ? messages[selectedIndex + 1] : undefined
+  const nextMessage =
+    selectedIndex >= 0 && selectedIndex < messages.length - 1
+      ? messages[selectedIndex + 1]
+      : undefined
 
   if (selectedId) {
     return (
@@ -2649,7 +4333,13 @@ function CompactMailView({
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b px-3 sm:px-4">
         <div className="flex min-w-0 flex-1 items-center gap-3">
-          {canOrganize && <Checkbox aria-label="选择当前页邮件" checked={allSelected ? true : someSelected ? "indeterminate" : false} onCheckedChange={(value) => onSelectAll(value === true)} />}
+          {canOrganize && (
+            <Checkbox
+              aria-label="选择当前页邮件"
+              checked={allSelected ? true : someSelected ? "indeterminate" : false}
+              onCheckedChange={(value) => onSelectAll(value === true)}
+            />
+          )}
           <div className="flex min-w-0 items-center gap-2 text-base font-semibold">
             {icon}
             <span className="truncate">{title}</span>
@@ -2658,18 +4348,39 @@ function CompactMailView({
         <div className="flex shrink-0 items-center gap-2">
           {selectedIds.length > 0 ? (
             <>
-              <span className="hidden text-sm text-muted-foreground min-[380px]:inline">已选 {selectedIds.length} 封</span>
+              <span className="hidden text-sm text-muted-foreground min-[380px]:inline">
+                已选 {selectedIds.length} 封
+              </span>
               {canOrganize && <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />}
             </>
           ) : (
-            <div className="text-sm text-muted-foreground">{typeof total === "number" ? `${messages.length} / ${total} 封` : `${messages.length} 封`}</div>
+            <div className="text-sm text-muted-foreground">
+              {typeof total === "number"
+                ? `${messages.length} / ${total} 封`
+                : `${messages.length} 封`}
+            </div>
           )}
         </div>
       </div>
       <ScrollArea key={`compact-mail-page-${pageIndex}`} className="min-h-0 flex-1">
         {loading && <MessageSkeleton />}
-        {messages.map((message) => <CompactMessageRow key={message.id} message={message} active={selectedId === message.id} checked={selectedIds.includes(message.id)} scheduled={scheduledDraftIds.has(message.id)} onCheckedChange={(checked) => onToggleSelected(message.id, checked)} onClick={() => onSelect(message.id)} onContextMenu={(event) => onContextMenu(event, message)} onStar={() => onStar(message)} canOrganize={canOrganize} />)}
-        {!loading && messages.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>}
+        {messages.map((message) => (
+          <CompactMessageRow
+            key={message.id}
+            message={message}
+            active={selectedId === message.id}
+            checked={selectedIds.includes(message.id)}
+            scheduled={scheduledDraftIds.has(message.id)}
+            onCheckedChange={(checked) => onToggleSelected(message.id, checked)}
+            onClick={() => onSelect(message.id)}
+            onContextMenu={(event) => onContextMenu(event, message)}
+            onStar={() => onStar(message)}
+            canOrganize={canOrganize}
+          />
+        ))}
+        {!loading && messages.length === 0 && (
+          <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>
+        )}
       </ScrollArea>
       <MailPagination
         pageIndex={pageIndex}
@@ -2743,11 +4454,25 @@ function CompactMessageDetail({
           <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <div className="min-w-0 flex-1 truncate text-sm font-semibold">{selected?.subject || "邮件详情"}</div>
-          <Button variant="ghost" size="icon" disabled={!previousMessage} onClick={() => previousMessage && onSelect(previousMessage.id)} aria-label="上一封">
+          <div className="min-w-0 flex-1 truncate text-sm font-semibold">
+            {selected?.subject || "邮件详情"}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!previousMessage}
+            onClick={() => previousMessage && onSelect(previousMessage.id)}
+            aria-label="上一封"
+          >
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="icon" disabled={!nextMessage} onClick={() => nextMessage && onSelect(nextMessage.id)} aria-label="下一封">
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={!nextMessage}
+            onClick={() => nextMessage && onSelect(nextMessage.id)}
+            aria-label="下一封"
+          >
             <ArrowLeft className="h-4 w-4 rotate-180" />
           </Button>
           {selected && (
@@ -2759,75 +4484,268 @@ function CompactMessageDetail({
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 {selected.folder === "Drafts" ? (
-                  <DropdownMenuItem onSelect={() => onSelect(selected.id)}><PencilLine className="h-4 w-4" />编辑草稿</DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onSelect(selected.id)}>
+                    <PencilLine className="h-4 w-4" />
+                    编辑草稿
+                  </DropdownMenuItem>
                 ) : (
                   <>
-                    {canSend && <DropdownMenuItem onSelect={() => onReply(selected)}><Reply className="h-4 w-4" />回复</DropdownMenuItem>}
-                    {canSend && <DropdownMenuItem onSelect={() => onForward(selected)}><Forward className="h-4 w-4" />转发</DropdownMenuItem>}
-                    {selected.sendQueueId && <DropdownMenuItem onSelect={() => onSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</DropdownMenuItem>}
-                    {canOrganize && <DropdownMenuItem onSelect={() => onArchive(selected)}><Archive className="h-4 w-4" />{selected.folder === "Archive" ? "取消归档" : "归档"}</DropdownMenuItem>}
-                    {canOrganize && <DropdownMenuItem onSelect={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</DropdownMenuItem>}
-                    {canOrganize && <DropdownMenuItem onSelect={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</DropdownMenuItem>}
+                    {canSend && (
+                      <DropdownMenuItem onSelect={() => onReply(selected)}>
+                        <Reply className="h-4 w-4" />
+                        回复
+                      </DropdownMenuItem>
+                    )}
+                    {canSend && (
+                      <DropdownMenuItem onSelect={() => onForward(selected)}>
+                        <Forward className="h-4 w-4" />
+                        转发
+                      </DropdownMenuItem>
+                    )}
+                    {selected.sendQueueId && (
+                      <DropdownMenuItem onSelect={() => onSendTimeline(selected)}>
+                        <History className="h-4 w-4" />
+                        投递时间线
+                      </DropdownMenuItem>
+                    )}
+                    {canOrganize && (
+                      <DropdownMenuItem onSelect={() => onArchive(selected)}>
+                        <Archive className="h-4 w-4" />
+                        {selected.folder === "Archive" ? "取消归档" : "归档"}
+                      </DropdownMenuItem>
+                    )}
+                    {canOrganize && (
+                      <DropdownMenuItem onSelect={() => onToggleRead(selected)}>
+                        <MailCheck className="h-4 w-4" />
+                        {selected.isRead ? "标为未读" : "标为已读"}
+                      </DropdownMenuItem>
+                    )}
+                    {canOrganize && (
+                      <DropdownMenuItem onSelect={() => onStar(selected)}>
+                        <Star
+                          className={cn(
+                            "h-4 w-4",
+                            selected.isStarred && "fill-yellow-400 text-yellow-500"
+                          )}
+                        />
+                        {selected.isStarred ? "取消星标" : "添加星标"}
+                      </DropdownMenuItem>
+                    )}
                   </>
                 )}
-                {canOrganize && <DropdownMenuItem onSelect={() => onDelete(selected)} className="text-destructive"><Trash2 className="h-4 w-4" />删除</DropdownMenuItem>}
+                {canOrganize && (
+                  <DropdownMenuItem
+                    onSelect={() => onDelete(selected)}
+                    className="text-destructive"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    删除
+                  </DropdownMenuItem>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           )}
         </div>
         <div className="hidden min-h-10 items-center justify-between gap-3 sm:flex">
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onBack}><ArrowLeft className="h-4 w-4" />返回</Button>
+            <Button variant="outline" size="sm" onClick={onBack}>
+              <ArrowLeft className="h-4 w-4" />
+              返回
+            </Button>
             {selected?.folder === "Drafts" ? (
-              <Button variant="outline" size="sm" onClick={() => onSelect(selected.id)}><PencilLine className="h-4 w-4" />编辑草稿</Button>
+              <Button variant="outline" size="sm" onClick={() => onSelect(selected.id)}>
+                <PencilLine className="h-4 w-4" />
+                编辑草稿
+              </Button>
             ) : (
               <>
-                {selected && canSend && <Button variant="outline" size="sm" onClick={() => onReply(selected)}><Reply className="h-4 w-4" />回复</Button>}
-                {selected && canSend && <Button variant="outline" size="sm" onClick={() => onForward(selected)}><Forward className="h-4 w-4" />转发</Button>}
-                {selected?.sendQueueId && <Button variant="outline" size="sm" onClick={() => onSendTimeline(selected)}><History className="h-4 w-4" />投递时间线</Button>}
-                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>{selected.folder === "Archive" ? "取消归档" : "归档"}</Button>}
-                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}><MailCheck className="h-4 w-4" />{selected.isRead ? "标为未读" : "标为已读"}</Button>}
-                {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onStar(selected)}><Star className={cn("h-4 w-4", selected.isStarred && "fill-yellow-400 text-yellow-500")} />{selected.isStarred ? "取消星标" : "添加星标"}</Button>}
+                {selected && canSend && (
+                  <Button variant="outline" size="sm" onClick={() => onReply(selected)}>
+                    <Reply className="h-4 w-4" />
+                    回复
+                  </Button>
+                )}
+                {selected && canSend && (
+                  <Button variant="outline" size="sm" onClick={() => onForward(selected)}>
+                    <Forward className="h-4 w-4" />
+                    转发
+                  </Button>
+                )}
+                {selected?.sendQueueId && (
+                  <Button variant="outline" size="sm" onClick={() => onSendTimeline(selected)}>
+                    <History className="h-4 w-4" />
+                    投递时间线
+                  </Button>
+                )}
+                {selected && canOrganize && (
+                  <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>
+                    {selected.folder === "Archive" ? "取消归档" : "归档"}
+                  </Button>
+                )}
+                {selected && canOrganize && (
+                  <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}>
+                    <MailCheck className="h-4 w-4" />
+                    {selected.isRead ? "标为未读" : "标为已读"}
+                  </Button>
+                )}
+                {selected && canOrganize && (
+                  <Button variant="outline" size="sm" onClick={() => onStar(selected)}>
+                    <Star
+                      className={cn(
+                        "h-4 w-4",
+                        selected.isStarred && "fill-yellow-400 text-yellow-500"
+                      )}
+                    />
+                    {selected.isStarred ? "取消星标" : "添加星标"}
+                  </Button>
+                )}
               </>
             )}
-            {selected && canOrganize && <Button variant="outline" size="sm" onClick={() => onDelete(selected)}><Trash2 className="h-4 w-4" />删除</Button>}
+            {selected && canOrganize && (
+              <Button variant="outline" size="sm" onClick={() => onDelete(selected)}>
+                <Trash2 className="h-4 w-4" />
+                删除
+              </Button>
+            )}
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" disabled={!previousMessage} onClick={() => previousMessage && onSelect(previousMessage.id)}>上一封</Button>
-            <Button variant="ghost" size="sm" disabled={!nextMessage} onClick={() => nextMessage && onSelect(nextMessage.id)}>下一封</Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!previousMessage}
+              onClick={() => previousMessage && onSelect(previousMessage.id)}
+            >
+              上一封
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!nextMessage}
+              onClick={() => nextMessage && onSelect(nextMessage.id)}
+            >
+              下一封
+            </Button>
           </div>
         </div>
       </div>
-        {loading && <div className="space-y-4 p-8"><Skeleton className="h-8 w-2/3" /><Skeleton className="h-4 w-1/3" /><Separator /><Skeleton className="h-64 w-full" /></div>}
-        {!loading && !selected && <div className="grid flex-1 place-items-center text-sm text-muted-foreground">邮件不存在</div>}
-        {selected && (
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="w-full px-4 py-4 sm:px-8 sm:py-6">
-              <div className="space-y-5 border-b pb-5">
-                <div className="flex items-start gap-3">
-                  <h1 className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight sm:text-2xl">{selected.subject}</h1>
-                  {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={selected.isStarred ? "取消星标" : "添加星标"} className="text-muted-foreground hover:text-yellow-500" onClick={() => onStar(selected)}>
-                    <Star className={cn("h-5 w-5", selected.isStarred && "fill-yellow-400 text-yellow-500")} />
-                  </Button>}
-                </div>
-                <MessageMetaPanel
-                  message={selected}
-                  {...(canManageLabels ? { availableLabels: labels, onAddLabel: (label: MailLabel) => onAddLabel(selected, label), onRemoveLabel: (labelId: string) => onRemoveLabel(selected, labelId), labelPending } : {})}
-                />
+      {loading && (
+        <div className="space-y-4 p-8">
+          <Skeleton className="h-8 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+          <Separator />
+          <Skeleton className="h-64 w-full" />
+        </div>
+      )}
+      {!loading && !selected && (
+        <div className="grid flex-1 place-items-center text-sm text-muted-foreground">
+          邮件不存在
+        </div>
+      )}
+      {selected && (
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="w-full px-4 py-4 sm:px-8 sm:py-6">
+            <div className="space-y-5 border-b pb-5">
+              <div className="flex items-start gap-3">
+                <h1 className="min-w-0 flex-1 break-words text-xl font-semibold tracking-tight sm:text-2xl">
+                  {selected.subject}
+                </h1>
+                {canOrganize && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={selected.isStarred ? "取消星标" : "添加星标"}
+                    className="text-muted-foreground hover:text-yellow-500"
+                    onClick={() => onStar(selected)}
+                  >
+                    <Star
+                      className={cn(
+                        "h-5 w-5",
+                        selected.isStarred && "fill-yellow-400 text-yellow-500"
+                      )}
+                    />
+                  </Button>
+                )}
               </div>
-              <div className="py-6 sm:py-8">
-                {threadMessages.length > 1 && <div className="mb-5 rounded-lg border bg-muted/20 p-3"><div className="mb-2 text-sm font-medium">同会话邮件 ({threadMessages.length})</div><div className="space-y-1">{threadMessages.filter((item) => item.id !== selected.id).map((item) => <Button type="button" variant="ghost" key={item.id} onClick={() => onSelect(item.id)} className="h-auto w-full justify-start truncate px-2 py-1 text-left text-sm font-normal">{item.subject || "(无主题)"} <span className="ml-1 text-muted-foreground">{formatDate(item.receivedAt)}</span></Button>)}</div></div>}
-                <TranslatableMailBody message={selected} language={language} />
-                {selected.attachments && selected.attachments.length > 0 && <div className="mt-8 rounded-lg border p-4"><div className="mb-3 font-medium">附件</div><div className="space-y-2">{selected.attachments.map((a) => canDownloadAttachments ? <a className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between" href={attachmentHref(selected, a.id)} key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span></a> : <div className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between" key={a.id}><span className="flex min-w-0 items-center gap-2"><Paperclip className="h-4 w-4 shrink-0" /><span className="truncate">{a.filename}</span></span><span>{formatBytes(a.sizeBytes)}</span></div>)}</div></div>}
-              </div>
+              <MessageMetaPanel
+                message={selected}
+                {...(canManageLabels
+                  ? {
+                      availableLabels: labels,
+                      onAddLabel: (label: MailLabel) => onAddLabel(selected, label),
+                      onRemoveLabel: (labelId: string) => onRemoveLabel(selected, labelId),
+                      labelPending,
+                    }
+                  : {})}
+              />
             </div>
-          </ScrollArea>
-        )}
+            <div className="py-6 sm:py-8">
+              {threadMessages.length > 1 && (
+                <div className="mb-5 rounded-lg border bg-muted/20 p-3">
+                  <div className="mb-2 text-sm font-medium">
+                    同会话邮件 ({threadMessages.length})
+                  </div>
+                  <div className="space-y-1">
+                    {threadMessages
+                      .filter((item) => item.id !== selected.id)
+                      .map((item) => (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          key={item.id}
+                          onClick={() => onSelect(item.id)}
+                          className="h-auto w-full justify-start truncate px-2 py-1 text-left text-sm font-normal"
+                        >
+                          {item.subject || "(无主题)"}{" "}
+                          <span className="ml-1 text-muted-foreground">
+                            {formatDate(item.receivedAt)}
+                          </span>
+                        </Button>
+                      ))}
+                  </div>
+                </div>
+              )}
+              <TranslatableMailBody message={selected} language={language} />
+              {selected.attachments && selected.attachments.length > 0 && (
+                <div className="mt-8 rounded-lg border p-4">
+                  <div className="mb-3 font-medium">附件</div>
+                  <div className="space-y-2">
+                    {selected.attachments.map((a) =>
+                      canDownloadAttachments ? (
+                        <a
+                          className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between"
+                          href={attachmentHref(selected, a.id)}
+                          key={a.id}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Paperclip className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{a.filename}</span>
+                          </span>
+                          <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
+                        </a>
+                      ) : (
+                        <div
+                          className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between"
+                          key={a.id}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Paperclip className="h-4 w-4 shrink-0" />
+                            <span className="truncate">{a.filename}</span>
+                          </span>
+                          <span>{formatBytes(a.sizeBytes)}</span>
+                        </div>
+                      )
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </ScrollArea>
+      )}
     </div>
   )
 }
-
-
 
 function TranslatableMailBody({ message, language }: { message: MailMessage; language: Language }) {
   const [translatedText, setTranslatedText] = React.useState("")
@@ -2836,18 +4754,35 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
   const [truncated, setTruncated] = React.useState(false)
   const { toast } = useToast()
   const targetLanguage = normalizeTranslationLanguage(language)
-  const sourceText = React.useMemo(() => (message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")).trim(), [message.bodyHtml, message.bodyText, message.snippet])
+  const sourceText = React.useMemo(
+    () => (message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")).trim(),
+    [message.bodyHtml, message.bodyText, message.snippet]
+  )
   const shouldShow = targetLanguage && shouldOfferMessageTranslation(sourceText, language)
-  const translatedMessage = React.useMemo<MailMessage>(() => ({ ...message, bodyText: translatedText, bodyHtml: translatedHtml }), [message, translatedHtml, translatedText])
-  const translate = useMutation({
-    mutationFn: () => message.externalAccountId ? api.translateExternalMessage(message.externalAccountId, message.id, targetLanguage!) : api.translateMessage(message.id, targetLanguage!),
+  const translatedMessage = React.useMemo<MailMessage>(
+    () => ({ ...message, bodyText: translatedText, bodyHtml: translatedHtml }),
+    [message, translatedHtml, translatedText]
+  )
+  const {
+    mutate: translate,
+    reset: resetTranslation,
+    isPending: translationPending,
+  } = useMutation({
+    mutationFn: () =>
+      message.externalAccountId
+        ? api.translateExternalMessage(message.externalAccountId, message.id, targetLanguage!)
+        : api.translateMessage(message.id, targetLanguage!),
     onSuccess: (result) => {
       setTranslatedText(result.translatedText)
       setTranslatedHtml(result.translatedHtml || "")
       setTruncated(result.truncated)
       setShowTranslated(true)
     },
-    onError: (error) => toast({ title: "翻译失败", description: error instanceof Error ? error.message : "请稍后重试" }),
+    onError: (error) =>
+      toast({
+        title: "翻译失败",
+        description: error instanceof Error ? error.message : "请稍后重试",
+      }),
   })
 
   React.useEffect(() => {
@@ -2855,8 +4790,8 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
     setTranslatedHtml("")
     setShowTranslated(false)
     setTruncated(false)
-    translate.reset()
-  }, [message.id, language])
+    resetTranslation()
+  }, [language, message.id, resetTranslation])
 
   return (
     <>
@@ -2864,17 +4799,40 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
         <div className="mb-4 rounded-lg border bg-muted/30 p-3 text-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-muted-foreground">
-              {translatedText ? `已翻译为 ${translationTargetLabel(language)}，当前${showTranslated ? "显示译文" : "显示原文"}` : `检测到邮件可能不是当前语言，可翻译为 ${translationTargetLabel(language)}`}
+              {translatedText
+                ? `已翻译为 ${translationTargetLabel(language)}，当前${showTranslated ? "显示译文" : "显示原文"}`
+                : `检测到邮件可能不是当前语言，可翻译为 ${translationTargetLabel(language)}`}
               {truncated && <span className="ml-1">（内容较长，仅翻译前半部分）</span>}
             </div>
             <div className="flex items-center gap-2">
-              {translatedText && <Button type="button" variant="ghost" size="sm" onClick={() => setShowTranslated((value) => !value)}>{showTranslated ? "显示原文" : "显示译文"}</Button>}
-              <Button type="button" variant="outline" size="sm" disabled={translate.isPending} onClick={() => translate.mutate()}>{translate.isPending ? "翻译中..." : translatedText ? "重新翻译" : "翻译"}</Button>
+              {translatedText && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowTranslated((value) => !value)}
+                >
+                  {showTranslated ? "显示原文" : "显示译文"}
+                </Button>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={translationPending}
+                onClick={() => translate()}
+              >
+                {translationPending ? "翻译中..." : translatedText ? "重新翻译" : "翻译"}
+              </Button>
             </div>
           </div>
         </div>
       )}
-      {translatedText && showTranslated ? <MailHtmlFrame message={translatedMessage} /> : <MailHtmlFrame message={message} />}
+      {translatedText && showTranslated ? (
+        <MailHtmlFrame message={translatedMessage} />
+      ) : (
+        <MailHtmlFrame message={message} />
+      )}
     </>
   )
 }
@@ -2896,7 +4854,8 @@ function shouldOfferMessageTranslation(text: string, language: Language) {
   if (!text.trim()) return false
   const cjkCount = (text.match(/[\u4e00-\u9fff]/g) || []).length
   const latinCount = (text.match(/[a-zA-Z]/g) || []).length
-  if (language === "zh-CN" || language === "zh-TW") return latinCount > 80 && latinCount > cjkCount * 3
+  if (language === "zh-CN" || language === "zh-TW")
+    return latinCount > 80 && latinCount > cjkCount * 3
   if (language === "en") return cjkCount > 20
   return false
 }
@@ -2904,14 +4863,27 @@ function shouldOfferMessageTranslation(text: string, language: Language) {
 function MailHtmlFrame({ message }: { message: MailMessage }) {
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = React.useState(260)
-  const srcDoc = React.useMemo(() => buildMailFrameSrcDoc(message.bodyHtml || "", message.bodyText || ""), [message.bodyHtml, message.bodyText])
+  const srcDoc = React.useMemo(
+    () => buildMailFrameSrcDoc(message.bodyHtml || "", message.bodyText || ""),
+    [message.bodyHtml, message.bodyText]
+  )
 
   const resize = React.useCallback(() => {
     const doc = iframeRef.current?.contentDocument
     if (!doc) return
     const body = doc.body
     const html = doc.documentElement
-    const nextHeight = Math.max(180, Math.ceil(Math.max(body?.scrollHeight || 0, body?.offsetHeight || 0, html?.scrollHeight || 0, html?.offsetHeight || 0)))
+    const nextHeight = Math.max(
+      180,
+      Math.ceil(
+        Math.max(
+          body?.scrollHeight || 0,
+          body?.offsetHeight || 0,
+          html?.scrollHeight || 0,
+          html?.offsetHeight || 0
+        )
+      )
+    )
     setHeight(nextHeight)
   }, [])
 
@@ -2920,7 +4892,11 @@ function MailHtmlFrame({ message }: { message: MailMessage }) {
     const frame = iframeRef.current
     if (!frame) return
     let observer: ResizeObserver | undefined
-    const timers = [window.setTimeout(resize, 0), window.setTimeout(resize, 120), window.setTimeout(resize, 600)]
+    const timers = [
+      window.setTimeout(resize, 0),
+      window.setTimeout(resize, 120),
+      window.setTimeout(resize, 600),
+    ]
     const attach = () => {
       const doc = frame.contentDocument
       if (!doc) return
@@ -2934,7 +4910,9 @@ function MailHtmlFrame({ message }: { message: MailMessage }) {
         observer.observe(doc.documentElement)
         if (doc.body) observer.observe(doc.body)
       }
-      doc.querySelectorAll("img").forEach((img) => img.addEventListener("load", resize, { once: true }))
+      doc
+        .querySelectorAll("img")
+        .forEach((img) => img.addEventListener("load", resize, { once: true }))
     }
     frame.addEventListener("load", attach)
     return () => {
@@ -2957,14 +4935,53 @@ function MailHtmlFrame({ message }: { message: MailMessage }) {
   )
 }
 
-function CompactMessageRow({ message, active, checked, scheduled, onCheckedChange, onClick, onContextMenu, onStar, canOrganize }: { message: MailMessage; active: boolean; checked: boolean; scheduled?: boolean; onCheckedChange: (checked: boolean) => void; onClick: () => void; onContextMenu: (event: React.MouseEvent) => void; onStar: () => void; canOrganize: boolean }) {
+function CompactMessageRow({
+  message,
+  active,
+  checked,
+  scheduled,
+  onCheckedChange,
+  onClick,
+  onContextMenu,
+  onStar,
+  canOrganize,
+}: {
+  message: MailMessage
+  active: boolean
+  checked: boolean
+  scheduled?: boolean
+  onCheckedChange: (checked: boolean) => void
+  onClick: () => void
+  onContextMenu: (event: React.MouseEvent) => void
+  onStar: () => void
+  canOrganize: boolean
+}) {
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
   return (
-    <div onClick={onClick} onContextMenu={onContextMenu} className={cn("cursor-pointer border-b px-3 py-3 text-sm transition-colors hover:bg-accent/50 sm:grid sm:items-center sm:gap-2 sm:px-4 sm:py-2", canOrganize ? "sm:grid-cols-[32px_28px_minmax(140px,220px)_minmax(0,1fr)_104px_36px]" : "sm:grid-cols-[28px_minmax(140px,220px)_minmax(0,1fr)_104px]", active && "bg-accent", !message.isRead && "font-semibold")}>
+    <div
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      className={cn(
+        "cursor-pointer border-b px-3 py-3 text-sm transition-colors hover:bg-accent/50 sm:grid sm:items-center sm:gap-2 sm:px-4 sm:py-2",
+        canOrganize
+          ? "sm:grid-cols-[32px_28px_minmax(140px,220px)_minmax(0,1fr)_104px_36px]"
+          : "sm:grid-cols-[28px_minmax(140px,220px)_minmax(0,1fr)_104px]",
+        active && "bg-accent",
+        !message.isRead && "font-semibold"
+      )}
+    >
       <div className="flex gap-3 sm:contents">
-        {canOrganize && <Checkbox aria-label="选择邮件" checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} onClick={(event) => event.stopPropagation()} className="mt-0.5 shrink-0 sm:mt-0" />}
+        {canOrganize && (
+          <Checkbox
+            aria-label="选择邮件"
+            checked={checked}
+            onCheckedChange={(value) => onCheckedChange(value === true)}
+            onClick={(event) => event.stopPropagation()}
+            className="mt-0.5 shrink-0 sm:mt-0"
+          />
+        )}
         {message.isRead ? (
           <MailCheck className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/70 sm:mt-0" />
         ) : (
@@ -2972,34 +4989,103 @@ function CompactMessageRow({ message, active, checked, scheduled, onCheckedChang
         )}
         <div className="min-w-0 flex-1 sm:contents">
           <div className="flex min-w-0 items-center justify-between gap-2 sm:block">
-            <div className="min-w-0 truncate" title={senderTitle(message)}>{senderName}</div>
+            <div className="min-w-0 truncate" title={senderTitle(message)}>
+              {senderName}
+            </div>
             <div className="flex shrink-0 items-center gap-1 sm:hidden">
-              <span className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</span>
-              {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="h-7 w-7 text-muted-foreground hover:text-yellow-500" onClick={(event) => { event.stopPropagation(); onStar() }}>
-                <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-              </Button>}
+              <span className="text-xs text-muted-foreground">
+                {formatDate(message.receivedAt)}
+              </span>
+              {canOrganize && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={message.isStarred ? "取消星标" : "添加星标"}
+                  className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onStar()
+                  }}
+                >
+                  <Star
+                    className={cn(
+                      "h-4 w-4",
+                      message.isStarred && "fill-yellow-400 text-yellow-500"
+                    )}
+                  />
+                </Button>
+              )}
             </div>
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2 sm:mt-0">
             <span className="truncate font-medium">{message.subject}</span>
-            <span className="hidden min-w-0 truncate text-muted-foreground sm:block">{message.snippet}</span>
-            {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
-            {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} />)}
-            {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
-            {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
+            <span className="hidden min-w-0 truncate text-muted-foreground sm:block">
+              {message.snippet}
+            </span>
+            {scheduled && (
+              <Badge
+                variant="secondary"
+                className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
+              >
+                已定时
+              </Badge>
+            )}
+            {visibleLabels.map((label) => (
+              <MailLabelBadge key={label.id} label={label} />
+            ))}
+            {hiddenLabelCount > 0 && (
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground"
+              >
+                +{hiddenLabelCount}
+              </Badge>
+            )}
+            {message.hasAttachments && (
+              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+            )}
           </div>
-          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:hidden">{message.snippet}</div>
+          <div className="mt-1 line-clamp-2 text-xs text-muted-foreground sm:hidden">
+            {message.snippet}
+          </div>
         </div>
       </div>
-      <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">{formatDate(message.receivedAt)}</div>
-      {canOrganize && <Button type="button" variant="ghost" size="icon" aria-label={message.isStarred ? "取消星标" : "添加星标"} className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex" onClick={(event) => { event.stopPropagation(); onStar() }}>
-        <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-      </Button>}
+      <div className="hidden shrink-0 text-right text-xs text-muted-foreground sm:block">
+        {formatDate(message.receivedAt)}
+      </div>
+      {canOrganize && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={message.isStarred ? "取消星标" : "添加星标"}
+          className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex"
+          onClick={(event) => {
+            event.stopPropagation()
+            onStar()
+          }}
+        >
+          <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
+        </Button>
+      )}
     </div>
   )
 }
 
-function NewLabelButton({ collapsed, pending, onCreate, editing, onEditingChange }: { collapsed: boolean; pending: boolean; onCreate: (name: string) => void; editing?: boolean; onEditingChange?: (v: boolean) => void }) {
+function NewLabelButton({
+  collapsed,
+  pending,
+  onCreate,
+  editing,
+  onEditingChange,
+}: {
+  collapsed: boolean
+  pending: boolean
+  onCreate: (name: string) => void
+  editing?: boolean
+  onEditingChange?: (v: boolean) => void
+}) {
   const [internalEditing, setInternalEditing] = React.useState(false)
   const isEditing = editing ?? internalEditing
   const setEditingState = onEditingChange ?? setInternalEditing
@@ -3024,7 +5110,16 @@ function NewLabelButton({ collapsed, pending, onCreate, editing, onEditingChange
           setEditingState(false)
         }}
       >
-        <Input autoFocus value={value} onChange={(event) => setValue(event.target.value)} onBlur={() => { if (!value.trim()) setEditingState(false) }} placeholder="新建标签" disabled={pending} />
+        <Input
+          autoFocus
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+          onBlur={() => {
+            if (!value.trim()) setEditingState(false)
+          }}
+          placeholder="新建标签"
+          disabled={pending}
+        />
       </form>
     )
   }
@@ -3036,14 +5131,35 @@ function NewLabelButton({ collapsed, pending, onCreate, editing, onEditingChange
   )
 }
 
-function AccountHeader({ collapsed, name, email, darkMode, language, onToggleTheme, onLanguageChange, onSettings }: { collapsed: boolean; name: string; email?: string; darkMode: boolean; language: Language; onToggleTheme: () => void; onLanguageChange: (language: Language) => void; onSettings: () => void }) {
+function AccountHeader({
+  collapsed,
+  name,
+  email,
+  darkMode,
+  language,
+  onToggleTheme,
+  onLanguageChange,
+  onSettings,
+}: {
+  collapsed: boolean
+  name: string
+  email?: string
+  darkMode: boolean
+  language: Language
+  onToggleTheme: () => void
+  onLanguageChange: (language: Language) => void
+  onSettings: () => void
+}) {
   const displayName = cleanAccountName(name, email)
-  const currentLanguage = languageOptions.find((item) => item.value === language) || languageOptions[0]
+  const currentLanguage =
+    languageOptions.find((item) => item.value === language) || languageOptions[0]
   if (collapsed) {
     return (
       <div className="flex justify-center">
         <Avatar className="size-8 rounded-full">
-          <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">{accountInitial(displayName, email)}</AvatarFallback>
+          <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
+            {accountInitial(displayName, email)}
+          </AvatarFallback>
         </Avatar>
       </div>
     )
@@ -3052,32 +5168,62 @@ function AccountHeader({ collapsed, name, email, darkMode, language, onToggleThe
     <div className="flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-2">
         <Avatar className="size-8 rounded-full">
-          <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">{accountInitial(displayName, email)}</AvatarFallback>
+          <AvatarFallback className="bg-primary text-xs font-semibold text-primary-foreground">
+            {accountInitial(displayName, email)}
+          </AvatarFallback>
         </Avatar>
         <div className="min-w-0 text-sm">
           <div className="truncate text-sm font-semibold leading-5">{displayName}</div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1">
-        <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" onClick={onToggleTheme}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 rounded-md text-muted-foreground"
+          onClick={onToggleTheme}
+        >
           {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" aria-label="切换语言" title="切换语言">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-8 rounded-md text-muted-foreground"
+              aria-label="切换语言"
+              title="切换语言"
+            >
               <span className="text-sm font-medium leading-none">{currentLanguage.shortLabel}</span>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-40">
             {languageOptions.map((item) => (
-              <DropdownMenuItem key={item.value} onSelect={() => onLanguageChange(item.value)} className="gap-2">
+              <DropdownMenuItem
+                key={item.value}
+                onSelect={() => onLanguageChange(item.value)}
+                className="gap-2"
+              >
                 <span className="min-w-0 flex-1">{item.label}</span>
-                <Check className={cn("h-4 w-4 text-emerald-500", item.value === language ? "opacity-100" : "opacity-0")} />
+                <Check
+                  className={cn(
+                    "h-4 w-4 text-emerald-500",
+                    item.value === language ? "opacity-100" : "opacity-0"
+                  )}
+                />
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md text-muted-foreground" onClick={onSettings}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="size-8 rounded-md text-muted-foreground"
+          onClick={onSettings}
+        >
           <Settings className="h-4 w-4" />
         </Button>
       </div>
@@ -3085,18 +5231,40 @@ function AccountHeader({ collapsed, name, email, darkMode, language, onToggleThe
   )
 }
 
-function MailboxSwitcher({ collapsed, mailboxes, selectedMailbox, onSelect }: { collapsed: boolean; mailboxes: Mailbox[]; selectedMailbox?: Mailbox; onSelect: (mailboxId: string) => void }) {
+function MailboxSwitcher({
+  collapsed,
+  mailboxes,
+  selectedMailbox,
+  onSelect,
+}: {
+  collapsed: boolean
+  mailboxes: Mailbox[]
+  selectedMailbox?: Mailbox
+  onSelect: (mailboxId: string) => void
+}) {
   const owned = mailboxes.filter((mailbox) => mailbox.access !== "read")
   const shared = mailboxes.filter((mailbox) => mailbox.access === "read")
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="outline" className={cn("h-9 min-w-0 flex-1 justify-start gap-2 rounded-md bg-background px-2 text-left font-normal", collapsed && "w-8 flex-none justify-center px-0")}>
+        <Button
+          variant="outline"
+          className={cn(
+            "h-9 min-w-0 flex-1 justify-start gap-2 rounded-md bg-background px-2 text-left font-normal",
+            collapsed && "w-8 flex-none justify-center px-0"
+          )}
+        >
           <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
           {!collapsed && (
             <>
-              <span className="min-w-0 flex-1 truncate text-sm font-medium">{selectedMailbox?.address || "当前邮箱"}</span>
-              {selectedMailbox?.access === "read" && <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">共享</Badge>}
+              <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                {selectedMailbox?.address || "当前邮箱"}
+              </span>
+              {selectedMailbox?.access === "read" && (
+                <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                  共享
+                </Badge>
+              )}
               <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
             </>
           )}
@@ -3104,20 +5272,49 @@ function MailboxSwitcher({ collapsed, mailboxes, selectedMailbox, onSelect }: { 
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
         {mailboxes.length === 0 && <DropdownMenuItem disabled>没有可用邮箱</DropdownMenuItem>}
-        {owned.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">我的邮箱</DropdownMenuLabel>}
+        {owned.length > 0 && (
+          <DropdownMenuLabel className="text-xs text-muted-foreground">我的邮箱</DropdownMenuLabel>
+        )}
         {owned.map((mailbox) => (
-          <DropdownMenuItem key={mailbox.id} onSelect={() => onSelect(mailbox.id)} className="gap-2">
-            <Check className={cn("h-4 w-4", selectedMailbox?.id === mailbox.id ? "opacity-100" : "opacity-0")} />
+          <DropdownMenuItem
+            key={mailbox.id}
+            onSelect={() => onSelect(mailbox.id)}
+            className="gap-2"
+          >
+            <Check
+              className={cn(
+                "h-4 w-4",
+                selectedMailbox?.id === mailbox.id ? "opacity-100" : "opacity-0"
+              )}
+            />
             <span className="min-w-0 flex-1 truncate font-medium">{mailbox.address}</span>
           </DropdownMenuItem>
         ))}
         {owned.length > 0 && shared.length > 0 && <DropdownMenuSeparator />}
-        {shared.length > 0 && <DropdownMenuLabel className="text-xs text-muted-foreground">共享给我</DropdownMenuLabel>}
+        {shared.length > 0 && (
+          <DropdownMenuLabel className="text-xs text-muted-foreground">共享给我</DropdownMenuLabel>
+        )}
         {shared.map((mailbox) => (
-          <DropdownMenuItem key={mailbox.id} onSelect={() => onSelect(mailbox.id)} className="gap-2 py-2">
-            <Check className={cn("h-4 w-4", selectedMailbox?.id === mailbox.id ? "opacity-100" : "opacity-0")} />
-            <span className="min-w-0 flex-1"><span className="block truncate font-medium">{mailbox.address}</span><span className="block truncate text-xs text-muted-foreground">来自 {mailbox.sharedBy}</span></span>
-            <Badge variant="outline" className="shrink-0 text-[10px]">只读</Badge>
+          <DropdownMenuItem
+            key={mailbox.id}
+            onSelect={() => onSelect(mailbox.id)}
+            className="gap-2 py-2"
+          >
+            <Check
+              className={cn(
+                "h-4 w-4",
+                selectedMailbox?.id === mailbox.id ? "opacity-100" : "opacity-0"
+              )}
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{mailbox.address}</span>
+              <span className="block truncate text-xs text-muted-foreground">
+                来自 {mailbox.sharedBy}
+              </span>
+            </span>
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              只读
+            </Badge>
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -3127,7 +5324,8 @@ function MailboxSwitcher({ collapsed, mailboxes, selectedMailbox, onSelect }: { 
 
 function cleanAccountName(name: string, email?: string) {
   const value = name.trim()
-  if (!value || (email && value.toLowerCase() === email.toLowerCase())) return email?.split("@")[0] || "用户"
+  if (!value || (email && value.toLowerCase() === email.toLowerCase()))
+    return email?.split("@")[0] || "用户"
   return value
 }
 
@@ -3160,7 +5358,11 @@ function senderTitle(message: MailMessage) {
 }
 
 function senderAddress(message: MailMessage) {
-  return extractAddress(message.from) || decodeMimeHeader(message.fromName?.trim() || "") || "未知发件人地址"
+  return (
+    extractAddress(message.from) ||
+    decodeMimeHeader(message.fromName?.trim() || "") ||
+    "未知发件人地址"
+  )
 }
 
 function extractAddress(value?: string) {
@@ -3181,7 +5383,13 @@ function sameMailTime(a?: string, b?: string) {
   return !Number.isNaN(left) && !Number.isNaN(right) && left === right
 }
 
-function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel, labelPending }: {
+function MessageMetaPanel({
+  message,
+  availableLabels,
+  onAddLabel,
+  onRemoveLabel,
+  labelPending,
+}: {
   message: MailMessage
   availableLabels?: MailLabel[]
   onAddLabel?: (label: MailLabel) => void
@@ -3201,11 +5409,15 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
     <div className="space-y-3 rounded-xl border bg-muted/20 p-3 text-sm">
       <div className="flex min-w-0 items-start gap-3">
         <Avatar className="size-10 shrink-0 rounded-full">
-          <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">{accountInitial(fromName, fromAddress)}</AvatarFallback>
+          <AvatarFallback className="bg-primary text-sm font-semibold text-primary-foreground">
+            {accountInitial(fromName, fromAddress)}
+          </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1 space-y-2">
           <MessageMetaRow label="发件人">
-            <span className="break-words font-medium text-foreground" title={senderTitle(message)}>{fromName}</span>
+            <span className="break-words font-medium text-foreground" title={senderTitle(message)}>
+              {fromName}
+            </span>
           </MessageMetaRow>
           <MessageMetaRow label="发件人地址">
             <span className="break-all">{fromAddress}</span>
@@ -3242,8 +5454,15 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
                 {labels.map((label) => {
                   const colors = generateLabelColor(label.name)
                   return (
-                    <Badge key={label.id} variant="outline" className="label-badge group/badge gap-1.5 rounded-md font-normal">
-                      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                    <Badge
+                      key={label.id}
+                      variant="outline"
+                      className="label-badge group/badge gap-1.5 rounded-md font-normal"
+                    >
+                      <span
+                        className="h-2 w-2 shrink-0 rounded-full"
+                        style={{ backgroundColor: colors.backgroundColor }}
+                      />
                       <span>{label.name}</span>
                       <button
                         type="button"
@@ -3268,7 +5487,9 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-48">
-                    {availableLabels.length === 0 && <DropdownMenuItem disabled>请先在侧栏新建标签</DropdownMenuItem>}
+                    {availableLabels.length === 0 && (
+                      <DropdownMenuItem disabled>请先在侧栏新建标签</DropdownMenuItem>
+                    )}
                     {availableLabels.map((label) => {
                       const active = labels.some((l) => l.id === label.id)
                       const colors = generateLabelColor(label.name)
@@ -3278,10 +5499,14 @@ function MessageMetaPanel({ message, availableLabels, onAddLabel, onRemoveLabel,
                           checked={active}
                           onSelect={(event) => {
                             event.preventDefault()
-                            active ? onRemoveLabel(label.id) : onAddLabel(label)
+                            if (active) onRemoveLabel(label.id)
+                            else onAddLabel(label)
                           }}
                         >
-                          <span className="mr-2 h-2 w-2 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+                          <span
+                            className="mr-2 h-2 w-2 rounded-full"
+                            style={{ backgroundColor: colors.backgroundColor }}
+                          />
                           <span>{label.name}</span>
                         </DropdownMenuCheckboxItem>
                       )
@@ -3311,8 +5536,13 @@ function AddressList({ values, empty = "无" }: { values: string[]; empty?: stri
   return (
     <div className="flex min-w-0 flex-wrap gap-1.5">
       {values.map((value, index) => (
-        <span key={`${value}-${index}`} className="inline-flex max-w-full rounded-md bg-background px-2 py-0.5 text-xs text-foreground ring-1 ring-border">
-          <span className="truncate" title={value}>{value}</span>
+        <span
+          key={`${value}-${index}`}
+          className="inline-flex max-w-full rounded-md bg-background px-2 py-0.5 text-xs text-foreground ring-1 ring-border"
+        >
+          <span className="truncate" title={value}>
+            {value}
+          </span>
         </span>
       ))}
     </div>
@@ -3343,56 +5573,123 @@ function MessageRow({
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
-  return <div onClick={onClick} onContextMenu={onContextMenu} className={cn("cursor-pointer border-b p-4 transition-colors hover:bg-accent/50", active && "bg-accent", !message.isRead && "font-semibold")}>
-    <div className="flex gap-3">
-      {canOrganize && <Checkbox
-          aria-label="选择邮件"
-          checked={checked}
-          onCheckedChange={(value) => onCheckedChange(value === true)}
-          onClick={(event) => event.stopPropagation()}
-          className="mt-0.5 shrink-0"
-        />}
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <div className="min-w-0 truncate text-sm" title={senderTitle(message)}>{senderName}</div>
-          <div className="flex shrink-0 items-center gap-1">
-            {canOrganize && <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={message.isStarred ? "取消星标" : "添加星标"}
-              className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
-              onClick={(e) => { e.stopPropagation(); onStar() }}
-            >
-              <Star className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")} />
-            </Button>}
-            <div className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
+  return (
+    <div
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      className={cn(
+        "cursor-pointer border-b p-4 transition-colors hover:bg-accent/50",
+        active && "bg-accent",
+        !message.isRead && "font-semibold"
+      )}
+    >
+      <div className="flex gap-3">
+        {canOrganize && (
+          <Checkbox
+            aria-label="选择邮件"
+            checked={checked}
+            onCheckedChange={(value) => onCheckedChange(value === true)}
+            onClick={(event) => event.stopPropagation()}
+            className="mt-0.5 shrink-0"
+          />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="mb-1 flex items-center justify-between gap-2">
+            <div className="min-w-0 truncate text-sm" title={senderTitle(message)}>
+              {senderName}
+            </div>
+            <div className="flex shrink-0 items-center gap-1">
+              {canOrganize && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={message.isStarred ? "取消星标" : "添加星标"}
+                  className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onStar()
+                  }}
+                >
+                  <Star
+                    className={cn(
+                      "h-4 w-4",
+                      message.isStarred && "fill-yellow-400 text-yellow-500"
+                    )}
+                  />
+                </Button>
+              )}
+              <div className="text-xs text-muted-foreground">{formatDate(message.receivedAt)}</div>
+            </div>
           </div>
+          <div className="mb-1 flex min-w-0 items-center gap-2">
+            <span className="min-w-0 truncate text-sm">{message.subject}</span>
+            {scheduled && (
+              <Badge
+                variant="secondary"
+                className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
+              >
+                已定时
+              </Badge>
+            )}
+            {visibleLabels.map((label) => (
+              <MailLabelBadge key={label.id} label={label} />
+            ))}
+            {hiddenLabelCount > 0 && (
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground"
+              >
+                +{hiddenLabelCount}
+              </Badge>
+            )}
+            {message.hasAttachments && (
+              <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />
+            )}
+          </div>
+          <div className="line-clamp-2 text-xs text-muted-foreground">{message.snippet}</div>
         </div>
-        <div className="mb-1 flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate text-sm">{message.subject}</span>
-          {scheduled && <Badge variant="secondary" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal">已定时</Badge>}
-          {visibleLabels.map((label) => <MailLabelBadge key={label.id} label={label} />)}
-          {hiddenLabelCount > 0 && <Badge variant="outline" className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground">+{hiddenLabelCount}</Badge>}
-          {message.hasAttachments && <Paperclip className="h-3 w-3 shrink-0 text-muted-foreground" />}
-        </div>
-        <div className="line-clamp-2 text-xs text-muted-foreground">{message.snippet}</div>
       </div>
     </div>
-  </div>
+  )
 }
 
 function MailLabelBadge({ label }: { label: MailLabel }) {
   const colors = generateLabelColor(label.name)
   return (
     <Badge variant="outline" className="shrink-0 gap-1.5 rounded-md font-normal">
-      <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: colors.backgroundColor }} />
+      <span
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{ backgroundColor: colors.backgroundColor }}
+      />
       {label.name}
     </Badge>
   )
 }
 
-function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts, canSchedule, canManageSignatures, onOpenChange, onSent }: { mailbox?: Mailbox; open: boolean; draft?: ComposeDraft; limits?: PermissionLimits; canSend: boolean; canManageDrafts: boolean; canSchedule: boolean; canManageSignatures: boolean; onOpenChange: (v: boolean) => void; onSent: () => void }) {
+function ComposeDialog({
+  mailbox,
+  open,
+  draft,
+  limits,
+  canSend,
+  canManageDrafts,
+  canSchedule,
+  canManageSignatures,
+  onOpenChange,
+  onSent,
+}: {
+  mailbox?: Mailbox
+  open: boolean
+  draft?: ComposeDraft
+  limits?: PermissionLimits
+  canSend: boolean
+  canManageDrafts: boolean
+  canSchedule: boolean
+  canManageSignatures: boolean
+  onOpenChange: (v: boolean) => void
+  onSent: () => void
+}) {
   const { toast } = useToast()
   const qc = useQueryClient()
   const [files, setFiles] = React.useState<File[]>([])
@@ -3403,7 +5700,9 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
   const [ccValue, setCcValue] = React.useState(draft?.cc || "")
   const [bccValue, setBccValue] = React.useState(draft?.bcc || "")
   const [subjectValue, setSubjectValue] = React.useState(draft?.subject || "")
-  const [draftStatus, setDraftStatus] = React.useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [draftStatus, setDraftStatus] = React.useState<"idle" | "saving" | "saved" | "error">(
+    "idle"
+  )
   const [lastSavedAt, setLastSavedAt] = React.useState<Date | null>(null)
   const [scheduleDialogOpen, setScheduleDialogOpen] = React.useState(false)
   const [sendIntent, setSendIntent] = React.useState<ComposeSendIntent | null>(null)
@@ -3412,24 +5711,54 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
   const [showCc, setShowCc] = React.useState(Boolean(draft?.cc))
   const [showBcc, setShowBcc] = React.useState(Boolean(draft?.bcc))
   const [sendSeparately, setSendSeparately] = React.useState(false)
-  const defaultSignature = useQuery({ queryKey: ["signature", "default", mailbox?.id], queryFn: () => api.defaultSignature(mailbox?.id), enabled: open && !!mailbox?.id && canManageSignatures })
+  const defaultSignature = useQuery({
+    queryKey: ["signature", "default", mailbox?.id],
+    queryFn: () => api.defaultSignature(mailbox?.id),
+    enabled: open && !!mailbox?.id && canManageSignatures,
+  })
   const signatureText = defaultSignature.data?.signature?.content || ""
-  const composerText = draft?.html || (draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : "")
-  const [body, setBody] = React.useState<ComposerValue>(() => draft?.html !== undefined ? htmlComposerValue(draft.html) : plainTextComposerValue(composerText))
+  const composerText =
+    draft?.html ||
+    (draft?.text !== undefined ? draft.text : signatureText ? `\n\n-- \n${signatureText}` : "")
+  const [body, setBody] = React.useState<ComposerValue>(() =>
+    draft?.html !== undefined ? htmlComposerValue(draft.html) : plainTextComposerValue(composerText)
+  )
   const activeMailboxId = draft?.mailboxId || mailbox?.id || ""
   const maxAttachmentBytes = attachmentLimitBytes(limits)
   const maxAttachmentText = maxAttachmentBytes > 0 ? formatBytes(maxAttachmentBytes) : "不限"
-  const composePayload = React.useMemo<DraftPayload>(() => ({
-    mailboxId: activeMailboxId,
-    to: splitEmails(toValue),
-    cc: showCc ? splitEmails(ccValue) : [],
-    bcc: showBcc ? splitEmails(bccValue) : [],
-    subject: subjectValue,
-    text: body.text,
-    html: body.html || plainTextToHtml(body.text),
-    ...(attachmentsTouched ? { attachments: draftAttachments } : {}),
-  }), [activeMailboxId, toValue, showCc, ccValue, showBcc, bccValue, subjectValue, body, attachmentsTouched, draftAttachments])
-  const hasDraftContent = open && !!activeMailboxId && (toValue.trim() || ccValue.trim() || bccValue.trim() || subjectValue.trim() || body.text.trim() || body.html.trim())
+  const composePayload = React.useMemo<DraftPayload>(
+    () => ({
+      mailboxId: activeMailboxId,
+      to: splitEmails(toValue),
+      cc: showCc ? splitEmails(ccValue) : [],
+      bcc: showBcc ? splitEmails(bccValue) : [],
+      subject: subjectValue,
+      text: body.text,
+      html: body.html || plainTextToHtml(body.text),
+      ...(attachmentsTouched ? { attachments: draftAttachments } : {}),
+    }),
+    [
+      activeMailboxId,
+      toValue,
+      showCc,
+      ccValue,
+      showBcc,
+      bccValue,
+      subjectValue,
+      body,
+      attachmentsTouched,
+      draftAttachments,
+    ]
+  )
+  const hasDraftContent =
+    open &&
+    !!activeMailboxId &&
+    (toValue.trim() ||
+      ccValue.trim() ||
+      bccValue.trim() ||
+      subjectValue.trim() ||
+      body.text.trim() ||
+      body.html.trim())
   const send = useMutation({
     mutationFn: async (payloads: SendPayload[]) => {
       const sent: MailMessage[] = []
@@ -3440,7 +5769,9 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
       if (draftId) {
         try {
           await api.deleteDraft(draftId)
-        } catch {}
+        } catch {
+          // The draft may already have been removed by another client.
+        }
       }
       toast({ title: payloads.length > 1 ? `已分别发送 ${payloads.length} 封邮件` : "发送成功" })
       setFiles([])
@@ -3450,7 +5781,8 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
     onError: (e) => toast({ title: "发送失败", description: e.message }),
   })
   const scheduleSend = useMutation({
-    mutationFn: (payload: SendPayload & { draftId?: string; sendAt: string }) => api.scheduleSend(payload),
+    mutationFn: (payload: SendPayload & { draftId?: string; sendAt: string }) =>
+      api.scheduleSend(payload),
     onSuccess: (scheduled) => {
       sendStartedRef.current = true
       toast({ title: `已定时发送 ${formatDateTime(scheduled.sendAt)}` })
@@ -3472,7 +5804,10 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
     sendStartedRef.current = false
     const nextShowCc = Boolean(draft?.cc)
     const nextShowBcc = Boolean(draft?.bcc)
-    const nextBody = draft?.html !== undefined ? htmlComposerValue(draft.html) : plainTextComposerValue(composerText)
+    const nextBody =
+      draft?.html !== undefined
+        ? htmlComposerValue(draft.html)
+        : plainTextComposerValue(composerText)
     lastSavedPayloadRef.current = JSON.stringify({
       mailboxId: draft?.mailboxId || mailbox?.id || "",
       to: splitEmails(draft?.to || ""),
@@ -3497,14 +5832,29 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
     setFiles(draft?.files || [])
     setDraftAttachments([])
     setAttachmentsTouched(false)
-  }, [open, draft?.key, draft?.id, draft?.mailboxId, draft?.to, draft?.cc, draft?.bcc, draft?.subject, draft?.html, draft?.files, mailbox?.id, composerText])
+  }, [
+    open,
+    draft?.key,
+    draft?.id,
+    draft?.mailboxId,
+    draft?.to,
+    draft?.cc,
+    draft?.bcc,
+    draft?.subject,
+    draft?.html,
+    draft?.files,
+    mailbox?.id,
+    composerText,
+  ])
 
   React.useEffect(() => {
     let cancelled = false
     Promise.all(files.map(fileToAttachment)).then((attachments) => {
       if (!cancelled) setDraftAttachments(attachments)
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+    }
   }, [files])
 
   React.useEffect(() => {
@@ -3535,19 +5885,28 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
     const warnings: string[] = []
     const normalizedBody = `${body.text}\n${stripHtml(body.html)}`.toLowerCase()
     if (!subjectValue.trim()) warnings.push("这封邮件还没有主题。")
-    if (!body.text.trim() && !htmlContainsMeaningfulContent(body.html)) warnings.push("正文还是空的。")
-    if (/(附件|附上|见附件|attached|attachment)/i.test(normalizedBody) && attachmentsCount === 0) warnings.push("正文提到了附件，但还没有添加附件。")
+    if (!body.text.trim() && !htmlContainsMeaningfulContent(body.html))
+      warnings.push("正文还是空的。")
+    if (/(附件|附上|见附件|attached|attachment)/i.test(normalizedBody) && attachmentsCount === 0)
+      warnings.push("正文提到了附件，但还没有添加附件。")
     return warnings
   }
 
-  function confirmOrRun(intent: Omit<ComposeSendIntent, "description"> & { warnings: string[]; defaultDescription?: string }) {
+  function confirmOrRun(
+    intent: Omit<ComposeSendIntent, "description"> & {
+      warnings: string[]
+      defaultDescription?: string
+    }
+  ) {
     if (intent.warnings.length === 0) {
       intent.onConfirm()
       return
     }
     setSendIntent({
       title: intent.title,
-      description: intent.defaultDescription ? `${intent.defaultDescription}\n${intent.warnings.join("\n")}` : intent.warnings.join("\n"),
+      description: intent.defaultDescription
+        ? `${intent.defaultDescription}\n${intent.warnings.join("\n")}`
+        : intent.warnings.join("\n"),
       confirmText: intent.confirmText,
       onConfirm: intent.onConfirm,
     })
@@ -3555,7 +5914,10 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
 
   function addFiles(nextFiles: File[]) {
     if (nextFiles.length === 0) return
-    const allowed = maxAttachmentBytes > 0 ? nextFiles.filter((file) => file.size <= maxAttachmentBytes) : nextFiles
+    const allowed =
+      maxAttachmentBytes > 0
+        ? nextFiles.filter((file) => file.size <= maxAttachmentBytes)
+        : nextFiles
     const blockedCount = nextFiles.length - allowed.length
     if (blockedCount > 0) {
       toast({ title: "附件超过权限组上限", description: `当前单个附件上限 ${maxAttachmentText}` })
@@ -3583,11 +5945,26 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
     const bcc = showBcc ? splitEmails(bccValue) : []
     const text = body.text
     const html = body.html || plainTextToHtml(text)
-    const payload: SendPayload = { mailboxId: mailbox.id, to, cc, bcc, subject: subjectValue, text, html, attachments }
+    const payload: SendPayload = {
+      mailboxId: mailbox.id,
+      to,
+      cc,
+      bcc,
+      subject: subjectValue,
+      text,
+      html,
+      attachments,
+    }
     const separateRecipients = Array.from(new Set([...to, ...cc, ...bcc]))
-    const payloads = sendSeparately && separateRecipients.length > 0
-      ? separateRecipients.map((recipient): SendPayload => ({ ...payload, to: [recipient], cc: [], bcc: [] }))
-      : [payload]
+    const payloads =
+      sendSeparately && separateRecipients.length > 0
+        ? separateRecipients.map((recipient): SendPayload => ({
+            ...payload,
+            to: [recipient],
+            cc: [],
+            bcc: [],
+          }))
+        : [payload]
     confirmOrRun({
       title: "确认发送这封邮件？",
       confirmText: sendSeparately && payloads.length > 1 ? "继续分别发送" : "继续发送",
@@ -3647,46 +6024,115 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
-        <form key={draft?.key || "new"} className="flex min-h-0 flex-1 flex-col sm:max-h-[90vh]" onSubmit={submit}>
+        <form
+          key={draft?.key || "new"}
+          className="flex min-h-0 flex-1 flex-col sm:max-h-[90vh]"
+          onSubmit={submit}
+        >
           <DialogHeader className="border-b px-4 py-3 text-left sm:px-6 sm:py-4">
             <DialogTitle className="flex min-w-0 flex-col gap-1 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pr-6">
               <span>{draftId ? "编辑草稿" : "写信"}</span>
-              <span className={cn("text-xs font-normal", draftStatus === "error" ? "text-destructive" : "text-muted-foreground")}>
-                {draftStatus === "saving" ? "正在保存草稿..." : draftStatus === "saved" && lastSavedAt ? `草稿已保存 ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : draftStatus === "error" ? "草稿保存失败" : ""}
+              <span
+                className={cn(
+                  "text-xs font-normal",
+                  draftStatus === "error" ? "text-destructive" : "text-muted-foreground"
+                )}
+              >
+                {draftStatus === "saving"
+                  ? "正在保存草稿..."
+                  : draftStatus === "saved" && lastSavedAt
+                    ? `草稿已保存 ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                    : draftStatus === "error"
+                      ? "草稿保存失败"
+                      : ""}
               </span>
             </DialogTitle>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <ComposeField label="发件邮箱">
-              <Input value={mailbox?.address || "未选择"} readOnly className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+              <Input
+                value={mailbox?.address || "未选择"}
+                readOnly
+                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+              />
             </ComposeField>
             <ComposeField
               label="收件人"
               action={
                 <div className="flex shrink-0 flex-wrap items-center justify-start gap-1 text-sm sm:justify-end sm:gap-2">
-                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowCc((value) => !value)}>抄送</Button>
-                  <Button type="button" variant="ghost" size="sm" className="h-8 px-2 font-normal" onClick={() => setShowBcc((value) => !value)}>密送</Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 font-normal"
+                    onClick={() => setShowCc((value) => !value)}
+                  >
+                    抄送
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2 font-normal"
+                    onClick={() => setShowBcc((value) => !value)}
+                  >
+                    密送
+                  </Button>
                   <div className="flex items-center gap-2 rounded-md px-2 py-1">
-                    <Checkbox id="compose-send-separately" checked={sendSeparately} onCheckedChange={(value) => setSendSeparately(value === true)} />
-                    <Label htmlFor="compose-send-separately" className="cursor-pointer text-sm font-normal">分别发送</Label>
+                    <Checkbox
+                      id="compose-send-separately"
+                      checked={sendSeparately}
+                      onCheckedChange={(value) => setSendSeparately(value === true)}
+                    />
+                    <Label
+                      htmlFor="compose-send-separately"
+                      className="cursor-pointer text-sm font-normal"
+                    >
+                      分别发送
+                    </Label>
                   </div>
                 </div>
               }
             >
-              <Input name="to" placeholder="name@example.com，多个地址用逗号或空格分隔" value={toValue} onChange={(event) => setToValue(event.target.value)} required className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+              <Input
+                name="to"
+                placeholder="name@example.com，多个地址用逗号或空格分隔"
+                value={toValue}
+                onChange={(event) => setToValue(event.target.value)}
+                required
+                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+              />
             </ComposeField>
             {showCc && (
               <ComposeField label="抄送">
-                <Input name="cc" placeholder="cc@example.com" value={ccValue} onChange={(event) => setCcValue(event.target.value)} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+                <Input
+                  name="cc"
+                  placeholder="cc@example.com"
+                  value={ccValue}
+                  onChange={(event) => setCcValue(event.target.value)}
+                  className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                />
               </ComposeField>
             )}
             {showBcc && (
               <ComposeField label="密送">
-                <Input name="bcc" placeholder="bcc@example.com" value={bccValue} onChange={(event) => setBccValue(event.target.value)} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+                <Input
+                  name="bcc"
+                  placeholder="bcc@example.com"
+                  value={bccValue}
+                  onChange={(event) => setBccValue(event.target.value)}
+                  className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                />
               </ComposeField>
             )}
             <ComposeField label="主　题">
-              <Input name="subject" placeholder="输入主题" value={subjectValue} onChange={(event) => setSubjectValue(event.target.value)} className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0" />
+              <Input
+                name="subject"
+                placeholder="输入主题"
+                value={subjectValue}
+                onChange={(event) => setSubjectValue(event.target.value)}
+                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+              />
             </ComposeField>
             <MailBodyComposer
               defaultValue={composerText}
@@ -3696,23 +6142,56 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
               maxAttachmentText={maxAttachmentText}
               onChange={setBody}
               onPickFiles={addFiles}
-              onRemoveFile={(index) => { setAttachmentsTouched(true); setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index)) }}
+              onRemoveFile={(index) => {
+                setAttachmentsTouched(true)
+                setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))
+              }}
             />
           </div>
           <DialogFooter className="grid grid-cols-3 gap-2 border-t bg-background px-4 py-3 sm:flex sm:flex-row sm:justify-end sm:px-6 sm:py-4">
-            <Button type="button" variant="outline" className="min-h-10 px-3" onClick={() => onOpenChange(false)}>取消</Button>
-            {canSchedule && <Button type="button" variant="outline" className="min-h-10 px-3" disabled={send.isPending || scheduleSend.isPending || !mailbox} onClick={() => setScheduleDialogOpen(true)}><Calendar className="h-4 w-4" />定时</Button>}
-            {canSend && <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}><Send className="h-4 w-4" />{send.isPending ? "发送中..." : "发送"}</Button>}
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-10 px-3"
+              onClick={() => onOpenChange(false)}
+            >
+              取消
+            </Button>
+            {canSchedule && (
+              <Button
+                type="button"
+                variant="outline"
+                className="min-h-10 px-3"
+                disabled={send.isPending || scheduleSend.isPending || !mailbox}
+                onClick={() => setScheduleDialogOpen(true)}
+              >
+                <Calendar className="h-4 w-4" />
+                定时
+              </Button>
+            )}
+            {canSend && (
+              <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}>
+                <Send className="h-4 w-4" />
+                {send.isPending ? "发送中..." : "发送"}
+              </Button>
+            )}
           </DialogFooter>
         </form>
-        <ScheduleSendDialog open={scheduleDialogOpen} pending={scheduleSend.isPending} onOpenChange={setScheduleDialogOpen} onConfirm={scheduleAt} />
+        <ScheduleSendDialog
+          open={scheduleDialogOpen}
+          pending={scheduleSend.isPending}
+          onOpenChange={setScheduleDialogOpen}
+          onConfirm={scheduleAt}
+        />
         <ConfirmDialog
           open={!!sendIntent}
           title={sendIntent?.title || ""}
           description={sendIntent?.description}
           confirmText={sendIntent?.confirmText || "继续"}
           pending={send.isPending || scheduleSend.isPending}
-          onOpenChange={(nextOpen) => { if (!nextOpen) setSendIntent(null) }}
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) setSendIntent(null)
+          }}
           onConfirm={() => sendIntent?.onConfirm()}
         />
       </DialogContent>
@@ -3720,7 +6199,15 @@ function ComposeDialog({ mailbox, open, draft, limits, canSend, canManageDrafts,
   )
 }
 
-function ComposeField({ label, children, action }: { label: string; children: React.ReactNode; action?: React.ReactNode }) {
+function ComposeField({
+  label,
+  children,
+  action,
+}: {
+  label: string
+  children: React.ReactNode
+  action?: React.ReactNode
+}) {
   return (
     <div className="flex min-h-14 flex-col gap-2 border-b px-4 py-2 sm:flex-row sm:items-center sm:px-6">
       <Label className="shrink-0 text-base font-normal text-foreground sm:w-20">{label}</Label>
@@ -3732,10 +6219,20 @@ function ComposeField({ label, children, action }: { label: string; children: Re
   )
 }
 
-function ScheduleSendDialog({ open, pending, onOpenChange, onConfirm }: { open: boolean; pending: boolean; onOpenChange: (open: boolean) => void; onConfirm: (sendAt: string) => void }) {
+function ScheduleSendDialog({
+  open,
+  pending,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean
+  pending: boolean
+  onOpenChange: (open: boolean) => void
+  onConfirm: (sendAt: string) => void
+}) {
   const [value, setValue] = React.useState("")
   const { toast } = useToast()
-  const presets = React.useMemo(() => scheduledSendPresets(), [open])
+  const presets = React.useMemo(() => (open ? scheduledSendPresets() : []), [open])
 
   React.useEffect(() => {
     if (open) setValue(defaultScheduledSendValue())
@@ -3771,17 +6268,33 @@ function ScheduleSendDialog({ open, pending, onOpenChange, onConfirm }: { open: 
                 className="justify-start font-normal"
                 onClick={() => setValue(preset.value)}
               >
-                <Clock3 className="h-4 w-4" />{preset.label}
+                <Clock3 className="h-4 w-4" />
+                {preset.label}
               </Button>
             ))}
           </div>
           <div className="grid gap-2">
             <Label htmlFor="schedule-send-at">发送时间</Label>
-            <Input id="schedule-send-at" type="datetime-local" value={value} min={toDateTimeLocalValue(new Date(Date.now() + 60_000))} onChange={(event) => setValue(event.target.value)} />
+            <Input
+              id="schedule-send-at"
+              type="datetime-local"
+              value={value}
+              min={toDateTimeLocalValue(new Date(Date.now() + 60_000))}
+              onChange={(event) => setValue(event.target.value)}
+            />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>取消</Button>
-            <Button type="submit" disabled={pending}>{pending ? "正在设置..." : "确认定时"}</Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              disabled={pending}
+            >
+              取消
+            </Button>
+            <Button type="submit" disabled={pending}>
+              {pending ? "正在设置..." : "确认定时"}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -3789,30 +6302,87 @@ function ScheduleSendDialog({ open, pending, onOpenChange, onConfirm }: { open: 
   )
 }
 
-type InsertDialogState = { kind: "link" | "image"; selectedText: string; url?: string; alt?: string; editing?: boolean }
+type InsertDialogState = {
+  kind: "link" | "image"
+  selectedText: string
+  url?: string
+  alt?: string
+  editing?: boolean
+}
 type InsertDialogValue = { url: string; text: string; alt: string }
-const composerFontOptions = ["Arial", "Georgia", "Times New Roman", "Courier New", "Microsoft YaHei"]
+const composerFontOptions = [
+  "Arial",
+  "Georgia",
+  "Times New Roman",
+  "Courier New",
+  "Microsoft YaHei",
+]
 const composerFontSizeOptions = [
   ["2", "小号"],
   ["3", "正文"],
   ["4", "中号"],
   ["5", "大号"],
 ] as const
-const composerFontSizeValueByKey: Record<string, string> = { "2": "13px", "3": "16px", "4": "20px", "5": "24px" }
-const composerTextColors = [["#111827", "默认"], ["#dc2626", "红色"], ["#2563eb", "蓝色"], ["#16a34a", "绿色"], ["#9333ea", "紫色"]] as const
-const composerHighlightColors = [["transparent", "无高亮"], ["#fef3c7", "黄色"], ["#dcfce7", "绿色"], ["#dbeafe", "蓝色"], ["#fce7f3", "粉色"]] as const
-const composerEmojiOptions = ["😀", "😄", "😊", "🙂", "😉", "😍", "😘", "😎", "🤔", "👍", "👏", "🙏", "💪", "🎉", "🔥", "✨", "❤️", "✅", "📌", "📅", "☕", "💡", "🚀", "⭐"]
-const composerMenuItemClass = "min-h-9 rounded-md px-3 text-sm transition-colors data-[highlighted]:bg-primary/10 data-[highlighted]:font-semibold data-[highlighted]:text-foreground hover:bg-primary/10 hover:font-semibold hover:text-foreground"
+const composerFontSizeValueByKey: Record<string, string> = {
+  "2": "13px",
+  "3": "16px",
+  "4": "20px",
+  "5": "24px",
+}
+const composerTextColors = [
+  ["#111827", "默认"],
+  ["#dc2626", "红色"],
+  ["#2563eb", "蓝色"],
+  ["#16a34a", "绿色"],
+  ["#9333ea", "紫色"],
+] as const
+const composerHighlightColors = [
+  ["transparent", "无高亮"],
+  ["#fef3c7", "黄色"],
+  ["#dcfce7", "绿色"],
+  ["#dbeafe", "蓝色"],
+  ["#fce7f3", "粉色"],
+] as const
+const composerEmojiOptions = [
+  "😀",
+  "😄",
+  "😊",
+  "🙂",
+  "😉",
+  "😍",
+  "😘",
+  "😎",
+  "🤔",
+  "👍",
+  "👏",
+  "🙏",
+  "💪",
+  "🎉",
+  "🔥",
+  "✨",
+  "❤️",
+  "✅",
+  "📌",
+  "📅",
+  "☕",
+  "💡",
+  "🚀",
+  "⭐",
+]
+const composerMenuItemClass =
+  "min-h-9 rounded-md px-3 text-sm transition-colors data-[highlighted]:bg-primary/10 data-[highlighted]:font-semibold data-[highlighted]:text-foreground hover:bg-primary/10 hover:font-semibold hover:text-foreground"
 
 function normalizeFontName(value: string) {
   const cleaned = value.replace(/["']/g, "").split(",")[0]?.trim() || ""
   if (!cleaned || cleaned === "默认字体") return ""
   if (/microsoft yahei/i.test(cleaned) || cleaned.includes("微软雅黑")) return "Microsoft YaHei"
   const lower = cleaned.toLowerCase()
-  return composerFontOptions.find((font) => {
-    const option = font.toLowerCase()
-    return lower === option || lower.includes(option) || option.includes(lower)
-  }) || ""
+  return (
+    composerFontOptions.find((font) => {
+      const option = font.toLowerCase()
+      return lower === option || lower.includes(option) || option.includes(lower)
+    }) || ""
+  )
 }
 
 function normalizeFontSize(value: string) {
@@ -3846,7 +6416,8 @@ function fontSizeLabel(value: string) {
 function normalizeInsertUrl(value: string, kind: InsertDialogState["kind"]) {
   const trimmed = value.trim()
   if (!trimmed) return ""
-  const allowed = kind === "image" ? /^(https?:|cid:|data:image\/|\/)/i : /^(https?:|mailto:|tel:|#|\/)/i
+  const allowed =
+    kind === "image" ? /^(https?:|cid:|data:image\/|\/)/i : /^(https?:|mailto:|tel:|#|\/)/i
   return allowed.test(trimmed) ? trimmed : `https://${trimmed}`
 }
 
@@ -3884,20 +6455,32 @@ const ScheduleCardNode = Node.create({
       "div",
       mergeAttributes(HTMLAttributes, {
         "data-schedule-card": "true",
-        style: "border:1px solid #d4d4d8;border-radius:8px;padding:14px 16px;margin:16px 0;background:#fafafa;",
+        style:
+          "border:1px solid #d4d4d8;border-radius:8px;padding:14px 16px;margin:16px 0;background:#fafafa;",
       }),
       ["div", { style: "font-weight:600;font-size:16px;margin-bottom:10px;" }, title || "日程"],
-      ...rows.map(([label, value]) => ["div", { style: "margin:6px 0;" }, ["span", { style: "color:#71717a;" }, `${label}：`], value]),
+      ...rows.map(([label, value]) => [
+        "div",
+        { style: "margin:6px 0;" },
+        ["span", { style: "color:#71717a;" }, `${label}：`],
+        value,
+      ]),
     ]
   },
 })
 
 function composerInitialHtml(defaultValue: string, defaultHtml?: string) {
-  return sanitizeComposerHtml(defaultHtml !== undefined ? defaultHtml : plainTextToHtml(defaultValue)) || "<p></p>"
+  return (
+    sanitizeComposerHtml(defaultHtml !== undefined ? defaultHtml : plainTextToHtml(defaultValue)) ||
+    "<p></p>"
+  )
 }
 
 function composerValueFromEditor(editor: Editor): ComposerValue {
-  const text = editor.getText({ blockSeparator: "\n" }).replace(/\u00a0/g, " ").trimEnd()
+  const text = editor
+    .getText({ blockSeparator: "\n" })
+    .replace(/\u00a0/g, " ")
+    .trimEnd()
   const html = sanitizeComposerHtml(editor.getHTML())
   if (!text.trim() && !htmlContainsMeaningfulContent(html)) return { text: "", html: "" }
   return { text, html: html || plainTextToHtml(text) }
@@ -3916,10 +6499,14 @@ function selectedImageAttributes(editor: Editor) {
 
 function scheduleToNodeAttributes(schedule: ScheduleDraft) {
   const start = parseScheduleStart(schedule)
-  const end = schedule.allDay ? new Date(start.getTime() + 24 * 60 * 60 * 1000) : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
+  const end = schedule.allDay
+    ? new Date(start.getTime() + 24 * 60 * 60 * 1000)
+    : new Date(start.getTime() + schedule.durationMinutes * 60 * 1000)
   return {
     title: schedule.title,
-    time: schedule.allDay ? formatDate(start.toISOString()) : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
+    time: schedule.allDay
+      ? formatDate(start.toISOString())
+      : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
     duration: schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes),
     reminder: reminderLabel(schedule.reminderMinutes),
     repeat: repeatLabel(schedule.repeat),
@@ -3928,12 +6515,32 @@ function scheduleToNodeAttributes(schedule: ScheduleDraft) {
   }
 }
 
-function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, maxAttachmentText, onChange, onPickFiles, onRemoveFile }: { defaultValue: string; defaultHtml?: string; files: File[]; signatureText: string; maxAttachmentText: string; onChange: (value: ComposerValue) => void; onPickFiles: (files: File[]) => void; onRemoveFile: (index: number) => void }) {
+function MailBodyComposer({
+  defaultValue,
+  defaultHtml,
+  files,
+  signatureText,
+  maxAttachmentText,
+  onChange,
+  onPickFiles,
+  onRemoveFile,
+}: {
+  defaultValue: string
+  defaultHtml?: string
+  files: File[]
+  signatureText: string
+  maxAttachmentText: string
+  onChange: (value: ComposerValue) => void
+  onPickFiles: (files: File[]) => void
+  onRemoveFile: (index: number) => void
+}) {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
   const isMobile = useIsMobile()
-  const [formatOpen, setFormatOpen] = React.useState(() => typeof window === "undefined" ? true : window.innerWidth >= 768)
+  const [formatOpen, setFormatOpen] = React.useState(() =>
+    typeof window === "undefined" ? true : window.innerWidth >= 768
+  )
   const [scheduleOpen, setScheduleOpen] = React.useState(false)
   const [emojiOpen, setEmojiOpen] = React.useState(false)
   const [insertDialog, setInsertDialog] = React.useState<InsertDialogState | null>(null)
@@ -3958,7 +6565,10 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
         enableClickSelection: true,
         HTMLAttributes: { target: "_blank", rel: "noopener noreferrer" },
       }),
-      ImageExtension.configure({ allowBase64: true, HTMLAttributes: { style: "max-width:100%;height:auto;border-radius:8px;margin:12px 0;" } }),
+      ImageExtension.configure({
+        allowBase64: true,
+        HTMLAttributes: { style: "max-width:100%;height:auto;border-radius:8px;margin:12px 0;" },
+      }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
       Placeholder.configure({ placeholder: "输入正文" }),
       ScheduleCardNode,
@@ -3966,7 +6576,8 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
     content: composerInitialHtml(defaultValue, defaultHtml),
     editorProps: {
       attributes: {
-        class: "mail-html min-h-[240px] min-w-0 flex-1 overflow-y-auto px-4 py-4 text-base leading-7 outline-none sm:min-h-[280px] sm:px-6 sm:py-5",
+        class:
+          "mail-html min-h-[240px] min-w-0 flex-1 overflow-y-auto px-4 py-4 text-base leading-7 outline-none sm:min-h-[280px] sm:px-6 sm:py-5",
         "aria-label": "正文",
       },
       handlePaste(view, event) {
@@ -4009,14 +6620,18 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
     if (defaultKey === lastDefaultRef.current) return
     lastDefaultRef.current = defaultKey
     if (!dirtyRef.current || editor.isEmpty) {
-      const next = defaultHtml !== undefined ? htmlComposerValue(defaultHtml) : plainTextComposerValue(defaultValue)
+      const next =
+        defaultHtml !== undefined
+          ? htmlComposerValue(defaultHtml)
+          : plainTextComposerValue(defaultValue)
       editor.commands.setContent(next.html || "<p></p>", { emitUpdate: false })
       onChange(next)
       setEmpty(!next.text.trim() && !htmlContainsMeaningfulContent(next.html))
     }
   }, [editor, defaultValue, defaultHtml, onChange])
 
-  const textStyleAttributes = editor?.getAttributes("textStyle") as { fontFamily?: string; fontSize?: string; color?: string; backgroundColor?: string } | undefined
+  const textStyleAttributes = editor?.getAttributes("textStyle") as
+    { fontFamily?: string; fontSize?: string; color?: string; backgroundColor?: string } | undefined
   const activeFont = normalizeFontName(textStyleAttributes?.fontFamily || "")
   const activeFontSize = normalizeFontSize(textStyleAttributes?.fontSize || "") || "3"
   const activeColor = textStyleAttributes?.color || ""
@@ -4036,11 +6651,22 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
     if (!editor) return
     if (kind === "link") {
       const attrs = editor.getAttributes("link") as { href?: string }
-      setInsertDialog({ kind, selectedText: editorTextSelection(editor), url: attrs.href || "", editing: Boolean(attrs.href) })
+      setInsertDialog({
+        kind,
+        selectedText: editorTextSelection(editor),
+        url: attrs.href || "",
+        editing: Boolean(attrs.href),
+      })
       return
     }
     const imageAttrs = selectedImageAttributes(editor)
-    setInsertDialog({ kind, selectedText: "", url: imageAttrs?.src || "", alt: imageAttrs?.alt || "", editing: Boolean(imageAttrs?.src) })
+    setInsertDialog({
+      kind,
+      selectedText: "",
+      url: imageAttrs?.src || "",
+      alt: imageAttrs?.alt || "",
+      editing: Boolean(imageAttrs?.src),
+    })
   }
 
   function confirmInsert(value: InsertDialogValue) {
@@ -4050,10 +6676,22 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
     if (insertDialog.kind === "link") {
       const text = value.text.trim() || insertDialog.selectedText || value.url.trim()
       if (editor.state.selection.empty && !insertDialog.editing) {
-        editor.chain().focus().insertContent(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`).run()
+        editor
+          .chain()
+          .focus()
+          .insertContent(
+            `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`
+          )
+          .run()
       } else {
-        if (value.text.trim() && value.text.trim() !== insertDialog.selectedText) editor.chain().focus().insertContent(escapeHtml(text)).run()
-        editor.chain().focus().extendMarkRange("link").setLink({ href: url, target: "_blank", rel: "noopener noreferrer" }).run()
+        if (value.text.trim() && value.text.trim() !== insertDialog.selectedText)
+          editor.chain().focus().insertContent(escapeHtml(text)).run()
+        editor
+          .chain()
+          .focus()
+          .extendMarkRange("link")
+          .setLink({ href: url, target: "_blank", rel: "noopener noreferrer" })
+          .run()
       }
       return
     }
@@ -4066,13 +6704,21 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
 
   function insertSignature() {
     if (!editor || !signatureText.trim()) return
-    editor.chain().focus().insertContent(`<p><br></p><p>-- <br>${plainTextToHtmlFragment(signatureText)}</p>`).run()
+    editor
+      .chain()
+      .focus()
+      .insertContent(`<p><br></p><p>-- <br>${plainTextToHtmlFragment(signatureText)}</p>`)
+      .run()
   }
 
   function insertSchedule(schedule: ScheduleDraft) {
     if (!editor) return
     const normalized = normalizeSchedule(schedule)
-    editor.chain().focus().insertContent({ type: "scheduleCard", attrs: scheduleToNodeAttributes(normalized) }).run()
+    editor
+      .chain()
+      .focus()
+      .insertContent({ type: "scheduleCard", attrs: scheduleToNodeAttributes(normalized) })
+      .run()
     onPickFiles([scheduleToFile(normalized)])
   }
 
@@ -4089,62 +6735,173 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
 
   return (
     <div className="flex min-h-[330px] flex-1 flex-col bg-background sm:min-h-[420px]">
-      <Input ref={fileInputRef} type="file" multiple className="hidden" onChange={handlePickedFiles} />
+      <Input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={handlePickedFiles}
+      />
       <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-6">
-        <ToolbarButton label="撤销" disabled={!editor?.can().undo()} onClick={() => editor?.chain().focus().undo().run()}><Undo2 className="h-4 w-4" /></ToolbarButton>
-        <ToolbarButton label="重做" disabled={!editor?.can().redo()} onClick={() => editor?.chain().focus().redo().run()}><Redo2 className="h-4 w-4" /></ToolbarButton>
+        <ToolbarButton
+          label="撤销"
+          disabled={!editor?.can().undo()}
+          onClick={() => editor?.chain().focus().undo().run()}
+        >
+          <Undo2 className="h-4 w-4" />
+        </ToolbarButton>
+        <ToolbarButton
+          label="重做"
+          disabled={!editor?.can().redo()}
+          onClick={() => editor?.chain().focus().redo().run()}
+        >
+          <Redo2 className="h-4 w-4" />
+        </ToolbarButton>
         <Separator orientation="vertical" className="mx-2 h-6" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant="ghost" size="sm" className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm" onMouseDown={(event) => event.preventDefault()}>
-              <Plus className="h-4 w-4" />插入<ChevronDown className="h-3.5 w-3.5" />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 gap-1 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm"
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <Plus className="h-4 w-4" />
+              插入
+              <ChevronDown className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">
-            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => fileInputRef.current?.click()}><Paperclip className="h-4 w-4" />附件</DropdownMenuItem>
-            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("link")}><Link className="h-4 w-4" />链接</DropdownMenuItem>
-            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => openInsertDialog("image")}><Image className="h-4 w-4" />图片链接</DropdownMenuItem>
-            <DropdownMenuItem className={composerMenuItemClass} onSelect={() => editor?.chain().focus().setHorizontalRule().run()}><span className="h-4 w-4 border-t border-current" aria-hidden />分隔线</DropdownMenuItem>
+            <DropdownMenuItem
+              className={composerMenuItemClass}
+              onSelect={() => fileInputRef.current?.click()}
+            >
+              <Paperclip className="h-4 w-4" />
+              附件
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={composerMenuItemClass}
+              onSelect={() => openInsertDialog("link")}
+            >
+              <Link className="h-4 w-4" />
+              链接
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={composerMenuItemClass}
+              onSelect={() => openInsertDialog("image")}
+            >
+              <Image className="h-4 w-4" />
+              图片链接
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={composerMenuItemClass}
+              onSelect={() => editor?.chain().focus().setHorizontalRule().run()}
+            >
+              <span className="h-4 w-4 border-t border-current" aria-hidden />
+              分隔线
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <span className="rounded-md border px-2 py-1 text-xs text-muted-foreground">附件 {maxAttachmentText}</span>
-        <ToolbarTextButton label="日程" icon={<Calendar className="h-4 w-4" />} onClick={() => setScheduleOpen(true)} />
+        <span className="rounded-md border px-2 py-1 text-xs text-muted-foreground">
+          附件 {maxAttachmentText}
+        </span>
+        <ToolbarTextButton
+          label="日程"
+          icon={<Calendar className="h-4 w-4" />}
+          onClick={() => setScheduleOpen(true)}
+        />
         <DropdownMenu open={emojiOpen} onOpenChange={setEmojiOpen}>
           <DropdownMenuTrigger asChild>
-            <Button type="button" variant={emojiOpen ? "secondary" : "ghost"} size="sm" className={cn("h-8 gap-1.5 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm", emojiOpen && "border border-primary/30 bg-primary/10 text-primary")} onMouseDown={(event) => event.preventDefault()}>
-              <Smile className="h-4 w-4" />表情
+            <Button
+              type="button"
+              variant={emojiOpen ? "secondary" : "ghost"}
+              size="sm"
+              className={cn(
+                "h-8 gap-1.5 rounded-md px-2 font-normal hover:bg-accent hover:shadow-sm",
+                emojiOpen && "border border-primary/30 bg-primary/10 text-primary"
+              )}
+              onMouseDown={(event) => event.preventDefault()}
+            >
+              <Smile className="h-4 w-4" />
+              表情
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64 p-2">
             <div className="grid grid-cols-8 gap-1">
               {composerEmojiOptions.map((emoji) => (
-                <Button key={emoji} type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-md text-lg" onClick={() => insertEmoji(emoji)}>
+                <Button
+                  key={emoji}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-md text-lg"
+                  onClick={() => insertEmoji(emoji)}
+                >
                   {emoji}
                 </Button>
               ))}
             </div>
           </DropdownMenuContent>
         </DropdownMenu>
-        <ToolbarTextButton label="格式" icon={<Type className="h-4 w-4" />} active={formatOpen} onClick={() => setFormatOpen((value) => !value)} />
+        <ToolbarTextButton
+          label="格式"
+          icon={<Type className="h-4 w-4" />}
+          active={formatOpen}
+          onClick={() => setFormatOpen((value) => !value)}
+        />
         <div className="flex items-center gap-1">
-          <ToolbarTextButton label="预览" icon={<Eye className="h-4 w-4" />} active={previewOpen} onClick={() => setPreviewOpen(true)} />
-          <ToolbarTextButton label="签名" icon={<Signature className="h-4 w-4" />} onClick={insertSignature} disabled={!signatureText.trim()} />
+          <ToolbarTextButton
+            label="预览"
+            icon={<Eye className="h-4 w-4" />}
+            active={previewOpen}
+            onClick={() => setPreviewOpen(true)}
+          />
+          <ToolbarTextButton
+            label="签名"
+            icon={<Signature className="h-4 w-4" />}
+            onClick={insertSignature}
+            disabled={!signatureText.trim()}
+          />
         </div>
       </div>
       {formatOpen && (
         <div className="flex min-h-14 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-6">
-          <ToolbarButton label="清除格式" disabled={!editor} onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}><Eraser className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton
+            label="清除格式"
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}
+          >
+            <Eraser className="h-4 w-4" />
+          </ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[112px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", activeFont && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
-                <span className="truncate">{fontLabel(activeFont)}</span><ChevronDown className="h-3.5 w-3.5" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-8 min-w-[112px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm",
+                  activeFont && "border-primary/35 bg-primary/10 text-primary shadow-sm"
+                )}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={!editor}
+              >
+                <span className="truncate">{fontLabel(activeFont)}</span>
+                <ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontOptions.map((font) => (
-                <DropdownMenuItem key={font} className={composerMenuItemClass} onSelect={() => applyFont(font)}>
-                  <Check className={cn("h-4 w-4", activeFont === font ? "opacity-100" : "opacity-0")} />
+                <DropdownMenuItem
+                  key={font}
+                  className={composerMenuItemClass}
+                  onSelect={() => applyFont(font)}
+                >
+                  <Check
+                    className={cn("h-4 w-4", activeFont === font ? "opacity-100" : "opacity-0")}
+                  />
                   <span style={{ fontFamily: font }}>{font}</span>
                 </DropdownMenuItem>
               ))}
@@ -4152,85 +6909,262 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="sm" className={cn("h-8 min-w-[84px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm", activeFontSize !== "3" && "border-primary/35 bg-primary/10 text-primary shadow-sm")} onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
-                {fontSizeLabel(activeFontSize)}<ChevronDown className="h-3.5 w-3.5" />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-8 min-w-[84px] justify-between rounded-md border border-transparent px-2 font-normal hover:border-border hover:bg-accent hover:shadow-sm",
+                  activeFontSize !== "3" && "border-primary/35 bg-primary/10 text-primary shadow-sm"
+                )}
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={!editor}
+              >
+                {fontSizeLabel(activeFontSize)}
+                <ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerFontSizeOptions.map(([size, label]) => (
-                <DropdownMenuItem key={size} className={composerMenuItemClass} onSelect={() => applyFontSize(size)}>
-                  <Check className={cn("h-4 w-4", activeFontSize === size ? "opacity-100" : "opacity-0")} />
+                <DropdownMenuItem
+                  key={size}
+                  className={composerMenuItemClass}
+                  onSelect={() => applyFontSize(size)}
+                >
+                  <Check
+                    className={cn("h-4 w-4", activeFontSize === size ? "opacity-100" : "opacity-0")}
+                  />
                   {label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="加粗" active={editor?.isActive("bold")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBold().run()}><Bold className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="斜体" active={editor?.isActive("italic")} disabled={!editor} onClick={() => editor?.chain().focus().toggleItalic().run()}><Italic className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="下划线" active={editor?.isActive("underline")} disabled={!editor} onClick={() => editor?.chain().focus().toggleUnderline().run()}><Underline className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="删除线" active={editor?.isActive("strike")} disabled={!editor} onClick={() => editor?.chain().focus().toggleStrike().run()}><Strikethrough className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton
+            label="加粗"
+            active={editor?.isActive("bold")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleBold().run()}
+          >
+            <Bold className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="斜体"
+            active={editor?.isActive("italic")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleItalic().run()}
+          >
+            <Italic className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="下划线"
+            active={editor?.isActive("underline")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleUnderline().run()}
+          >
+            <Underline className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="删除线"
+            active={editor?.isActive("strike")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleStrike().run()}
+          >
+            <Strikethrough className="h-4 w-4" />
+          </ToolbarButton>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className={cn("h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm", activeColor && "border-primary/35 bg-primary/10 text-primary shadow-sm")} title="文字颜色" aria-label="文字颜色" onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
+                  activeColor && "border-primary/35 bg-primary/10 text-primary shadow-sm"
+                )}
+                title="文字颜色"
+                aria-label="文字颜色"
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={!editor}
+              >
                 <Type className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-36">
               {composerTextColors.map(([color, label]) => (
-                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => color === "#111827" ? editor?.chain().focus().unsetColor().run() : editor?.chain().focus().setColor(color).run()}>
-                  <Check className={cn("h-4 w-4", activeColor === color || (!activeColor && color === "#111827") ? "opacity-100" : "opacity-0")} />
-                  <span className="h-3 w-3 rounded-full border" style={{ backgroundColor: color }} />{label}
+                <DropdownMenuItem
+                  key={color}
+                  className={composerMenuItemClass}
+                  onSelect={() =>
+                    color === "#111827"
+                      ? editor?.chain().focus().unsetColor().run()
+                      : editor?.chain().focus().setColor(color).run()
+                  }
+                >
+                  <Check
+                    className={cn(
+                      "h-4 w-4",
+                      activeColor === color || (!activeColor && color === "#111827")
+                        ? "opacity-100"
+                        : "opacity-0"
+                    )}
+                  />
+                  <span
+                    className="h-3 w-3 rounded-full border"
+                    style={{ backgroundColor: color }}
+                  />
+                  {label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button type="button" variant="ghost" size="icon" className={cn("h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm", activeHighlight && "border-primary/35 bg-primary/10 text-primary shadow-sm")} title="高亮" aria-label="高亮" onMouseDown={(event) => event.preventDefault()} disabled={!editor}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
+                  activeHighlight && "border-primary/35 bg-primary/10 text-primary shadow-sm"
+                )}
+                title="高亮"
+                aria-label="高亮"
+                onMouseDown={(event) => event.preventDefault()}
+                disabled={!editor}
+              >
                 <Highlighter className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start">
               {composerHighlightColors.map(([color, label]) => (
-                <DropdownMenuItem key={color} className={composerMenuItemClass} onSelect={() => color === "transparent" ? editor?.chain().focus().unsetBackgroundColor().run() : editor?.chain().focus().setBackgroundColor(color).run()}>
-                  <Check className={cn("h-4 w-4", activeHighlight === color || (!activeHighlight && color === "transparent") ? "opacity-100" : "opacity-0")} />
-                  <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />{label}
+                <DropdownMenuItem
+                  key={color}
+                  className={composerMenuItemClass}
+                  onSelect={() =>
+                    color === "transparent"
+                      ? editor?.chain().focus().unsetBackgroundColor().run()
+                      : editor?.chain().focus().setBackgroundColor(color).run()
+                  }
+                >
+                  <Check
+                    className={cn(
+                      "h-4 w-4",
+                      activeHighlight === color || (!activeHighlight && color === "transparent")
+                        ? "opacity-100"
+                        : "opacity-0"
+                    )}
+                  />
+                  <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />
+                  {label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="无序列表" active={editor?.isActive("bulletList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="有序列表" active={editor?.isActive("orderedList")} disabled={!editor} onClick={() => editor?.chain().focus().toggleOrderedList().run()}><ListOrdered className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="减少缩进" disabled={!editor?.can().liftListItem("listItem")} onClick={() => editor?.chain().focus().liftListItem("listItem").run()}><IndentDecrease className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="增加缩进" disabled={!editor?.can().sinkListItem("listItem")} onClick={() => editor?.chain().focus().sinkListItem("listItem").run()}><IndentIncrease className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton
+            label="无序列表"
+            active={editor?.isActive("bulletList")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleBulletList().run()}
+          >
+            <List className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="有序列表"
+            active={editor?.isActive("orderedList")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
+          >
+            <ListOrdered className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="减少缩进"
+            disabled={!editor?.can().liftListItem("listItem")}
+            onClick={() => editor?.chain().focus().liftListItem("listItem").run()}
+          >
+            <IndentDecrease className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="增加缩进"
+            disabled={!editor?.can().sinkListItem("listItem")}
+            onClick={() => editor?.chain().focus().sinkListItem("listItem").run()}
+          >
+            <IndentIncrease className="h-4 w-4" />
+          </ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
-          <ToolbarButton label="左对齐" active={editor?.isActive({ textAlign: "left" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("left").run()}><AlignLeft className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="居中" active={editor?.isActive({ textAlign: "center" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("center").run()}><AlignCenter className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="右对齐" active={editor?.isActive({ textAlign: "right" })} disabled={!editor} onClick={() => editor?.chain().focus().setTextAlign("right").run()}><AlignRight className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="引用" active={editor?.isActive("blockquote")} disabled={!editor} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote className="h-4 w-4" /></ToolbarButton>
-          <ToolbarButton label="代码块" active={editor?.isActive("codeBlock")} disabled={!editor} onClick={() => editor?.chain().focus().toggleCodeBlock().run()}><Code2 className="h-4 w-4" /></ToolbarButton>
+          <ToolbarButton
+            label="左对齐"
+            active={editor?.isActive({ textAlign: "left" })}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().setTextAlign("left").run()}
+          >
+            <AlignLeft className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="居中"
+            active={editor?.isActive({ textAlign: "center" })}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().setTextAlign("center").run()}
+          >
+            <AlignCenter className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="右对齐"
+            active={editor?.isActive({ textAlign: "right" })}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().setTextAlign("right").run()}
+          >
+            <AlignRight className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="引用"
+            active={editor?.isActive("blockquote")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleBlockquote().run()}
+          >
+            <Quote className="h-4 w-4" />
+          </ToolbarButton>
+          <ToolbarButton
+            label="代码块"
+            active={editor?.isActive("codeBlock")}
+            disabled={!editor}
+            onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
+          >
+            <Code2 className="h-4 w-4" />
+          </ToolbarButton>
         </div>
       )}
-      <div className={cn(
-        "composer-editor relative flex min-h-[240px] flex-1 border-b focus-within:bg-card/40 sm:min-h-[280px]",
-        "[&_.ProseMirror]:min-h-[240px] [&_.ProseMirror]:w-full [&_.ProseMirror]:flex-1 [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-4 [&_.ProseMirror]:py-4 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none sm:[&_.ProseMirror]:min-h-[280px] sm:[&_.ProseMirror]:px-6 sm:[&_.ProseMirror]:py-5",
-        "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
-        "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
-        empty && "bg-background"
-      )}>
+      <div
+        className={cn(
+          "composer-editor relative flex min-h-[240px] flex-1 border-b focus-within:bg-card/40 sm:min-h-[280px]",
+          "[&_.ProseMirror]:min-h-[240px] [&_.ProseMirror]:w-full [&_.ProseMirror]:flex-1 [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-4 [&_.ProseMirror]:py-4 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none sm:[&_.ProseMirror]:min-h-[280px] sm:[&_.ProseMirror]:px-6 sm:[&_.ProseMirror]:py-5",
+          "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
+          "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
+          empty && "bg-background"
+        )}
+      >
         <EditorContent editor={editor} className="flex min-h-0 flex-1" />
       </div>
       {files.length > 0 && (
         <div className="border-t px-4 py-3 sm:px-6">
           <div className="flex flex-wrap gap-2">
             {files.map((file, index) => (
-              <Badge key={`${file.name}-${file.size}-${index}`} variant="outline" className="h-8 gap-2 rounded-md px-2 font-normal">
+              <Badge
+                key={`${file.name}-${file.size}-${index}`}
+                variant="outline"
+                className="h-8 gap-2 rounded-md px-2 font-normal"
+              >
                 <Paperclip className="h-3.5 w-3.5" />
                 <span className="max-w-48 truncate">{file.name}</span>
                 <span className="text-muted-foreground">{formatBytes(file.size)}</span>
-                <Button type="button" variant="ghost" size="icon" className="h-5 w-5 rounded-md" onClick={() => onRemoveFile(index)}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 rounded-md"
+                  onClick={() => onRemoveFile(index)}
+                >
                   <X className="h-3.5 w-3.5" />
                 </Button>
               </Badge>
@@ -4238,29 +7172,82 @@ function MailBodyComposer({ defaultValue, defaultHtml, files, signatureText, max
           </div>
         </div>
       )}
-      <InsertContentDialog state={insertDialog} onOpenChange={(open) => { if (!open) setInsertDialog(null) }} onConfirm={confirmInsert} />
-      <ScheduleDialog open={scheduleOpen} onOpenChange={setScheduleOpen} onConfirm={(schedule) => { insertSchedule(schedule); setScheduleOpen(false) }} />
+      <InsertContentDialog
+        state={insertDialog}
+        onOpenChange={(open) => {
+          if (!open) setInsertDialog(null)
+        }}
+        onConfirm={confirmInsert}
+      />
+      <ScheduleDialog
+        open={scheduleOpen}
+        onOpenChange={setScheduleOpen}
+        onConfirm={(schedule) => {
+          insertSchedule(schedule)
+          setScheduleOpen(false)
+        }}
+      />
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="w-[min(92vw,44rem)] max-w-none">
           <DialogHeader>
             <DialogTitle>邮件预览</DialogTitle>
           </DialogHeader>
-          <div className="mail-html max-h-[60vh] overflow-y-auto rounded-md border bg-background p-5 text-sm leading-7" dangerouslySetInnerHTML={{ __html: sanitizeComposerHtml(editor?.getHTML() || "") || "<p></p>" }} />
+          <div
+            className="mail-html max-h-[60vh] overflow-y-auto rounded-md border bg-background p-5 text-sm leading-7"
+            dangerouslySetInnerHTML={{
+              __html: sanitizeComposerHtml(editor?.getHTML() || "") || "<p></p>",
+            }}
+          />
         </DialogContent>
       </Dialog>
     </div>
   )
 }
 
-function ToolbarTextButton({ label, icon, active, disabled, onClick }: { label: string; icon: React.ReactNode; active?: boolean; disabled?: boolean; onClick?: () => void }) {
+function ToolbarTextButton({
+  label,
+  icon,
+  active,
+  disabled,
+  onClick,
+}: {
+  label: string
+  icon: React.ReactNode
+  active?: boolean
+  disabled?: boolean
+  onClick?: () => void
+}) {
   return (
-    <Button type="button" variant={active ? "secondary" : "ghost"} size="sm" className={cn("h-8 gap-1.5 rounded-md px-2 font-normal transition-all hover:bg-accent hover:text-foreground hover:shadow-sm", active && "border border-primary/30 bg-primary/10 text-primary shadow-sm")} title={label} aria-label={label} aria-pressed={active || undefined} onMouseDown={(event) => event.preventDefault()} onClick={onClick} disabled={disabled}>
-      {icon}{label}
+    <Button
+      type="button"
+      variant={active ? "secondary" : "ghost"}
+      size="sm"
+      className={cn(
+        "h-8 gap-1.5 rounded-md px-2 font-normal transition-all hover:bg-accent hover:text-foreground hover:shadow-sm",
+        active && "border border-primary/30 bg-primary/10 text-primary shadow-sm"
+      )}
+      title={label}
+      aria-label={label}
+      aria-pressed={active || undefined}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {icon}
+      {label}
     </Button>
   )
 }
 
-function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: InsertDialogState | null; onOpenChange: (open: boolean) => void; onConfirm: (value: InsertDialogValue) => void }) {
+function InsertContentDialog({
+  state,
+  onOpenChange,
+  onConfirm,
+}: {
+  state: InsertDialogState | null
+  onOpenChange: (open: boolean) => void
+  onConfirm: (value: InsertDialogValue) => void
+}) {
   const kind = state?.kind || "link"
   const [url, setUrl] = React.useState("")
   const [text, setText] = React.useState("")
@@ -4285,25 +7272,53 @@ function InsertContentDialog({ state, onOpenChange, onConfirm }: { state: Insert
       <DialogContent className="sm:max-w-md">
         <form className="grid gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>{kind === "link" ? (state?.editing ? "编辑链接" : "插入链接") : (state?.editing ? "编辑图片" : "插入图片")}</DialogTitle>
+            <DialogTitle>
+              {kind === "link"
+                ? state?.editing
+                  ? "编辑链接"
+                  : "插入链接"
+                : state?.editing
+                  ? "编辑图片"
+                  : "插入图片"}
+            </DialogTitle>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="composer-insert-url">{kind === "link" ? "链接地址" : "图片地址"}</Label>
-            <Input id="composer-insert-url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder={kind === "link" ? "https://example.com" : "https://example.com/image.png"} autoFocus />
+            <Input
+              id="composer-insert-url"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              placeholder={
+                kind === "link" ? "https://example.com" : "https://example.com/image.png"
+              }
+              autoFocus
+            />
           </div>
           {kind === "link" ? (
             <div className="grid gap-2">
               <Label htmlFor="composer-insert-text">显示文字</Label>
-              <Input id="composer-insert-text" value={text} onChange={(event) => setText(event.target.value)} placeholder="默认使用链接地址" />
+              <Input
+                id="composer-insert-text"
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder="默认使用链接地址"
+              />
             </div>
           ) : (
             <div className="grid gap-2">
               <Label htmlFor="composer-insert-alt">替代文字</Label>
-              <Input id="composer-insert-alt" value={alt} onChange={(event) => setAlt(event.target.value)} placeholder="图片说明" />
+              <Input
+                id="composer-insert-alt"
+                value={alt}
+                onChange={(event) => setAlt(event.target.value)}
+                placeholder="图片说明"
+              />
             </div>
           )}
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
             <Button type="submit">{state?.editing ? "更新" : "插入"}</Button>
           </DialogFooter>
         </form>
@@ -4335,7 +7350,15 @@ const repeatOptions = [
   { value: "yearly", label: "每年" },
 ] as const
 
-function ScheduleDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOpenChange: (open: boolean) => void; onConfirm: (schedule: ScheduleDraft) => void }) {
+function ScheduleDialog({
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onConfirm: (schedule: ScheduleDraft) => void
+}) {
   const [duration, setDuration] = React.useState("60")
   const [reminder, setReminder] = React.useState("15")
   const [repeat, setRepeat] = React.useState<ScheduleDraft["repeat"]>("none")
@@ -4343,7 +7366,7 @@ function ScheduleDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
   const [customDuration, setCustomDuration] = React.useState(false)
   const [customReminder, setCustomReminder] = React.useState(false)
   const [lunar, setLunar] = React.useState(false)
-  const defaultStart = React.useMemo(() => defaultScheduleStartValue(), [open])
+  const defaultStart = open ? defaultScheduleStartValue() : ""
   const { toast } = useToast()
 
   function submit(event: React.FormEvent<HTMLFormElement>) {
@@ -4354,8 +7377,12 @@ function ScheduleDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
       toast({ title: "请输入日程主题" })
       return
     }
-    const durationMinutes = customDuration ? Number(form.get("customDuration") || 60) : Number(duration)
-    const reminderMinutes = customReminder ? Number(form.get("customReminder") || 15) : Number(reminder)
+    const durationMinutes = customDuration
+      ? Number(form.get("customDuration") || 60)
+      : Number(duration)
+    const reminderMinutes = customReminder
+      ? Number(form.get("customReminder") || 15)
+      : Number(reminder)
     onConfirm({
       title,
       start: String(form.get("start") || defaultStart),
@@ -4386,40 +7413,108 @@ function ScheduleDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
           <DialogTitle>新建日程</DialogTitle>
         </DialogHeader>
         <form className="space-y-5" onSubmit={submit}>
-          <Input name="title" placeholder="输入日程主题" className="h-11 border-0 border-b px-0 text-lg shadow-none focus-visible:ring-0" />
+          <Input
+            name="title"
+            placeholder="输入日程主题"
+            className="h-11 border-0 border-b px-0 text-lg shadow-none focus-visible:ring-0"
+          />
           <div className="grid gap-4">
             <ScheduleRow label="开始">
-              <Input name="start" type={allDay ? "date" : "datetime-local"} defaultValue={allDay ? defaultStart.slice(0, 10) : defaultStart} className="h-11" />
-              <CheckLabel id="schedule-all-day" label="全天" checked={allDay} onCheckedChange={setAllDay} />
+              <Input
+                name="start"
+                type={allDay ? "date" : "datetime-local"}
+                defaultValue={allDay ? defaultStart.slice(0, 10) : defaultStart}
+                className="h-11"
+              />
+              <CheckLabel
+                id="schedule-all-day"
+                label="全天"
+                checked={allDay}
+                onCheckedChange={setAllDay}
+              />
             </ScheduleRow>
             <ScheduleRow label="持续">
               {customDuration ? (
-                <Input name="customDuration" type="number" min={1} defaultValue="60" className="h-11" />
+                <Input
+                  name="customDuration"
+                  type="number"
+                  min={1}
+                  defaultValue="60"
+                  className="h-11"
+                />
               ) : (
                 <Select value={duration} onValueChange={setDuration}>
-                  <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-                  <SelectContent>{durationOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+                  <SelectTrigger className="h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {durationOptions.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               )}
-              <CheckLabel id="schedule-custom-duration" label="自定义" checked={customDuration} onCheckedChange={setCustomDuration} />
+              <CheckLabel
+                id="schedule-custom-duration"
+                label="自定义"
+                checked={customDuration}
+                onCheckedChange={setCustomDuration}
+              />
             </ScheduleRow>
             <ScheduleRow label="提醒">
               {customReminder ? (
-                <Input name="customReminder" type="number" min={0} defaultValue="15" className="h-11" />
+                <Input
+                  name="customReminder"
+                  type="number"
+                  min={0}
+                  defaultValue="15"
+                  className="h-11"
+                />
               ) : (
                 <Select value={reminder} onValueChange={setReminder}>
-                  <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-                  <SelectContent>{reminderOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+                  <SelectTrigger className="h-11">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reminderOptions.map((item) => (
+                      <SelectItem key={item.value} value={item.value}>
+                        {item.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
                 </Select>
               )}
-              <CheckLabel id="schedule-custom-reminder" label="自定义" checked={customReminder} onCheckedChange={setCustomReminder} />
+              <CheckLabel
+                id="schedule-custom-reminder"
+                label="自定义"
+                checked={customReminder}
+                onCheckedChange={setCustomReminder}
+              />
             </ScheduleRow>
             <ScheduleRow label="重复">
-              <Select value={repeat} onValueChange={(value) => setRepeat(value as ScheduleDraft["repeat"])}>
-                <SelectTrigger className="h-11"><SelectValue /></SelectTrigger>
-                <SelectContent>{repeatOptions.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent>
+              <Select
+                value={repeat}
+                onValueChange={(value) => setRepeat(value as ScheduleDraft["repeat"])}
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {repeatOptions.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
-              <CheckLabel id="schedule-lunar" label="农历" checked={lunar} onCheckedChange={setLunar} />
+              <CheckLabel
+                id="schedule-lunar"
+                label="农历"
+                checked={lunar}
+                onCheckedChange={setLunar}
+              />
             </ScheduleRow>
             <ScheduleRow label="位置">
               <Input name="location" placeholder="请输入位置" className="h-11" />
@@ -4430,7 +7525,9 @@ function ScheduleDialog({ open, onOpenChange, onConfirm }: { open: boolean; onOp
           </div>
           <DialogFooter>
             <Button type="submit">确定</Button>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>取消</Button>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              取消
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4447,16 +7544,44 @@ function ScheduleRow({ label, children }: { label: string; children: React.React
   )
 }
 
-function CheckLabel({ id, label, checked, onCheckedChange }: { id: string; label: string; checked: boolean; onCheckedChange: (checked: boolean) => void }) {
+function CheckLabel({
+  id,
+  label,
+  checked,
+  onCheckedChange,
+}: {
+  id: string
+  label: string
+  checked: boolean
+  onCheckedChange: (checked: boolean) => void
+}) {
   return (
     <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} onCheckedChange={(value) => onCheckedChange(value === true)} />
-      <Label htmlFor={id} className="cursor-pointer text-sm font-normal">{label}</Label>
+      <Checkbox
+        id={id}
+        checked={checked}
+        onCheckedChange={(value) => onCheckedChange(value === true)}
+      />
+      <Label htmlFor={id} className="cursor-pointer text-sm font-normal">
+        {label}
+      </Label>
     </div>
   )
 }
 
-function ToolbarButton({ label, children, active, onClick, disabled }: { label: string; children: React.ReactNode; active?: boolean; onClick?: () => void; disabled?: boolean }) {
+function ToolbarButton({
+  label,
+  children,
+  active,
+  onClick,
+  disabled,
+}: {
+  label: string
+  children: React.ReactNode
+  active?: boolean
+  onClick?: () => void
+  disabled?: boolean
+}) {
   return (
     <Button
       type="button"
@@ -4464,7 +7589,8 @@ function ToolbarButton({ label, children, active, onClick, disabled }: { label: 
       size="icon"
       className={cn(
         "h-8 w-8 rounded-md border border-transparent text-muted-foreground transition-all hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
-        active && "border-primary/35 bg-primary/10 text-primary shadow-sm hover:bg-primary/15 hover:text-primary"
+        active &&
+          "border-primary/35 bg-primary/10 text-primary shadow-sm hover:bg-primary/15 hover:text-primary"
       )}
       title={label}
       aria-label={label}
@@ -4478,9 +7604,16 @@ function ToolbarButton({ label, children, active, onClick, disabled }: { label: 
   )
 }
 
-function splitEmails(s: string) { return s.split(/[;,，\s]+/).map((v) => v.trim()).filter(Boolean) }
+function splitEmails(s: string) {
+  return s
+    .split(/[;,，\s]+/)
+    .map((v) => v.trim())
+    .filter(Boolean)
+}
 function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>) {
-  const AudioContextCtor = window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  const AudioContextCtor =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
   if (!AudioContextCtor) return
   const ctx = ref.current || new AudioContextCtor()
   ref.current = ctx
@@ -4501,13 +7634,22 @@ function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>)
     osc.stop(start + 0.18)
   }
 }
-function withPrefix(subject: string, prefix: string) { return subject.toLowerCase().startsWith(prefix.toLowerCase()) ? subject : `${prefix} ${subject}` }
+function withPrefix(subject: string, prefix: string) {
+  return subject.toLowerCase().startsWith(prefix.toLowerCase()) ? subject : `${prefix} ${subject}`
+}
 function quoteMessage(message: MailMessage) {
   const body = message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")
-  const quote = body.split("\n").map((line) => `> ${line}`).join("\n")
+  const quote = body
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n")
   return `\n\n----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
 }
-function stripHtml(html: string) { const div = document.createElement("div"); div.innerHTML = DOMPurify.sanitize(html); return div.textContent || div.innerText || "" }
+function stripHtml(html: string) {
+  const div = document.createElement("div")
+  div.innerHTML = DOMPurify.sanitize(html)
+  return div.textContent || div.innerText || ""
+}
 function attachmentLimitBytes(limits?: PermissionLimits) {
   const mb = limits?.maxAttachmentMb || 0
   return mb > 0 ? mb * 1024 * 1024 : 0
@@ -4517,13 +7659,23 @@ async function fileToAttachment(file: File) {
   let binary = ""
   const bytes = new Uint8Array(buffer)
   for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i])
-  return { filename: file.name, contentType: file.type || "application/octet-stream", contentBase64: btoa(binary) }
+  return {
+    filename: file.name,
+    contentType: file.type || "application/octet-stream",
+    contentBase64: btoa(binary),
+  }
 }
 async function attachmentFilesFromMessage(message: MailMessage) {
   if (!message.attachments?.length) return []
-  return Promise.all(message.attachments.map(async (attachment) => {
-    const response = await fetch(`/api/mail/attachments/${attachment.id}`, { credentials: "include" })
-    const blob = await response.blob()
-    return new File([blob], attachment.filename, { type: attachment.contentType || blob.type || "application/octet-stream" })
-  }))
+  return Promise.all(
+    message.attachments.map(async (attachment) => {
+      const response = await fetch(`/api/mail/attachments/${attachment.id}`, {
+        credentials: "include",
+      })
+      const blob = await response.blob()
+      return new File([blob], attachment.filename, {
+        type: attachment.contentType || blob.type || "application/octet-stream",
+      })
+    })
+  )
 }

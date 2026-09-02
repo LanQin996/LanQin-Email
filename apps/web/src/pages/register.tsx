@@ -8,7 +8,13 @@ import { useMe } from "@/hooks/use-me"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
 import { PasswordInput } from "@/components/ui/password-input"
 import { TurnstileBox } from "@/components/turnstile-box"
@@ -22,10 +28,17 @@ export function RegisterPage() {
   const { toast } = useToast()
   const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const linuxDoRegistration = params.get("linuxdo") === "complete"
-  const pendingLinuxDo = useQuery({ queryKey: ["linuxdo-pending-registration"], queryFn: api.linuxDoPendingRegistration, enabled: linuxDoRegistration, retry: false })
+  const pendingLinuxDo = useQuery({
+    queryKey: ["linuxdo-pending-registration"],
+    queryFn: api.linuxDoPendingRegistration,
+    enabled: linuxDoRegistration,
+    retry: false,
+  })
   const [turnstileToken, setTurnstileToken] = React.useState("")
   const [domainId, setDomainId] = React.useState("")
-  const domains: PublicDomain[] = linuxDoRegistration ? pendingLinuxDo.data?.domains || [] : publicSettings.data?.mailboxDomains || []
+  const domains: PublicDomain[] = linuxDoRegistration
+    ? pendingLinuxDo.data?.domains || []
+    : publicSettings.data?.mailboxDomains || []
   const selectedDomain = domains.find((d) => d.id === domainId)
 
   const register = useMutation({
@@ -36,7 +49,8 @@ export function RegisterPage() {
 
       if (linuxDoRegistration) {
         const localPart = String(form.get("localPart") || "").trim()
-        if (!domainId || !selectedDomain || !localPart) throw new Error("请选择邮箱域名并填写邮箱前缀")
+        if (!domainId || !selectedDomain || !localPart)
+          throw new Error("请选择邮箱域名并填写邮箱前缀")
         return api.linuxDoRegister({
           domainId,
           localPart,
@@ -90,20 +104,41 @@ export function RegisterPage() {
             {linuxDoRegistration ? "补全 Linux.do 注册信息" : "注册账号"}
           </div>
           {linuxDoRegistration && pendingLinuxDo.isLoading ? (
-            <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">正在加载已验证的 Linux.do 账号...</div>
+            <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+              正在加载已验证的 Linux.do 账号...
+            </div>
           ) : linuxDoRegistration && pendingLinuxDo.isError ? (
             <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">{pendingLinuxDo.error.message}</div>
-              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild><Link to="/login"><ArrowLeft className="h-4 w-4" />重新登录</Link></Button>
+              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+                {pendingLinuxDo.error.message}
+              </div>
+              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
+                <Link to="/login">
+                  <ArrowLeft className="h-4 w-4" />
+                  重新登录
+                </Link>
+              </Button>
             </div>
           ) : linuxDoRegistration && pendingLinuxDo.isSuccess && domains.length === 0 ? (
             <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前没有可用于注册的邮箱域名</div>
-              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild><Link to="/login"><ArrowLeft className="h-4 w-4" />返回登录</Link></Button>
+              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+                当前没有可用于注册的邮箱域名
+              </div>
+              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
+                <Link to="/login">
+                  <ArrowLeft className="h-4 w-4" />
+                  返回登录
+                </Link>
+              </Button>
             </div>
-          ) : !linuxDoRegistration && publicSettings.isSuccess && !publicSettings.data.openRegistration && !publicSettings.data.inviteRegistrationEnabled ? (
+          ) : !linuxDoRegistration &&
+            publicSettings.isSuccess &&
+            !publicSettings.data.openRegistration &&
+            !publicSettings.data.inviteRegistrationEnabled ? (
             <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">当前未开放注册</div>
+              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+                当前未开放注册
+              </div>
               <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
                 <Link to="/login">
                   <ArrowLeft className="h-4 w-4" />
@@ -112,24 +147,47 @@ export function RegisterPage() {
               </Button>
             </div>
           ) : (
-            <form className="space-y-5" onSubmit={(e) => { e.preventDefault(); if (turnstileRequired && !turnstileToken) { toast({ title: "请先完成人机验证" }); return }; register.mutate(new FormData(e.currentTarget)) }}>
+            <form
+              className="space-y-5"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (turnstileRequired && !turnstileToken) {
+                  toast({ title: "请先完成人机验证" })
+                  return
+                }
+                register.mutate(new FormData(e.currentTarget))
+              }}
+            >
               {linuxDoRegistration && pendingLinuxDo.data && (
                 <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-                  已验证 Linux.do 用户 <span className="font-medium text-foreground">@{pendingLinuxDo.data.username}</span>
+                  已验证 Linux.do 用户{" "}
+                  <span className="font-medium text-foreground">
+                    @{pendingLinuxDo.data.username}
+                  </span>
                 </div>
               )}
               {domains.length > 0 ? (
                 <div className="space-y-2">
-                  <Label htmlFor="localPart" className="text-sm font-medium">邮箱地址</Label>
+                  <Label htmlFor="localPart" className="text-sm font-medium">
+                    邮箱地址
+                  </Label>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
-                    <Input id="localPart" name="localPart" className="h-11 text-base" placeholder="邮箱前缀" required />
+                    <Input
+                      id="localPart"
+                      name="localPart"
+                      className="h-11 text-base"
+                      placeholder="邮箱前缀"
+                      required
+                    />
                     <Select value={domainId} onValueChange={setDomainId} required>
                       <SelectTrigger className="h-11">
                         <SelectValue placeholder="选择域名" />
                       </SelectTrigger>
                       <SelectContent>
                         {domains.map((d) => (
-                          <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          <SelectItem key={d.id} value={d.id}>
+                            {d.name}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -137,44 +195,107 @@ export function RegisterPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-medium">邮箱</Label>
-                  <Input id="email" name="email" type="email" autoComplete="username" required className="h-11 text-base" />
+                  <Label htmlFor="email" className="text-sm font-medium">
+                    邮箱
+                  </Label>
+                  <Input
+                    id="email"
+                    name="email"
+                    type="email"
+                    autoComplete="username"
+                    required
+                    className="h-11 text-base"
+                  />
                 </div>
               )}
               <div className="space-y-2">
-                <Label htmlFor="displayName" className="text-sm font-medium">显示名称</Label>
-                <Input id="displayName" name="displayName" autoComplete="name" defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""} className="h-11 text-base" />
+                <Label htmlFor="displayName" className="text-sm font-medium">
+                  显示名称
+                </Label>
+                <Input
+                  id="displayName"
+                  name="displayName"
+                  autoComplete="name"
+                  defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""}
+                  className="h-11 text-base"
+                />
               </div>
-              {!linuxDoRegistration && publicSettings.data?.inviteRegistrationEnabled && !publicSettings.data.openRegistration && (
-                <div className="space-y-2">
-                  <Label htmlFor="inviteCode" className="text-sm font-medium">邀请码</Label>
-                  <Input id="inviteCode" name="inviteCode" autoComplete="off" required className="h-11 font-mono text-base uppercase" placeholder="请输入邀请码" />
-                </div>
+              {!linuxDoRegistration &&
+                publicSettings.data?.inviteRegistrationEnabled &&
+                !publicSettings.data.openRegistration && (
+                  <div className="space-y-2">
+                    <Label htmlFor="inviteCode" className="text-sm font-medium">
+                      邀请码
+                    </Label>
+                    <Input
+                      id="inviteCode"
+                      name="inviteCode"
+                      autoComplete="off"
+                      required
+                      className="h-11 font-mono text-base uppercase"
+                      placeholder="请输入邀请码"
+                    />
+                  </div>
+                )}
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm font-medium">
+                  密码
+                </Label>
+                <PasswordInput
+                  id="password"
+                  name="password"
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  className="h-11 text-base"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="confirmPassword" className="text-sm font-medium">
+                  确认密码
+                </Label>
+                <PasswordInput
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  autoComplete="new-password"
+                  minLength={8}
+                  required
+                  className="h-11 text-base"
+                />
+              </div>
+              {turnstileRequired && (
+                <TurnstileBox
+                  siteKey={publicSettings.data?.turnstileSiteKey || ""}
+                  onToken={setTurnstileToken}
+                />
               )}
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium">密码</Label>
-                <PasswordInput id="password" name="password" autoComplete="new-password" minLength={8} required className="h-11 text-base" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-sm font-medium">确认密码</Label>
-                <PasswordInput id="confirmPassword" name="confirmPassword" autoComplete="new-password" minLength={8} required className="h-11 text-base" />
-              </div>
-              {turnstileRequired && <TurnstileBox siteKey={publicSettings.data?.turnstileSiteKey || ""} onToken={setTurnstileToken} />}
-              <Button className="h-11 w-full text-base" disabled={register.isPending || publicSettings.isLoading || (linuxDoRegistration && pendingLinuxDo.isLoading)}>
+              <Button
+                className="h-11 w-full text-base"
+                disabled={
+                  register.isPending ||
+                  publicSettings.isLoading ||
+                  (linuxDoRegistration && pendingLinuxDo.isLoading)
+                }
+              >
                 {register.isPending ? "注册中..." : linuxDoRegistration ? "完成注册" : "注册"}
                 {!register.isPending && <ArrowRight className="h-4 w-4" />}
               </Button>
             </form>
           )}
         </div>
-        {!linuxDoRegistration && !(publicSettings.isSuccess && !publicSettings.data.openRegistration && !publicSettings.data.inviteRegistrationEnabled) && (
-          <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span>已有账号？</span>
-            <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
-              <Link to="/login">返回登录</Link>
-            </Button>
-          </div>
-        )}
+        {!linuxDoRegistration &&
+          !(
+            publicSettings.isSuccess &&
+            !publicSettings.data.openRegistration &&
+            !publicSettings.data.inviteRegistrationEnabled
+          ) && (
+            <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <span>已有账号？</span>
+              <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
+                <Link to="/login">返回登录</Link>
+              </Button>
+            </div>
+          )}
       </div>
     </div>
   )

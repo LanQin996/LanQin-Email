@@ -1,7 +1,17 @@
 import type { PermissionInfo, PermissionLimits } from "@/lib/api"
 import type { PermissionKey } from "@/lib/api-types"
 
-export type AdminSection = "overview" | "users" | "permissionGroups" | "domains" | "mailboxes" | "aliases" | "messages" | "sendAudit" | "deliveryQueue" | "settings"
+export type AdminSection =
+  | "overview"
+  | "users"
+  | "permissionGroups"
+  | "domains"
+  | "mailboxes"
+  | "aliases"
+  | "messages"
+  | "sendAudit"
+  | "deliveryQueue"
+  | "settings"
 
 export const adminSectionLabels: Record<AdminSection, string> = {
   overview: "概览",

@@ -5,7 +5,7 @@ import type { User } from "@/lib/api"
 type MeResponse = { user: User }
 
 export function useMe(
-  options?: Omit<UseQueryOptions<MeResponse, Error, MeResponse, ["me"]>, "queryKey" | "queryFn">,
+  options?: Omit<UseQueryOptions<MeResponse, Error, MeResponse, ["me"]>, "queryKey" | "queryFn">
 ) {
   return useQuery({
     queryKey: ["me"],

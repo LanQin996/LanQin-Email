@@ -3,13 +3,28 @@ import * as React from "react"
 declare global {
   interface Window {
     turnstile?: {
-      render: (container: HTMLElement, options: { sitekey: string; size?: "normal" | "compact" | "flexible"; callback: (token: string) => void; "expired-callback": () => void; "error-callback": () => void }) => string
+      render: (
+        container: HTMLElement,
+        options: {
+          sitekey: string
+          size?: "normal" | "compact" | "flexible"
+          callback: (token: string) => void
+          "expired-callback": () => void
+          "error-callback": () => void
+        }
+      ) => string
       remove: (widgetId: string) => void
     }
   }
 }
 
-export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+export function TurnstileBox({
+  siteKey,
+  onToken,
+}: {
+  siteKey: string
+  onToken: (token: string) => void
+}) {
   const ref = React.useRef<HTMLDivElement | null>(null)
   React.useEffect(() => {
     if (!siteKey || !ref.current) return
@@ -29,7 +44,9 @@ export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (
     if (window.turnstile) {
       render()
     } else {
-      const existing = document.querySelector('script[src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"]')
+      const existing = document.querySelector(
+        'script[src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"]'
+      )
       if (existing) {
         existing.addEventListener("load", render, { once: true })
       } else {
@@ -47,5 +64,9 @@ export function TurnstileBox({ siteKey, onToken }: { siteKey: string; onToken: (
       if (widgetId && window.turnstile) window.turnstile.remove(widgetId)
     }
   }, [siteKey, onToken])
-  return <div className="w-full"><div ref={ref} className="w-full" /></div>
+  return (
+    <div className="w-full">
+      <div ref={ref} className="w-full" />
+    </div>
+  )
 }

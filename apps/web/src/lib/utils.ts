@@ -8,13 +8,24 @@ export function cn(...inputs: ClassValue[]) {
 export function formatDate(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date)
+  return new Intl.DateTimeFormat("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
 }
 
 export function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date)
+  return new Intl.DateTimeFormat("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
 }
 
 export function formatBytes(bytes: number) {
@@ -22,7 +33,10 @@ export function formatBytes(bytes: number) {
   const units = ["B", "KB", "MB", "GB"]
   let size = bytes
   let idx = 0
-  while (size >= 1024 && idx < units.length - 1) { size /= 1024; idx++ }
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024
+    idx++
+  }
   return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`
 }
 
@@ -34,15 +48,15 @@ export function formatBytes(bytes: number) {
 function normalizeCharset(charset: string): string {
   const c = charset.toLowerCase().trim()
   const aliases: Record<string, string> = {
-    "gb2312": "gbk",
+    gb2312: "gbk",
     "x-gbk": "gbk",
     "euc-cn": "gbk",
     "hz-gb-2312": "gbk",
     "shift-jis": "shift_jis",
-    "sjis": "shift_jis",
+    sjis: "shift_jis",
     "windows-31j": "shift_jis",
     "ks_c_5601-1987": "euc-kr",
-    "ksc5601": "euc-kr",
+    ksc5601: "euc-kr",
     "windows-949": "euc-kr",
     "iso-8859-1": "windows-1252",
   }
@@ -64,25 +78,32 @@ export function decodeMimeHeader(value: string): string {
   if (!value || !value.includes("=?")) return value
   // RFC 2047 §6.2: ignore whitespace between adjacent encoded words.
   const collapsed = value.replace(/(\?=)\s+(=\?)/g, "$1$2")
-  return collapsed.replace(/=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g, (_match, charset, encoding, encoded) => {
-    try {
-      const lowerEncoding = String(encoding).toLowerCase()
-      let decoded: string
-      if (lowerEncoding === "b") {
-        const sanitized = encoded.replace(/\s+/g, "")
-        const padded = sanitized + "=".repeat((4 - (sanitized.length % 4)) % 4)
-        decoded = atob(padded)
-      } else {
-        decoded = encoded.replace(/_/g, " ").replace(/=([0-9a-fA-F]{2})/g, (_m: string, hex: string) => String.fromCharCode(parseInt(hex, 16)))
+  return collapsed.replace(
+    /=\?([^?]+)\?([bBqQ])\?([^?]*)\?=/g,
+    (_match, charset, encoding, encoded) => {
+      try {
+        const lowerEncoding = String(encoding).toLowerCase()
+        let decoded: string
+        if (lowerEncoding === "b") {
+          const sanitized = encoded.replace(/\s+/g, "")
+          const padded = sanitized + "=".repeat((4 - (sanitized.length % 4)) % 4)
+          decoded = atob(padded)
+        } else {
+          decoded = encoded
+            .replace(/_/g, " ")
+            .replace(/=([0-9a-fA-F]{2})/g, (_m: string, hex: string) =>
+              String.fromCharCode(parseInt(hex, 16))
+            )
+        }
+        const bytes = new Uint8Array(Array.from(decoded, (ch) => ch.charCodeAt(0)))
+        const normalized = normalizeCharset(charset) || "utf-8"
+        const decoder = new TextDecoder(normalized)
+        return decoder.decode(bytes)
+      } catch {
+        return _match
       }
-      const bytes = new Uint8Array(Array.from(decoded, (ch) => ch.charCodeAt(0)))
-      const normalized = normalizeCharset(charset) || "utf-8"
-      const decoder = new TextDecoder(normalized)
-      return decoder.decode(bytes)
-    } catch {
-      return _match
     }
-  })
+  )
 }
 
 export interface LabelColorStyle {
@@ -105,6 +126,6 @@ export function generateLabelColor(name: string): LabelColorStyle {
     h = Math.imul(h, 0x01000193)
     h ^= h >>> 16
   }
-  const hue = ((h >>> 0) % 360 + 360) % 360
+  const hue = (((h >>> 0) % 360) + 360) % 360
   return { backgroundColor: `hsl(${hue}, 70%, 45%)`, color: "#ffffff" }
 }

@@ -2,7 +2,10 @@ const THEME_TRANSITION_MS = 180
 let themeTimer: number | undefined
 
 export function getInitialTheme() {
-  return localStorage.getItem("lanqin:theme") === "dark" || document.documentElement.classList.contains("dark")
+  return (
+    localStorage.getItem("lanqin:theme") === "dark" ||
+    document.documentElement.classList.contains("dark")
+  )
 }
 
 export function applyTheme(dark: boolean, animated = false) {

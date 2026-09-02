@@ -1,6 +1,17 @@
 import * as React from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
-import { BarChart3, Copy, Globe2, Inbox, LogOut, Mail, Mailbox, Settings, ShieldCheck, Users } from "lucide-react"
+import {
+  BarChart3,
+  Copy,
+  Globe2,
+  Inbox,
+  LogOut,
+  Mail,
+  Mailbox,
+  Settings,
+  ShieldCheck,
+  Users,
+} from "lucide-react"
 import { useMe } from "@/hooks/use-me"
 import { useLogout } from "@/hooks/use-logout"
 import { AuthGuard } from "@/components/auth-guard"
@@ -26,15 +37,35 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar"
 
-const adminSections: { key: string; label: string; icon: React.ReactNode; permissions: PermissionKey[] }[] = [
+const adminSections: {
+  key: string
+  label: string
+  icon: React.ReactNode
+  permissions: PermissionKey[]
+}[] = [
   { key: "overview", label: "概览", icon: <BarChart3 />, permissions: ["admin.overview.view"] },
   { key: "users", label: "用户", icon: <Users />, permissions: ["admin.users.view"] },
-  { key: "permissionGroups", label: "权限组", icon: <ShieldCheck />, permissions: ["admin.permission_groups.view"] },
-  { key: "domains", label: "域名", icon: <Globe2 />, permissions: ["admin.domains.view", "admin.dns.view"] },
+  {
+    key: "permissionGroups",
+    label: "权限组",
+    icon: <ShieldCheck />,
+    permissions: ["admin.permission_groups.view"],
+  },
+  {
+    key: "domains",
+    label: "域名",
+    icon: <Globe2 />,
+    permissions: ["admin.domains.view", "admin.dns.view"],
+  },
   { key: "mailboxes", label: "邮箱账号", icon: <Mailbox />, permissions: ["admin.mailboxes.view"] },
   { key: "aliases", label: "别名转发", icon: <Copy />, permissions: ["admin.aliases.view"] },
   { key: "messages", label: "全部邮件", icon: <Inbox />, permissions: ["admin.messages.view"] },
-  { key: "settings", label: "系统设置", icon: <Settings />, permissions: ["admin.settings.view", "admin.templates.view"] },
+  {
+    key: "settings",
+    label: "系统设置",
+    icon: <Settings />,
+    permissions: ["admin.settings.view", "admin.templates.view"],
+  },
 ]
 
 export function ProtectedLayout() {
@@ -56,7 +87,9 @@ function ProtectedContent() {
   const isProfileRoute = pathname.startsWith("/profile")
   const isAdminRoute = pathname.startsWith("/admin")
   const adminSection = new URLSearchParams(location.search).get("section") || "overview"
-  const visibleAdminSections = adminSections.filter((item) => hasAnyPermission(user, item.permissions))
+  const visibleAdminSections = adminSections.filter((item) =>
+    hasAnyPermission(user, item.permissions)
+  )
 
   if (isMailRoute || isProfileRoute) {
     return <Outlet />
@@ -67,8 +100,8 @@ function ProtectedContent() {
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton size="lg" asChild>
+            <SidebarMenuItem>
+              <SidebarMenuButton size="lg" asChild>
                 <Link to="/">
                   <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
                     <Mail className="size-4" />
@@ -106,7 +139,10 @@ function ProtectedContent() {
                     <span className="truncate font-semibold">{user.displayName}</span>
                     <span className="truncate text-xs text-muted-foreground">{user.email}</span>
                   </div>
-                  <Badge variant={user.role === "admin" ? "default" : "secondary"} className="ml-auto text-[10px]">
+                  <Badge
+                    variant={user.role === "admin" ? "default" : "secondary"}
+                    className="ml-auto text-[10px]"
+                  >
                     {user.role === "admin" ? "超级管理员" : "普通用户"}
                   </Badge>
                 </Link>
@@ -115,7 +151,8 @@ function ProtectedContent() {
           </SidebarMenu>
           <div className="p-2">
             <Button variant="outline" size="sm" className="w-full gap-2 text-xs" onClick={logout}>
-              <LogOut className="h-3.5 w-3.5" />退出登录
+              <LogOut className="h-3.5 w-3.5" />
+              退出登录
             </Button>
           </div>
         </SidebarFooter>
@@ -126,7 +163,10 @@ function ProtectedContent() {
           <div className="flex h-12 items-center gap-3 border-b bg-background px-3 md:hidden">
             <SidebarTrigger aria-label="打开导航" />
             <div className="min-w-0 flex-1 truncate text-sm font-semibold">
-              {isAdminRoute ? visibleAdminSections.find((item) => item.key === adminSection)?.label || "系统管理" : "LanQin Email"}
+              {isAdminRoute
+                ? visibleAdminSections.find((item) => item.key === adminSection)?.label ||
+                  "系统管理"
+                : "LanQin Email"}
             </div>
           </div>
           <Outlet />
@@ -136,7 +176,13 @@ function ProtectedContent() {
   )
 }
 
-function AdminSectionItems({ activeSection, sections }: { activeSection: string; sections: typeof adminSections }) {
+function AdminSectionItems({
+  activeSection,
+  sections,
+}: {
+  activeSection: string
+  sections: typeof adminSections
+}) {
   const { isMobile, setOpenMobile } = useSidebar()
 
   function closeMobile() {

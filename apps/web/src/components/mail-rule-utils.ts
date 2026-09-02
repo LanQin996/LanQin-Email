@@ -42,9 +42,29 @@ export const conditionOperatorLabels: Record<RuleConditionOperator, string> = {
   on: "当天",
 }
 
-const textConditionOperators: RuleConditionOperator[] = ["contains", "not-contains", "equals", "not-equals", "starts-with", "ends-with"]
-const sizeConditionOperators: RuleConditionOperator[] = ["gt", "gte", "lt", "lte", "equals", "not-equals"]
-const dateConditionOperators: RuleConditionOperator[] = ["before", "after", "on", "equals", "not-equals"]
+const textConditionOperators: RuleConditionOperator[] = [
+  "contains",
+  "not-contains",
+  "equals",
+  "not-equals",
+  "starts-with",
+  "ends-with",
+]
+const sizeConditionOperators: RuleConditionOperator[] = [
+  "gt",
+  "gte",
+  "lt",
+  "lte",
+  "equals",
+  "not-equals",
+]
+const dateConditionOperators: RuleConditionOperator[] = [
+  "before",
+  "after",
+  "on",
+  "equals",
+  "not-equals",
+]
 
 export const conditionFields = Object.keys(conditionFieldLabels) as RuleConditionField[]
 export const commonRuleFolders = ["Inbox", "Archive", "Spam", "Trash"]
@@ -62,7 +82,11 @@ export const ruleActionLabels: Record<MailRuleAction["type"], string> = {
 export function normalizeDraftAction(action: MailRuleAction, labels: MailLabel[]): MailRuleAction {
   if (action.type === "label") {
     const value = action.value || labels[0]?.name || ""
-    return { type: "label", value, labelId: labels.find((label) => label.name === value)?.id || action.labelId || "" }
+    return {
+      type: "label",
+      value,
+      labelId: labels.find((label) => label.name === value)?.id || action.labelId || "",
+    }
   }
   if (action.type === "move") return { type: "move", value: action.value || "Archive" }
   if (action.type === "forward") return { type: "forward", value: (action.value || "").trim() }
@@ -80,7 +104,9 @@ export function conditionOperatorsForField(field?: MailRuleCondition["field"]) {
   return textConditionOperators
 }
 
-export function defaultConditionOperator(field?: MailRuleCondition["field"]): RuleConditionOperator {
+export function defaultConditionOperator(
+  field?: MailRuleCondition["field"]
+): RuleConditionOperator {
   if (field === "all") return "equals"
   if (field === "size") return "gte"
   if (field === "date") return "on"
@@ -94,10 +120,18 @@ export function conditionPlaceholder(field?: MailRuleCondition["field"]) {
   return "输入值"
 }
 
-export function conditionSummary(conditions: MailRuleCondition[] = [], fromContains = "", subjectContains = "") {
+export function conditionSummary(
+  conditions: MailRuleCondition[] = [],
+  fromContains = "",
+  subjectContains = ""
+) {
   const legacyConditions = [
-    fromContains ? { field: "from", operator: "contains", value: fromContains } as MailRuleCondition : undefined,
-    subjectContains ? { field: "subject", operator: "contains", value: subjectContains } as MailRuleCondition : undefined,
+    fromContains
+      ? ({ field: "from", operator: "contains", value: fromContains } as MailRuleCondition)
+      : undefined,
+    subjectContains
+      ? ({ field: "subject", operator: "contains", value: subjectContains } as MailRuleCondition)
+      : undefined,
   ].filter(Boolean) as MailRuleCondition[]
   const items = conditions.length > 0 ? conditions : legacyConditions
   return items.map(conditionItemSummary).join("；") || "无条件"
@@ -115,12 +149,25 @@ function conditionItemSummary(item: MailRuleCondition): string {
 }
 
 export function actionSummary(action: MailRuleAction) {
-  if (action.type === "label") return `${ruleActionLabels[action.type]}${action.value ? `：${action.value}` : ""}`
-  if (action.type === "move") return `${ruleActionLabels[action.type]}：${folderLabel(action.value || "Archive")}`
+  if (action.type === "label")
+    return `${ruleActionLabels[action.type]}${action.value ? `：${action.value}` : ""}`
+  if (action.type === "move")
+    return `${ruleActionLabels[action.type]}：${folderLabel(action.value || "Archive")}`
   if (action.type === "forward") return `${ruleActionLabels[action.type]}：${action.value || ""}`
   return ruleActionLabels[action.type]
 }
 
 function folderLabel(folder: string) {
-  return ({ Inbox: "收件箱", Sent: "已发送", Drafts: "草稿箱", Archive: "归档", Spam: "垃圾邮件", Trash: "回收站" } as Record<string, string>)[folder] || folder
+  return (
+    (
+      {
+        Inbox: "收件箱",
+        Sent: "已发送",
+        Drafts: "草稿箱",
+        Archive: "归档",
+        Spam: "垃圾邮件",
+        Trash: "回收站",
+      } as Record<string, string>
+    )[folder] || folder
+  )
 }

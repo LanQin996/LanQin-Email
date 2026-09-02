@@ -46,42 +46,264 @@ export type PermissionKey =
   | "admin.templates.view"
   | "admin.templates.update"
   | "admin.templates.reset"
-export type PermissionInfo = { key: PermissionKey; label: string; description: string; category: string }
-export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number }
+export type PermissionInfo = {
+  key: PermissionKey
+  label: string
+  description: string
+  category: string
+}
+export type PermissionLimits = {
+  maxAttachmentMb: number
+  smtpDailyLimit: number
+  smtpMinuteLimit: number
+  imapMinuteLimit: number
+  pop3MinuteLimit: number
+}
 export type PermissionGroupSummary = { id: string; name: string }
-export type PermissionGroup = { id: string; name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits; system: boolean; userCount: number; createdAt: string; updatedAt: string }
-export type User = { id: string; email: string; displayName: string; role: "admin" | "user"; disabled: boolean; protected: boolean; twoFactorEnabled: boolean; permissions: PermissionKey[]; limits: PermissionLimits; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; createdAt: string }
-export type APIToken = { id: string; name: string; lastUsedAt?: string; expiresAt?: string; disabled: boolean; scopes: string[]; createdAt: string; updatedAt: string }
+export type PermissionGroup = {
+  id: string
+  name: string
+  description: string
+  permissions: PermissionKey[]
+  limits: PermissionLimits
+  system: boolean
+  userCount: number
+  createdAt: string
+  updatedAt: string
+}
+export type User = {
+  id: string
+  email: string
+  displayName: string
+  role: "admin" | "user"
+  disabled: boolean
+  protected: boolean
+  twoFactorEnabled: boolean
+  permissions: PermissionKey[]
+  limits: PermissionLimits
+  permissionGroupIds: string[]
+  permissionGroups: PermissionGroupSummary[]
+  createdAt: string
+}
+export type APIToken = {
+  id: string
+  name: string
+  lastUsedAt?: string
+  expiresAt?: string
+  disabled: boolean
+  scopes: string[]
+  createdAt: string
+  updatedAt: string
+}
 export type AdminUser = User & { mailboxCount: number; mailboxes?: string[] }
-export type AdminOverview = { users: number; activeUsers: number; domains: number; mailboxes: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number; storageBytes: number }
-export type Domain = { id: string; name: string; status: string; dkimSelector: string; dkimPublicKey?: string; dnsStatus: string; dnsCheckedAt?: string; createdAt: string }
-export type Mailbox = { id: string; userId: string; userEmail?: string; domainId: string; localPart: string; address: string; displayName: string; quotaMb: number; status: string; createdAt: string; access?: "owner" | "read"; sharedBy?: string; shareScope?: "all" | "custom"; shareIncludesStarred?: boolean; shareAllowsAttachments?: boolean }
+export type AdminOverview = {
+  users: number
+  activeUsers: number
+  domains: number
+  mailboxes: number
+  activeMailboxes: number
+  aliases: number
+  messages: number
+  unreadMessages: number
+  storageBytes: number
+}
+export type Domain = {
+  id: string
+  name: string
+  status: string
+  dkimSelector: string
+  dkimPublicKey?: string
+  dnsStatus: string
+  dnsCheckedAt?: string
+  createdAt: string
+}
+export type Mailbox = {
+  id: string
+  userId: string
+  userEmail?: string
+  domainId: string
+  localPart: string
+  address: string
+  displayName: string
+  quotaMb: number
+  status: string
+  createdAt: string
+  access?: "owner" | "read"
+  sharedBy?: string
+  shareScope?: "all" | "custom"
+  shareIncludesStarred?: boolean
+  shareAllowsAttachments?: boolean
+}
 export type ShareUser = { id: string; email: string; displayName: string }
 export type MailboxShareStatus = "active" | "expiring" | "expired" | "revoked" | "left"
-export type MailboxShare = { id: string; mailboxId: string; mailboxAddress: string; ownerUserId: string; ownerEmail: string; ownerName: string; sharedWithUserId: string; sharedWithEmail: string; sharedWithName: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; folderNames: string[]; labelIds: string[]; labelNames: string[]; allowAttachments: boolean; version: number; status: MailboxShareStatus; expiresAt?: string; lastAccessedAt?: string; revokedAt?: string; leftAt?: string; createdAt: string }
-export type MailboxSharePayload = { mailboxId: string; sharedWithUserId: string; scope: "all" | "custom"; includeStarred: boolean; folderIds: string[]; labelIds: string[]; allowAttachments: boolean; expiresInDays?: 0 | 7 | 30 | 90; expiresAt?: string }
-export type MailboxShareUpdatePayload = Omit<MailboxSharePayload, "mailboxId" | "sharedWithUserId"> & { version: number }
-export type MailboxShareAuditEvent = { id: string; shareId: string; actorEmail: string; event: "created" | "updated" | "renewed" | "revoked" | "left" | "accessed"; details: Record<string, unknown>; createdAt: string }
-export type UserNotification = { id: string; type: string; title: string; body: string; data: Record<string, unknown>; readAt?: string; createdAt: string }
-export type Alias = { id: string; domainId: string; source: string; destination: string; enabled: boolean; createdAt: string }
-export type MailFolder = { id: string; name: string; role: string; sortOrder: number; unreadCount: number; totalCount: number; uidValidity: number; uidNext: number; highestModseq: number }
-export type Attachment = { id: string; messageId: string; filename: string; contentType: string; sizeBytes: number; createdAt: string }
-export type MailLabel = { id: string; mailboxId?: string; name: string; color: string; messageCount?: number }
+export type MailboxShare = {
+  id: string
+  mailboxId: string
+  mailboxAddress: string
+  ownerUserId: string
+  ownerEmail: string
+  ownerName: string
+  sharedWithUserId: string
+  sharedWithEmail: string
+  sharedWithName: string
+  scope: "all" | "custom"
+  includeStarred: boolean
+  folderIds: string[]
+  folderNames: string[]
+  labelIds: string[]
+  labelNames: string[]
+  allowAttachments: boolean
+  version: number
+  status: MailboxShareStatus
+  expiresAt?: string
+  lastAccessedAt?: string
+  revokedAt?: string
+  leftAt?: string
+  createdAt: string
+}
+export type MailboxSharePayload = {
+  mailboxId: string
+  sharedWithUserId: string
+  scope: "all" | "custom"
+  includeStarred: boolean
+  folderIds: string[]
+  labelIds: string[]
+  allowAttachments: boolean
+  expiresInDays?: 0 | 7 | 30 | 90
+  expiresAt?: string
+}
+export type MailboxShareUpdatePayload = Omit<
+  MailboxSharePayload,
+  "mailboxId" | "sharedWithUserId"
+> & { version: number }
+export type MailboxShareAuditEvent = {
+  id: string
+  shareId: string
+  actorEmail: string
+  event: "created" | "updated" | "renewed" | "revoked" | "left" | "accessed"
+  details: Record<string, unknown>
+  createdAt: string
+}
+export type UserNotification = {
+  id: string
+  type: string
+  title: string
+  body: string
+  data: Record<string, unknown>
+  readAt?: string
+  createdAt: string
+}
+export type Alias = {
+  id: string
+  domainId: string
+  source: string
+  destination: string
+  enabled: boolean
+  createdAt: string
+}
+export type MailFolder = {
+  id: string
+  name: string
+  role: string
+  sortOrder: number
+  unreadCount: number
+  totalCount: number
+  uidValidity: number
+  uidNext: number
+  highestModseq: number
+}
+export type Attachment = {
+  id: string
+  messageId: string
+  filename: string
+  contentType: string
+  sizeBytes: number
+  createdAt: string
+}
+export type MailLabel = {
+  id: string
+  mailboxId?: string
+  name: string
+  color: string
+  messageCount?: number
+}
 export type MailMessage = {
-  id: string; mailboxId?: string; mailboxAddress?: string; ownerEmail?: string; recipientAddress?: string; folderId: string; folder: string; messageUid: string; imapUid: number; imapModseq: number; messageId: string; threadId?: string; threadCount?: number; subject: string; from: string; fromName?: string; to: string[]; cc: string[]; bcc?: string[]; sentAt: string; receivedAt: string; snippet: string; bodyText?: string; bodyHtml?: string; isRead: boolean; isStarred: boolean; hasAttachments: boolean; sizeBytes: number; attachments?: Attachment[]
+  id: string
+  mailboxId?: string
+  mailboxAddress?: string
+  ownerEmail?: string
+  recipientAddress?: string
+  folderId: string
+  folder: string
+  messageUid: string
+  imapUid: number
+  imapModseq: number
+  messageId: string
+  threadId?: string
+  threadCount?: number
+  subject: string
+  from: string
+  fromName?: string
+  to: string[]
+  cc: string[]
+  bcc?: string[]
+  sentAt: string
+  receivedAt: string
+  snippet: string
+  bodyText?: string
+  bodyHtml?: string
+  isRead: boolean
+  isStarred: boolean
+  hasAttachments: boolean
+  sizeBytes: number
+  attachments?: Attachment[]
   labels?: MailLabel[]
   sendQueueId?: string
   sendQueueStatus?: SendQueueStatus
   externalAccountId?: string
 }
 export type DNSRecord = { type: string; name: string; value: string; ttl: number }
-export type DNSCheckResult = { domain: string; status: string; checks: Record<string, { ok: boolean; message: string; found?: string[] }> }
+export type DNSCheckResult = {
+  domain: string
+  status: string
+  checks: Record<string, { ok: boolean; message: string; found?: string[] }>
+}
 export type ListResponse<T> = { items: T[]; nextCursor?: string; totalCount?: number }
-export type MailTranslation = { translatedText: string; translatedHtml?: string; sourceLanguage?: string; targetLanguage: string; truncated: boolean }
-export type SendPayload = { mailboxId?: string; to: string[]; cc: string[]; bcc: string[]; subject: string; text: string; html: string; attachments: { filename: string; contentType: string; contentBase64: string }[] }
-export type DraftPayload = Omit<SendPayload, "attachments"> & { attachments?: SendPayload["attachments"] }
+export type MailTranslation = {
+  translatedText: string
+  translatedHtml?: string
+  sourceLanguage?: string
+  targetLanguage: string
+  truncated: boolean
+}
+export type SendPayload = {
+  mailboxId?: string
+  to: string[]
+  cc: string[]
+  bcc: string[]
+  subject: string
+  text: string
+  html: string
+  attachments: { filename: string; contentType: string; contentBase64: string }[]
+}
+export type DraftPayload = Omit<SendPayload, "attachments"> & {
+  attachments?: SendPayload["attachments"]
+}
 export type ScheduleSendPayload = SendPayload & { draftId?: string; sendAt: string }
-export type ScheduledSend = { id: string; mailboxId: string; draftId?: string; subject: string; to: string[]; snippet: string; sendAt: string; status: "pending" | "sending" | "sent" | "failed" | "cancelled"; error?: string; createdAt: string; updatedAt: string; sentAt?: string }
+export type ScheduledSend = {
+  id: string
+  mailboxId: string
+  draftId?: string
+  subject: string
+  to: string[]
+  snippet: string
+  sendAt: string
+  status: "pending" | "sending" | "sent" | "failed" | "cancelled"
+  error?: string
+  createdAt: string
+  updatedAt: string
+  sentAt?: string
+}
 export type SendQueueStatus = "queued" | "sending" | "delivered" | "failed" | "canceled"
 export type SendQueueItem = {
   id: string
@@ -136,29 +358,188 @@ export type AdminDeliveryQueueItem = {
   deliveredAt?: string
 }
 export type Contact = { id: string; name: string; email: string; note: string; createdAt: string }
-export type MailSignature = { id: string; mailboxId: string; name: string; content: string; isDefault: boolean; createdAt: string; updatedAt: string }
-export type MailRuleConditionField = "all" | "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"
-export type MailRuleConditionOperator = "contains" | "not-contains" | "equals" | "not-equals" | "starts-with" | "ends-with" | "gt" | "gte" | "lt" | "lte" | "before" | "after" | "on"
-export type MailRuleCondition = { field?: MailRuleConditionField; operator?: MailRuleConditionOperator; value?: string; matchMode?: "all" | "any"; conditions?: MailRuleCondition[] }
-export type MailRuleAction = { type: "archive" | "trash" | "star" | "mark-read" | "label" | "move" | "forward" | "telegram"; value?: string; labelId?: string }
-export type MailRule = { id: string; mailboxId: string; name: string; matchMode: "all" | "any"; conditions: MailRuleCondition[]; actions: MailRuleAction[]; applyToExisting: boolean; stopProcessing: boolean; fromContains: string; subjectContains: string; action: MailRuleAction["type"]; enabled: boolean; createdAt: string; appliedExistingCount?: number }
-export type TelegramSettings = { available: boolean; configured: boolean; tokenSet: boolean; botUsername: string; chatId: string; enabled: boolean; lastDeliveredAt?: string; lastError?: string }
-export type ForwardAddress = { id: string; email: string; verified: boolean; expiresAt?: string; verifiedAt?: string; createdAt: string }
-export type BlockedSender = { id: string; mailboxId: string; email: string; reason: string; createdAt: string }
-export type MailStats = { totalMessages: number; unreadMessages: number; starredMessages: number; attachmentCount: number; attachmentBytes: number; storageBytes: number; quotaBytes: number; quotaUsedPct: number; byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[] }
+export type MailSignature = {
+  id: string
+  mailboxId: string
+  name: string
+  content: string
+  isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+export type MailRuleConditionField =
+  "all" | "from" | "to" | "cc" | "subject" | "body" | "attachment" | "size" | "date"
+export type MailRuleConditionOperator =
+  | "contains"
+  | "not-contains"
+  | "equals"
+  | "not-equals"
+  | "starts-with"
+  | "ends-with"
+  | "gt"
+  | "gte"
+  | "lt"
+  | "lte"
+  | "before"
+  | "after"
+  | "on"
+export type MailRuleCondition = {
+  field?: MailRuleConditionField
+  operator?: MailRuleConditionOperator
+  value?: string
+  matchMode?: "all" | "any"
+  conditions?: MailRuleCondition[]
+}
+export type MailRuleAction = {
+  type: "archive" | "trash" | "star" | "mark-read" | "label" | "move" | "forward" | "telegram"
+  value?: string
+  labelId?: string
+}
+export type MailRule = {
+  id: string
+  mailboxId: string
+  name: string
+  matchMode: "all" | "any"
+  conditions: MailRuleCondition[]
+  actions: MailRuleAction[]
+  applyToExisting: boolean
+  stopProcessing: boolean
+  fromContains: string
+  subjectContains: string
+  action: MailRuleAction["type"]
+  enabled: boolean
+  createdAt: string
+  appliedExistingCount?: number
+}
+export type TelegramSettings = {
+  available: boolean
+  configured: boolean
+  tokenSet: boolean
+  botUsername: string
+  chatId: string
+  enabled: boolean
+  lastDeliveredAt?: string
+  lastError?: string
+}
+export type ForwardAddress = {
+  id: string
+  email: string
+  verified: boolean
+  expiresAt?: string
+  verifiedAt?: string
+  createdAt: string
+}
+export type BlockedSender = {
+  id: string
+  mailboxId: string
+  email: string
+  reason: string
+  createdAt: string
+}
+export type MailStats = {
+  totalMessages: number
+  unreadMessages: number
+  starredMessages: number
+  attachmentCount: number
+  attachmentBytes: number
+  storageBytes: number
+  quotaBytes: number
+  quotaUsedPct: number
+  byFolder: { folder: string; role: string; count: number; unread: number; bytes: number }[]
+}
 export type ExternalImapStorageMode = "local" | "remote"
 export type ExternalImapTlsMode = "tls" | "starttls" | "plain"
 export type ExternalImapAuthMode = "password" | "oauth2"
-export type ExternalImapAccount = { id: string; mailboxId: string; name: string; host: string; port: number; tlsMode: ExternalImapTlsMode; username: string; authMode: ExternalImapAuthMode; oauthProvider?: ExternalImapOAuthProvider; oauthEmail?: string; oauthConfigured?: boolean; storageMode: ExternalImapStorageMode; syncReadState: boolean; enabled: boolean; lastSyncAt?: string; lastStatus: string; lastError?: string; createdAt: string; updatedAt: string }
-export type ExternalImapAccountPayload = { mailboxId: string; name: string; host: string; port: number; tlsMode: ExternalImapTlsMode; username: string; password?: string; storageMode: ExternalImapStorageMode; syncReadState: boolean; enabled: boolean }
+export type ExternalImapAccount = {
+  id: string
+  mailboxId: string
+  name: string
+  host: string
+  port: number
+  tlsMode: ExternalImapTlsMode
+  username: string
+  authMode: ExternalImapAuthMode
+  oauthProvider?: ExternalImapOAuthProvider
+  oauthEmail?: string
+  oauthConfigured?: boolean
+  storageMode: ExternalImapStorageMode
+  syncReadState: boolean
+  enabled: boolean
+  lastSyncAt?: string
+  lastStatus: string
+  lastError?: string
+  createdAt: string
+  updatedAt: string
+}
+export type ExternalImapAccountPayload = {
+  mailboxId: string
+  name: string
+  host: string
+  port: number
+  tlsMode: ExternalImapTlsMode
+  username: string
+  password?: string
+  storageMode: ExternalImapStorageMode
+  syncReadState: boolean
+  enabled: boolean
+}
 export type ExternalImapOAuthProvider = "gmail" | "outlook"
-export type ExternalImapOAuthStartPayload = { mailboxId: string; name?: string; email?: string; storageMode: ExternalImapStorageMode; syncReadState: boolean; enabled: boolean }
-export type ExternalImapFolder = { name: string; role: string; unreadCount: number; totalCount: number }
-export type ExternalImapSyncRun = { id: string; accountId: string; folder?: string; status: string; imported: number; skipped: number; failed: number; error?: string; startedAt: string; finishedAt?: string }
-export type MailTemplate = { key: string; name: string; subject: string; bodyText: string; bodyHtml: string; updatedAt: string }
-export type MailboxApplyOptions = { enabled: boolean; domains: Domain[]; reservedPrefixes?: string[] }
-export type MaildirSyncCounts = { directoriesChecked: number; directoriesScanned: number; filesScanned: number; imported: number; backfilled: number; cleaned: number; fileErrors: number }
-export type MaildirSyncRun = { startedAt: string; finishedAt?: string; durationMs: number; status: "running" | "success" | "partial" | "error"; error?: string; counts: MaildirSyncCounts }
+export type ExternalImapOAuthStartPayload = {
+  mailboxId: string
+  name?: string
+  email?: string
+  storageMode: ExternalImapStorageMode
+  syncReadState: boolean
+  enabled: boolean
+}
+export type ExternalImapFolder = {
+  name: string
+  role: string
+  unreadCount: number
+  totalCount: number
+}
+export type ExternalImapSyncRun = {
+  id: string
+  accountId: string
+  folder?: string
+  status: string
+  imported: number
+  skipped: number
+  failed: number
+  error?: string
+  startedAt: string
+  finishedAt?: string
+}
+export type MailTemplate = {
+  key: string
+  name: string
+  subject: string
+  bodyText: string
+  bodyHtml: string
+  updatedAt: string
+}
+export type MailboxApplyOptions = {
+  enabled: boolean
+  domains: Domain[]
+  reservedPrefixes?: string[]
+}
+export type MaildirSyncCounts = {
+  directoriesChecked: number
+  directoriesScanned: number
+  filesScanned: number
+  imported: number
+  backfilled: number
+  cleaned: number
+  fileErrors: number
+}
+export type MaildirSyncRun = {
+  startedAt: string
+  finishedAt?: string
+  durationMs: number
+  status: "running" | "success" | "partial" | "error"
+  error?: string
+  counts: MaildirSyncCounts
+}
 export type MaildirSyncHealth = {
   configured: boolean
   enabled: boolean
@@ -211,13 +592,73 @@ export type SystemSettings = {
   externalImapOutlookClientId: string
   externalImapOutlookClientSecretSet: boolean
 }
-export type SystemSettingsPayload = Omit<SystemSettings, "smtpPasswordSet" | "turnstileSecretSet" | "linuxDoClientSecretSet" | "linuxDoCallbackUrl" | "externalImapSecretSet" | "externalImapGmailClientSecretSet" | "externalImapOutlookClientSecretSet"> & { smtpPassword: string; turnstileSecretKey: string; linuxDoClientSecret: string; externalImapSecretKey: string; externalImapGmailClientSecret: string; externalImapOutlookClientSecret: string }
+export type SystemSettingsPayload = Omit<
+  SystemSettings,
+  | "smtpPasswordSet"
+  | "turnstileSecretSet"
+  | "linuxDoClientSecretSet"
+  | "linuxDoCallbackUrl"
+  | "externalImapSecretSet"
+  | "externalImapGmailClientSecretSet"
+  | "externalImapOutlookClientSecretSet"
+> & {
+  smtpPassword: string
+  turnstileSecretKey: string
+  linuxDoClientSecret: string
+  externalImapSecretKey: string
+  externalImapGmailClientSecret: string
+  externalImapOutlookClientSecret: string
+}
 export type PublicDomain = { id: string; name: string }
-export type PublicSettings = { openRegistration: boolean; inviteRegistrationEnabled: boolean; turnstileEnabled: boolean; turnstileSiteKey: string; publicHostname: string; mailAutoRefresh: boolean; mailRefreshMs: number; externalImapEnabled: boolean; linuxDoSSOEnabled: boolean; linuxDoRegistrationEnabled: boolean; mailboxDomains?: PublicDomain[] }
-export type LoginPayload = { email?: string; password?: string; turnstileToken?: string; challengeToken?: string; twoFactorCode?: string }
+export type PublicSettings = {
+  openRegistration: boolean
+  inviteRegistrationEnabled: boolean
+  turnstileEnabled: boolean
+  turnstileSiteKey: string
+  publicHostname: string
+  mailAutoRefresh: boolean
+  mailRefreshMs: number
+  externalImapEnabled: boolean
+  linuxDoSSOEnabled: boolean
+  linuxDoRegistrationEnabled: boolean
+  mailboxDomains?: PublicDomain[]
+}
+export type LoginPayload = {
+  email?: string
+  password?: string
+  turnstileToken?: string
+  challengeToken?: string
+  twoFactorCode?: string
+}
 export type LoginResponse = { user?: User; twoFactorRequired?: boolean; challengeToken?: string }
-export type RegisterPayload = { email: string; displayName: string; password: string; turnstileToken?: string; domainId?: string; localPart?: string; inviteCode?: string }
-export type RegistrationInvite = { id: string; code: string; maxUses: number; usedCount: number; remainingUses: number; createdByEmail?: string; createdAt: string }
+export type RegisterPayload = {
+  email: string
+  displayName: string
+  password: string
+  turnstileToken?: string
+  domainId?: string
+  localPart?: string
+  inviteCode?: string
+}
+export type RegistrationInvite = {
+  id: string
+  code: string
+  maxUses: number
+  usedCount: number
+  remainingUses: number
+  createdByEmail?: string
+  createdAt: string
+}
 export type LinuxDoIdentity = { linked: boolean; username?: string }
-export type LinuxDoPendingRegistration = { username: string; displayName: string; domains: PublicDomain[] }
-export type LinuxDoRegistrationPayload = { domainId: string; localPart: string; displayName: string; password: string; turnstileToken?: string }
+export type LinuxDoPendingRegistration = {
+  username: string
+  displayName: string
+  domains: PublicDomain[]
+}
+export type LinuxDoRegistrationPayload = {
+  domainId: string
+  localPart: string
+  displayName: string
+  password: string
+  turnstileToken?: string
+}

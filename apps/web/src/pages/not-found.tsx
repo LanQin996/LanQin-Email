@@ -16,7 +16,8 @@ export function NotFoundPage() {
         <div className="flex justify-center gap-3">
           <Button asChild>
             <Link to="/">
-              <Home className="mr-2 h-4 w-4" />返回首页
+              <Home className="mr-2 h-4 w-4" />
+              返回首页
             </Link>
           </Button>
           <Button variant="outline" asChild>
