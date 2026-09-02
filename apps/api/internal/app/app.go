@@ -163,6 +163,8 @@ func (a *App) migrate(ctx context.Context) error {
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
+			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -774,6 +776,9 @@ func (a *App) migrate(ctx context.Context) error {
 	if err := a.migratePermissionGroupLimits(ctx); err != nil {
 		return err
 	}
+	if err := a.migrateMailboxQuota(ctx); err != nil {
+		return err
+	}
 	if err := a.migrateSendQueueMessageID(ctx); err != nil {
 		return err
 	}
@@ -1070,6 +1075,50 @@ func (a *App) migrateSendQueueMessageID(ctx context.Context) error {
 	}
 	_, err = a.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_send_queue_mailbox_source_message_id ON send_queue(mailbox_id, source, message_id) WHERE message_id <> ''`)
 	return err
+}
+
+// migrateMailboxQuota adds the per-user mailbox counters.
+//
+// Existing rows are backfilled from the current mailbox count. Mailboxes that
+// were deleted before this migration ran cannot be recovered, so the backfilled
+// total is a lower bound for pre-existing accounts. That is an accepted,
+// one-time loss of precision, not a bug.
+func (a *App) migrateMailboxQuota(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(users)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !columns["mailboxes_created_total"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN mailboxes_created_total INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		if _, err := a.db.ExecContext(ctx, `UPDATE users SET mailboxes_created_total =
+			(SELECT COUNT(*) FROM mailboxes WHERE mailboxes.user_id = users.id)`); err != nil {
+			return err
+		}
+	}
+	if !columns["mailbox_quota_bonus"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) migratePermissionGroupLimits(ctx context.Context) error {
@@ -1496,7 +1545,8 @@ func (a *App) seed(ctx context.Context) error {
 	}
 
 	// Create mailbox for admin
-	mailboxID, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, adminEmail, string(passwordHash), 1024, "active")
+	// Bootstrapping the configured administrator must never be blocked by a quota.
+	mailboxID, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, adminEmail, string(passwordHash), 1024, "active", nil)
 	if err != nil {
 		return err
 	}
@@ -1570,21 +1620,21 @@ func defaultFolderDefs() []struct{ name, role string } {
 	}
 }
 
-func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, displayName, password string, quotaMB int, status string) (string, error) {
+func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, displayName, password string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
-	return a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, displayName, string(passwordHash), quotaMB, status)
+	return a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, displayName, string(passwordHash), quotaMB, status, enforceQuotaFor)
 }
 
-func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status)
+	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status, enforceQuotaFor)
 	if err != nil {
 		return "", err
 	}
@@ -1594,7 +1644,16 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 	return id, nil
 }
 
-func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+// createMailboxWithPasswordHashTx is the single funnel every mailbox creation
+// goes through, which is why the lifetime counter is incremented here rather
+// than at the call sites.
+//
+// enforceQuotaFor selects whether the user's mailbox quota is checked: pass the
+// owning user for self-service paths (registration, self-apply), or nil for
+// administrative paths that are deliberately allowed to exceed the quota. It is
+// a required parameter so that adding a new creation path forces an explicit
+// decision instead of silently defaulting to "unchecked".
+func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	localPart = normalizeLocalPart(localPart)
 	if localPart == "" {
 		return "", errors.New("invalid local part")
@@ -1616,6 +1675,9 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 
 	id := newID("mbx")
 	now := a.now().UTC().Format(time.RFC3339Nano)
+	if err := a.consumeMailboxQuotaTx(ctx, tx, userID, now, enforceQuotaFor); err != nil {
+		return "", err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, passwordHash, quotaMB, status, now, now)
 	if err != nil {
@@ -1628,6 +1690,66 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 		}
 	}
 	return id, nil
+}
+
+// errMailboxCountLimitReached is returned when a self-service mailbox creation
+// would push the user past their permission group's mailbox count limit.
+//
+// Not to be confused with errMailboxQuotaExceeded, which is about a mailbox's
+// storage size in bytes.
+var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
+
+// consumeMailboxQuotaTx increments the user's lifetime mailbox counter and, when
+// enforceQuotaFor is set, refuses to do so once the effective limit is reached.
+//
+// The check and the increment are one conditional UPDATE on purpose. Reading the
+// counter and then writing it back would let two concurrent requests observe the
+// same value and both pass, because none of the three supported databases run at
+// an isolation level that would prevent it by default. This mirrors how
+// consumeRegistrationInviteTx guards invite codes.
+func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
+	query := `UPDATE users SET mailboxes_created_total=mailboxes_created_total+1, updated_at=? WHERE id=?`
+	args := []any{now, userID}
+
+	limit := 0
+	if enforceQuotaFor != nil {
+		limit = effectiveMailboxLimit(enforceQuotaFor)
+	}
+	// A limit of 0 means unlimited, so the guard is simply omitted. The bound is
+	// inlined rather than passed as a parameter to keep PostgreSQL from having to
+	// infer a type for a bare placeholder comparison.
+	if limit > 0 {
+		query += ` AND mailboxes_created_total<?`
+		args = append(args, limit)
+	}
+
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		if limit > 0 {
+			return errMailboxCountLimitReached
+		}
+		// No guard was applied, so the only way to match zero rows is a missing user.
+		return errNotFound
+	}
+	return nil
+}
+
+// mailboxCountLimitMessage explains the limit in the user's own terms. The
+// cumulative wording matters: deleting a mailbox does not free up an allowance,
+// which is otherwise counter-intuitive.
+func mailboxCountLimitMessage(u *User) string {
+	limit := effectiveMailboxLimit(u)
+	if limit <= 0 {
+		return "邮箱数量已达上限"
+	}
+	return fmt.Sprintf("邮箱数量已达上限（%d 个，按累计创建数计算，删除邮箱不会释放额度）", limit)
 }
 
 func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {

@@ -434,6 +434,7 @@ export function ProfilePage() {
         mailboxes={canAccessMail ? mailboxes.data?.items || [] : []}
         applyOptions={mailboxApplyOptions.data}
         applyPending={applyMailbox.isPending}
+        mailboxQuota={user ? { used: user.mailboxesCreatedTotal, limit: user.limits.maxMailboxes > 0 ? user.limits.maxMailboxes + user.mailboxQuotaBonus : 0 } : undefined}
         selectedMailboxId={mailboxId}
         externalImapEnabled={externalImapEnabled}
         externalAccounts={externalImapAccounts.data?.items || []}
@@ -706,6 +707,7 @@ function MailboxManagement({
   mailboxes,
   applyOptions,
   applyPending,
+  mailboxQuota,
   selectedMailboxId,
   externalImapEnabled,
   externalAccounts,
@@ -731,6 +733,7 @@ function MailboxManagement({
   mailboxes: Mailbox[]
   applyOptions?: MailboxApplyOptions
   applyPending: boolean
+  mailboxQuota?: { used: number; limit: number }
   selectedMailboxId: string
   externalImapEnabled: boolean
   externalAccounts: ExternalImapAccount[]
@@ -757,7 +760,12 @@ function MailboxManagement({
   const selectedMailbox = mailboxes.find((item) => item.id === selectedMailboxId)
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {mailboxQuota && (
+          <Badge variant="secondary" className="font-normal">
+            邮箱额度 {mailboxQuota.limit > 0 ? `${mailboxQuota.used} / ${mailboxQuota.limit}` : `${mailboxQuota.used} / 不限`}
+          </Badge>
+        )}
         {canApply && <ApplyMailboxDialog options={applyOptions} pending={applyPending} onApply={onApply} />}
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">

@@ -753,13 +753,18 @@ func saveMailboxShareScopes(ctx context.Context, tx *sql.Tx, shareID string, fol
 	return nil
 }
 
+// addMailboxShareAudit records who touched a shared mailbox. It cannot return an
+// error without changing every caller, so a failure is at least logged: silently
+// losing an audit row would leave cross-account access untraceable.
 func (a *App) addMailboxShareAudit(ctx context.Context, executor externalSchemaExecutor, shareID, mailboxID, actorUserID, event string, details map[string]any) {
 	if details == nil {
 		details = map[string]any{}
 	}
 	encoded, _ := json.Marshal(details)
-	_, _ = executor.ExecContext(ctx, `INSERT INTO mailbox_share_audit_events(id,share_id,mailbox_id,actor_user_id,event,details_json,created_at) VALUES(?,?,?,?,?,?,?)`,
-		newID("sha"), shareID, mailboxID, actorUserID, event, string(encoded), a.now().UTC().Format(time.RFC3339Nano))
+	if _, err := executor.ExecContext(ctx, `INSERT INTO mailbox_share_audit_events(id,share_id,mailbox_id,actor_user_id,event,details_json,created_at) VALUES(?,?,?,?,?,?,?)`,
+		newID("sha"), shareID, mailboxID, actorUserID, event, string(encoded), a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		a.log.Warn("failed to record mailbox share audit event", "error", err, "share_id", shareID, "event", event)
+	}
 }
 
 func (a *App) addNotification(ctx context.Context, executor externalSchemaExecutor, userID, kind, title, body string, data map[string]any, dedupeKey string) {
@@ -771,8 +776,13 @@ func (a *App) addNotification(ctx context.Context, executor externalSchemaExecut
 	if dedupeKey != "" {
 		dedupe = dedupeKey
 	}
-	_, _ = executor.ExecContext(ctx, `INSERT INTO user_notifications(id,user_id,type,title,body,data_json,dedupe_key,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		newID("ntf"), userID, kind, title, body, string(encoded), dedupe, a.now().UTC().Format(time.RFC3339Nano))
+	if _, err := executor.ExecContext(ctx, `INSERT INTO user_notifications(id,user_id,type,title,body,data_json,dedupe_key,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		newID("ntf"), userID, kind, title, body, string(encoded), dedupe, a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		// Duplicate dedupe_key collisions are expected and benign.
+		if !isUniqueViolation(err) {
+			a.log.Warn("failed to record user notification", "error", err, "user_id", userID, "type", kind)
+		}
+	}
 }
 
 func (a *App) recordMailboxShareAccess(ctx context.Context, shareID, mailboxID, actorUserID string) {
@@ -780,6 +790,7 @@ func (a *App) recordMailboxShareAccess(ctx context.Context, shareID, mailboxID, 
 	result, err := a.db.ExecContext(ctx, `UPDATE mailbox_shares SET last_accessed_at=? WHERE id=? AND (last_accessed_at IS NULL OR last_accessed_at<?)`,
 		now.Format(time.RFC3339Nano), shareID, now.Add(-time.Hour).Format(time.RFC3339Nano))
 	if err != nil {
+		a.log.Warn("failed to record mailbox share access", "error", err, "share_id", shareID)
 		return
 	}
 	if affected, _ := result.RowsAffected(); affected > 0 {

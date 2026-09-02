@@ -21,7 +21,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 - **Webmail client**: multiple mailbox switching, folders, reading and composing messages, drafts, scheduled sending, attachments, search, labels, stars, move/delete, read/unread status.
 - **Mailbox enhancements**: contacts, signatures, inbox rules (including automatic forwarding after delivery), sender blacklist, mail statistics, archive read messages, empty Trash/Spam.
 - **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, address aliases (delivery redirection, not inbox auto-forwarding), catch-all toggle.
-- **Accounts and permissions**: email/password login, Linux.do OAuth2 SSO, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
+- **Accounts and permissions**: email/password login, Linux.do OAuth2 SSO, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC with per-group quotas for attachment size, send rate, and mailbox count.
 - **Admin panel**: overview checklist, user/permission group/domain/mailbox/alias/all-message management, system settings, mail templates, SMTP testing.
 - **Mail service stack**: Postfix delivery, Dovecot IMAP/POP3, Rspamd anti-spam and DKIM signing, Maildir-to-SQLite sync.
 - **Deployment friendly**: default all-in-one single container, plus a multi-container stack for debugging Postfix/Dovecot/Rspamd.
@@ -153,6 +153,12 @@ Production SSO requires a valid HTTPS `LANQIN_PUBLIC_BASE_URL`. LanQin uses the 
 ## Invitation Registration
 
 Invitation registration is configured in **Admin > System Settings > Security**. When public registration is disabled but invitation registration is enabled, users must enter a valid invitation code. Administrators can create a custom code or let LanQin generate one, set its maximum number of uses, view and copy the full code later, monitor remaining uses, and delete it. Successful registration and use-count updates are committed in one database transaction. Linux.do registration remains controlled by its separate switch.
+
+## Permission Group Quotas
+
+Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP messages per day and per minute, IMAP and POP3 commands per minute, and the number of mailboxes a user may create. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
+
+The mailbox quota counts **every mailbox ever created** for the user, including mailboxes that were later deleted, so deleting a mailbox does not hand the allowance back. This is what prevents a user from cycling create and delete to exceed the limit. Self-service requests under **Profile > Mailboxes** are refused once the limit is reached; mailboxes created by an administrator or through the Open API are allowed past it but still count towards the total. The default allowance for regular users is 3 mailboxes.
 
 ## Key Environment Variables
 

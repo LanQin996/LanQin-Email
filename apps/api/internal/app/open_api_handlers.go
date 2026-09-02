@@ -231,7 +231,9 @@ func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request)
 		respondMailboxOwnerError(w, err)
 		return
 	}
-	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), req.QuotaMB, "active")
+	// Same rationale as the admin panel: an API caller with mailbox-write scope is
+	// trusted to exceed a user's quota, but the creation is still counted.
+	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), req.QuotaMB, "active", nil)
 	if err != nil {
 		badRequest(w, err)
 		return

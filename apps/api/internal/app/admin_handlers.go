@@ -603,7 +603,9 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, local, displayName, req.Password, req.QuotaMB, "active")
+	// Administrators may deliberately exceed a user's mailbox quota, so no limit
+	// is enforced here. The creation is still counted against the user's total.
+	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, local, displayName, req.Password, req.QuotaMB, "active", nil)
 	if err != nil {
 		badRequest(w, err)
 		return

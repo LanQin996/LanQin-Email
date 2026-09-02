@@ -9,14 +9,109 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/microcosm-cc/bluemonday"
 )
+
+// isPublicUnicastIP reports whether ip is a globally routable unicast address.
+//
+// Every outbound-connection guard shares this predicate on purpose: when the
+// rules lived in one copy per feature they drifted apart, and the weaker copy
+// silently became the SSRF hole.
+func isPublicUnicastIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() &&
+		!ip.IsLoopback() &&
+		!ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsMulticast() &&
+		!ip.IsUnspecified()
+}
+
+// safeAttachmentContentType reduces a stored MIME type to a well-formed media
+// type. The value originates from the sender's headers, so it is untrusted;
+// parameters are dropped because responses are always sent as a download.
+func safeAttachmentContentType(value string) string {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil || mediaType == "" {
+		return "application/octet-stream"
+	}
+	return mediaType
+}
+
+// attachmentDisposition builds a Content-Disposition value that survives
+// non-ASCII filenames. The quoted form is kept as an ASCII fallback for old
+// clients and the RFC 5987 form carries the real name.
+//
+// Do not use mime.QEncoding here: RFC 2047 encoded-words are an email header
+// construct and browsers render them literally in HTTP responses.
+func attachmentDisposition(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	if runes := []rune(filename); len(runes) > 120 {
+		filename = string(runes[:120])
+	}
+	var fallback strings.Builder
+	fallback.Grow(len(filename))
+	for _, r := range filename {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			// Drop control characters, including CR and LF.
+		case r > 0x7e || r == '"' || r == '\\':
+			fallback.WriteByte('_')
+		default:
+			fallback.WriteRune(r)
+		}
+	}
+	ascii := strings.TrimSpace(fallback.String())
+	if ascii == "" {
+		ascii = "attachment"
+	}
+	return `attachment; filename="` + ascii + `"; filename*=UTF-8''` + rfc5987Escape(filename)
+}
+
+// rfc5987Escape percent-encodes everything outside the unreserved set, which is
+// always a valid subset of RFC 5987 attr-char.
+func rfc5987Escape(value string) string {
+	const hexDigits = "0123456789ABCDEF"
+	var b strings.Builder
+	b.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '.' || c == '_' || c == '~' {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hexDigits[c>>4])
+		b.WriteByte(hexDigits[c&0x0f])
+	}
+	return b.String()
+}
+
+// writeAttachmentHeaders applies the download headers shared by every
+// attachment endpoint. nosniff is defence in depth: Content-Disposition already
+// prevents rendering, but the media type is attacker-controlled.
+func writeAttachmentHeaders(w http.ResponseWriter, contentType, filename string, size int64) {
+	w.Header().Set("Content-Type", safeAttachmentContentType(contentType))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", attachmentDisposition(filename))
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+}
 
 type HTMLPolicy struct{ policy *bluemonday.Policy }
 

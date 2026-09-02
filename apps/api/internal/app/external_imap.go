@@ -13,13 +13,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"mime/quotedprintable"
 	"net"
 	"net/http"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -685,9 +685,7 @@ func (a *App) handleExternalIMAPAttachment(w http.ResponseWriter, r *http.Reques
 			respondError(w, http.StatusNotFound, "attachment not found")
 			return
 		}
-		w.Header().Set("Content-Type", att.ContentType)
-		w.Header().Set("Content-Disposition", `attachment; filename="`+escapeDownloadFilename(att.Filename)+`"`)
-		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		writeAttachmentHeaders(w, att.ContentType, att.Filename, int64(len(data)))
 		_, _ = w.Write(data)
 		return
 	}
@@ -696,9 +694,7 @@ func (a *App) handleExternalIMAPAttachment(w http.ResponseWriter, r *http.Reques
 		respondError(w, http.StatusBadRequest, "failed to load remote message")
 		return
 	}
-	w.Header().Set("Content-Type", "message/rfc822")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+safeExternalEMLFilename(remote.Subject)+`"`)
-	w.Header().Set("Content-Length", strconv.Itoa(len(raw)))
+	writeAttachmentHeaders(w, "message/rfc822", safeExternalEMLFilename(remote.Subject), int64(len(raw)))
 	_, _ = w.Write(raw)
 }
 
@@ -809,18 +805,37 @@ func (a *App) validateExternalIMAPHost(ctx context.Context, host string) error {
 		}
 	}
 	for _, ip := range ips {
-		if !isPublicExternalIMAPIP(ip) {
+		if !isPublicUnicastIP(ip) {
 			return errors.New("private or local IMAP hosts are not allowed")
 		}
 	}
 	return nil
 }
 
-func isPublicExternalIMAPIP(ip net.IP) bool {
-	if ip == nil {
-		return false
+// externalIMAPDialer returns a dialer that re-checks the destination after DNS
+// resolution.
+//
+// validateExternalIMAPHost resolves the hostname itself, so on its own it leaves
+// a DNS rebinding window: a hostile resolver can answer with a public address
+// for the check and a private one for the connection that follows. Dialer.Control
+// runs once per connection attempt with the address actually being dialed, which
+// is the only point where the check cannot be raced.
+func (a *App) externalIMAPDialer() *net.Dialer {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	if a.cfg.ExternalIMAPAllowPrivateHosts {
+		return dialer
 	}
-	return !(ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified())
+	dialer.Control = func(_, address string, _ syscall.RawConn) error {
+		host, _, err := net.SplitHostPort(address)
+		if err != nil {
+			return err
+		}
+		if !isPublicUnicastIP(net.ParseIP(host)) {
+			return errors.New("private or local IMAP hosts are not allowed")
+		}
+		return nil
+	}
+	return dialer
 }
 
 func (a *App) encryptExternalIMAPPassword(password string) (string, error) {
@@ -1479,30 +1494,13 @@ func decodeExternalIMAPPartData(data []byte, encoding string) ([]byte, error) {
 	}
 }
 
-func escapeDownloadFilename(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = "attachment"
-	}
-	name = strings.Map(func(r rune) rune {
-		if r < 32 || r == '"' || r == '\\' {
-			return '-'
-		}
-		return r
-	}, name)
-	if len([]rune(name)) > 120 {
-		name = string([]rune(name)[:120])
-	}
-	return mime.QEncoding.Encode("utf-8", name)
-}
-
 func (a *App) openExternalIMAPClient(ctx context.Context, account externalIMAPAccountRecord) (externalIMAPClient, error) {
 	if err := a.validateExternalIMAPHost(ctx, account.Host); err != nil {
 		return nil, err
 	}
 	addr := net.JoinHostPort(account.Host, strconv.Itoa(account.Port))
 	options := &imapclient.Options{
-		Dialer:    &net.Dialer{Timeout: 10 * time.Second},
+		Dialer:    a.externalIMAPDialer(),
 		TLSConfig: &tls.Config{ServerName: account.Host, MinVersion: tls.VersionTLS12},
 	}
 	var c *imapclient.Client

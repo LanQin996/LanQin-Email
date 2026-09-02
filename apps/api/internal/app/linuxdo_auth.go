@@ -452,7 +452,12 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
 	}
-	if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), 1024, "active"); err != nil {
+	// The account was inserted moments ago inside this transaction, so its
+	// mailbox counter is 0 and no quota could reject the very first mailbox.
+	// Loading a *User here would also have to read permission groups outside
+	// this transaction, where the new row is not yet visible. The counter is
+	// still incremented by the call below.
+	if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), 1024, "active", nil); err != nil {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
 	}

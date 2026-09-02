@@ -16,6 +16,8 @@ func postgresFreshSchema() []string {
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
+			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL
 		)`,

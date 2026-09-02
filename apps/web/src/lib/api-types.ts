@@ -47,10 +47,10 @@ export type PermissionKey =
   | "admin.templates.update"
   | "admin.templates.reset"
 export type PermissionInfo = { key: PermissionKey; label: string; description: string; category: string }
-export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number }
+export type PermissionLimits = { maxAttachmentMb: number; smtpDailyLimit: number; smtpMinuteLimit: number; imapMinuteLimit: number; pop3MinuteLimit: number; maxMailboxes: number }
 export type PermissionGroupSummary = { id: string; name: string }
 export type PermissionGroup = { id: string; name: string; description: string; permissions: PermissionKey[]; limits: PermissionLimits; system: boolean; userCount: number; createdAt: string; updatedAt: string }
-export type User = { id: string; email: string; displayName: string; role: "admin" | "user"; disabled: boolean; protected: boolean; twoFactorEnabled: boolean; permissions: PermissionKey[]; limits: PermissionLimits; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; createdAt: string }
+export type User = { id: string; email: string; displayName: string; role: "admin" | "user"; disabled: boolean; protected: boolean; twoFactorEnabled: boolean; permissions: PermissionKey[]; limits: PermissionLimits; permissionGroupIds: string[]; permissionGroups: PermissionGroupSummary[]; mailboxesCreatedTotal: number; mailboxQuotaBonus: number; createdAt: string }
 export type APIToken = { id: string; name: string; lastUsedAt?: string; expiresAt?: string; disabled: boolean; scopes: string[]; createdAt: string; updatedAt: string }
 export type AdminUser = User & { mailboxCount: number; mailboxes?: string[] }
 export type AdminOverview = { users: number; activeUsers: number; domains: number; mailboxes: number; activeMailboxes: number; aliases: number; messages: number; unreadMessages: number; storageBytes: number }

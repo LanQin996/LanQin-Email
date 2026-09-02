@@ -192,7 +192,7 @@ func (a *App) statusWebhookDialContext(ctx context.Context, network, address str
 		return nil, err
 	}
 	for _, ip := range ips {
-		if !isPublicStatusWebhookIP(ip) {
+		if !isPublicUnicastIP(ip) {
 			return nil, errors.New("private or local status webhook hosts are not allowed")
 		}
 	}
@@ -220,18 +220,11 @@ func validatePublicWebhookHost(ctx context.Context, host string) error {
 		return fmt.Errorf("failed to resolve status webhook host: %w", err)
 	}
 	for _, ip := range ips {
-		if !isPublicStatusWebhookIP(ip) {
+		if !isPublicUnicastIP(ip) {
 			return errors.New("private or local status webhook hosts are not allowed")
 		}
 	}
 	return nil
-}
-
-func isPublicStatusWebhookIP(ip net.IP) bool {
-	if ip == nil {
-		return false
-	}
-	return ip.IsGlobalUnicast() && !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() && !ip.IsUnspecified()
 }
 
 func truncateWebhookError(value string) string {

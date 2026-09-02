@@ -323,7 +323,7 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	// Create a mailbox for the registered user.
 	if mailboxDomainID != "" && mailboxLocalPart != "" {
-		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active"); mbErr != nil {
+		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active", user); mbErr != nil {
 			a.log.Warn("failed to create mailbox for registered user", "error", mbErr, "email", email)
 		}
 	}

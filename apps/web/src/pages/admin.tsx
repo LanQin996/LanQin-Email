@@ -490,6 +490,14 @@ function PermissionLimitEditor({ value, onChange }: { value: PermissionLimits; o
           <Label>POP3 每分钟命令数</Label>
           <Input type="number" min={0} value={value.pop3MinuteLimit} onChange={(event) => update("pop3MinuteLimit", event.target.value)} />
         </div>
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <Label>邮箱数量上限</Label>
+            <span className="text-xs text-muted-foreground">按累计创建数计算</span>
+          </div>
+          <Input type="number" min={0} value={value.maxMailboxes} onChange={(event) => update("maxMailboxes", event.target.value)} />
+          <span className="block text-xs text-muted-foreground">删除邮箱不会释放额度</span>
+        </div>
       </div>
     </div>
   )
@@ -518,6 +526,7 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
       <Badge variant="secondary" className="font-normal">SMTP 每分钟 {limitText(value.smtpMinuteLimit, "封")}</Badge>
       <Badge variant="secondary" className="font-normal">IMAP 每分钟 {limitText(value.imapMinuteLimit, "次")}</Badge>
       <Badge variant="secondary" className="font-normal">POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}</Badge>
+      <Badge variant="secondary" className="font-normal">邮箱数量 {limitText(value.maxMailboxes, "个")}</Badge>
     </div>
   )
 }

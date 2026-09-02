@@ -2054,9 +2054,7 @@ func (a *App) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	writeAttachmentHeaders(w, contentType, filename, size)
 	_, _ = io.Copy(w, f)
 }
 
@@ -2075,9 +2073,7 @@ func (a *App) handleAdminAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	writeAttachmentHeaders(w, contentType, filename, size)
 	_, _ = io.Copy(w, f)
 }
 
@@ -2482,16 +2478,23 @@ func normalizeLabelColor(color string) string {
 func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 	rows, err := a.db.QueryContext(ctx, `SELECT storage_path FROM attachments WHERE message_id=?`, messageID)
 	if err != nil {
+		a.log.Warn("failed to list attachment files for deletion", "error", err, "message_id", messageID)
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p string
 		if rows.Scan(&p) == nil {
-			_ = os.Remove(p)
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				a.log.Warn("failed to delete attachment file", "error", err, "message_id", messageID)
+			}
 		}
 	}
-	_ = os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID))
+	// A failure here leaves files on disk with no database row pointing at them.
+	// Nothing retries, so the warning is the only trace an operator gets.
+	if err := os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID)); err != nil {
+		a.log.Warn("failed to remove attachment directory", "error", err, "message_id", messageID)
+	}
 }
 
 func (a *App) deleteMessage(ctx context.Context, messageID string) {
