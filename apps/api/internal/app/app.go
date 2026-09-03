@@ -1755,33 +1755,41 @@ var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
 var errMailboxDailyLimitReached = errors.New("mailbox daily creation limit reached")
 
 // consumeMailboxQuotaTx increments the user's lifetime mailbox counter and, when
-// enforceQuotaFor is set, refuses to do so once the effective limit is reached.
+// enforceQuotaFor is set, refuses to do so once either the lifetime or the
+// per-day allowance is reached.
 //
-// The check and the increment are one conditional UPDATE on purpose. Reading the
-// counter and then writing it back would let two concurrent requests observe the
-// same value and both pass, because none of the three supported databases run at
-// an isolation level that would prevent it by default. This mirrors how
+// Both guards live in the WHERE clause of a single UPDATE on purpose. Counting
+// first and writing afterwards would let two concurrent requests observe the same
+// counts and both succeed, because none of the three supported databases run at an
+// isolation level that would prevent it by default. Folding the checks into the
+// UPDATE makes the users row the serialization point: the second transaction
+// blocks on that row lock, and when it resumes the statement re-evaluates its
+// WHERE against the now-committed state of the first. This mirrors how
 // consumeRegistrationInviteTx guards invite codes.
 func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
+	lifetimeLimit := 0
+	dailyLimit := 0
 	if enforceQuotaFor != nil {
-		if err := a.checkMailboxDailyLimitTx(ctx, tx, userID, now, enforceQuotaFor); err != nil {
-			return err
-		}
+		lifetimeLimit = effectiveMailboxLimit(enforceQuotaFor)
+		dailyLimit = enforceQuotaFor.Limits.MaxMailboxesPerDay
 	}
 
 	query := `UPDATE users SET mailboxes_created_total=mailboxes_created_total+1, updated_at=? WHERE id=?`
 	args := []any{now, userID}
+	windowStart := a.now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
 
-	limit := 0
-	if enforceQuotaFor != nil {
-		limit = effectiveMailboxLimit(enforceQuotaFor)
+	// A limit of 0 means unlimited, so that guard is simply omitted. Both bounds are
+	// interpolated rather than bound as parameters: they are ints from our own
+	// config, and PostgreSQL cannot infer a type for a bare placeholder compared
+	// against COUNT(*).
+	if lifetimeLimit > 0 {
+		query += fmt.Sprintf(` AND mailboxes_created_total<%d`, lifetimeLimit)
 	}
-	// A limit of 0 means unlimited, so the guard is simply omitted. The bound is
-	// inlined rather than passed as a parameter to keep PostgreSQL from having to
-	// infer a type for a bare placeholder comparison.
-	if limit > 0 {
-		query += ` AND mailboxes_created_total<?`
-		args = append(args, limit)
+	if dailyLimit > 0 {
+		// The event for this creation is inserted after this statement, so the
+		// subquery only ever counts prior creations.
+		query += fmt.Sprintf(` AND (SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?)<%d`, dailyLimit)
+		args = append(args, userID, windowStart)
 	}
 
 	result, err := tx.ExecContext(ctx, query, args...)
@@ -1792,45 +1800,52 @@ func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now
 	if err != nil {
 		return err
 	}
-	if affected != 1 {
-		if limit > 0 {
-			return errMailboxCountLimitReached
-		}
+	if affected == 1 {
+		return nil
+	}
+	if lifetimeLimit == 0 && dailyLimit == 0 {
 		// No guard was applied, so the only way to match zero rows is a missing user.
 		return errNotFound
 	}
-	return nil
+	return a.classifyMailboxQuotaFailureTx(ctx, tx, userID, windowStart, lifetimeLimit, dailyLimit)
 }
 
-// checkMailboxDailyLimitTx enforces the rolling 24 hour creation allowance and
-// records the attempt.
-//
-// The window is deliberately rolling rather than calendar-day: with a limit of
-// one, a midnight boundary would let a user create at 23:59 and again at 00:01.
-// This matches how recordSMTPRate bounds daily sending.
-//
-// Events are kept even after the mailbox itself is deleted, which is what stops
-// create-delete-create from resetting the allowance.
-func (a *App) checkMailboxDailyLimitTx(ctx context.Context, tx *sql.Tx, userID, now string, user *User) error {
-	limit := user.Limits.MaxMailboxesPerDay
-	if limit <= 0 {
-		return nil
+// classifyMailboxQuotaFailureTx works out which guard rejected the UPDATE so the
+// caller can return a meaningful message. It only runs on the failure path, where
+// an extra pair of reads costs nothing.
+func (a *App) classifyMailboxQuotaFailureTx(ctx context.Context, tx *sql.Tx, userID, windowStart string, lifetimeLimit, dailyLimit int) error {
+	if dailyLimit > 0 {
+		var used int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?`,
+			userID, windowStart).Scan(&used); err != nil {
+			return err
+		}
+		if used >= dailyLimit {
+			return errMailboxDailyLimitReached
+		}
 	}
-	windowStart := a.now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
-	var used int
-	if err := tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?`,
-		userID, windowStart).Scan(&used); err != nil {
-		return err
+	if lifetimeLimit > 0 {
+		var total int
+		if err := tx.QueryRowContext(ctx, `SELECT mailboxes_created_total FROM users WHERE id=?`, userID).Scan(&total); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errNotFound
+			}
+			return err
+		}
+		if total >= lifetimeLimit {
+			return errMailboxCountLimitReached
+		}
 	}
-	if used >= limit {
-		return errMailboxDailyLimitReached
-	}
-	return nil
+	// Neither bound is exceeded, so the row itself is gone.
+	return errNotFound
 }
 
 // recordMailboxCreationTx appends to the creation log. It runs for every path,
 // including administrative ones, so that the log stays a complete history.
+//
+// The row must be inserted after consumeMailboxQuotaTx, whose per-day subquery
+// counts only prior creations.
 func (a *App) recordMailboxCreationTx(ctx context.Context, tx *sql.Tx, userID, mailboxID, now string) error {
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO mailbox_creation_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`,

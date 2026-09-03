@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -300,5 +302,159 @@ func TestMailboxDailyRateZeroMeansUnlimited(t *testing.T) {
 		if code := applyMailbox(t, user, domain.ID, local); code != http.StatusCreated {
 			t.Fatalf("apply %q code=%d, want 201 (0 must mean unlimited)", local, code)
 		}
+	}
+}
+
+// TestMailboxDailyRateRejectsSecondCreationInSameTransaction pins that the per-day
+// guard is evaluated by the database rather than from a value read earlier in Go.
+//
+// The review finding was that consumeMailboxQuotaTx used to COUNT into a Go
+// variable and then UPDATE, so two concurrent requests could both observe the same
+// count and both succeed on PostgreSQL/MySQL. The fix folds the count into the
+// UPDATE's WHERE clause.
+//
+// A goroutine race cannot demonstrate this under SQLite, which serializes writers:
+// contending transactions fail with lock errors rather than quota errors, so such a
+// test passes either way and proves nothing. Instead this drives two creations
+// through one transaction, where the second statement necessarily sees the first
+// one's uncommitted event — exactly the read the old code skipped.
+func TestMailboxDailyRateRejectsSecondCreationInSameTransaction(t *testing.T) {
+	a, admin, _, created, domain := setupQuotaTest(t)
+	setRegularGroupMailboxLimits(t, admin, 10, 1)
+
+	user, err := a.userByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := a.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	if _, err := a.createMailboxWithPasswordHashTx(t.Context(), tx, created.ID, domain.ID,
+		"first", "", "hash", 1024, "active", user); err != nil {
+		t.Fatalf("first creation failed: %v", err)
+	}
+	_, err = a.createMailboxWithPasswordHashTx(t.Context(), tx, created.ID, domain.ID,
+		"second", "", "hash", 1024, "active", user)
+	if !errors.Is(err, errMailboxDailyLimitReached) {
+		t.Fatalf("second creation error = %v, want errMailboxDailyLimitReached", err)
+	}
+}
+
+// TestMailboxDailyRateSerializesConcurrentCreations checks the end-to-end outcome
+// over HTTP: whatever the driver does about locking, at most one creation may land.
+func TestMailboxDailyRateSerializesConcurrentCreations(t *testing.T) {
+	a, admin, _, created, domain := setupQuotaTest(t)
+	setRegularGroupMailboxLimits(t, admin, 10, 1)
+
+	user, err := a.userByID(t.Context(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const attempts = 4
+	results := make(chan error, attempts)
+	start := make(chan struct{})
+	for i := range attempts {
+		go func(n int) {
+			<-start
+			tx, err := a.db.BeginTx(t.Context(), nil)
+			if err != nil {
+				results <- err
+				return
+			}
+			defer tx.Rollback()
+			if _, err := a.createMailboxWithPasswordHashTx(t.Context(), tx, created.ID, domain.ID,
+				fmt.Sprintf("race%d", n), "", "hash", 1024, "active", user); err != nil {
+				results <- err
+				return
+			}
+			results <- tx.Commit()
+		}(i)
+	}
+	close(start)
+
+	succeeded := 0
+	for range attempts {
+		if err := <-results; err == nil {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("%d concurrent creations succeeded, want exactly 1", succeeded)
+	}
+
+	var events, total int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=?`, created.ID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT mailboxes_created_total FROM users WHERE id=?`, created.ID).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if events != 1 || total != 1 {
+		t.Errorf("events=%d total=%d, want 1 and 1", events, total)
+	}
+}
+
+// TestLinuxDoRegistrationGroupRequiresSuperAdmin covers the review finding that a
+// settings operator could point Linux.do sign-ups at a group holding permissions
+// they lack, then register into it.
+func TestLinuxDoRegistrationGroupRequiresSuperAdmin(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	var login map[string]any
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, &login); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	privileged := createAssignableGroup(t, admin, "高权限组", []string{PermissionUsersView, PermissionUsersCreate})
+	settingsGroup := createAssignableGroup(t, admin, "仅设置权限", []string{PermissionSettingsView, PermissionSettingsUpdate})
+
+	var operator AdminUser
+	if code := admin.do("POST", "/api/admin/users", map[string]any{
+		"email": "settings-op@example.net", "displayName": "Settings Op", "role": "user",
+		"password": "Password123!", "disabled": false,
+		"permissionGroupIds": []string{settingsGroup.ID},
+	}, &operator); code != http.StatusCreated {
+		t.Fatalf("create operator code=%d", code)
+	}
+	ops := &testClient{t: t, server: ts}
+	if code := ops.do("POST", "/api/auth/login", map[string]string{"email": "settings-op@example.net", "password": "Password123!"}, &login); code != http.StatusOK {
+		t.Fatalf("operator login code=%d", code)
+	}
+
+	var settings SystemSettings
+	if code := ops.do("GET", "/api/admin/settings", nil, &settings); code != http.StatusOK {
+		t.Fatalf("operator get settings code=%d", code)
+	}
+	update := systemSettingsPayload(settings)
+	update["linuxDoRegistrationGroupIds"] = []string{privileged.ID}
+	var body map[string]any
+	if code := ops.do("POST", "/api/admin/settings", update, &body); code != http.StatusForbidden {
+		t.Fatalf("operator set Linux.do group code=%d, want 403 body=%v", code, body)
+	}
+
+	// Unrelated settings must still be editable by the same operator.
+	update["linuxDoRegistrationGroupIds"] = settings.LinuxDoRegistrationGroupIDs
+	update["catchAllEnabled"] = !settings.CatchAllEnabled
+	if code := ops.do("POST", "/api/admin/settings", update, &settings); code != http.StatusOK {
+		t.Fatalf("operator saving unrelated settings code=%d, want 200", code)
+	}
+
+	// A super administrator may still set it.
+	if code := admin.do("GET", "/api/admin/settings", nil, &settings); code != http.StatusOK {
+		t.Fatalf("admin get settings code=%d", code)
+	}
+	update = systemSettingsPayload(settings)
+	update["linuxDoRegistrationGroupIds"] = []string{privileged.ID}
+	if code := admin.do("POST", "/api/admin/settings", update, &settings); code != http.StatusOK {
+		t.Fatalf("admin set Linux.do group code=%d", code)
+	}
+	if len(settings.LinuxDoRegistrationGroupIDs) != 1 || settings.LinuxDoRegistrationGroupIDs[0] != privileged.ID {
+		t.Fatalf("super admin change did not persist: %+v", settings.LinuxDoRegistrationGroupIDs)
 	}
 }

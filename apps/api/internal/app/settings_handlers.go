@@ -197,7 +197,25 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(req.LinuxDoClientSecret) != "" {
 		next.LinuxDoClientSecret = strings.TrimSpace(req.LinuxDoClientSecret)
 	}
-	next.LinuxDoRegistrationGroupIDs = strings.Join(cleanIDList(req.LinuxDoRegistrationGroupIDs), ",")
+	// Assigning a permission group is an authorization decision, not a settings
+	// tweak: Linux.do sign-ups join this group through writeUserPermissionGroups,
+	// which by design skips the actor-based grant checks. Left on
+	// admin.settings.update, a settings operator could point it at a group holding
+	// permissions they lack and then register a Linux.do account into it. The same
+	// reasoning already restricts invite codes to super administrators.
+	requestedLinuxDoGroups := strings.Join(cleanIDList(req.LinuxDoRegistrationGroupIDs), ",")
+	if requestedLinuxDoGroups != next.LinuxDoRegistrationGroupIDs {
+		actor := currentUser(r)
+		if actor == nil || actor.Role != "admin" {
+			respondError(w, http.StatusForbidden, "只有超级管理员可以修改 Linux.do 注册用户组")
+			return
+		}
+		if err := a.validateAssignableGroupIDsTx(r.Context(), nil, cleanIDList(req.LinuxDoRegistrationGroupIDs)); err != nil {
+			badRequest(w, err)
+			return
+		}
+		next.LinuxDoRegistrationGroupIDs = requestedLinuxDoGroups
+	}
 	if err := validateLinuxDoSettings(next); err != nil {
 		badRequest(w, err)
 		return

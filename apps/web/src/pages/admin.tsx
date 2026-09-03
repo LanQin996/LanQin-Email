@@ -1013,6 +1013,11 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   const { toast } = useToast()
   const canSettingsView = hasPermission(user, "admin.settings.view")
   const canUpdateSettings = hasPermission(user, "admin.settings.update")
+  // Invite codes and the Linux.do registration group are restricted to real super
+  // administrators server-side, because both can grant permission groups. Gating on
+  // identity rather than a permission keeps the UI from offering actions that always
+  // return 403.
+  const isSuperAdmin = user?.role === "admin"
   const canTestSMTP = hasPermission(user, "admin.settings.test_smtp")
   const canViewTemplates = hasPermission(user, "admin.templates.view")
   const canUpdateTemplates = hasPermission(user, "admin.templates.update")
@@ -1307,7 +1312,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
           <SwitchRow label="开放注册" checked={openRegistration} onCheckedChange={setOpenRegistration} />
           <SwitchRow label="邀请码注册" checked={inviteRegistrationEnabled} onCheckedChange={setInviteRegistrationEnabled} />
           <div className="text-xs text-muted-foreground">普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。</div>
-          <RegistrationInvitesPanel canUpdate={canUpdateSettings} />
+          {isSuperAdmin && <RegistrationInvitesPanel />}
           <Separator />
           <SwitchRow label="双因素认证 (2FA)" checked={twoFactorEnabled} onCheckedChange={setTwoFactorEnabled} />
           <Separator />
@@ -1326,7 +1331,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
             </div>
             <SwitchRow label="启用 Linux.do 登录" checked={linuxDoSSOEnabled} onCheckedChange={setLinuxDoSSOEnabled} />
             <SwitchRow label="允许 Linux.do 用户注册本站账号" checked={linuxDoRegistrationEnabled} onCheckedChange={setLinuxDoRegistrationEnabled} />
-            {linuxDoRegistrationEnabled && (
+            {linuxDoRegistrationEnabled && isSuperAdmin && (
               <div className="space-y-2">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <Label>Linux.do 注册后加入的用户组</Label>
@@ -1364,7 +1369,7 @@ function SystemSettingsSection({ settings, domains }: { settings?: SystemSetting
   )
 }
 
-function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
+function RegistrationInvitesPanel() {
   const qc = useQueryClient()
   const { toast } = useToast()
   const invites = useQuery({ queryKey: ["admin", "registration-invites"], queryFn: api.registrationInvites })
@@ -1413,8 +1418,7 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
           <div className="font-medium">邀请码</div>
           <div className="text-xs text-muted-foreground">邀请码可重复查看，每次成功注册会扣减一次。</div>
         </div>
-        {canUpdate && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
             <DialogTrigger asChild><Button type="button" size="sm"><Plus className="h-4 w-4" />创建邀请码</Button></DialogTrigger>
             <DialogContent>
               <DialogHeader><DialogTitle>创建邀请码</DialogTitle></DialogHeader>
@@ -1447,11 +1451,10 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
               </DialogFooter>
             </DialogContent>
           </Dialog>
-        )}
       </div>
       <div className="overflow-x-auto rounded-md border">
         <Table>
-          <TableHeader><TableRow><TableHead>邀请码</TableHead><TableHead>用户组</TableHead><TableHead>使用情况</TableHead><TableHead>创建人</TableHead><TableHead>创建时间</TableHead>{canUpdate && <TableHead className="w-14" />}</TableRow></TableHeader>
+          <TableHeader><TableRow><TableHead>邀请码</TableHead><TableHead>用户组</TableHead><TableHead>使用情况</TableHead><TableHead>创建人</TableHead><TableHead>创建时间</TableHead><TableHead className="w-14" /></TableRow></TableHeader>
           <TableBody>
             {items.map((item) => (
               <TableRow key={item.id}>
@@ -1469,7 +1472,7 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
                 <TableCell className="whitespace-nowrap">{item.usedCount} / {item.maxUses} <span className="text-muted-foreground">（剩余 {item.remainingUses}）</span></TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">{item.createdByEmail || "-"}</TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">{formatDate(item.createdAt)}</TableCell>
-                {canUpdate && <TableCell><Button type="button" variant="ghost" size="icon" title="删除邀请码" aria-label="删除邀请码" onClick={() => setRemoveItem(item)}><Trash2 className="h-4 w-4" /></Button></TableCell>}
+                <TableCell><Button type="button" variant="ghost" size="icon" title="删除邀请码" aria-label="删除邀请码" onClick={() => setRemoveItem(item)}><Trash2 className="h-4 w-4" /></Button></TableCell>
               </TableRow>
             ))}
           </TableBody>
