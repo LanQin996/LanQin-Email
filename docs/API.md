@@ -389,9 +389,9 @@ Content-Type: application/json
 
 **响应：** 创建后的 mailbox 对象（结构与列表接口相同）。
 
-This endpoint is not blocked by the owner's permission group mailbox limit (`maxMailboxes`), but the mailbox still counts towards their cumulative total, which may leave the owner unable to create further mailboxes themselves.
+This endpoint is not blocked by the owner's permission group mailbox limits (`maxMailboxes`, `maxMailboxesPerDay`), but the mailbox still counts towards both, which may leave the owner unable to create further mailboxes themselves.
 
-本接口不受拥有者所在权限组的邮箱数量上限（`maxMailboxes`）约束，但创建的邮箱仍会计入其累计数，可能导致拥有者之后无法再自助创建邮箱。
+本接口不受拥有者所在权限组的邮箱数量上限（`maxMailboxes`）与每日新建上限（`maxMailboxesPerDay`）约束，但创建的邮箱仍会计入两者，可能导致拥有者之后无法再自助创建邮箱。
 
 ### Get mailbox
 

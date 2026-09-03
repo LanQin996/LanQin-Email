@@ -154,11 +154,21 @@ Production SSO requires a valid HTTPS `LANQIN_PUBLIC_BASE_URL`. LanQin uses the 
 
 Invitation registration is configured in **Admin > System Settings > Security**. When public registration is disabled but invitation registration is enabled, users must enter a valid invitation code. Administrators can create a custom code or let LanQin generate one, set its maximum number of uses, view and copy the full code later, monitor remaining uses, and delete it. Successful registration and use-count updates are committed in one database transaction. Linux.do registration remains controlled by its separate switch.
 
+Each code may also be bound to a permission group: anyone registering with it joins that group automatically, which is how you hand out different capabilities without editing each new account. Leaving the selection empty grants only the regular user group, matching the previous behaviour. The super administrator group can never be bound. Because a code that grants a permission group is an authorization tool rather than a settings tweak, **managing invitation codes now requires an actual super administrator** — the `admin.settings.update` permission is no longer sufficient.
+
+If the bound group is deleted before the code is used, registration fails with a clear error instead of silently falling back to the default group, and the code is not consumed.
+
+## Linux.do Registration Groups
+
+When Linux.do registration is enabled, you may select a permission group that every Linux.do sign-up joins. Unlike invitation codes, a group that has been deleted is skipped with a warning rather than blocking sign-up, because this setting is static and easy to leave stale.
+
 ## Permission Group Quotas
 
-Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP messages per day and per minute, IMAP and POP3 commands per minute, and the number of mailboxes a user may create. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
+Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP messages per day and per minute, IMAP and POP3 commands per minute, the number of mailboxes a user may create, and how many mailboxes they may create per day. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
 
 The mailbox quota counts **every mailbox ever created** for the user, including mailboxes that were later deleted, so deleting a mailbox does not hand the allowance back. This is what prevents a user from cycling create and delete to exceed the limit. Self-service requests under **Profile > Mailboxes** are refused once the limit is reached; mailboxes created by an administrator or through the Open API are allowed past it but still count towards the total. The default allowance for regular users is 3 mailboxes.
+
+The per-day limit applies on top of the total, so both must pass. It uses a rolling 24 hour window rather than a calendar day, which stops one mailbox at 23:59 and another at 00:01 from defeating a limit of one per day. **Unused allowance does not accumulate**: skipping a day never grants two the next day. The default is 1 per day, so an upgraded deployment starts enforcing it immediately; set it to `0` to restore the previous unlimited behaviour.
 
 ## Key Environment Variables
 
