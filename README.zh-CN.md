@@ -14,7 +14,7 @@
 
 LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + TypeScript + shadcn/ui，后端使用 Go + SQLite，部署时可用单容器集成 API、Web、Nginx、Postfix、Dovecot、Rspamd。
 
-交流群组：[Telegram 群组](https://t.me/+EhII7MSyi3QwNDQ5)
+交流群组：[Telegram 群组](https://t.me/+EhII7MSyi3QwNDQ5) 
 
 ## 功能特性
 
