@@ -25,7 +25,7 @@ type loginTestResponse struct {
 // count the forwarding header is ignored, so these tests could not vary client IP.
 func newTestAppBehindProxy(t *testing.T) *App {
 	t.Helper()
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	return newTestAppWithConfig(t, Config{
 		Addr:              ":0",
 		DBPath:            filepath.Join(dir, "lanqin.db"),
@@ -246,7 +246,7 @@ func TestLoginRateLimitTOTPAndSuccessfulCleanup(t *testing.T) {
 
 func TestLoginAuditDoesNotLogCredentialsOrTokens(t *testing.T) {
 	var logs bytes.Buffer
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a, err := New(Config{
 		Addr:              ":0",
 		DBPath:            filepath.Join(dir, "lanqin.db"),
