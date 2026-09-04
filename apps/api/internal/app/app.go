@@ -35,7 +35,7 @@ type App struct {
 	maildirDirs        map[string]maildirDirectorySignature
 	maildirRuns        uint64
 	syncEventsMu       sync.Mutex
-	syncEventClients   map[chan struct{}]struct{}
+	syncEventClients   map[chan struct{}]string
 	sseConnections     map[string]int
 	externalIMAP       externalIMAPClientFactory
 	linuxDoOAuth       linuxDoOAuthClient

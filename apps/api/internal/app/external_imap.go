@@ -1283,7 +1283,15 @@ func (a *App) finishExternalIMAPRun(ctx context.Context, run ExternalIMAPSyncRun
 	_, _ = a.db.ExecContext(ctx, `UPDATE external_imap_accounts SET last_sync_at=?,last_status=?,last_error=?,updated_at=? WHERE id=?`,
 		finished.Format(time.RFC3339Nano), lastStatus, run.Error, finished.Format(time.RFC3339Nano), run.AccountID)
 	if run.Imported > 0 {
-		a.publishSyncEvent()
+		// The account names the mailbox the messages landed in, so only that mailbox's
+		// audience needs waking rather than every open stream.
+		var mailboxID string
+		if scanErr := a.db.QueryRowContext(ctx, `SELECT mailbox_id FROM external_imap_accounts WHERE id=?`, run.AccountID).Scan(&mailboxID); scanErr != nil {
+			a.log.Warn("failed to resolve external IMAP sync audience", "account", run.AccountID, "error", scanErr)
+			a.publishSyncEventToAll()
+		} else {
+			a.publishSyncEventForMailboxes(ctx, []string{mailboxID})
+		}
 	}
 	return run, err
 }

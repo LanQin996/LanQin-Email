@@ -2160,7 +2160,7 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if flusher != nil {
 		flusher.Flush()
 	}
-	syncEvents, unsubscribe := a.subscribeSyncEvents()
+	syncEvents, unsubscribe := a.subscribeSyncEvents(user.ID)
 	defer unsubscribe()
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
@@ -2205,13 +2205,13 @@ func (a *App) releaseSSESlot(userID string) {
 	a.sseConnections[userID]--
 }
 
-func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {
+func (a *App) subscribeSyncEvents(userID string) (<-chan struct{}, func()) {
 	client := make(chan struct{}, 1)
 	a.syncEventsMu.Lock()
 	if a.syncEventClients == nil {
-		a.syncEventClients = make(map[chan struct{}]struct{})
+		a.syncEventClients = make(map[chan struct{}]string)
 	}
-	a.syncEventClients[client] = struct{}{}
+	a.syncEventClients[client] = userID
 	a.syncEventsMu.Unlock()
 	return client, func() {
 		a.syncEventsMu.Lock()
@@ -2220,7 +2220,9 @@ func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {
 	}
 }
 
-func (a *App) publishSyncEvent() {
+// publishSyncEventToAll wakes every open stream. Used when a change cannot be
+// attributed to a mailbox, and as the fallback when the audience lookup fails.
+func (a *App) publishSyncEventToAll() {
 	a.syncEventsMu.Lock()
 	defer a.syncEventsMu.Unlock()
 	for client := range a.syncEventClients {
@@ -2229,6 +2231,97 @@ func (a *App) publishSyncEvent() {
 		default:
 		}
 	}
+}
+
+func (a *App) publishSyncEventToUsers(userIDs map[string]struct{}) {
+	if len(userIDs) == 0 {
+		return
+	}
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	for client, owner := range a.syncEventClients {
+		if _, ok := userIDs[owner]; !ok {
+			continue
+		}
+		select {
+		case client <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// publishSyncEventForCounts delivers one maildir run's event to the clients that can
+// see what changed.
+//
+// Before this, every sync woke every open stream: one user receiving mail refreshed
+// every other logged-in browser, which is both a thundering herd and a timing signal
+// that somebody on the server just got mail.
+func (a *App) publishSyncEventForCounts(ctx context.Context, counts maildirSyncCounts) {
+	if counts.broadcast || len(counts.affectedMailboxIDs) == 0 {
+		a.publishSyncEventToAll()
+		return
+	}
+	mailboxIDs := make([]string, 0, len(counts.affectedMailboxIDs))
+	for id := range counts.affectedMailboxIDs {
+		mailboxIDs = append(mailboxIDs, id)
+	}
+	a.publishSyncEventForMailboxes(ctx, mailboxIDs)
+}
+
+// publishSyncEventForMailboxes notifies the owner of each mailbox plus anyone holding a
+// live share of it.
+//
+// The audience is resolved at publish time rather than at subscribe time on purpose: a
+// mailbox created or shared during a long-lived stream still reaches that stream.
+func (a *App) publishSyncEventForMailboxes(ctx context.Context, mailboxIDs []string) {
+	users, err := a.usersForMailboxes(ctx, mailboxIDs)
+	if err != nil {
+		// A failed lookup must not cost anyone their live refresh.
+		a.log.Warn("failed to resolve sync event audience", "error", err)
+		a.publishSyncEventToAll()
+		return
+	}
+	a.publishSyncEventToUsers(users)
+}
+
+func (a *App) usersForMailboxes(ctx context.Context, mailboxIDs []string) (map[string]struct{}, error) {
+	users := map[string]struct{}{}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	for _, mailboxID := range mailboxIDs {
+		var owner string
+		if err := a.db.QueryRowContext(ctx, `SELECT user_id FROM mailboxes WHERE id=?`, mailboxID).Scan(&owner); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if strings.TrimSpace(owner) != "" {
+			users[owner] = struct{}{}
+		}
+		rows, err := a.db.QueryContext(ctx, `SELECT shared_with_user_id FROM mailbox_shares
+			WHERE mailbox_id=? AND revoked_at IS NULL AND left_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, mailboxID, now)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var sharedWith string
+			if err := rows.Scan(&sharedWith); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if strings.TrimSpace(sharedWith) != "" {
+				users[sharedWith] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return users, nil
 }
 
 func (a *App) mailboxForCurrentUser(r *http.Request) (*Mailbox, error) {

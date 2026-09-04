@@ -3,6 +3,8 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -338,5 +340,104 @@ func TestSMTPRateRecipientsMigrationBackfillsExistingTable(t *testing.T) {
 	// Idempotent: startup runs every migration on every boot.
 	if err := a.migrateSMTPRateRecipients(ctx); err != nil {
 		t.Fatalf("re-running the migration failed: %v", err)
+	}
+}
+
+// TestSyncEventsReachOnlyTheAffectedAudience covers the report's L7: every maildir sync
+// woke every open stream, so one user receiving mail refreshed every other logged-in
+// browser and leaked the timing of that delivery.
+func TestSyncEventsReachOnlyTheAffectedAudience(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.MaildirRoot = newTestDir(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	alice := createTestMailbox(t, admin, domainID, "sse-alice", "SSE Alice", "Password123!", nil)
+	bob := createTestMailbox(t, admin, domainID, "sse-bob", "SSE Bob", "Password123!", nil)
+	aliceUser, _, err := a.userByEmail(t.Context(), alice.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bobUser, _, err := a.userByEmail(t.Context(), bob.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	aliceEvents, stopAlice := a.subscribeSyncEvents(aliceUser.ID)
+	defer stopAlice()
+	bobEvents, stopBob := a.subscribeSyncEvents(bobUser.ID)
+	defer stopBob()
+
+	dir := filepath.Join(a.cfg.MaildirRoot, "lanqin.local", "sse-alice", "Maildir", "new")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeIncrementalMaildirMessage(t, dir, "for-alice", "<sse-audience@example.test>")
+
+	counts, err := a.syncMaildirOnceTracked(t.Context(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts.Imported != 1 {
+		t.Fatalf("counts=%+v, want one imported message", counts)
+	}
+	select {
+	case <-aliceEvents:
+	default:
+		t.Error("the mailbox owner was not notified of their own delivery")
+	}
+	select {
+	case <-bobEvents:
+		t.Error("an unrelated user was notified of somebody else's delivery")
+	default:
+	}
+}
+
+// TestSyncEventAudienceFollowsLiveSharesOnly pins the audience predicate: a mailbox
+// shared with someone has to reach them too, or targeting the fan-out would quietly
+// cost shared-mailbox viewers their live refresh. A revoked share must not.
+func TestSyncEventAudienceFollowsLiveSharesOnly(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	owned := createTestMailbox(t, admin, domainID, "share-owner", "Share Owner", "Password123!", nil)
+	viewer := createTestMailbox(t, admin, domainID, "share-viewer", "Share Viewer", "Password123!", nil)
+	revoked := createTestMailbox(t, admin, domainID, "share-revoked", "Share Revoked", "Password123!", nil)
+
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	insertShare := func(sharedWith string, revokedAt any) {
+		t.Helper()
+		if _, err := a.db.ExecContext(t.Context(), `INSERT INTO mailbox_shares(id,mailbox_id,owner_user_id,shared_with_user_id,scope,revoked_at,created_at,updated_at)
+			VALUES(?,?,?,?,?,?,?,?)`, newID("shr"), owned.ID, owned.UserID, sharedWith, "all", revokedAt, now, now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertShare(viewer.UserID, nil)
+	insertShare(revoked.UserID, now)
+
+	audience, err := a.usersForMailboxes(t.Context(), []string{owned.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := audience[owned.UserID]; !ok {
+		t.Error("mailbox owner missing from the audience")
+	}
+	if _, ok := audience[viewer.UserID]; !ok {
+		t.Error("live share recipient missing from the audience")
+	}
+	if _, ok := audience[revoked.UserID]; ok {
+		t.Error("revoked share recipient is still in the audience")
+	}
+	if len(audience) != 2 {
+		t.Errorf("audience=%v, want exactly the owner and the live share recipient", audience)
 	}
 }

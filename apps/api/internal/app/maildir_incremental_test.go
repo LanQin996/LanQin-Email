@@ -113,8 +113,12 @@ func TestMaildirIncrementalScanPerformsPeriodicFullScan(t *testing.T) {
 }
 
 func TestTrackedMaildirSyncPublishesOnlyWhenMessagesChange(t *testing.T) {
-	a, _, dir := prepareIncrementalMaildirTest(t)
-	events, unsubscribe := a.subscribeSyncEvents()
+	a, mb, dir := prepareIncrementalMaildirTest(t)
+	var ownerID string
+	if err := a.db.QueryRow(`SELECT user_id FROM mailboxes WHERE id=?`, mb.ID).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe := a.subscribeSyncEvents(ownerID)
 	defer unsubscribe()
 	writeIncrementalMaildirMessage(t, dir, "first", "<incremental-event@example.test>")
 
