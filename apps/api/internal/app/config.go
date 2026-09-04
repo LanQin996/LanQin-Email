@@ -40,6 +40,7 @@ type Config struct {
 	MaildirScanSeconds              int
 	AllowInsecureHTTP               bool
 	TrustedProxyCount               int
+	AuthPolicySecret                string
 	OpenRegistration                bool
 	InviteRegistrationEnabled       bool
 	TwoFactorEnabled                bool
@@ -108,6 +109,7 @@ func LoadConfig() Config {
 		MaildirScanSeconds:              getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", defaultMaildirScanSeconds),
 		AllowInsecureHTTP:               getenvBool("LANQIN_ALLOW_INSECURE_HTTP", false),
 		TrustedProxyCount:               getenvInt("LANQIN_TRUSTED_PROXY_COUNT", 0),
+		AuthPolicySecret:                getenv("LANQIN_AUTH_POLICY_SECRET", ""),
 		OpenRegistration:                getenvBool("LANQIN_OPEN_REGISTRATION", false),
 		InviteRegistrationEnabled:       false,
 		TwoFactorEnabled:                getenvBool("LANQIN_TWO_FACTOR_ENABLED", false),

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -817,7 +818,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := a.sendMailNow(r.Context(), currentUser(r), mb, req)
 	if err != nil {
-		if errors.Is(err, errNoRecipients) {
+		if errors.Is(err, errNoRecipients) || errors.Is(err, errTooManyRecipients) {
 			badRequest(w, err)
 			return
 		}
@@ -848,6 +849,16 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 }
 
 var errNoRecipients = errors.New("at least one recipient is required")
+
+// maxRecipientsPerMessage bounds a single send.
+//
+// Without it one message could carry thousands of recipients while consuming a
+// single unit of the SMTP quota, which both defeats the quota and turns the local
+// delivery loop into an amplifier: every local recipient costs an insertMessage plus
+// a Maildir write.
+const maxRecipientsPerMessage = 100
+
+var errTooManyRecipients = errors.New("too many recipients")
 var errInvalidMIME = errors.New("invalid mime message")
 var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
 var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
@@ -871,6 +882,9 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 	if len(allRecipients) == 0 {
 		return nil, errNoRecipients
 	}
+	if len(allRecipients) > maxRecipientsPerMessage {
+		return nil, fmt.Errorf("%w: max %d", errTooManyRecipients, maxRecipientsPerMessage)
+	}
 	if strings.TrimSpace(req.Subject) == "" {
 		req.Subject = "(no subject)"
 	}
@@ -891,14 +905,17 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 		fromName = strings.TrimSpace(req.FromName)
 	}
 	messageID := fmt.Sprintf("<%s@%s>", newID("msg"), strings.Split(mb.Address, "@")[1])
+	// Charge the send quota before building the MIME message: BuildMIME encodes every
+	// attachment, so doing it first let a user who is already over their limit burn
+	// that work on every rejected attempt.
+	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+		return nil, err
+	}
 	mimeBytes, err := BuildMIME(MIMEMessage{
 		From: fromAddress, FromName: fromName, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidMIME, err)
-	}
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
-		return nil, err
 	}
 
 	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
@@ -988,6 +1005,13 @@ func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLim
 		return nil
 	}
 	for i := range attachments {
+		// Reject from the encoded length first. base64 expands by 4/3 plus padding, so
+		// anything longer than that bound cannot fit under the limit once decoded, and
+		// checking it here avoids materialising an oversized attachment in memory just
+		// to refuse it. Requests are capped at 64 MB, far above the 25 MB default.
+		if int64(len(attachments[i].ContentBase64)) > limitBytes/3*4+16 {
+			return fmt.Errorf("%w: max %d MB", errAttachmentTooLarge, limits.MaxAttachmentMB)
+		}
 		decoded, err := attachments[i].contentBytes()
 		if err != nil {
 			return fmt.Errorf("%w: %v", errInvalidMIME, err)
@@ -1012,6 +1036,9 @@ func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Ma
 		return err
 	}
 	defer tx.Rollback()
+	if err := a.lockUserQuotaRowTx(ctx, tx, user.ID); err != nil {
+		return err
+	}
 	if dailyLimit > 0 {
 		var count int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id=? AND created_at>=?", user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
@@ -1036,7 +1063,21 @@ func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Ma
 	return tx.Commit()
 }
 
+// handleAuthPolicy answers Dovecot's auth policy lookups.
+//
+// It is registered outside /api and carries no session, because Dovecot has no
+// credentials to present. The bundled nginx configurations do not proxy it and the
+// API port is never published, so it is reachable only from inside the deployment;
+// LANQIN_AUTH_POLICY_SECRET adds a shared secret for setups that expose 8080
+// directly. Responses deliberately do not distinguish "no such user" from
+// "disabled" so the endpoint cannot be used to enumerate mailboxes.
 func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
+	if secret := strings.TrimSpace(a.cfg.AuthPolicySecret); secret != "" {
+		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("key")), []byte(secret)) != 1 {
+			respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "policy rejected"})
+			return
+		}
+	}
 	var req struct {
 		Login        string `json:"login"`
 		Protocol     string `json:"protocol"`
@@ -1068,7 +1109,7 @@ func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if user == nil || user.Disabled {
-		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "user not found or disabled"})
+		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "policy rejected"})
 		return
 	}
 	if user.Role == "admin" {
@@ -1116,6 +1157,9 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 		return err
 	}
 	defer tx.Rollback()
+	if err := a.lockUserQuotaRowTx(ctx, tx, user.ID); err != nil {
+		return err
+	}
 	if limits.SMTPDailyLimit > 0 {
 		var count int
 		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {

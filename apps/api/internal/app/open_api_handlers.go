@@ -843,7 +843,7 @@ func respondMailboxOwnerError(w http.ResponseWriter, err error) {
 
 func respondSendError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errNoRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge):
+	case errors.Is(err, errNoRecipients), errors.Is(err, errTooManyRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge):
 		badRequest(w, err)
 	case errors.Is(err, errSMTPRateLimited):
 		respondError(w, http.StatusTooManyRequests, err.Error())

@@ -2,6 +2,10 @@
 set -eu
 : "${LANQIN_TLS_CERT_FILE:=}"
 : "${LANQIN_TLS_KEY_FILE:=}"
+# The bundled dovecot.conf ships the all-in-one address, where the API shares this
+# container. In the split stack the API is a separate service, so 127.0.0.1 would
+# point at Dovecot itself and the IMAP/POP3 rate limits would silently never apply.
+: "${LANQIN_AUTH_POLICY_URL:=http://127.0.0.1:8080/auth-policy}"
 addgroup --system --gid 5000 vmail 2>/dev/null || true
 adduser --system --uid 5000 --gid 5000 --home /var/mail/vhosts --no-create-home vmail 2>/dev/null || true
 mkdir -p /data /var/mail/vhosts
@@ -26,4 +30,8 @@ fi
 sed -i "s#^ssl_cert = <.*#ssl_cert = <${TLS_CERT}#" /etc/dovecot/dovecot.conf
 sed -i "s#^ssl_key = <.*#ssl_key = <${TLS_KEY}#" /etc/dovecot/dovecot.conf
 sed -i "s#^auth_policy_hash_nonce = .*#auth_policy_hash_nonce = ${AUTH_POLICY_HASH_NONCE}#" /etc/dovecot/dovecot.conf
+sed -i "s#^auth_policy_server_url = .*#auth_policy_server_url = ${LANQIN_AUTH_POLICY_URL}#" /etc/dovecot/dovecot.conf
+# Printed so an operator can confirm the address is right for their topology: a
+# wrong one does not fail loudly, it just stops enforcing IMAP/POP3 rate limits.
+echo "dovecot: auth policy server = ${LANQIN_AUTH_POLICY_URL}" >&2
 exec dovecot -F

@@ -1916,3 +1916,10 @@ func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {
 	_, err = a.insertMessage(ctx, msg, nil)
 	return err
 }
+
+// lockUserQuotaRowTx serializes concurrent quota checks for one user. See
+// lockUserQuotaRowSQL for why counting without this is unsafe on every driver.
+func (a *App) lockUserQuotaRowTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	_, err := tx.ExecContext(ctx, lockUserQuotaRowSQL(a.cfg.DBDriver), userID)
+	return err
+}

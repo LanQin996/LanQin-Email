@@ -1,5 +1,4 @@
 import * as React from "react"
-import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, BookOpen, CheckCircle2, Circle, ClipboardList, Copy, ExternalLink, GitBranch, Github, Globe2, Mailbox, MoreHorizontal, Plus, RefreshCcw, Scale, Search, ShieldCheck, Star, Trash2, Users } from "lucide-react"
@@ -29,6 +28,7 @@ import {
   permissionLimitText as limitText,
   type AdminSection as Section,
 } from "@/components/admin-config"
+import { MailHtmlFrame } from "@/components/mail-html-frame"
 import { useMe } from "@/hooks/use-me"
 import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
@@ -1838,7 +1838,9 @@ function AdminMessageDialog({ message, loading, open, onOpenChange }: { message?
               <MessageMeta label="文件夹" value={folderName(message.folder)} />
               <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
             </div>
-            <div className="mail-html prose max-w-none rounded-lg border p-5 text-sm leading-7" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(message.bodyHtml || `<pre>${escapeHtml(message.bodyText || message.snippet || "")}</pre>`) }} />
+            <div className="overflow-hidden rounded-lg border">
+              <MailHtmlFrame bodyHtml={message.bodyHtml} bodyText={message.bodyText || message.snippet} />
+            </div>
             {message.attachments && message.attachments.length > 0 && (
               <div className="rounded-lg border p-4">
                 <div className="mb-3 font-medium">附件</div>
@@ -1868,9 +1870,6 @@ function folderName(folder: string) {
   return labels[folder] || folder
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char)
-}
 
 function adminSenderDisplayName(message: MailMessage) {
   const fromName = decodeMimeHeader(message.fromName?.trim() || "")
