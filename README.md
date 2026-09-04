@@ -184,7 +184,8 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_DB_DRIVER` | API database driver: `sqlite`, `mysql`, or `postgres` | `sqlite` |
 | `LANQIN_DATABASE_URL` | MySQL DSN or PostgreSQL URL; required for external databases | Empty |
 | `LANQIN_DB_PATH` | SQLite database path | `/data/lanqin.db` |
-| `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging | `false` |
+| `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging. Also gates the localhost CORS allowance | `false` |
+| `LANQIN_TRUSTED_PROXY_COUNT` | Number of trusted reverse proxies in front of the API. `0` ignores forwarding headers and uses the TCP peer address; the bundled Compose setup puts Nginx in front, so it sets `1` | `0` |
 | `LANQIN_OPEN_REGISTRATION` | Enable public registration | `false` |
 | `LANQIN_TWO_FACTOR_ENABLED` | Global 2FA feature toggle | `false` |
 | `LANQIN_TURNSTILE_ENABLED` | Enable Turnstile | `false` |

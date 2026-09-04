@@ -48,6 +48,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		logger = slog.Default()
 	}
 	cfg = normalizeDatabaseConfig(cfg)
+	if cfg.AllowInsecureHTTP {
+		// Session and OAuth state cookies lose their Secure attribute in this mode,
+		// so anyone on the path can lift a login. It exists for local development.
+		logger.Warn("LANQIN_ALLOW_INSECURE_HTTP is enabled: session cookies are sent without Secure and non-HTTPS callbacks are accepted; do not use this in production")
+	}
 	if cfg.DBDriver == databaseDriverSQLite {
 		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)

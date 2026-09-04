@@ -12,6 +12,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	netmail "net/mail"
 	"regexp"
 	"strconv"
 	"strings"
@@ -226,6 +227,35 @@ func normalizeDomain(s string) string {
 	return s
 }
 
+// domainRe mirrors localPartRe for the right-hand side of an address. Without it
+// normalizeDomain would let embedded CR/LF through, and every recipient string
+// eventually reaches BuildMIME, which writes headers verbatim.
+var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$`)
+
+// validRecipientAddress reports whether an already-normalized address is safe to
+// place in a mail header.
+//
+// This deliberately follows normalizeRuleForwardAddress: parse, re-normalize, then
+// require the parse to agree with the normalized form. Any address that survives a
+// round-trip through net/mail cannot contain a bare CR or LF.
+func validRecipientAddress(email string) bool {
+	if email == "" || len(email) > 320 {
+		return false
+	}
+	if strings.ContainsAny(email, "\r\n") {
+		return false
+	}
+	local, domain, ok := strings.Cut(email, "@")
+	if !ok || local == "" || domain == "" {
+		return false
+	}
+	if !domainRe.MatchString(domain) {
+		return false
+	}
+	parsed, err := netmail.ParseAddress(email)
+	return err == nil && strings.EqualFold(parsed.Address, email)
+}
+
 var localPartRe = regexp.MustCompile(`[^a-z0-9._%+\-]`)
 
 func normalizeLocalPart(s string) string {
@@ -244,12 +274,17 @@ func normalizeEmail(s string) string {
 	return normalizeLocalPart(parts[0]) + "@" + normalizeDomain(parts[1])
 }
 
+// dedupeEmails normalizes, validates and de-duplicates recipient addresses.
+//
+// Invalid entries are dropped rather than reported: callers treat an empty result
+// as "no recipients" and reject the send, so a request consisting only of malformed
+// addresses still fails loudly.
 func dedupeEmails(items []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		email := normalizeEmail(item)
-		if email == "" || !strings.Contains(email, "@") || seen[email] {
+		if !validRecipientAddress(email) || seen[email] {
 			continue
 		}
 		seen[email] = true

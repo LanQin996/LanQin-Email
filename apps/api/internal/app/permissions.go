@@ -137,11 +137,11 @@ type PermissionGroup struct {
 }
 
 type PermissionLimits struct {
-	MaxAttachmentMB  int `json:"maxAttachmentMb"`
-	SMTPDailyLimit   int `json:"smtpDailyLimit"`
-	SMTPMinuteLimit  int `json:"smtpMinuteLimit"`
-	IMAPMinuteLimit  int `json:"imapMinuteLimit"`
-	POP3MinuteLimit  int `json:"pop3MinuteLimit"`
+	MaxAttachmentMB int `json:"maxAttachmentMb"`
+	SMTPDailyLimit  int `json:"smtpDailyLimit"`
+	SMTPMinuteLimit int `json:"smtpMinuteLimit"`
+	IMAPMinuteLimit int `json:"imapMinuteLimit"`
+	POP3MinuteLimit int `json:"pop3MinuteLimit"`
 	// MaxMailboxes limits how many mailboxes a user may create over their
 	// lifetime. Like every other field here, 0 means unlimited. The count is
 	// cumulative and includes deleted mailboxes, so deleting a mailbox does not
@@ -155,10 +155,10 @@ type PermissionLimits struct {
 
 func defaultPermissionLimits() PermissionLimits {
 	return PermissionLimits{
-		MaxAttachmentMB: 25,
-		SMTPDailyLimit:  200,
-		SMTPMinuteLimit: 20,
-		IMAPMinuteLimit: 200,
+		MaxAttachmentMB:    25,
+		SMTPDailyLimit:     200,
+		SMTPMinuteLimit:    20,
+		IMAPMinuteLimit:    200,
 		POP3MinuteLimit:    150,
 		MaxMailboxes:       3,
 		MaxMailboxesPerDay: 1,
@@ -214,11 +214,11 @@ func encodePermissionLimits(limits PermissionLimits) string {
 
 func mergePermissionLimits(left, right PermissionLimits) PermissionLimits {
 	return PermissionLimits{
-		MaxAttachmentMB:  mergeLimitValue(left.MaxAttachmentMB, right.MaxAttachmentMB),
-		SMTPDailyLimit:   mergeLimitValue(left.SMTPDailyLimit, right.SMTPDailyLimit),
-		SMTPMinuteLimit:  mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
-		IMAPMinuteLimit:  mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
-		POP3MinuteLimit:  mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
+		MaxAttachmentMB:    mergeLimitValue(left.MaxAttachmentMB, right.MaxAttachmentMB),
+		SMTPDailyLimit:     mergeLimitValue(left.SMTPDailyLimit, right.SMTPDailyLimit),
+		SMTPMinuteLimit:    mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
+		IMAPMinuteLimit:    mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
+		POP3MinuteLimit:    mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
 		MaxMailboxes:       mergeLimitValue(left.MaxMailboxes, right.MaxMailboxes),
 		MaxMailboxesPerDay: mergeLimitValue(left.MaxMailboxesPerDay, right.MaxMailboxesPerDay),
 	}
@@ -244,10 +244,10 @@ func minimalLimits() PermissionLimits {
 	// zero value would make the merged limit permanently unlimited without
 	// raising an error. TestMinimalLimitsHasNoZeroField guards this.
 	return PermissionLimits{
-		MaxAttachmentMB: 1,
-		SMTPDailyLimit:  1,
-		SMTPMinuteLimit: 1,
-		IMAPMinuteLimit: 1,
+		MaxAttachmentMB:    1,
+		SMTPDailyLimit:     1,
+		SMTPMinuteLimit:    1,
+		IMAPMinuteLimit:    1,
 		POP3MinuteLimit:    1,
 		MaxMailboxes:       1,
 		MaxMailboxesPerDay: 1,

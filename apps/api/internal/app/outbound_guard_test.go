@@ -4,23 +4,24 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIsPublicUnicastIPRejectsInternalRanges(t *testing.T) {
 	blocked := []string{
-		"127.0.0.1",              // loopback
-		"::1",                    // IPv6 loopback
-		"::ffff:127.0.0.1",       // IPv4-mapped loopback
-		"10.0.0.1",               // RFC1918
-		"172.16.0.1",             // RFC1918
-		"192.168.1.1",            // RFC1918
-		"fd00::1",                // RFC4193 unique local
-		"169.254.169.254",        // cloud metadata (link-local)
-		"fe80::1",                // IPv6 link-local
-		"224.0.0.1",              // IPv4 multicast
-		"ff02::1",                // IPv6 multicast
-		"0.0.0.0",                // unspecified
-		"::",                     // IPv6 unspecified
+		"127.0.0.1",        // loopback
+		"::1",              // IPv6 loopback
+		"::ffff:127.0.0.1", // IPv4-mapped loopback
+		"10.0.0.1",         // RFC1918
+		"172.16.0.1",       // RFC1918
+		"192.168.1.1",      // RFC1918
+		"fd00::1",          // RFC4193 unique local
+		"169.254.169.254",  // cloud metadata (link-local)
+		"fe80::1",          // IPv6 link-local
+		"224.0.0.1",        // IPv4 multicast
+		"ff02::1",          // IPv6 multicast
+		"0.0.0.0",          // unspecified
+		"::",               // IPv6 unspecified
 	}
 	for _, item := range blocked {
 		ip := net.ParseIP(item)
@@ -127,5 +128,82 @@ func TestAttachmentDispositionStripsHeaderBreakers(t *testing.T) {
 	}
 	if attachmentDisposition("") == "" {
 		t.Error("empty filename must still yield a disposition")
+	}
+}
+
+// TestValidRecipientAddressRejectsHeaderInjection covers the report's H1: a
+// recipient carrying CR/LF used to reach BuildMIME verbatim and split into extra
+// headers, letting an authenticated user forge Reply-To on locally delivered mail.
+func TestValidRecipientAddressRejectsHeaderInjection(t *testing.T) {
+	rejected := []string{
+		"victim@example.com\r\nReply-To: attacker@evil.example",
+		"victim@example.com\nBcc: attacker@evil.example",
+		"victim@exa mple.com",
+		"victim@",
+		"@example.com",
+		"victim@-example.com",
+		"victim@example-.com",
+		"victim@exa_mple.com",
+		"",
+	}
+	for _, item := range rejected {
+		if validRecipientAddress(normalizeEmail(item)) {
+			t.Errorf("validRecipientAddress(%q) = true, want false", item)
+		}
+	}
+	accepted := []string{"victim@example.com", "a.b+c@sub.example.co.uk", "x@e.io"}
+	for _, item := range accepted {
+		if !validRecipientAddress(normalizeEmail(item)) {
+			t.Errorf("validRecipientAddress(%q) = false, want true", item)
+		}
+	}
+
+	// Called directly, the predicate must also refuse a bare CR or LF: normalizeEmail
+	// happens to trim those at the edges, but the guard cannot rely on its caller.
+	for _, item := range []string{"victim@example.com\r", "victim@example.com\n", "a\rb@example.com"} {
+		if validRecipientAddress(item) {
+			t.Errorf("validRecipientAddress(%q) = true, want false", item)
+		}
+	}
+}
+func TestDedupeEmailsDropsInjectedRecipients(t *testing.T) {
+	got := dedupeEmails([]string{
+		"ok@example.com",
+		"victim@example.com\r\nReply-To: attacker@evil.example",
+		"OK@EXAMPLE.COM",
+	})
+	if len(got) != 1 || got[0] != "ok@example.com" {
+		t.Fatalf("dedupeEmails = %+v, want [ok@example.com]", got)
+	}
+}
+
+// TestBuildMIMEStripsHeaderBreaks is defence in depth: even if a caller bypasses
+// dedupeEmails, no header value may introduce a new line.
+func TestBuildMIMEStripsHeaderBreaks(t *testing.T) {
+	raw, err := BuildMIME(MIMEMessage{
+		From:      "sender@example.com",
+		To:        []string{"victim@example.com\r\nReply-To: attacker@evil.example"},
+		Subject:   "probe",
+		Text:      "body",
+		MessageID: "<probe@example.com>",
+		Date:      time.Unix(0, 0).UTC(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	headers, _, _ := strings.Cut(string(raw), "\r\n\r\n")
+	var toLine string
+	for _, line := range strings.Split(headers, "\r\n") {
+		if strings.HasPrefix(strings.ToLower(line), "reply-to:") {
+			t.Fatalf("injected header survived BuildMIME:\n%s", headers)
+		}
+		if strings.HasPrefix(line, "To: ") {
+			toLine = line
+		}
+	}
+	// The injected text must survive only as inert content of the To line, never as
+	// its own header. Exact spacing is not pinned; staying on one line is the point.
+	if !strings.Contains(toLine, "victim@example.com") || !strings.Contains(toLine, "Reply-To: attacker@evil.example") {
+		t.Errorf("To header lost the folded value: %q", toLine)
 	}
 }

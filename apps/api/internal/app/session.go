@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"database/sql"
 	"net/http"
 	"time"
 )
@@ -24,4 +26,17 @@ func (a *App) issueSession(w http.ResponseWriter, r *http.Request, userID string
 		Secure:   !a.cfg.AllowInsecureHTTP,
 	})
 	return nil
+}
+
+// revokeUserSessionsTx deletes a user's sessions, optionally sparing one.
+//
+// keepTokenHash is the hash of the session that should survive — pass "" to end
+// every session, which is what an administrator-driven reset does.
+func revokeUserSessionsTx(ctx context.Context, tx *sql.Tx, userID, keepTokenHash string) error {
+	if keepTokenHash == "" {
+		_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, userID)
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=? AND token_hash<>?`, userID, keepTokenHash)
+	return err
 }

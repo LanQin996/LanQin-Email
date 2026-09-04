@@ -325,6 +325,13 @@ func (a *App) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update mailbox passwords")
 		return
 	}
+	// An administrator reset is typically a response to a compromised account, so
+	// every session of the target user ends — including any the administrator's own
+	// browser might hold for that user.
+	if err := revokeUserSessionsTx(r.Context(), tx, id, ""); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke sessions")
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save password")
 		return

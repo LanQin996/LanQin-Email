@@ -66,6 +66,21 @@ jobs:
           go-version-file: apps/api/go.mod
           cache-dependency-path: apps/api/go.sum
 
+      - name: Check api formatting
+        working-directory: apps/api
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted:"
+            echo "$unformatted"
+            gofmt -d .
+            exit 1
+          fi
+
+      - name: Vet api
+        working-directory: apps/api
+        run: go vet ./...
+
       - name: Test api
         working-directory: apps/api
         run: go test ./...

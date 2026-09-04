@@ -182,7 +182,8 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 | `LANQIN_ADMIN_EMAIL` | 初始管理员邮箱 | `admin@example.com` |
 | `LANQIN_ADMIN_PASSWORD` | 初始管理员密码，生产必须修改 | `ChangeMe123!` |
 | `LANQIN_DB_PATH` | SQLite 数据库路径 | `/data/lanqin.db` |
-| `LANQIN_ALLOW_INSECURE_HTTP` | 是否允许非 HTTPS Cookie，本地调试可开 | `false` |
+| `LANQIN_ALLOW_INSECURE_HTTP` | 是否允许非 HTTPS Cookie，本地调试可开；同时决定是否放通 localhost 跨域 | `false` |
+| `LANQIN_TRUSTED_PROXY_COUNT` | API 前面可信反向代理的层数。`0` 表示忽略转发头、只用 TCP 对端地址；本仓库 compose 由 Nginx 反代，因此设为 `1` | `0` |
 | `LANQIN_OPEN_REGISTRATION` | 是否开放注册 | `false` |
 | `LANQIN_TWO_FACTOR_ENABLED` | 2FA 功能总开关 | `false` |
 | `LANQIN_TURNSTILE_ENABLED` | 是否启用 Turnstile | `false` |

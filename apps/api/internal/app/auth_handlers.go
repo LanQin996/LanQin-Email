@@ -434,6 +434,18 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to update mailbox password")
 		return
 	}
+	// Changing a password is the one recovery action a user knows to take after a
+	// suspected compromise, so it has to end the attacker's other sessions. The
+	// current session is kept alive to avoid logging the user out of the page they
+	// are on.
+	keep := ""
+	if cookie, err := r.Cookie(a.cfg.CookieName); err == nil {
+		keep = hashToken(cookie.Value)
+	}
+	if err := revokeUserSessionsTx(r.Context(), tx, user.ID, keep); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke other sessions")
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save password")
 		return

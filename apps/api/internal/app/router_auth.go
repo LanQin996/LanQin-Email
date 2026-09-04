@@ -20,7 +20,7 @@ const apiTokenScopesContextKey contextKey = "api_token_scopes"
 func (a *App) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	r.Use(a.clientIPMiddleware())
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(a.corsMiddleware)
@@ -238,10 +238,45 @@ func (a *App) registerOpenAPIRoutes(r chi.Router) {
 	r.With(a.requireAPITokenScope("aliases:write"), a.requireAdminAccess, a.requirePermission(PermissionAliasesDelete)).Delete("/aliases/{id}", a.handleDeleteAlias)
 }
 
+// clientIPMiddleware records the client IP and rewrites RemoteAddr to match.
+//
+// middleware.RealIP is deprecated precisely because it trusts True-Client-IP,
+// X-Real-IP and X-Forwarded-For unconditionally, so any client could dictate the
+// address used for rate limiting and audit logs. Here the source is chosen from
+// configuration instead:
+//
+//   - TrustedProxyCount > 0: take the Nth-from-right X-Forwarded-For entry, which
+//     is the value the closest trusted proxy appended and a client cannot forge.
+//   - otherwise: use the TCP peer address and ignore headers entirely.
+//
+// RemoteAddr is overwritten so existing callers keep working; new code may also
+// read middleware.GetClientIP(ctx).
+func (a *App) clientIPMiddleware() func(http.Handler) http.Handler {
+	source := middleware.ClientIPFromRemoteAddr
+	if a.cfg.TrustedProxyCount > 0 {
+		source = middleware.ClientIPFromXFFTrustedProxies(a.cfg.TrustedProxyCount)
+	}
+	return func(next http.Handler) http.Handler {
+		return source(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if ip := middleware.GetClientIP(r.Context()); ip != "" {
+				r.RemoteAddr = ip
+			}
+			next.ServeHTTP(w, r)
+		}))
+	}
+}
+
 func (a *App) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && (strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") || origin == a.cfg.PublicBaseURL) {
+		// The localhost allowance is a development affordance: a page on the user's
+		// own machine would otherwise be unable to talk to the API. In production it
+		// only widens the attack surface, so it is tied to insecure-HTTP mode.
+		allowed := origin != "" && origin == a.cfg.PublicBaseURL
+		if !allowed && origin != "" && a.cfg.AllowInsecureHTTP {
+			allowed = strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:")
+		}
+		if allowed {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Vary", "Origin")
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
