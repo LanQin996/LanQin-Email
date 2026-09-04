@@ -239,3 +239,104 @@ func TestFailedRegistrationLeavesNoUserOrConsumedInvite(t *testing.T) {
 		t.Errorf("failed registration consumed the invite: %+v", list.Items[0])
 	}
 }
+
+// TestSMTPDailyQuotaChargesPerRecipient covers the report's M6: the daily allowance was
+// charged once per message regardless of how many addresses it carried, so a single
+// send could cover up to maxRecipientsPerMessage recipients for the price of one.
+func TestSMTPDailyQuotaChargesPerRecipient(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	// A daily allowance of 5 with the per-minute cap left unlimited isolates the
+	// volume budget, which is the guard this test is about.
+	updateRegularPermissionGroupWithLimits(t, admin, regularUserDefaultPermissions(), PermissionLimits{MaxAttachmentMB: 10, SMTPDailyLimit: 5})
+
+	domainID := mustDefaultDomainID(t, a)
+	sender := createTestMailbox(t, admin, domainID, "quota-sender", "Quota Sender", "Password123!", nil)
+	user := &testClient{t: t, server: ts}
+	if code := user.do("POST", "/api/auth/login", map[string]string{"email": sender.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("sender login code=%d", code)
+	}
+	send := func(subject string, to []string) int {
+		var body map[string]any
+		return user.do("POST", "/api/mail/send", map[string]any{
+			"mailboxId": sender.ID, "to": to, "subject": subject, "text": "body", "html": "<p>body</p>",
+		}, &body)
+	}
+
+	three := []string{"a@example.test", "b@example.test", "c@example.test"}
+	if code := send("first", three); code != http.StatusCreated {
+		t.Fatalf("three-recipient send code=%d", code)
+	}
+	// Three of five units are spent, so another three no longer fit.
+	if code := send("second", three); code != http.StatusTooManyRequests {
+		t.Errorf("second three-recipient send code=%d, want 429", code)
+	}
+	// The remaining two units are still usable, then the allowance is exhausted.
+	if code := send("third", []string{"d@example.test", "e@example.test"}); code != http.StatusCreated {
+		t.Errorf("two-recipient send code=%d, want 201", code)
+	}
+	if code := send("fourth", []string{"f@example.test"}); code != http.StatusTooManyRequests {
+		t.Errorf("send past the allowance code=%d, want 429", code)
+	}
+	var charged int
+	if err := a.db.QueryRow(`SELECT COALESCE(SUM(recipients),0) FROM smtp_send_events`).Scan(&charged); err != nil {
+		t.Fatal(err)
+	}
+	if charged != 5 {
+		t.Errorf("charged %d units, want 5", charged)
+	}
+}
+
+// TestSMTPRateRecipientsMigrationBackfillsExistingTable guards the upgrade path: the
+// inline DDL only covers fresh databases, so an existing deployment depends on the
+// PRAGMA-probing migration to gain the column.
+func TestSMTPRateRecipientsMigrationBackfillsExistingTable(t *testing.T) {
+	a := newTestApp(t)
+	ctx := t.Context()
+	if _, err := a.db.ExecContext(ctx, `ALTER TABLE smtp_send_events DROP COLUMN recipients`); err != nil {
+		t.Fatal(err)
+	}
+	columns, err := sqliteTableColumns(ctx, a.db, "smtp_send_events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if columns["recipients"] {
+		t.Fatal("column was not dropped, the test cannot prove anything")
+	}
+	if err := a.migrateSMTPRateRecipients(ctx); err != nil {
+		t.Fatal(err)
+	}
+	columns, err = sqliteTableColumns(ctx, a.db, "smtp_send_events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !columns["recipients"] {
+		t.Fatal("migration did not add smtp_send_events.recipients")
+	}
+	// Rows written before the upgrade must read as one charged unit, which is what
+	// per-message accounting always meant.
+	var userID, mailboxID string
+	if err := a.db.QueryRowContext(ctx, `SELECT u.id,m.id FROM users u JOIN mailboxes m ON m.user_id=u.id LIMIT 1`).Scan(&userID, &mailboxID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`,
+		newID("smtp"), userID, mailboxID, a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	var charged int
+	if err := a.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(recipients),0) FROM smtp_send_events`).Scan(&charged); err != nil {
+		t.Fatal(err)
+	}
+	if charged != 1 {
+		t.Errorf("legacy row charged %d units, want 1", charged)
+	}
+	// Idempotent: startup runs every migration on every boot.
+	if err := a.migrateSMTPRateRecipients(ctx); err != nil {
+		t.Fatalf("re-running the migration failed: %v", err)
+	}
+}

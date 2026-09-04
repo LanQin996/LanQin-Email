@@ -604,7 +604,8 @@ func (a *App) migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			recipients INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_smtp_send_events_user_created ON smtp_send_events(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS imap_events (
@@ -801,6 +802,9 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := a.migrateInviteGroupsAndMailboxRate(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateSMTPRateRecipients(ctx); err != nil {
 		return err
 	}
 	if err := a.migrateSendQueueMessageID(ctx); err != nil {
@@ -1148,6 +1152,23 @@ func (a *App) migrateMailboxQuota(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// migrateSMTPRateRecipients adds the per-event recipient weight.
+//
+// Existing rows default to 1, which is exactly what they meant: before this column
+// the daily allowance was charged one unit per message regardless of how many
+// addresses it carried.
+func (a *App) migrateSMTPRateRecipients(ctx context.Context) error {
+	columns, err := sqliteTableColumns(ctx, a.db, "smtp_send_events")
+	if err != nil {
+		return err
+	}
+	if columns["recipients"] {
+		return nil
+	}
+	_, err = a.db.ExecContext(ctx, `ALTER TABLE smtp_send_events ADD COLUMN recipients INTEGER NOT NULL DEFAULT 1`)
+	return err
 }
 
 // migrateInviteGroupsAndMailboxRate adds the invite-to-group binding column.

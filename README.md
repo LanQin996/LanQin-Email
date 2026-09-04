@@ -164,7 +164,9 @@ When Linux.do registration is enabled, you may select a permission group that ev
 
 ## Permission Group Quotas
 
-Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP messages per day and per minute, IMAP and POP3 commands per minute, the number of mailboxes a user may create, and how many mailboxes they may create per day. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
+Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP recipients per day and messages per minute, IMAP and POP3 commands per minute, the number of mailboxes a user may create, and how many mailboxes they may create per day. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
+
+The daily SMTP allowance is charged **per recipient**, so one message addressed to 10 people costs 10; the per-minute allowance still counts **messages**, since its job is to throttle request rate. A single message carries at most 100 recipients across To/CC/BCC after deduplication.
 
 The mailbox quota counts **every mailbox ever created** for the user, including mailboxes that were later deleted, so deleting a mailbox does not hand the allowance back. This is what prevents a user from cycling create and delete to exceed the limit. Self-service requests under **Profile > Mailboxes** are refused once the limit is reached; mailboxes created by an administrator or through the Open API are allowed past it but still count towards the total. The default allowance for regular users is 3 mailboxes.
 

@@ -482,7 +482,7 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, show
         <CardContent>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <LimitBadge label="附件上限" value={user.limits?.maxAttachmentMb} unit="MB" />
-            <LimitBadge label="SMTP 每日" value={user.limits?.smtpDailyLimit} unit="封" />
+            <LimitBadge label="SMTP 每日" value={user.limits?.smtpDailyLimit} unit="人" />
             <LimitBadge label="SMTP 每分钟" value={user.limits?.smtpMinuteLimit} unit="封" />
             <LimitBadge label="IMAP 每分钟" value={user.limits?.imapMinuteLimit} unit="次" />
             <LimitBadge label="POP3 每分钟" value={user.limits?.pop3MinuteLimit} unit="次" />

@@ -443,7 +443,8 @@ func postgresFreshSchema() []string {
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
-			created_at VARCHAR(35) NOT NULL
+			created_at VARCHAR(35) NOT NULL,
+			recipients INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE INDEX idx_smtp_send_events_user_created ON smtp_send_events(user_id,created_at)`,
 		`CREATE TABLE imap_events (

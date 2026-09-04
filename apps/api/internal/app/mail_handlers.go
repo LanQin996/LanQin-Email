@@ -908,7 +908,7 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 	// Charge the send quota before building the MIME message: BuildMIME encodes every
 	// attachment, so doing it first let a user who is already over their limit burn
 	// that work on every rejected attempt.
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+	if err := a.recordSMTPRate(ctx, user, mb, len(allRecipients)); err != nil {
 		return nil, err
 	}
 	mimeBytes, err := BuildMIME(MIMEMessage{
@@ -1143,13 +1143,27 @@ func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error {
+// recordSMTPRate charges the sender's SMTP allowance for one message.
+//
+// recipients is the number of addresses the message carries. The daily allowance is a
+// volume budget, so it is charged per recipient: charging one unit per message let a
+// user with smtpDailyLimit=200 push maxRecipientsPerMessage times that many addresses
+// through it, which is both a quota bypass and an outbound-spam amplifier.
+//
+// The per-minute allowance is deliberately still counted per message. It exists to
+// throttle request rate, not volume, and operators have already configured values in
+// that unit — reinterpreting them as recipients would silently make a legitimate
+// 30-address send impossible under the default of 20.
+func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox, recipients int) error {
 	if user == nil || mb == nil || user.Role == "admin" {
 		return nil
 	}
 	limits := user.Limits
 	if limits.SMTPDailyLimit == 0 && limits.SMTPMinuteLimit == 0 {
 		return nil
+	}
+	if recipients < 1 {
+		recipients = 1
 	}
 	now := a.now().UTC()
 	tx, err := a.db.BeginTx(ctx, nil)
@@ -1161,11 +1175,11 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 		return err
 	}
 	if limits.SMTPDailyLimit > 0 {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+		var used int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(recipients),0) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&used); err != nil {
 			return err
 		}
-		if count >= limits.SMTPDailyLimit {
+		if used+recipients > limits.SMTPDailyLimit {
 			return fmt.Errorf("%w: daily limit %d", errSMTPRateLimited, limits.SMTPDailyLimit)
 		}
 	}
@@ -1178,7 +1192,7 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 			return fmt.Errorf("%w: per-minute limit %d", errSMTPRateLimited, limits.SMTPMinuteLimit)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`, newID("smtp"), user.ID, mb.ID, now.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at,recipients) VALUES(?,?,?,?,?)`, newID("smtp"), user.ID, mb.ID, now.Format(time.RFC3339Nano), recipients); err != nil {
 		return err
 	}
 	return tx.Commit()

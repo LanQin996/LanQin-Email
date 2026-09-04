@@ -475,7 +475,7 @@ function PermissionLimitEditor({ value, onChange }: { value: PermissionLimits; o
           <Input type="number" min={0} value={value.maxAttachmentMb} onChange={(event) => update("maxAttachmentMb", event.target.value)} />
         </div>
         <div className="space-y-2">
-          <Label>SMTP 每日封数</Label>
+          <Label>SMTP 每日收件人数</Label>
           <Input type="number" min={0} value={value.smtpDailyLimit} onChange={(event) => update("smtpDailyLimit", event.target.value)} />
         </div>
         <div className="space-y-2">
@@ -530,7 +530,7 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
       <Badge variant="secondary" className="font-normal">附件 {limitText(value.maxAttachmentMb, "MB")}</Badge>
-      <Badge variant="secondary" className="font-normal">SMTP 每日 {limitText(value.smtpDailyLimit, "封")}</Badge>
+      <Badge variant="secondary" className="font-normal">SMTP 每日 {limitText(value.smtpDailyLimit, "人")}</Badge>
       <Badge variant="secondary" className="font-normal">SMTP 每分钟 {limitText(value.smtpMinuteLimit, "封")}</Badge>
       <Badge variant="secondary" className="font-normal">IMAP 每分钟 {limitText(value.imapMinuteLimit, "次")}</Badge>
       <Badge variant="secondary" className="font-normal">POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}</Badge>
