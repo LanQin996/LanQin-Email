@@ -4023,6 +4023,9 @@ func TestUserMailSignaturesDefaultResolution(t *testing.T) {
 func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 	a := newTestApp(t)
 	a.cfg.TwoFactorEnabled = true
+	// One accepted code burns its 30-second step, so each use below needs a new step.
+	clock := time.Now().UTC().Truncate(time.Second)
+	a.now = func() time.Time { return clock }
 	ts := httptest.NewServer(a.Router())
 	defer ts.Close()
 	client := &testClient{t: t, server: ts}
@@ -4055,6 +4058,7 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 		t.Fatalf("enable status=%d user=%+v", status, enabled.User)
 	}
 
+	clock = clock.Add(31 * time.Second)
 	fresh := &testClient{t: t, server: ts}
 	var challenge struct {
 		TwoFactorRequired bool   `json:"twoFactorRequired"`
@@ -4073,7 +4077,20 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 	if status := fresh.do("POST", "/api/auth/login", map[string]string{"challengeToken": challenge.ChallengeToken, "twoFactorCode": code}, &login); status != http.StatusOK || fresh.cookie == nil {
 		t.Fatalf("2fa login status=%d body=%v cookie=%v", status, login, fresh.cookie)
 	}
-	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code}, &enabled); status != http.StatusOK || enabled.User.TwoFactorEnabled {
+	// Reusing the code that just logged in must fail; a fresh step plus the account
+	// password is now required to remove the second factor.
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code, "currentPassword": "ChangeMe123!"}, &out); status != http.StatusUnauthorized {
+		t.Fatalf("replayed disable status=%d body=%v", status, out)
+	}
+	clock = clock.Add(31 * time.Second)
+	code, err = generateTOTP(setup.Secret, a.now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code}, &out); status != http.StatusUnauthorized {
+		t.Fatalf("disable without password status=%d body=%v", status, out)
+	}
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code, "currentPassword": "ChangeMe123!"}, &enabled); status != http.StatusOK || enabled.User.TwoFactorEnabled {
 		t.Fatalf("disable status=%d user=%+v", status, enabled.User)
 	}
 }

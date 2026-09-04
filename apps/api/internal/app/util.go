@@ -416,3 +416,43 @@ func requireString(name, value string) error {
 }
 
 var errNotFound = errors.New("not found")
+
+// maxPasswordBytes is bcrypt's hard input limit. golang.org/x/crypto returns
+// ErrPasswordTooLong beyond it, which callers would otherwise surface as a 500.
+const maxPasswordBytes = 72
+
+// validatePasswordLength enforces both bounds in one place.
+//
+// The lower bound counts bytes rather than runes to stay consistent with what bcrypt
+// consumes; the message says characters because that is what a user can act on.
+func validatePasswordLength(password string) error {
+	if len(password) < 8 {
+		return errors.New("密码至少需要 8 个字符")
+	}
+	if len(password) > maxPasswordBytes {
+		return fmt.Errorf("密码过长，最多 %d 字节（一个中文字符约占 3 字节）", maxPasswordBytes)
+	}
+	return nil
+}
+
+// requireCleanLocalPart normalizes a user-supplied mailbox prefix and rejects it if
+// normalization had to change anything.
+//
+// normalizeLocalPart silently strips characters outside its allow-list, so a request
+// for "a/b" would quietly create "ab" — a different address than the user asked for,
+// with no indication in the response. Reserved-prefix checks also read more
+// predictably when the stored value equals the submitted one.
+func requireCleanLocalPart(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	normalized := normalizeLocalPart(trimmed)
+	if normalized == "" {
+		return "", errors.New("邮箱前缀无效")
+	}
+	if normalized != strings.ToLower(trimmed) {
+		return "", errors.New("邮箱前缀只能包含字母、数字以及 . _ % + - ，且不能以点开头或结尾")
+	}
+	if len(normalized) > 64 {
+		return "", errors.New("邮箱前缀过长")
+	}
+	return normalized, nil
+}

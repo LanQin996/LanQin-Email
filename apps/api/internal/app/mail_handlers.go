@@ -2121,7 +2121,23 @@ func (a *App) handleAdminAttachment(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// maxSSEConnectionsPerUser bounds how many event streams one account may hold.
+//
+// Each stream costs a goroutine and a ticker for as long as it stays open, so without
+// a cap a single account could pin an unbounded number of them.
+const maxSSEConnectionsPerUser = 8
+
 func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !a.acquireSSESlot(user.ID) {
+		respondError(w, http.StatusTooManyRequests, "打开的实时连接过多，请关闭其他标签页后重试")
+		return
+	}
+	defer a.releaseSSESlot(user.ID)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -2150,6 +2166,29 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func (a *App) acquireSSESlot(userID string) bool {
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	if a.sseConnections == nil {
+		a.sseConnections = make(map[string]int)
+	}
+	if a.sseConnections[userID] >= maxSSEConnectionsPerUser {
+		return false
+	}
+	a.sseConnections[userID]++
+	return true
+}
+
+func (a *App) releaseSSESlot(userID string) {
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	if a.sseConnections[userID] <= 1 {
+		delete(a.sseConnections, userID)
+		return
+	}
+	a.sseConnections[userID]--
 }
 
 func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {

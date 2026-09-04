@@ -406,9 +406,13 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "人机验证失败，请重试")
 		return
 	}
-	localPart := normalizeLocalPart(req.LocalPart)
-	if localPart == "" || strings.TrimSpace(req.DomainID) == "" {
+	if strings.TrimSpace(req.DomainID) == "" {
 		badRequest(w, errors.New("请选择邮箱域名并填写邮箱前缀"))
+		return
+	}
+	localPart, err := requireCleanLocalPart(req.LocalPart)
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	for _, reserved := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
@@ -417,8 +421,8 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -530,7 +534,7 @@ func (a *App) handleLinuxDoTwoFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, secret, err := a.loadUserAuthByID(r.Context(), challenge.UserID)
-	if err != nil || user.Disabled || !user.TwoFactorEnabled || !verifyTOTP(secret, req.Code, a.now().UTC()) {
+	if err != nil || user.Disabled || !user.TwoFactorEnabled || !a.consumeTOTP(r.Context(), user.ID, secret, req.Code) {
 		respondError(w, http.StatusUnauthorized, "验证码错误")
 		return
 	}
@@ -630,7 +634,7 @@ func (a *App) verifyLinuxDoReauthentication(ctx context.Context, userID, passwor
 	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) != nil {
 		return errors.New("invalid password")
 	}
-	if intBool(enabled) && !verifyTOTP(secret, code, a.now().UTC()) {
+	if intBool(enabled) && !a.consumeTOTP(ctx, userID, secret, code) {
 		return errors.New("invalid two-factor code")
 	}
 	return nil

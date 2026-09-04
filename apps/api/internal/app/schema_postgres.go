@@ -15,6 +15,7 @@ func postgresFreshSchema() []string {
 			password_hash VARCHAR(255) NOT NULL,
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+			two_factor_last_counter BIGINT NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
 			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
 			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
@@ -45,6 +46,8 @@ func postgresFreshSchema() []string {
 			expires_at VARCHAR(35) NOT NULL,
 			created_at VARCHAR(35) NOT NULL
 		)`,
+		`CREATE INDEX idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX idx_sessions_expires ON sessions(expires_at)`,
 		`CREATE TABLE login_challenges (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

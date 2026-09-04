@@ -166,7 +166,7 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "启用失败", description: error.message }),
   })
   const disableTwoFactor = useMutation({
-    mutationFn: (form: FormData) => api.disableTwoFactor(String(form.get("code") || "")),
+    mutationFn: (form: FormData) => api.disableTwoFactor(String(form.get("code") || ""), String(form.get("currentPassword") || "")),
     onSuccess: (data) => { qc.setQueryData(["me"], data); twoFactorFormRef.current?.reset(); toast({ title: "双因素认证已关闭" }) },
     onError: (error) => toast({ title: "关闭失败", description: error.message }),
   })
@@ -606,6 +606,9 @@ function ProfileOverview({ user, profile, password, passwordFormRef, stats, show
             <form ref={twoFactorFormRef} className="space-y-4" onSubmit={(e) => { e.preventDefault(); disableTwoFactor.mutate(new FormData(e.currentTarget)) }}>
               <Field label="当前验证码">
                 <Input name="code" inputMode="numeric" autoComplete="one-time-code" minLength={6} maxLength={6} required />
+              </Field>
+              <Field label="当前密码">
+                <PasswordInput name="currentPassword" autoComplete="current-password" required />
               </Field>
               <div className="flex justify-end">
                 <Button variant="destructive" disabled={disableTwoFactor.isPending}>{disableTwoFactor.isPending ? "关闭中..." : "关闭双因素认证"}</Button>

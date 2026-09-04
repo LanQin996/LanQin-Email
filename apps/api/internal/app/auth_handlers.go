@@ -88,7 +88,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			respondLoginRateLimited(w, retryAfter)
 			return
 		}
-		if !verifyTOTP(secret, req.TwoFactorCode, a.now().UTC()) {
+		if !a.consumeTOTP(r.Context(), user.ID, secret, req.TwoFactorCode) {
 			retryAfter, recordErr := a.recordLoginFailure(r.Context(), user.Email, clientIP)
 			if recordErr != nil {
 				a.log.Warn("failed to record authentication failure", "stage", "totp", "error", recordErr)
@@ -235,8 +235,8 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("邮箱地址无效"))
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -251,7 +251,12 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var mailboxLocalPart string
 	if strings.TrimSpace(req.DomainID) != "" && strings.TrimSpace(req.LocalPart) != "" {
 		mailboxDomainID = strings.TrimSpace(req.DomainID)
-		mailboxLocalPart = normalizeLocalPart(req.LocalPart)
+		cleaned, err := requireCleanLocalPart(req.LocalPart)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		mailboxLocalPart = cleaned
 	} else {
 		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE status='active' ORDER BY created_at ASC LIMIT 1`).Scan(&mailboxDomainID); err != nil {
 			mailboxDomainID = ""
@@ -400,8 +405,8 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		badRequest(w, errors.New("新密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.NewPassword); err != nil {
+		badRequest(w, err)
 		return
 	}
 	row := a.db.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id=?`, user.ID)

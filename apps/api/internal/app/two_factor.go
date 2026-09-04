@@ -14,6 +14,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type loginChallenge struct {
@@ -48,26 +50,57 @@ func generateTOTP(secret string, now time.Time) (string, error) {
 }
 
 func verifyTOTP(secret, code string, now time.Time) bool {
+	_, ok := matchTOTPCounter(secret, code, now)
+	return ok
+}
+
+// matchTOTPCounter returns the 30-second step a code belongs to.
+//
+// The step is what makes replay detectable: a code stays valid for the whole
+// acceptance window, so without remembering the last accepted step the same six
+// digits can be presented repeatedly for about 90 seconds.
+func matchTOTPCounter(secret, code string, now time.Time) (int64, bool) {
 	code = strings.TrimSpace(code)
 	if len(code) != 6 {
-		return false
+		return 0, false
 	}
 	for _, r := range code {
 		if r < '0' || r > '9' {
-			return false
+			return 0, false
 		}
 	}
 	key, err := decodeTOTPSecret(secret)
 	if err != nil {
-		return false
+		return 0, false
 	}
 	counter := now.Unix() / 30
 	for delta := int64(-1); delta <= 1; delta++ {
 		if generateTOTPForCounter(key, counter+delta) == code {
-			return true
+			return counter + delta, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+// consumeTOTP verifies a code and burns the step it belongs to.
+//
+// The conditional UPDATE is the whole point: it both records the step and rejects
+// any code from a step already used, including two concurrent requests carrying the
+// same code, since only one can move the column forward.
+func (a *App) consumeTOTP(ctx context.Context, userID, secret, code string) bool {
+	counter, ok := matchTOTPCounter(secret, code, a.now().UTC())
+	if !ok {
+		return false
+	}
+	result, err := a.db.ExecContext(ctx,
+		`UPDATE users SET two_factor_last_counter=? WHERE id=? AND two_factor_last_counter<?`,
+		counter, userID, counter)
+	if err != nil {
+		a.log.Warn("failed to record TOTP counter", "error", err)
+		return false
+	}
+	affected, err := result.RowsAffected()
+	return err == nil && affected == 1
 }
 
 func decodeTOTPSecret(secret string) ([]byte, error) {
@@ -206,7 +239,7 @@ func (a *App) handleTwoFactorEnable(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("two-factor secret not set"))
 		return
 	}
-	if !verifyTOTP(secret, req.Code, a.now().UTC()) {
+	if !a.consumeTOTP(r.Context(), user.ID, secret, req.Code) {
 		respondError(w, http.StatusUnauthorized, "invalid verification code")
 		return
 	}
@@ -229,7 +262,8 @@ func (a *App) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Code string `json:"code"`
+		Code            string `json:"code"`
+		CurrentPassword string `json:"currentPassword"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -244,7 +278,11 @@ func (a *App) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) {
 		respondJSON(w, http.StatusOK, map[string]any{"user": current})
 		return
 	}
-	if strings.TrimSpace(secret) != "" && current.TwoFactorEnabled && !verifyTOTP(secret, req.Code, a.now().UTC()) {
+	if err := a.verifyCurrentPassword(r.Context(), user.ID, req.CurrentPassword); err != nil {
+		respondError(w, http.StatusUnauthorized, "当前密码错误")
+		return
+	}
+	if strings.TrimSpace(secret) != "" && current.TwoFactorEnabled && !a.consumeTOTP(r.Context(), user.ID, secret, req.Code) {
 		respondError(w, http.StatusUnauthorized, "invalid verification code")
 		return
 	}
@@ -258,4 +296,19 @@ func (a *App) handleTwoFactorDisable(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"user": updated})
+}
+
+// verifyCurrentPassword re-authenticates the signed-in user.
+//
+// Used by operations that weaken account security, where holding a session should not
+// be sufficient on its own.
+func (a *App) verifyCurrentPassword(ctx context.Context, userID, password string) error {
+	if strings.TrimSpace(password) == "" {
+		return errors.New("current password is required")
+	}
+	var hash string
+	if err := a.db.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id=?`, userID).Scan(&hash); err != nil {
+		return err
+	}
+	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
 }

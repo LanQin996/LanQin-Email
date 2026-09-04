@@ -124,8 +124,8 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusForbidden, "only administrators can create administrator users")
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -295,8 +295,8 @@ func (a *App) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -519,8 +519,8 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	role := req.Role

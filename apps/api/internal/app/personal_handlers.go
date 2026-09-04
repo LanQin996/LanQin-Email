@@ -63,13 +63,9 @@ func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	localPart := normalizeLocalPart(req.LocalPart)
-	if localPart == "" {
-		badRequest(w, errors.New("请输入邮箱前缀"))
-		return
-	}
-	if len(localPart) > 64 {
-		badRequest(w, errors.New("邮箱前缀过长"))
+	localPart, err := requireCleanLocalPart(req.LocalPart)
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	reserved := map[string]bool{}

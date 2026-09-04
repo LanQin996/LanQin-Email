@@ -36,6 +36,7 @@ type App struct {
 	maildirRuns        uint64
 	syncEventsMu       sync.Mutex
 	syncEventClients   map[chan struct{}]struct{}
+	sseConnections     map[string]int
 	externalIMAP       externalIMAPClientFactory
 	linuxDoOAuth       linuxDoOAuthClient
 	telegramAPIBaseURL string
@@ -102,6 +103,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
+	a.startWorker(func() { a.sessionCleanupWorker(workerCtx) })
 	if strings.TrimSpace(a.cfg.StatusWebhookURL) != "" {
 		a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
 	}
@@ -167,6 +169,7 @@ func (a *App) migrate(ctx context.Context) error {
 			password_hash TEXT NOT NULL,
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+			two_factor_last_counter INTEGER NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
 			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
 			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
@@ -197,6 +200,8 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
 		`CREATE TABLE IF NOT EXISTS login_challenges (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -1137,6 +1142,11 @@ func (a *App) migrateMailboxQuota(ctx context.Context) error {
 			return err
 		}
 	}
+	if !columns["two_factor_last_counter"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN two_factor_last_counter INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -1718,7 +1728,10 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 		status = "active"
 	}
 	var domain string
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=? AND status='active'`, domainID).Scan(&domain); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errInactiveDomain
+		}
 		return "", err
 	}
 	address := localPart + "@" + domain
@@ -1747,6 +1760,11 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 	}
 	return id, nil
 }
+
+// errInactiveDomain means the target domain is missing or disabled. Checking this in
+// the creation funnel rather than per entry point closes the registration path, which
+// accepted a client-supplied domainId without verifying its status.
+var errInactiveDomain = errors.New("domain is not active")
 
 // errMailboxCountLimitReached is returned when a self-service mailbox creation
 // would push the user past their permission group's mailbox count limit.

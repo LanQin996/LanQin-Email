@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const externalSchemaVersion = 9
+const externalSchemaVersion = 10
 
 var externalSchemaTables = []string{
 	"aliases",
@@ -142,6 +142,9 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if err := migrateExternalSchemaV9(ctx, conn, driver, tables); err != nil {
 			return err
 		}
+		if err := migrateExternalSchemaV10(ctx, conn, driver); err != nil {
+			return err
+		}
 		tables, err = listExternalSchemaTables(ctx, conn, driver)
 		if err != nil {
 			return err
@@ -167,7 +170,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 	for _, migration := range []struct {
 		version int
 		name    string
-	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}, {4, "external_schema_v4_telegram_notifications"}, {5, "external_schema_v5_login_rate_limits"}, {6, "external_schema_v6_queue_leases"}, {7, "external_schema_v7_message_threads"}, {8, "external_schema_v8_mailbox_quota"}, {9, "external_schema_v9_invite_groups_mailbox_rate"}} {
+	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}, {4, "external_schema_v4_telegram_notifications"}, {5, "external_schema_v5_login_rate_limits"}, {6, "external_schema_v6_queue_leases"}, {7, "external_schema_v7_message_threads"}, {8, "external_schema_v8_mailbox_quota"}, {9, "external_schema_v9_invite_groups_mailbox_rate"}, {10, "external_schema_v10_session_indexes_totp_replay"}} {
 		marker := fmt.Sprintf("INSERT INTO schema_migrations(version,name,applied_at) VALUES(%d,'%s',CURRENT_TIMESTAMP)", migration.version, migration.name)
 		if _, err := executor.ExecContext(ctx, marker); err != nil {
 			return fmt.Errorf("external schema: record v%d: %w", migration.version, err)
@@ -317,6 +320,12 @@ func validateExternalSchema(ctx context.Context, conn *sql.Conn, actual []string
 	}
 	if name != "external_schema_v9_invite_groups_mailbox_rate" {
 		return fmt.Errorf("external schema: unexpected v9 migration %q", name)
+	}
+	if err := conn.QueryRowContext(ctx, `SELECT name FROM schema_migrations WHERE version=10`).Scan(&name); err != nil {
+		return fmt.Errorf("external schema: read v10 migration marker: %w", err)
+	}
+	if name != "external_schema_v10_session_indexes_totp_replay" {
+		return fmt.Errorf("external schema: unexpected v10 migration %q", name)
 	}
 	return nil
 }
@@ -766,6 +775,55 @@ func migrateExternalSchemaV9(ctx context.Context, conn *sql.Conn, driver string,
 	if tx != nil {
 		if err := tx.Commit(); err != nil {
 			return fmt.Errorf("external schema: commit v9 PostgreSQL migration: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateExternalSchemaV10 indexes sessions and adds the TOTP replay guard.
+//
+// Only token_hash was indexed, so revoking a user's sessions and pruning expired
+// rows both had to scan the whole table — and the new cleanup worker does the latter
+// on a timer. two_factor_last_counter records the last accepted TOTP step so a code
+// cannot be presented twice inside its acceptance window.
+func migrateExternalSchemaV10(ctx context.Context, conn *sql.Conn, driver string) error {
+	var count, version int
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MAX(version),0) FROM schema_migrations`).Scan(&count, &version); err != nil {
+		return err
+	}
+	if count >= 10 && version >= 10 {
+		return nil
+	}
+	if count != 9 || version != 9 {
+		return fmt.Errorf("external schema: unsupported migration history before v10 (count=%d, version=%d)", count, version)
+	}
+	statements := []string{
+		`CREATE INDEX idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX idx_sessions_expires ON sessions(expires_at)`,
+		`ALTER TABLE users ADD COLUMN two_factor_last_counter BIGINT NOT NULL DEFAULT 0`,
+	}
+	var executor externalSchemaExecutor = conn
+	var tx *sql.Tx
+	if driver == databaseDriverPostgres {
+		var err error
+		tx, err = conn.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("external schema: begin v10 PostgreSQL migration: %w", err)
+		}
+		executor = tx
+		defer func() { _ = tx.Rollback() }()
+	}
+	for i, statement := range statements {
+		if _, err := executor.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("external schema: apply v10 statement %d: %w", i+1, err)
+		}
+	}
+	if _, err := executor.ExecContext(ctx, `INSERT INTO schema_migrations(version,name,applied_at) VALUES(10,'external_schema_v10_session_indexes_totp_replay',CURRENT_TIMESTAMP)`); err != nil {
+		return fmt.Errorf("external schema: record v10: %w", err)
+	}
+	if tx != nil {
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("external schema: commit v10 PostgreSQL migration: %w", err)
 		}
 	}
 	return nil
