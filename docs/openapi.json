@@ -61,11 +61,12 @@
     "schemas": {
       "SendRequest": {
         "type": "object", "required": ["mailboxId"],
+        "description": "to, cc and bcc together must resolve to at least 1 and at most 100 distinct recipients.",
         "properties": {
           "mailboxId": { "type": "string" }, "from": { "type": "string" }, "fromName": { "type": "string" },
-          "to": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "bcc": { "type": "array", "items": { "type": "string", "format": "email" } },
+          "to": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
+          "cc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
+          "bcc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
           "subject": { "type": "string" }, "text": { "type": "string" }, "html": { "type": "string" },
           "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/AttachmentInput" } }
         }

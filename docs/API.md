@@ -489,7 +489,7 @@ Content-Type: application/json
 | Field 字段 | Required 必填 | Description 说明 |
 |-------|----------|-------------|
 | `mailboxId` | Yes | Sending mailbox ID (must be owned by the token user) / 发信邮箱 ID（必须属于 Token 拥有者） |
-| `to` | Yes | Recipient addresses (at least one recipient across to/cc/bcc) / 收件人地址（to/cc/bcc 至少需有一个收件人） |
+| `to` | Yes | Recipient addresses (at least one recipient across to/cc/bcc, at most 100 after deduplication) / 收件人地址（to/cc/bcc 至少需有一个收件人，去重后最多 100 个） |
 | `cc` | No | CC addresses / 抄送地址 |
 | `bcc` | No | BCC addresses / 密送地址 |
 | `subject` | No | Message subject / 邮件主题 |
@@ -579,7 +579,7 @@ Current status values:
 
 | Status 状态码 | Cause 原因 |
 |--------|-------|
-| `400` | No recipients / invalid MIME / attachment too large / 无收件人、MIME 无效或附件过大 |
+| `400` | No recipients / more than 100 recipients / invalid MIME / attachment too large / 无收件人、收件人超过 100 个、MIME 无效或附件过大 |
 | `403` | Sender address is not authorized / 发信地址未被授权 |
 | `404` | Mailbox not found or not owned by the token user / 邮箱不存在或不属于 Token 拥有者 |
 | `429` | SMTP send rate limit exceeded / 超过 SMTP 发信频率限制 |

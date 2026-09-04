@@ -21,7 +21,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 - **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
 - **邮箱增强**：联系人、签名、收件规则（包括收件后自动转发）、发件人黑名单、邮件统计、归档已读、清空回收站/垃圾邮件。
 - **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、地址别名投递（不是用户收件后的自动转发）、无人收件开关。
-- **账号与权限**：邮箱密码登录、Linux.do OAuth2 SSO、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC，并可按权限组限制附件大小、发信频率与邮箱数量。
+- **账号与权限**：邮箱密码登录、Linux.do OAuth2 SSO、会话管理（改密码会撤销其他会话）、TOTP 两步验证（关闭需验证当前密码）、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC，并可按权限组限制附件大小、发信频率与邮箱数量。
 - **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
 - **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
 - **部署友好**：默认 all-in-one 单容器，也提供多容器 stack 方便调试 Postfix/Dovecot/Rspamd。
@@ -199,6 +199,7 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 | `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/gmail/callback` | 空 |
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/outlook/callback` | 空 |
 | `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置 | 随机长字符串 |
+| `LANQIN_AUTH_POLICY_SECRET` | Dovecot 查询 IMAP/POP3 频率限制的共享密钥。仅在直接暴露 API 8080 时需要设置 | 空 |
 
 该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密。
 
@@ -254,6 +255,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - Web 可放在宿主机 Nginx/宝塔/边缘网关后，但 SMTP/IMAP/POP3 证书需要单独挂载给容器内 Postfix/Dovecot。
 - 云厂商常默认封禁 25 端口；无法收发公网邮件时先检查端口、安全组、防火墙与反向 DNS。
 - SQLite 适合单机部署；多节点部署前需要迁移数据库，并同步调整 Postfix/Dovecot 查询配置。
+- Dovecot 查询 IMAP/POP3 频率限制的 `/auth-policy` 注册在 `/api` 之外且不校验会话，只依赖它不经 Nginx 反代、仅容器内可达。如果你把 API 的 `8080` 直接暴露到公网，请设置 `LANQIN_AUTH_POLICY_SECRET`，并在 `LANQIN_AUTH_POLICY_URL` 后追加 `?key=<该值>`。
 
 ## SMTP 提交
 
