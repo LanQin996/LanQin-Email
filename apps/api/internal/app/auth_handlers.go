@@ -327,6 +327,37 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The mailbox is created in the same transaction as the user.
+	//
+	// Doing it after the commit meant that an inactive domain, a taken prefix or a
+	// quota rejection left the caller with 201, a live session and no mailbox, with
+	// nothing but a log line to show for it. Rolling the whole registration back
+	// instead keeps the account and its mailbox from ever disagreeing.
+	if mailboxDomainID != "" && mailboxLocalPart != "" {
+		limits, err := a.permissionLimitsForGroupsTx(r.Context(), tx, inviteGroupIDs)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			return
+		}
+		// attachUserAuthorization cannot run against the uncommitted user, so the
+		// quota subject is assembled by hand. consumeMailboxQuotaTx only reads the
+		// limits from it; the counters it compares against come from the transaction.
+		quotaUser := &User{ID: userID, Limits: limits}
+		if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active", quotaUser); err != nil {
+			switch {
+			case errors.Is(err, errInactiveDomain):
+				respondError(w, http.StatusBadRequest, "所选域名不可用，请选择其他域名")
+			case errors.Is(err, errMailboxCountLimitReached), errors.Is(err, errMailboxDailyLimitReached):
+				respondError(w, http.StatusForbidden, "邮箱数量已达上限，请联系管理员")
+			case isUniqueViolation(err):
+				respondError(w, http.StatusConflict, "该邮箱前缀已被使用，请换一个前缀")
+			default:
+				a.log.Warn("failed to create mailbox for registered user", "error", err, "email", email)
+				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			}
+			return
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 		return
@@ -340,14 +371,6 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
 		return
 	}
-
-	// Create a mailbox for the registered user.
-	if mailboxDomainID != "" && mailboxLocalPart != "" {
-		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active", user); mbErr != nil {
-			a.log.Warn("failed to create mailbox for registered user", "error", mbErr, "email", email)
-		}
-	}
-
 	respondJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 

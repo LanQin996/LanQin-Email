@@ -190,3 +190,52 @@ func TestInactiveDomainRejectedByCreationFunnel(t *testing.T) {
 		t.Fatal("creating a mailbox on a disabled domain succeeded")
 	}
 }
+
+// TestFailedRegistrationLeavesNoUserOrConsumedInvite covers the report's L6: the
+// mailbox used to be created after the transaction had already been committed, so a
+// rejection there returned 201 with a live session, an account without a mailbox and
+// an invite use spent on it.
+func TestFailedRegistrationLeavesNoUserOrConsumedInvite(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.InviteRegistrationEnabled = true
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	var invite RegistrationInvite
+	if code := admin.do("POST", "/api/admin/registration-invites", map[string]any{"code": "rollback-1", "maxUses": 1}, &invite); code != http.StatusCreated {
+		t.Fatalf("create invite code=%d", code)
+	}
+
+	domainID := mustDefaultDomainID(t, a)
+	if _, err := a.db.ExecContext(t.Context(), `UPDATE domains SET status='disabled' WHERE id=?`, domainID); err != nil {
+		t.Fatal(err)
+	}
+
+	var body map[string]any
+	if code := (&testClient{t: t, server: ts}).do("POST", "/api/auth/register", map[string]any{
+		"email": "rollback@example.test", "displayName": "Rollback", "password": "Password123!",
+		"inviteCode": invite.Code, "domainId": domainID, "localPart": "rollback",
+	}, &body); code != http.StatusBadRequest {
+		t.Fatalf("registration onto a disabled domain code=%d body=%v", code, body)
+	}
+
+	var users int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email=?`, "rollback@example.test").Scan(&users); err != nil {
+		t.Fatal(err)
+	}
+	if users != 0 {
+		t.Errorf("failed registration left %d user rows", users)
+	}
+	var list struct {
+		Items []RegistrationInvite `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/registration-invites", nil, &list); code != http.StatusOK || len(list.Items) != 1 {
+		t.Fatalf("list invites code=%d items=%+v", code, list.Items)
+	}
+	if list.Items[0].UsedCount != 0 || list.Items[0].RemainingUses != 1 {
+		t.Errorf("failed registration consumed the invite: %+v", list.Items[0])
+	}
+}

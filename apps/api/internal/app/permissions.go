@@ -1038,6 +1038,42 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	return a.writeUserPermissionGroups(ctx, tx, userID, groupIDs)
 }
 
+// permissionLimitsForGroupsTx merges the quota limits of an explicit group set.
+//
+// Self-registration writes the user's group rows inside the same transaction as the
+// user, so attachUserAuthorization cannot be used there: it reads through a.db and
+// therefore cannot see uncommitted membership. The group IDs are known at that point,
+// so the limits are merged straight from permission_groups, which is committed data.
+//
+// Precedence mirrors authorizationForUser: the regular-user group replaces the
+// built-in defaults, and every other assignable group is merged on top.
+func (a *App) permissionLimitsForGroupsTx(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
+	limits := defaultPermissionLimits()
+	var regularJSON string
+	err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&regularJSON)
+	switch {
+	case err == nil:
+		limits = decodeStoredLimits(regularJSON)
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return PermissionLimits{}, err
+	}
+	for _, groupID := range cleanIDList(groupIDs) {
+		if groupID == PermissionGroupRegular || !isAssignablePermissionGroupID(groupID) {
+			continue
+		}
+		var limitsJSON string
+		if err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, groupID).Scan(&limitsJSON); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return PermissionLimits{}, err
+		}
+		limits = mergePermissionLimits(limits, decodeStoredLimits(limitsJSON))
+	}
+	return limits, nil
+}
+
 // writeUserPermissionGroups replaces a user's group membership without checking
 // an actor's authority to grant it.
 //
