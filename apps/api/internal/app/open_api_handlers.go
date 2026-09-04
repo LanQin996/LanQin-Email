@@ -403,6 +403,12 @@ func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.R
 		respondError(w, http.StatusInternalServerError, "failed to reset mailbox passwords")
 		return
 	}
+	// Same containment as the admin UI reset: this endpoint resets somebody else's
+	// password, so their sessions and API tokens go with it.
+	if err := a.containUserAfterAdminResetTx(r.Context(), tx, userID, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke sessions")
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save password")
 		return

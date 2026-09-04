@@ -41,6 +41,24 @@ func revokeUserSessionsTx(ctx context.Context, tx *sql.Tx, userID, keepTokenHash
 	return err
 }
 
+// containUserAfterAdminResetTx ends every way the target user is currently
+// authenticated: sessions and API tokens.
+//
+// An administrator-driven password reset is a containment action. Tokens authenticate
+// independently of sessions, so revoking only the sessions would leave an attacker with
+// full API access past the very action taken to cut them off. Tokens are disabled
+// rather than deleted so the owner can see what was stopped and re-enable it.
+//
+// A user changing their own password keeps their tokens: that is not containment, and
+// they can revoke tokens from their own settings.
+func (a *App) containUserAfterAdminResetTx(ctx context.Context, tx *sql.Tx, userID, now string) error {
+	if err := revokeUserSessionsTx(ctx, tx, userID, ""); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, `UPDATE api_tokens SET disabled=1, updated_at=? WHERE user_id=? AND disabled=0`, now, userID)
+	return err
+}
+
 const (
 	// sessionCleanupInterval is deliberately coarse: expired sessions are already
 	// rejected by authenticateRequest, so removal is housekeeping rather than

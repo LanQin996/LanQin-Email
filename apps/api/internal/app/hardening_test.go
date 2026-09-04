@@ -484,3 +484,81 @@ func TestAttachmentCountCapRejectsOversizedSend(t *testing.T) {
 		t.Fatalf("send at the cap code=%d body=%v", code, body)
 	}
 }
+
+// TestAdminPasswordResetDisablesAPITokens covers the rest of the report's H4: the reset
+// revoked every session, but API tokens authenticate independently of sessions, so the
+// very action taken to lock an attacker out left them with full API access.
+func TestAdminPasswordResetDisablesAPITokens(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	owned := createTestMailbox(t, admin, domainID, "token-owner", "Token Owner", "Password123!", nil)
+
+	owner := &testClient{t: t, server: ts}
+	if code := owner.do("POST", "/api/auth/login", map[string]string{"email": owned.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("owner login code=%d", code)
+	}
+	token := createTestAPIToken(t, owner, "containment")
+	bearer := &testClient{t: t, server: ts, bearer: token}
+	var list struct {
+		Items []SendQueueEntry `json:"items"`
+	}
+	if code := bearer.do("GET", "/api/open/v1/send", nil, &list); code != http.StatusOK {
+		t.Fatalf("token should work before the reset: code=%d", code)
+	}
+
+	if code := admin.do("POST", "/api/admin/users/"+owned.UserID+"/password", map[string]string{"password": "NewPassword123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin reset code=%d", code)
+	}
+	if code := bearer.do("GET", "/api/open/v1/send", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("token still authenticates after a containment reset: code=%d", code)
+	}
+	// The owner's sessions are gone too, so the reset is a complete cut-off.
+	if code := owner.do("GET", "/api/me", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("session survived the reset: code=%d", code)
+	}
+}
+
+// TestOpenAPIPasswordResetAlsoContainsTheAccount pins the third reset path. The report's
+// H4 named the admin UI reset and the self-service change; the Open API mailbox password
+// reset resets somebody else's credentials too and was leaving every session and token
+// untouched.
+func TestOpenAPIPasswordResetAlsoContainsTheAccount(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	owned := createTestMailbox(t, admin, domainID, "openapi-reset", "OpenAPI Reset", "Password123!", nil)
+	adminToken := createTestAPIToken(t, admin, "operator")
+
+	owner := &testClient{t: t, server: ts}
+	if code := owner.do("POST", "/api/auth/login", map[string]string{"email": owned.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("owner login code=%d", code)
+	}
+	ownerToken := createTestAPIToken(t, owner, "victim")
+
+	operator := &testClient{t: t, server: ts, bearer: adminToken}
+	if code := operator.do("POST", "/api/open/v1/mailboxes/"+owned.ID+"/password", map[string]string{"password": "NewPassword123!"}, nil); code != http.StatusOK {
+		t.Fatalf("open api reset code=%d", code)
+	}
+	if code := owner.do("GET", "/api/me", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("session survived the reset: code=%d", code)
+	}
+	victim := &testClient{t: t, server: ts, bearer: ownerToken}
+	if code := victim.do("GET", "/api/open/v1/send", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("token still authenticates after the reset: code=%d", code)
+	}
+	// The operator's own token is untouched: only the target account is contained.
+	if code := operator.do("GET", "/api/open/v1/mailboxes", nil, nil); code != http.StatusOK {
+		t.Errorf("the operator's token was disabled too: code=%d", code)
+	}
+}

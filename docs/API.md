@@ -670,7 +670,7 @@ Users can only read messages from their own active mailboxes. Fetch message bodi
 - `GET /api/open/v1/send/{id}/events`: queue audit and final delivery events.
 - `POST /api/open/v1/send/{id}/retry`: retry a failed queue item.
 - `POST /api/open/v1/send/{id}/cancel`: cancel a queued or failed item.
-- `POST /api/open/v1/mailboxes/{id}/password`: reset the owner user's password and all mailbox passwords owned by that user.
+- `POST /api/open/v1/mailboxes/{id}/password`: reset the owner user's password and all mailbox passwords owned by that user. This is a containment action: it also ends every session of that user and disables their API tokens.
 - `GET /api/open/v1/domains/{id}/dns-records` and `POST .../dns-check`: DNS configuration and check.
 - `/api/open/v1/aliases`: alias CRUD.
 
