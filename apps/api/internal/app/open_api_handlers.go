@@ -413,7 +413,7 @@ func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.R
 
 func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -843,7 +843,7 @@ func respondMailboxOwnerError(w http.ResponseWriter, err error) {
 
 func respondSendError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errNoRecipients), errors.Is(err, errTooManyRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge):
+	case errors.Is(err, errNoRecipients), errors.Is(err, errTooManyRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge), errors.Is(err, errTooManyAttachments):
 		badRequest(w, err)
 	case errors.Is(err, errSMTPRateLimited):
 		respondError(w, http.StatusTooManyRequests, err.Error())

@@ -807,7 +807,7 @@ type ScheduledSend struct {
 
 func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -826,7 +826,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if errors.Is(err, errAttachmentTooLarge) {
+		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) {
 			badRequest(w, err)
 			return
 		}
@@ -999,7 +999,41 @@ func userLimits(user *User) PermissionLimits {
 	return user.Limits
 }
 
+// maxAttachmentsPerMessage bounds how many parts one message may carry.
+//
+// The size limit is per attachment, so without a count bound a single request could
+// carry thousands of tiny files, each costing a MIME part, an attachments row and a
+// file on disk.
+const maxAttachmentsPerMessage = 20
+
+var errTooManyAttachments = errors.New("too many attachments")
+
+// composeRequestBodyLimit derives a compose endpoint's request body cap from the
+// sender's attachment allowance instead of always using the global ceiling.
+//
+// base64 inflates by 4/3 and a message may carry up to maxAttachmentsPerMessage parts,
+// so that is the bound, plus 1 MB for headers and both bodies. An unlimited attachment
+// allowance keeps the global ceiling, and so does any computed value above it.
+func composeRequestBodyLimit(limits PermissionLimits) int64 {
+	limitBytes := attachmentLimitBytes(limits)
+	if limitBytes <= 0 {
+		return maxJSONRequestBodyBytes
+	}
+	limit := limitBytes/3*4*maxAttachmentsPerMessage + 1<<20
+	if limit <= 0 || limit > maxJSONRequestBodyBytes {
+		return maxJSONRequestBodyBytes
+	}
+	return limit
+}
+
+func (a *App) decodeComposeJSON(r *http.Request, dst any) error {
+	return decodeJSONWithLimit(r, dst, composeRequestBodyLimit(userLimits(currentUser(r))))
+}
+
 func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLimits) error {
+	if len(attachments) > maxAttachmentsPerMessage {
+		return fmt.Errorf("%w: max %d", errTooManyAttachments, maxAttachmentsPerMessage)
+	}
 	limitBytes := attachmentLimitBytes(limits)
 	if limitBytes == 0 {
 		return nil
@@ -1200,7 +1234,7 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox, recip
 
 func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	var req mailDraftInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -1211,7 +1245,7 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Attachments != nil {
 		if err := validateAttachmentLimit(*req.Attachments, userLimits(currentUser(r))); err != nil {
-			if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+			if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) || errors.Is(err, errInvalidMIME) {
 				badRequest(w, err)
 				return
 			}
@@ -1682,7 +1716,7 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 		DraftID     string            `json:"draftId"`
 		SendAt      string            `json:"sendAt"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -1702,7 +1736,7 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	compose := mailComposeInput{MailboxID: req.MailboxID, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, Attachments: req.Attachments}
 	if err := validateAttachmentLimit(compose.Attachments, userLimits(currentUser(r))); err != nil {
-		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) || errors.Is(err, errInvalidMIME) {
 			badRequest(w, err)
 			return
 		}

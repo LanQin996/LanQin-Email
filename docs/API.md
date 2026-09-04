@@ -495,7 +495,7 @@ Content-Type: application/json
 | `subject` | No | Message subject / 邮件主题 |
 | `text` | No | Plain text body / 纯文本正文 |
 | `html` | No | HTML body / HTML 正文 |
-| `attachments` | No | List of attachments (see below) / 附件列表（见下方） |
+| `attachments` | No | List of attachments, at most 20 (see below) / 附件列表，最多 20 个（见下方） |
 
 **Attachment fields:**
 
@@ -505,9 +505,9 @@ Content-Type: application/json
 | `contentType` | MIME type, e.g. `application/pdf` / MIME 类型，如 `application/pdf` |
 | `contentBase64` | Base64-encoded file content / Base64 编码的文件内容 |
 
-Total attachment size is limited by the sender's permission group (`maxAttachmentMb`, default 25 MB). Exceeding it returns `400`.
+Each attachment is limited by the sender's permission group (`maxAttachmentMb`, default 25 MB), and one message carries at most 20 attachments. Exceeding either returns `400`.
 
-附件总大小受发信人所在权限组限制（`maxAttachmentMb`，默认 25 MB）。超出会返回 `400`。
+每个附件的大小受发信人所在权限组限制（`maxAttachmentMb`，默认 25 MB），单封邮件最多 20 个附件。超出任一限制都会返回 `400`。
 
 **Response:**
 
@@ -579,7 +579,7 @@ Current status values:
 
 | Status 状态码 | Cause 原因 |
 |--------|-------|
-| `400` | No recipients / more than 100 recipients / invalid MIME / attachment too large / 无收件人、收件人超过 100 个、MIME 无效或附件过大 |
+| `400` | No recipients / more than 100 recipients / invalid MIME / attachment too large or too many attachments / 无收件人、收件人超过 100 个、MIME 无效、附件过大或附件数量过多 |
 | `403` | Sender address is not authorized / 发信地址未被授权 |
 | `404` | Mailbox not found or not owned by the token user / 邮箱不存在或不属于 Token 拥有者 |
 | `429` | SMTP send rate limit exceeded / 超过 SMTP 发信频率限制 |

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -439,5 +440,47 @@ func TestSyncEventAudienceFollowsLiveSharesOnly(t *testing.T) {
 	}
 	if len(audience) != 2 {
 		t.Errorf("audience=%v, want exactly the owner and the live share recipient", audience)
+	}
+}
+
+// TestAttachmentCountCapRejectsOversizedSend covers the remainder of the report's M4:
+// the size limit applies per attachment, so without a count bound one request could
+// carry thousands of tiny parts, each costing a MIME part, a row and a file.
+func TestAttachmentCountCapRejectsOversizedSend(t *testing.T) {
+	a := newTestApp(t)
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	var boxes struct {
+		Items []Mailbox `json:"items"`
+	}
+	if code := admin.do("GET", "/api/mail/mailboxes", nil, &boxes); code != http.StatusOK || len(boxes.Items) == 0 {
+		t.Fatalf("mailboxes code=%d items=%d", code, len(boxes.Items))
+	}
+
+	attachments := make([]map[string]string, maxAttachmentsPerMessage+1)
+	for i := range attachments {
+		attachments[i] = map[string]string{
+			"filename":      "part.txt",
+			"contentType":   "text/plain",
+			"contentBase64": base64.StdEncoding.EncodeToString([]byte("x")),
+		}
+	}
+	var body map[string]any
+	if code := admin.do("POST", "/api/mail/send", map[string]any{
+		"mailboxId": boxes.Items[0].ID, "to": []string{"someone@example.test"},
+		"subject": "many parts", "text": "body", "html": "", "attachments": attachments,
+	}, &body); code != http.StatusBadRequest {
+		t.Fatalf("oversized attachment count code=%d, want 400 body=%v", code, body)
+	}
+	// One part below the cap still goes through.
+	if code := admin.do("POST", "/api/mail/send", map[string]any{
+		"mailboxId": boxes.Items[0].ID, "to": []string{"someone@example.test"},
+		"subject": "at the cap", "text": "body", "html": "", "attachments": attachments[:maxAttachmentsPerMessage],
+	}, &body); code != http.StatusCreated {
+		t.Fatalf("send at the cap code=%d body=%v", code, body)
 	}
 }

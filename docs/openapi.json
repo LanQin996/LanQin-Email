@@ -68,7 +68,7 @@
           "cc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
           "bcc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
           "subject": { "type": "string" }, "text": { "type": "string" }, "html": { "type": "string" },
-          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/AttachmentInput" } }
+          "attachments": { "type": "array", "maxItems": 20, "items": { "$ref": "#/components/schemas/AttachmentInput" } }
         }
       },
       "AttachmentInput": { "type": "object", "required": ["filename", "contentBase64"], "properties": { "filename": { "type": "string" }, "contentType": { "type": "string" }, "contentBase64": { "type": "string", "contentEncoding": "base64" } } },
