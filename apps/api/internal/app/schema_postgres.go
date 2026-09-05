@@ -15,7 +15,10 @@ func postgresFreshSchema() []string {
 			password_hash VARCHAR(255) NOT NULL,
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+			two_factor_last_counter BIGINT NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
+			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL
 		)`,
@@ -43,6 +46,8 @@ func postgresFreshSchema() []string {
 			expires_at VARCHAR(35) NOT NULL,
 			created_at VARCHAR(35) NOT NULL
 		)`,
+		`CREATE INDEX idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX idx_sessions_expires ON sessions(expires_at)`,
 		`CREATE TABLE login_challenges (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -94,12 +99,20 @@ func postgresFreshSchema() []string {
 			code VARCHAR(64) NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
 			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+			permission_group_ids_json TEXT NOT NULL DEFAULT '[]',
 			created_by VARCHAR(64) REFERENCES users(id) ON DELETE SET NULL,
 			created_at VARCHAR(35) NOT NULL,
 			updated_at VARCHAR(35) NOT NULL,
 			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX idx_registration_invites_created ON registration_invites(created_at)`,
+		`CREATE TABLE mailbox_creation_events (
+			id VARCHAR(64) PRIMARY KEY,
+			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id VARCHAR(64) NOT NULL,
+			created_at VARCHAR(35) NOT NULL
+		)`,
+		`CREATE INDEX idx_mailbox_creation_events_user ON mailbox_creation_events(user_id,created_at)`,
 		`CREATE TABLE api_tokens (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -430,7 +443,8 @@ func postgresFreshSchema() []string {
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
-			created_at VARCHAR(35) NOT NULL
+			created_at VARCHAR(35) NOT NULL,
+			recipients INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE INDEX idx_smtp_send_events_user_created ON smtp_send_events(user_id,created_at)`,
 		`CREATE TABLE imap_events (

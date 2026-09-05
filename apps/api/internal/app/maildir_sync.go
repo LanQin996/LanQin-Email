@@ -109,8 +109,8 @@ func (a *App) syncMaildirOnceTracked(ctx context.Context, interval time.Duration
 		nextRunAt = &next
 	}
 	a.maildirHealth.markRunFinished(finishedAt, counts, err, nextRunAt)
-	if err == nil && counts.total() > 0 {
-		a.publishSyncEvent()
+	if err == nil && counts.clientVisibleChanges() > 0 {
+		a.publishSyncEventForCounts(ctx, counts)
 	}
 	return counts, err
 }
@@ -204,6 +204,9 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 				}
 				if ok {
 					counts.Imported++
+					// Catch-all mail has no owning mailbox, so there is no audience to
+					// narrow the event down to.
+					counts.broadcast = true
 				}
 				continue
 			}
@@ -226,6 +229,7 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 			}
 			if ok {
 				counts.Imported++
+				counts.markMailbox(target.Mailbox.ID)
 			}
 		}
 		after, err := statMaildirDirectory(dir)
@@ -254,11 +258,14 @@ func (a *App) syncMaildirOnceDetailed(ctx context.Context) (maildirSyncCounts, e
 		return counts, err
 	}
 	counts.Backfilled += backfilled
-	cleaned, err := a.cleanupMissingMaildirMessages(ctx, seenFiles, scannedDirs, fullScan)
+	cleaned, cleanedMailboxIDs, err := a.cleanupMissingMaildirMessages(ctx, seenFiles, scannedDirs, fullScan)
 	if err != nil {
 		return counts, err
 	}
 	counts.Cleaned += cleaned
+	for _, mailboxID := range cleanedMailboxIDs {
+		counts.markMailbox(mailboxID)
+	}
 	return counts, nil
 }
 
@@ -421,6 +428,8 @@ func (a *App) syncUnregisteredMaildirDetailed(ctx context.Context, mb maildirMai
 			}
 			if ok {
 				counts.Imported++
+				// See the other unregistered branch: catch-all mail has no owner.
+				counts.broadcast = true
 			}
 		}
 	}
@@ -674,39 +683,43 @@ func (a *App) syncExistingMaildirMessageState(ctx context.Context, mailboxID, fo
 func (a *App) removeDuplicateMaildirMessage(ctx context.Context, rawPath, mailboxID, folderID, messageID string) {
 	var existing string
 	err := a.db.QueryRowContext(ctx, `SELECT raw_path FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' AND raw_path<>'' LIMIT 1`, mailboxID, folderID, messageID).Scan(&existing)
-	if err != nil || existing == "" || existing == rawPath {
+	if err != nil || existing == "" || sameMaildirPath(existing, rawPath) {
 		return
 	}
 	a.removeMaildirPath(ctx, rawPath)
 }
 
-func (a *App) cleanupMissingMaildirMessages(ctx context.Context, seenFiles, scannedDirs map[string]struct{}, fullScan bool) (int, error) {
+// cleanupMissingMaildirMessages removes rows whose Maildir file is gone. It also
+// returns the mailboxes it touched, so the resulting sync event only wakes the clients
+// that can actually see the deletion.
+func (a *App) cleanupMissingMaildirMessages(ctx context.Context, seenFiles, scannedDirs map[string]struct{}, fullScan bool) (int, []string, error) {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
-		return 0, nil
+		return 0, nil, nil
 	}
 	if !fullScan && len(scannedDirs) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
 	cutoff := a.now().UTC().Add(-5 * time.Minute).Format(time.RFC3339Nano)
-	rows, err := a.db.QueryContext(ctx, `SELECT id,raw_path FROM messages WHERE mailbox_id IS NOT NULL AND mailbox_id<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
+	rows, err := a.db.QueryContext(ctx, `SELECT id,mailbox_id,raw_path FROM messages WHERE mailbox_id IS NOT NULL AND mailbox_id<>'' AND raw_path<>'' AND updated_at<?`, cutoff)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	type item struct {
-		ID      string
-		RawPath string
+		ID        string
+		MailboxID string
+		RawPath   string
 	}
 	var missing []item
 	for rows.Next() {
 		var it item
-		if err := rows.Scan(&it.ID, &it.RawPath); err != nil {
+		if err := rows.Scan(&it.ID, &it.MailboxID, &it.RawPath); err != nil {
 			rows.Close()
-			return 0, err
+			return 0, nil, err
 		}
 		ok, err := a.pathIsUnderMaildirRoot(it.RawPath)
 		if err != nil {
 			rows.Close()
-			return 0, err
+			return 0, nil, err
 		}
 		if !ok {
 			continue
@@ -723,30 +736,32 @@ func (a *App) cleanupMissingMaildirMessages(ctx context.Context, seenFiles, scan
 			missing = append(missing, it)
 		} else if err != nil {
 			rows.Close()
-			return 0, err
+			return 0, nil, err
 		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return 0, err
+		return 0, nil, err
 	}
 	if err := rows.Close(); err != nil {
-		return 0, err
+		return 0, nil, err
 	}
+	mailboxIDs := make([]string, 0, len(missing))
 	for _, it := range missing {
 		a.deleteMessageFiles(ctx, it.ID)
 		var folderID sql.NullString
 		_ = a.db.QueryRowContext(ctx, `SELECT folder_id FROM messages WHERE id=?`, it.ID).Scan(&folderID)
 		if _, err := a.db.ExecContext(ctx, `DELETE FROM messages WHERE id=?`, it.ID); err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		if folderID.Valid && folderID.String != "" {
 			if _, err := a.bumpFolderModSeq(ctx, folderID.String); err != nil {
-				return 0, err
+				return 0, nil, err
 			}
 		}
+		mailboxIDs = append(mailboxIDs, it.MailboxID)
 	}
-	return len(missing), nil
+	return len(missing), mailboxIDs, nil
 }
 
 func maildirFlagsFromPath(path, folderName string) (bool, bool) {

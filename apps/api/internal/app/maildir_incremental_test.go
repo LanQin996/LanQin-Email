@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -112,8 +113,12 @@ func TestMaildirIncrementalScanPerformsPeriodicFullScan(t *testing.T) {
 }
 
 func TestTrackedMaildirSyncPublishesOnlyWhenMessagesChange(t *testing.T) {
-	a, _, dir := prepareIncrementalMaildirTest(t)
-	events, unsubscribe := a.subscribeSyncEvents()
+	a, mb, dir := prepareIncrementalMaildirTest(t)
+	var ownerID string
+	if err := a.db.QueryRow(`SELECT user_id FROM mailboxes WHERE id=?`, mb.ID).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	events, unsubscribe := a.subscribeSyncEvents(ownerID)
 	defer unsubscribe()
 	writeIncrementalMaildirMessage(t, dir, "first", "<incremental-event@example.test>")
 
@@ -172,13 +177,27 @@ func writeIncrementalMaildirMessage(t *testing.T, dir, name, messageID string) s
 	return path
 }
 
+// maildirDirChangeBase is far enough in the past that no real file operation can
+// produce one of the timestamps forceDirectoryChange hands out.
+var (
+	maildirDirChangeBase = time.Now().Add(-24 * time.Hour)
+	maildirDirChangeStep atomic.Int64
+)
+
+// forceDirectoryChange gives the directory an mtime that no earlier call produced.
+//
+// The incremental scan keys off the directory mtime (statMaildirDirectory) and records
+// the value it saw. Deriving the new mtime from the current one is not enough: an
+// intervening os.Remove resets the mtime to the real clock, so a fixed offset can land
+// back on the value the previous scan already recorded — the scan then treats the
+// directory as unchanged and skips the deletion the test just made. Stepping a shared
+// counter instead makes every call produce a distinct signature.
 func forceDirectoryChange(t *testing.T, dir string) {
 	t.Helper()
-	info, err := os.Stat(dir)
-	if err != nil {
+	if _, err := os.Stat(dir); err != nil {
 		t.Fatal(err)
 	}
-	changed := info.ModTime().Add(2 * time.Second)
+	changed := maildirDirChangeBase.Add(time.Duration(maildirDirChangeStep.Add(1)) * time.Second)
 	if err := os.Chtimes(dir, changed, changed); err != nil {
 		t.Fatal(err)
 	}

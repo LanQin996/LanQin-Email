@@ -148,7 +148,6 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import { ConfirmDialog } from "@/components/confirm-dialog"
 import {
-  buildMailFrameSrcDoc,
   escapeHtml,
   htmlComposerValue,
   htmlContainsMeaningfulContent,
@@ -184,6 +183,7 @@ import {
   SidebarMenuItem,
   SidebarProvider,
 } from "@/components/ui/sidebar"
+import { MailHtmlFrame } from "@/components/mail-html-frame"
 import { useMe } from "@/hooks/use-me"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
@@ -4829,9 +4829,12 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
         </div>
       )}
       {translatedText && showTranslated ? (
-        <MailHtmlFrame message={translatedMessage} />
+        <MailHtmlFrame
+          bodyHtml={translatedMessage.bodyHtml}
+          bodyText={translatedMessage.bodyText}
+        />
       ) : (
-        <MailHtmlFrame message={message} />
+        <MailHtmlFrame bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
       )}
     </>
   )
@@ -4858,81 +4861,6 @@ function shouldOfferMessageTranslation(text: string, language: Language) {
     return latinCount > 80 && latinCount > cjkCount * 3
   if (language === "en") return cjkCount > 20
   return false
-}
-
-function MailHtmlFrame({ message }: { message: MailMessage }) {
-  const iframeRef = React.useRef<HTMLIFrameElement>(null)
-  const [height, setHeight] = React.useState(260)
-  const srcDoc = React.useMemo(
-    () => buildMailFrameSrcDoc(message.bodyHtml || "", message.bodyText || ""),
-    [message.bodyHtml, message.bodyText]
-  )
-
-  const resize = React.useCallback(() => {
-    const doc = iframeRef.current?.contentDocument
-    if (!doc) return
-    const body = doc.body
-    const html = doc.documentElement
-    const nextHeight = Math.max(
-      180,
-      Math.ceil(
-        Math.max(
-          body?.scrollHeight || 0,
-          body?.offsetHeight || 0,
-          html?.scrollHeight || 0,
-          html?.offsetHeight || 0
-        )
-      )
-    )
-    setHeight(nextHeight)
-  }, [])
-
-  React.useEffect(() => {
-    setHeight(260)
-    const frame = iframeRef.current
-    if (!frame) return
-    let observer: ResizeObserver | undefined
-    const timers = [
-      window.setTimeout(resize, 0),
-      window.setTimeout(resize, 120),
-      window.setTimeout(resize, 600),
-    ]
-    const attach = () => {
-      const doc = frame.contentDocument
-      if (!doc) return
-      doc.querySelectorAll("a[href]").forEach((link) => {
-        link.setAttribute("target", "_blank")
-        link.setAttribute("rel", "noopener noreferrer")
-      })
-      resize()
-      if ("ResizeObserver" in window) {
-        observer = new ResizeObserver(resize)
-        observer.observe(doc.documentElement)
-        if (doc.body) observer.observe(doc.body)
-      }
-      doc
-        .querySelectorAll("img")
-        .forEach((img) => img.addEventListener("load", resize, { once: true }))
-    }
-    frame.addEventListener("load", attach)
-    return () => {
-      frame.removeEventListener("load", attach)
-      observer?.disconnect()
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [resize, srcDoc])
-
-  return (
-    <iframe
-      ref={iframeRef}
-      title="邮件正文"
-      className="block w-full border-0 bg-white"
-      sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-      referrerPolicy="no-referrer"
-      srcDoc={srcDoc}
-      style={{ height }}
-    />
-  )
 }
 
 function CompactMessageRow({

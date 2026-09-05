@@ -38,6 +38,11 @@ apps/api/tmp/
 *.sqlite
 *.sqlite3
 
+# Docker Compose bind mounts created at runtime by deploy/docker-compose.yml
+deploy/data/
+deploy/mail/
+deploy/dkim/
+
 # Mail/runtime generated artifacts
 maildata/
 dkim-keys/
@@ -61,3 +66,8 @@ desktop.ini
 .claude/
 *.swp
 *.swo
+
+# Local AI assistant scratch space (审查/审计报告等工作产物，不属于项目代码)
+/A/
+CLAUDE.md
+.playwright-mcp

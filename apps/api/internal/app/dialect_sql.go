@@ -67,3 +67,22 @@ func sqlDialect(driver string) string {
 		return databaseDriverSQLite
 	}
 }
+
+// lockUserQuotaRowSQL returns a statement that takes an exclusive lock on a user's
+// row, used to serialize rate-limit checks that must count rows before inserting.
+//
+// Counting and then inserting is not safe on its own: PostgreSQL's READ COMMITTED
+// and MySQL's REPEATABLE READ both let two concurrent transactions observe the same
+// count, and SQLite's busy-timeout retries only the blocked statement, leaving the
+// earlier count stale. Serializing on the user row makes the second transaction wait
+// until the first commits, so its subsequent count sees the new row.
+//
+// SQLite has no row-level locking and no FOR UPDATE, so a no-op write is used there
+// to promote the transaction to a writer. Elsewhere FOR UPDATE locks without
+// producing a dead tuple.
+func lockUserQuotaRowSQL(driver string) string {
+	if sqlDialect(driver) == databaseDriverSQLite {
+		return `UPDATE users SET updated_at=updated_at WHERE id=?`
+	}
+	return `SELECT id FROM users WHERE id=? FOR UPDATE`
+}

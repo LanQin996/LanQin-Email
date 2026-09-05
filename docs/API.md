@@ -389,6 +389,10 @@ Content-Type: application/json
 
 **响应：** 创建后的 mailbox 对象（结构与列表接口相同）。
 
+This endpoint is not blocked by the owner's permission group mailbox limits (`maxMailboxes`, `maxMailboxesPerDay`), but the mailbox still counts towards both, which may leave the owner unable to create further mailboxes themselves.
+
+本接口不受拥有者所在权限组的邮箱数量上限（`maxMailboxes`）与每日新建上限（`maxMailboxesPerDay`）约束，但创建的邮箱仍会计入两者，可能导致拥有者之后无法再自助创建邮箱。
+
 ### Get mailbox
 
 ```http
@@ -485,13 +489,13 @@ Content-Type: application/json
 | Field 字段 | Required 必填 | Description 说明 |
 |-------|----------|-------------|
 | `mailboxId` | Yes | Sending mailbox ID (must be owned by the token user) / 发信邮箱 ID（必须属于 Token 拥有者） |
-| `to` | Yes | Recipient addresses (at least one recipient across to/cc/bcc) / 收件人地址（to/cc/bcc 至少需有一个收件人） |
+| `to` | Yes | Recipient addresses (at least one recipient across to/cc/bcc, at most 100 after deduplication) / 收件人地址（to/cc/bcc 至少需有一个收件人，去重后最多 100 个） |
 | `cc` | No | CC addresses / 抄送地址 |
 | `bcc` | No | BCC addresses / 密送地址 |
 | `subject` | No | Message subject / 邮件主题 |
 | `text` | No | Plain text body / 纯文本正文 |
 | `html` | No | HTML body / HTML 正文 |
-| `attachments` | No | List of attachments (see below) / 附件列表（见下方） |
+| `attachments` | No | List of attachments, at most 20 (see below) / 附件列表，最多 20 个（见下方） |
 
 **Attachment fields:**
 
@@ -501,9 +505,9 @@ Content-Type: application/json
 | `contentType` | MIME type, e.g. `application/pdf` / MIME 类型，如 `application/pdf` |
 | `contentBase64` | Base64-encoded file content / Base64 编码的文件内容 |
 
-Total attachment size is limited by the sender's permission group (`maxAttachmentMb`, default 25 MB). Exceeding it returns `400`.
+Each attachment is limited by the sender's permission group (`maxAttachmentMb`, default 25 MB), and one message carries at most 20 attachments. Exceeding either returns `400`.
 
-附件总大小受发信人所在权限组限制（`maxAttachmentMb`，默认 25 MB）。超出会返回 `400`。
+每个附件的大小受发信人所在权限组限制（`maxAttachmentMb`，默认 25 MB），单封邮件最多 20 个附件。超出任一限制都会返回 `400`。
 
 **Response:**
 
@@ -575,7 +579,7 @@ Current status values:
 
 | Status 状态码 | Cause 原因 |
 |--------|-------|
-| `400` | No recipients / invalid MIME / attachment too large / 无收件人、MIME 无效或附件过大 |
+| `400` | No recipients / more than 100 recipients / invalid MIME / attachment too large or too many attachments / 无收件人、收件人超过 100 个、MIME 无效、附件过大或附件数量过多 |
 | `403` | Sender address is not authorized / 发信地址未被授权 |
 | `404` | Mailbox not found or not owned by the token user / 邮箱不存在或不属于 Token 拥有者 |
 | `429` | SMTP send rate limit exceeded / 超过 SMTP 发信频率限制 |
@@ -666,7 +670,7 @@ Users can only read messages from their own active mailboxes. Fetch message bodi
 - `GET /api/open/v1/send/{id}/events`: queue audit and final delivery events.
 - `POST /api/open/v1/send/{id}/retry`: retry a failed queue item.
 - `POST /api/open/v1/send/{id}/cancel`: cancel a queued or failed item.
-- `POST /api/open/v1/mailboxes/{id}/password`: reset the owner user's password and all mailbox passwords owned by that user.
+- `POST /api/open/v1/mailboxes/{id}/password`: reset the owner user's password and all mailbox passwords owned by that user. This is a containment action: it also ends every session of that user and disables their API tokens.
 - `GET /api/open/v1/domains/{id}/dns-records` and `POST .../dns-check`: DNS configuration and check.
 - `/api/open/v1/aliases`: alias CRUD.
 

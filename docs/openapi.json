@@ -14,7 +14,7 @@
     "/domains/{id}/dns-check": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "DNS check result" } } } },
     "/mailboxes": { "get": { "parameters": [{ "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "responses": { "200": { "description": "Paginated mailboxes" } } }, "post": { "responses": { "201": { "description": "Mailbox created" } } } },
     "/mailboxes/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Mailbox" }, "404": { "$ref": "#/components/responses/NotFound" } } }, "post": { "responses": { "200": { "description": "Mailbox updated" } } }, "delete": { "responses": { "200": { "description": "Mailbox deleted" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
-    "/mailboxes/{id}/password": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "responses": { "200": { "description": "Owner and mailbox passwords reset" } } } },
+    "/mailboxes/{id}/password": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "post": { "description": "Resets the owner user's password and every mailbox password they own. Also ends all of that user's sessions and disables their API tokens.", "responses": { "200": { "description": "Owner and mailbox passwords reset; sessions and API tokens revoked" } } } },
     "/mailboxes/{id}/messages": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }, { "$ref": "#/components/parameters/Limit" }, { "$ref": "#/components/parameters/Cursor" }], "get": { "responses": { "200": { "description": "Paginated messages" } } } },
     "/messages/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Message detail" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
     "/attachments/{id}": { "parameters": [{ "$ref": "#/components/parameters/ResourceId" }], "get": { "responses": { "200": { "description": "Attachment bytes" }, "404": { "$ref": "#/components/responses/NotFound" } } } },
@@ -61,13 +61,14 @@
     "schemas": {
       "SendRequest": {
         "type": "object", "required": ["mailboxId"],
+        "description": "to, cc and bcc together must resolve to at least 1 and at most 100 distinct recipients.",
         "properties": {
           "mailboxId": { "type": "string" }, "from": { "type": "string" }, "fromName": { "type": "string" },
-          "to": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "cc": { "type": "array", "items": { "type": "string", "format": "email" } },
-          "bcc": { "type": "array", "items": { "type": "string", "format": "email" } },
+          "to": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
+          "cc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
+          "bcc": { "type": "array", "maxItems": 100, "items": { "type": "string", "format": "email" } },
           "subject": { "type": "string" }, "text": { "type": "string" }, "html": { "type": "string" },
-          "attachments": { "type": "array", "items": { "$ref": "#/components/schemas/AttachmentInput" } }
+          "attachments": { "type": "array", "maxItems": 20, "items": { "$ref": "#/components/schemas/AttachmentInput" } }
         }
       },
       "AttachmentInput": { "type": "object", "required": ["filename", "contentBase64"], "properties": { "filename": { "type": "string" }, "contentType": { "type": "string" }, "contentBase64": { "type": "string", "contentEncoding": "base64" } } },

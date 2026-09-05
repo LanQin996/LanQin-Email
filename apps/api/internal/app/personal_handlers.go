@@ -63,13 +63,9 @@ func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	localPart := normalizeLocalPart(req.LocalPart)
-	if localPart == "" {
-		badRequest(w, errors.New("请输入邮箱前缀"))
-		return
-	}
-	if len(localPart) > 64 {
-		badRequest(w, errors.New("邮箱前缀过长"))
+	localPart, err := requireCleanLocalPart(req.LocalPart)
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	reserved := map[string]bool{}
@@ -100,8 +96,16 @@ func (a *App) handleApplyMailbox(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("displayName must be at most 80 characters"))
 		return
 	}
-	mailboxID, err := a.createMailboxWithPasswordHash(r.Context(), user.ID, domainID, localPart, displayName, passwordHash, 1024, "active")
+	mailboxID, err := a.createMailboxWithPasswordHash(r.Context(), user.ID, domainID, localPart, displayName, passwordHash, 1024, "active", user)
 	if err != nil {
+		if errors.Is(err, errMailboxCountLimitReached) {
+			respondError(w, http.StatusConflict, mailboxCountLimitMessage(user))
+			return
+		}
+		if errors.Is(err, errMailboxDailyLimitReached) {
+			respondError(w, http.StatusTooManyRequests, mailboxDailyLimitMessage(user))
+			return
+		}
 		if isUniqueViolation(err) {
 			respondError(w, http.StatusConflict, "该邮箱地址已被占用")
 			return

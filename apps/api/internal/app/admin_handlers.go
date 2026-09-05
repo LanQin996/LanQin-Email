@@ -124,8 +124,8 @@ func (a *App) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusForbidden, "only administrators can create administrator users")
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -295,8 +295,8 @@ func (a *App) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
@@ -323,6 +323,13 @@ func (a *App) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.ExecContext(r.Context(), `UPDATE mailboxes SET password_hash=?, updated_at=? WHERE user_id=?`, string(hash), now, id); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update mailbox passwords")
+		return
+	}
+	// An administrator reset is typically a response to a compromised account, so every
+	// session and API token of the target user is cut off — including any session the
+	// administrator's own browser might hold for that user.
+	if err := a.containUserAfterAdminResetTx(r.Context(), tx, id, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke sessions")
 		return
 	}
 	if err := tx.Commit(); err != nil {
@@ -512,8 +519,8 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	role := req.Role
@@ -603,7 +610,9 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, local, displayName, req.Password, req.QuotaMB, "active")
+	// Administrators may deliberately exceed a user's mailbox quota, so no limit
+	// is enforced here. The creation is still counted against the user's total.
+	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, local, displayName, req.Password, req.QuotaMB, "active", nil)
 	if err != nil {
 		badRequest(w, err)
 		return

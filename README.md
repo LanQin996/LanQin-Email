@@ -21,7 +21,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 - **Webmail client**: multiple mailbox switching, folders, reading and composing messages, drafts, scheduled sending, attachments, search, labels, stars, move/delete, read/unread status.
 - **Mailbox enhancements**: contacts, signatures, inbox rules (including automatic forwarding after delivery), sender blacklist, mail statistics, archive read messages, empty Trash/Spam.
 - **Multi-domain / multi-mailbox**: domain management, DKIM key generation, DNS record display and checks, mailbox accounts, address aliases (delivery redirection, not inbox auto-forwarding), catch-all toggle.
-- **Accounts and permissions**: email/password login, Linux.do OAuth2 SSO, session management, TOTP two-factor authentication, Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC.
+- **Accounts and permissions**: email/password login, Linux.do OAuth2 SSO, session management (changing the password revokes other sessions; an administrator password reset revokes every session and disables that user's API tokens), TOTP two-factor authentication (disabling it requires the current password), Cloudflare Turnstile, user self-service mailbox requests, permission groups/RBAC with per-group quotas for attachment size, send rate, and mailbox count.
 - **Admin panel**: overview checklist, user/permission group/domain/mailbox/alias/all-message management, system settings, mail templates, SMTP testing.
 - **Mail service stack**: Postfix delivery, Dovecot IMAP/POP3, Rspamd anti-spam and DKIM signing, Maildir-to-SQLite sync.
 - **Deployment friendly**: default all-in-one single container, plus a multi-container stack for debugging Postfix/Dovecot/Rspamd.
@@ -154,6 +154,24 @@ Production SSO requires a valid HTTPS `LANQIN_PUBLIC_BASE_URL`. LanQin uses the 
 
 Invitation registration is configured in **Admin > System Settings > Security**. When public registration is disabled but invitation registration is enabled, users must enter a valid invitation code. Administrators can create a custom code or let LanQin generate one, set its maximum number of uses, view and copy the full code later, monitor remaining uses, and delete it. Successful registration and use-count updates are committed in one database transaction. Linux.do registration remains controlled by its separate switch.
 
+Each code may also be bound to a permission group: anyone registering with it joins that group automatically, which is how you hand out different capabilities without editing each new account. Leaving the selection empty grants only the regular user group, matching the previous behaviour. The super administrator group can never be bound. Because a code that grants a permission group is an authorization tool rather than a settings tweak, **managing invitation codes now requires an actual super administrator** — the `admin.settings.update` permission is no longer sufficient.
+
+If the bound group is deleted before the code is used, registration fails with a clear error instead of silently falling back to the default group, and the code is not consumed.
+
+## Linux.do Registration Groups
+
+When Linux.do registration is enabled, you may select a permission group that every Linux.do sign-up joins. Unlike invitation codes, a group that has been deleted is skipped with a warning rather than blocking sign-up, because this setting is static and easy to leave stale.
+
+## Permission Group Quotas
+
+Every permission group carries a quota set, edited in **Admin > Permission Groups**: attachment size, SMTP recipients per day and messages per minute, IMAP and POP3 commands per minute, the number of mailboxes a user may create, and how many mailboxes they may create per day. **`0` means unlimited** for every one of these fields. A user who belongs to several groups receives the most generous value of each field.
+
+The daily SMTP allowance is charged **per recipient**, so one message addressed to 10 people costs 10; the per-minute allowance still counts **messages**, since its job is to throttle request rate. A single message carries at most 100 recipients across To/CC/BCC after deduplication and at most 20 attachments, and the attachment size limit applies to each attachment individually.
+
+The mailbox quota counts **every mailbox ever created** for the user, including mailboxes that were later deleted, so deleting a mailbox does not hand the allowance back. This is what prevents a user from cycling create and delete to exceed the limit. Self-service requests under **Profile > Mailboxes** are refused once the limit is reached; mailboxes created by an administrator or through the Open API are allowed past it but still count towards the total. The default allowance for regular users is 3 mailboxes.
+
+The per-day limit applies on top of the total, so both must pass. It uses a rolling 24 hour window rather than a calendar day, which stops one mailbox at 23:59 and another at 00:01 from defeating a limit of one per day. **Unused allowance does not accumulate**: skipping a day never grants two the next day. The default is 1 per day, so an upgraded deployment starts enforcing it immediately; set it to `0` to restore the previous unlimited behaviour.
+
 ## Key Environment Variables
 
 See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. Common variables:
@@ -168,7 +186,8 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_DB_DRIVER` | API database driver: `sqlite`, `mysql`, or `postgres` | `sqlite` |
 | `LANQIN_DATABASE_URL` | MySQL DSN or PostgreSQL URL; required for external databases | Empty |
 | `LANQIN_DB_PATH` | SQLite database path | `/data/lanqin.db` |
-| `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging | `false` |
+| `LANQIN_ALLOW_INSECURE_HTTP` | Allow non-HTTPS cookies; useful for local debugging. Also gates the localhost CORS allowance | `false` |
+| `LANQIN_TRUSTED_PROXY_COUNT` | Number of trusted reverse proxies in front of the API. `0` ignores forwarding headers and uses the TCP peer address; the bundled Compose setup puts Nginx in front, so it sets `1` | `0` |
 | `LANQIN_OPEN_REGISTRATION` | Enable public registration | `false` |
 | `LANQIN_TWO_FACTOR_ENABLED` | Global 2FA feature toggle | `false` |
 | `LANQIN_TURNSTILE_ENABLED` | Enable Turnstile | `false` |
@@ -183,9 +202,10 @@ See [`deploy/.env.example`](./deploy/.env.example) for the full configuration. C
 | `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | Allow external IMAP to connect to private/localhost hosts; also configurable in admin | `false` |
 | `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail external IMAP OAuth2; callback is `/api/external-imap-oauth/gmail/callback` | Empty |
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook external IMAP OAuth2; callback is `/api/external-imap-oauth/outlook/callback` | Empty |
-| `LANQIN_NOTIFICATION_SECRET_KEY` | Master key used to encrypt each user's Telegram Bot Token; required for Telegram rule actions | Random long string |
+| `LANQIN_NOTIFICATION_SECRET_KEY` | Master key used to encrypt each user's Telegram Bot Token; required for Telegram rule actions. Also encrypts TOTP two-factor seeds | Random long string |
+| `LANQIN_AUTH_POLICY_SECRET` | Shared secret for the endpoint Dovecot queries for IMAP/POP3 rate limits. Only needed when API port 8080 is exposed directly | Empty |
 
-This key is generated by the deployment operator; Telegram does not issue it. For example, use the cryptographically secure PowerShell command `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)` or `openssl rand -base64 32`, place it in the deployment `.env`, and restart the API. It is an encryption root key and is intentionally not stored through the admin UI. Back it up securely: changing or losing it makes existing Bot Tokens undecryptable.
+This key is generated by the deployment operator; Telegram does not issue it. For example, use the cryptographically secure PowerShell command `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)` or `openssl rand -base64 32`, place it in the deployment `.env`, and restart the API. It is an encryption root key and is intentionally not stored through the admin UI. Back it up securely: changing or losing it makes existing Bot Tokens undecryptable and invalidates encrypted TOTP seeds. Seeds written before the key was configured stay in plaintext and keep working; an administrator can rebind an affected user through **Admin > Users > Reset two-factor authentication**, which also ends that user's sessions and disables their API tokens.
 
 ## Architecture
 
@@ -254,6 +274,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - The Web UI can sit behind host Nginx / aaPanel / an edge gateway, but SMTP/IMAP/POP3 certificates must be mounted separately for Postfix/Dovecot inside the container.
 - Cloud providers often block port 25 by default; if public email does not send or receive, first check ports, security groups, firewalls, and reverse DNS.
 - SQLite is suitable for single-node deployments; before multi-node deployment, migrate the database and adjust Postfix/Dovecot query configuration accordingly.
+- `/auth-policy`, which Dovecot queries for IMAP/POP3 rate limits, is registered outside `/api` and does not check sessions; it relies on not being proxied by Nginx and only being reachable inside the container. If you expose the API's `8080` publicly, set `LANQIN_AUTH_POLICY_SECRET` and append `?key=<value>` to `LANQIN_AUTH_POLICY_URL`.
 
 ## SMTP Submission
 
@@ -279,4 +300,4 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
  </picture>
 </a>
 
-Friends: [LINUX DO](https://linux.do/) — a new ideal community
+Friends: [LINUX DO](https://linux.do/)  —  a new ideal community

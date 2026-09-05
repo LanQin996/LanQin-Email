@@ -21,7 +21,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 - **Webmail 客户端**：多邮箱切换、文件夹、邮件读写、草稿、定时发送、附件、搜索、标签、星标、移动/删除、已读/未读。
 - **邮箱增强**：联系人、签名、收件规则（包括收件后自动转发）、发件人黑名单、邮件统计、归档已读、清空回收站/垃圾邮件。
 - **多域名/多邮箱**：域名管理、DKIM 密钥生成、DNS 记录展示与检测、邮箱账号、地址别名投递（不是用户收件后的自动转发）、无人收件开关。
-- **账号与权限**：邮箱密码登录、Linux.do OAuth2 SSO、会话管理、TOTP 两步验证、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC。
+- **账号与权限**：邮箱密码登录、Linux.do OAuth2 SSO、会话管理（改密码会撤销其他会话；管理员重置密码会撤销全部会话并停用该用户的 API Token）、TOTP 两步验证（关闭需验证当前密码）、Cloudflare Turnstile、用户自助申请邮箱、权限组/RBAC，并可按权限组限制附件大小、发信频率与邮箱数量。
 - **管理员面板**：概览清单、用户/权限组/域名/邮箱/别名/全部邮件管理、系统设置、邮件模板、SMTP 测试。
 - **邮件服务栈**：Postfix 投递、Dovecot IMAP/POP3、Rspamd 反垃圾与 DKIM 签名、Maildir 到 SQLite 同步。
 - **部署友好**：默认 all-in-one 单容器，也提供多容器 stack 方便调试 Postfix/Dovecot/Rspamd。
@@ -154,6 +154,24 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 
 在“**管理后台 > 系统设置 > 安全**”中独立开启邀请码注册。普通开放注册关闭、邀请码注册开启时，用户必须填写有效邀请码；普通开放注册开启时仍可直接注册。管理员可以自定义邀请码或让系统自动生成，设置最大可用次数，之后随时查看、复制、检查剩余次数或删除。用户创建与邀请码次数扣减在同一数据库事务中完成。Linux.do 注册继续由其独立开关控制。
 
+每个邀请码还可以绑定一个用户组：用该码注册的用户会自动加入该组，不必再逐个编辑新账号的权限。不选则仅继承普通用户组，与原有行为一致。超级管理员组永远不可绑定。由于能授出用户组的邀请码属于授权工具而非普通设置项，**邀请码管理现在需要超级管理员身份**，`admin.settings.update` 权限不再足够。
+
+如果绑定的用户组在邀请码使用前被删除，注册会明确报错而不是静默退回默认组，并且不会扣减该邀请码的可用次数。
+
+## Linux.do 注册用户组
+
+开启 Linux.do 注册后，可以指定一个用户组，所有通过 Linux.do 注册的用户都会自动加入。与邀请码不同，这里配置的用户组若已被删除，只会跳过并记录日志，不会阻断注册 —— 因为它是一份静态配置，管理员删组后容易忘记同步。
+
+## 权限组配额
+
+每个权限组都带一组配额，在“**管理后台 > 权限组**”中编辑：附件大小、SMTP 每日收件人数与每分钟封数、IMAP 与 POP3 每分钟命令数、可创建的邮箱数量，以及每日可新建的邮箱数量。以上字段**填 `0` 表示不限制**。用户同时属于多个权限组时，每个字段取各组中最宽松的值。
+
+SMTP 每日额度按**收件人数**扣减，一封发给 10 个地址的邮件扣 10；每分钟额度仍按**封数**统计，用于限制请求频率。单封邮件的 To/CC/BCC 去重后最多 100 个收件人，附件最多 20 个，附件大小上限按单个附件计。
+
+邮箱数量配额按**累计创建数**统计，已删除的邮箱同样计入，因此删除邮箱不会释放额度 —— 这是为了防止用户反复创建再删除来突破上限。达到上限后，“个人设置 > 邮箱账号”中的自助申请会被拒绝；管理员在后台或通过开放 API 创建的邮箱不受上限约束，但同样计入累计数。普通用户默认可创建 3 个邮箱。
+
+每日上限与总量上限**叠加生效**，两者都通过才能创建。它按滚动 24 小时统计而非自然日，以免 23:59 与 00:01 各建一个就突破了“每天一个”的限制。**额度不累积**：今天没用完，明天也只有一个。默认值为每日 1 个，因此升级后会立即开始生效；需要恢复原先的不限制行为请改为 `0`。
+
 ## 关键环境变量
 
 完整配置见 [`deploy/.env.example`](./deploy/.env.example)。常用变量如下：
@@ -166,7 +184,8 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 | `LANQIN_ADMIN_EMAIL` | 初始管理员邮箱 | `admin@example.com` |
 | `LANQIN_ADMIN_PASSWORD` | 初始管理员密码，生产必须修改 | `ChangeMe123!` |
 | `LANQIN_DB_PATH` | SQLite 数据库路径 | `/data/lanqin.db` |
-| `LANQIN_ALLOW_INSECURE_HTTP` | 是否允许非 HTTPS Cookie，本地调试可开 | `false` |
+| `LANQIN_ALLOW_INSECURE_HTTP` | 是否允许非 HTTPS Cookie，本地调试可开；同时决定是否放通 localhost 跨域 | `false` |
+| `LANQIN_TRUSTED_PROXY_COUNT` | API 前面可信反向代理的层数。`0` 表示忽略转发头、只用 TCP 对端地址；本仓库 compose 由 Nginx 反代，因此设为 `1` | `0` |
 | `LANQIN_OPEN_REGISTRATION` | 是否开放注册 | `false` |
 | `LANQIN_TWO_FACTOR_ENABLED` | 2FA 功能总开关 | `false` |
 | `LANQIN_TURNSTILE_ENABLED` | 是否启用 Turnstile | `false` |
@@ -181,9 +200,10 @@ Linux.do SSO 默认关闭，在“**管理后台 > 系统设置 > 安全**”中
 | `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | 是否允许外部 IMAP 连接内网/localhost 主机；也可在后台配置 | `false` |
 | `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/gmail/callback` | 空 |
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/outlook/callback` | 空 |
-| `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置 | 随机长字符串 |
+| `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置；同时用于加密 TOTP 两步验证种子 | 随机长字符串 |
+| `LANQIN_AUTH_POLICY_SECRET` | Dovecot 查询 IMAP/POP3 频率限制的共享密钥。仅在直接暴露 API 8080 时需要设置 | 空 |
 
-该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密。
+该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密，已加密的 TOTP 种子同样失效。配置该密钥之前写入的种子仍以明文保存、照常可用；受影响的用户可由管理员在“**管理后台 > 用户 > 重置双因素认证**”清除后重新绑定，该操作同时会撤销该用户的会话并停用其 API Token。
 
 ## 架构
 
@@ -237,6 +257,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 - Web 可放在宿主机 Nginx/宝塔/边缘网关后，但 SMTP/IMAP/POP3 证书需要单独挂载给容器内 Postfix/Dovecot。
 - 云厂商常默认封禁 25 端口；无法收发公网邮件时先检查端口、安全组、防火墙与反向 DNS。
 - SQLite 适合单机部署；多节点部署前需要迁移数据库，并同步调整 Postfix/Dovecot 查询配置。
+- Dovecot 查询 IMAP/POP3 频率限制的 `/auth-policy` 注册在 `/api` 之外且不校验会话，只依赖它不经 Nginx 反代、仅容器内可达。如果你把 API 的 `8080` 直接暴露到公网，请设置 `LANQIN_AUTH_POLICY_SECRET`，并在 `LANQIN_AUTH_POLICY_URL` 后追加 `?key=<该值>`。
 
 ## SMTP 提交
 

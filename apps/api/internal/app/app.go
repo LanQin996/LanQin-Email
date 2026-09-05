@@ -35,7 +35,8 @@ type App struct {
 	maildirDirs        map[string]maildirDirectorySignature
 	maildirRuns        uint64
 	syncEventsMu       sync.Mutex
-	syncEventClients   map[chan struct{}]struct{}
+	syncEventClients   map[chan struct{}]string
+	sseConnections     map[string]int
 	externalIMAP       externalIMAPClientFactory
 	linuxDoOAuth       linuxDoOAuthClient
 	telegramAPIBaseURL string
@@ -48,6 +49,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		logger = slog.Default()
 	}
 	cfg = normalizeDatabaseConfig(cfg)
+	if cfg.AllowInsecureHTTP {
+		// Session and OAuth state cookies lose their Secure attribute in this mode,
+		// so anyone on the path can lift a login. It exists for local development.
+		logger.Warn("LANQIN_ALLOW_INSECURE_HTTP is enabled: session cookies are sent without Secure and non-HTTPS callbacks are accepted; do not use this in production")
+	}
 	if cfg.DBDriver == databaseDriverSQLite {
 		if err := os.MkdirAll(filepath.Dir(cfg.DBPath), 0o755); err != nil {
 			return nil, fmt.Errorf("create db dir: %w", err)
@@ -97,6 +103,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
+	a.startWorker(func() { a.sessionCleanupWorker(workerCtx) })
 	if strings.TrimSpace(a.cfg.StatusWebhookURL) != "" {
 		a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
 	}
@@ -162,7 +169,10 @@ func (a *App) migrate(ctx context.Context) error {
 			password_hash TEXT NOT NULL,
 			two_factor_secret TEXT NOT NULL DEFAULT '',
 			two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+			two_factor_last_counter INTEGER NOT NULL DEFAULT 0,
 			disabled INTEGER NOT NULL DEFAULT 0,
+			mailboxes_created_total INTEGER NOT NULL DEFAULT 0,
+			mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
@@ -190,6 +200,8 @@ func (a *App) migrate(ctx context.Context) error {
 			expires_at TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)`,
 		`CREATE TABLE IF NOT EXISTS login_challenges (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -241,12 +253,23 @@ func (a *App) migrate(ctx context.Context) error {
 			code TEXT NOT NULL UNIQUE,
 			max_uses INTEGER NOT NULL CHECK(max_uses > 0),
 			used_count INTEGER NOT NULL DEFAULT 0 CHECK(used_count >= 0),
+			permission_group_ids_json TEXT NOT NULL DEFAULT '[]',
 			created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
 			created_at TEXT NOT NULL,
 			updated_at TEXT NOT NULL,
 			CHECK(used_count <= max_uses)
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_registration_invites_created ON registration_invites(created_at)`,
+		// mailbox_id deliberately has no foreign key: deleting a mailbox must not
+		// erase the creation record, otherwise create-delete-create would reset the
+		// per-day rate limit.
+		`CREATE TABLE IF NOT EXISTS mailbox_creation_events (
+			id TEXT PRIMARY KEY,
+			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			mailbox_id TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_mailbox_creation_events_user ON mailbox_creation_events(user_id,created_at)`,
 		`CREATE TABLE IF NOT EXISTS api_tokens (
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -581,7 +604,8 @@ func (a *App) migrate(ctx context.Context) error {
 			id TEXT PRIMARY KEY,
 			user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			mailbox_id TEXT NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
-			created_at TEXT NOT NULL
+			created_at TEXT NOT NULL,
+			recipients INTEGER NOT NULL DEFAULT 1
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_smtp_send_events_user_created ON smtp_send_events(user_id, created_at)`,
 		`CREATE TABLE IF NOT EXISTS imap_events (
@@ -772,6 +796,15 @@ func (a *App) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := a.migratePermissionGroupLimits(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateMailboxQuota(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateInviteGroupsAndMailboxRate(ctx); err != nil {
+		return err
+	}
+	if err := a.migrateSMTPRateRecipients(ctx); err != nil {
 		return err
 	}
 	if err := a.migrateSendQueueMessageID(ctx); err != nil {
@@ -1070,6 +1103,106 @@ func (a *App) migrateSendQueueMessageID(ctx context.Context) error {
 	}
 	_, err = a.db.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_send_queue_mailbox_source_message_id ON send_queue(mailbox_id, source, message_id) WHERE message_id <> ''`)
 	return err
+}
+
+// migrateMailboxQuota adds the per-user mailbox counters.
+//
+// Existing rows are backfilled from the current mailbox count. Mailboxes that
+// were deleted before this migration ran cannot be recovered, so the backfilled
+// total is a lower bound for pre-existing accounts. That is an accepted,
+// one-time loss of precision, not a bug.
+func (a *App) migrateMailboxQuota(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(users)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !columns["mailboxes_created_total"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN mailboxes_created_total INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+		if _, err := a.db.ExecContext(ctx, `UPDATE users SET mailboxes_created_total =
+			(SELECT COUNT(*) FROM mailboxes WHERE mailboxes.user_id = users.id)`); err != nil {
+			return err
+		}
+	}
+	if !columns["mailbox_quota_bonus"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN mailbox_quota_bonus INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	if !columns["two_factor_last_counter"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE users ADD COLUMN two_factor_last_counter INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// migrateSMTPRateRecipients adds the per-event recipient weight.
+//
+// Existing rows default to 1, which is exactly what they meant: before this column
+// the daily allowance was charged one unit per message regardless of how many
+// addresses it carried.
+func (a *App) migrateSMTPRateRecipients(ctx context.Context) error {
+	columns, err := sqliteTableColumns(ctx, a.db, "smtp_send_events")
+	if err != nil {
+		return err
+	}
+	if columns["recipients"] {
+		return nil
+	}
+	_, err = a.db.ExecContext(ctx, `ALTER TABLE smtp_send_events ADD COLUMN recipients INTEGER NOT NULL DEFAULT 1`)
+	return err
+}
+
+// migrateInviteGroupsAndMailboxRate adds the invite-to-group binding column.
+//
+// mailbox_creation_events is created by the inline DDL above and needs no
+// backfill: an empty table simply means nobody has consumed today's allowance
+// yet, which is the correct state after an upgrade.
+func (a *App) migrateInviteGroupsAndMailboxRate(ctx context.Context) error {
+	rows, err := a.db.QueryContext(ctx, `PRAGMA table_info(registration_invites)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notnull int
+		var dflt any
+		var pk int
+		if err := rows.Scan(&cid, &name, &typ, &notnull, &dflt, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !columns["permission_group_ids_json"] {
+		if _, err := a.db.ExecContext(ctx, `ALTER TABLE registration_invites ADD COLUMN permission_group_ids_json TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) migratePermissionGroupLimits(ctx context.Context) error {
@@ -1496,7 +1629,8 @@ func (a *App) seed(ctx context.Context) error {
 	}
 
 	// Create mailbox for admin
-	mailboxID, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, adminEmail, string(passwordHash), 1024, "active")
+	// Bootstrapping the configured administrator must never be blocked by a quota.
+	mailboxID, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, adminEmail, string(passwordHash), 1024, "active", nil)
 	if err != nil {
 		return err
 	}
@@ -1570,21 +1704,21 @@ func defaultFolderDefs() []struct{ name, role string } {
 	}
 }
 
-func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, displayName, password string, quotaMB int, status string) (string, error) {
+func (a *App) createMailbox(ctx context.Context, userID, domainID, localPart, displayName, password string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return "", err
 	}
-	return a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, displayName, string(passwordHash), quotaMB, status)
+	return a.createMailboxWithPasswordHash(ctx, userID, domainID, localPart, displayName, string(passwordHash), quotaMB, status, enforceQuotaFor)
 }
 
-func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
-	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status)
+	id, err := a.createMailboxWithPasswordHashTx(ctx, tx, userID, domainID, localPart, displayName, passwordHash, quotaMB, status, enforceQuotaFor)
 	if err != nil {
 		return "", err
 	}
@@ -1594,7 +1728,16 @@ func (a *App) createMailboxWithPasswordHash(ctx context.Context, userID, domainI
 	return id, nil
 }
 
-func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string) (string, error) {
+// createMailboxWithPasswordHashTx is the single funnel every mailbox creation
+// goes through, which is why the lifetime counter is incremented here rather
+// than at the call sites.
+//
+// enforceQuotaFor selects whether the user's mailbox quota is checked: pass the
+// owning user for self-service paths (registration, self-apply), or nil for
+// administrative paths that are deliberately allowed to exceed the quota. It is
+// a required parameter so that adding a new creation path forces an explicit
+// decision instead of silently defaulting to "unchecked".
+func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, userID, domainID, localPart, displayName, passwordHash string, quotaMB int, status string, enforceQuotaFor *User) (string, error) {
 	localPart = normalizeLocalPart(localPart)
 	if localPart == "" {
 		return "", errors.New("invalid local part")
@@ -1605,8 +1748,19 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 	if status == "" {
 		status = "active"
 	}
+	if enforceQuotaFor != nil && enforceQuotaFor.Limits.MaxMailboxesPerDay > 0 {
+		// Lock before the first table read. PostgreSQL needs a fresh statement
+		// snapshot after waiting, and MySQL REPEATABLE READ must not establish
+		// its read view before the preceding creation commits.
+		if err := a.lockUserQuotaRowTx(ctx, tx, userID); err != nil {
+			return "", err
+		}
+	}
 	var domain string
-	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=?`, domainID).Scan(&domain); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=? AND status='active'`, domainID).Scan(&domain); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", errInactiveDomain
+		}
 		return "", err
 	}
 	address := localPart + "@" + domain
@@ -1616,9 +1770,15 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 
 	id := newID("mbx")
 	now := a.now().UTC().Format(time.RFC3339Nano)
+	if err := a.consumeMailboxQuotaTx(ctx, tx, userID, now, enforceQuotaFor); err != nil {
+		return "", err
+	}
 	_, err := tx.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, id, userID, domainID, localPart, address, displayName, passwordHash, quotaMB, status, now, now)
 	if err != nil {
+		return "", err
+	}
+	if err := a.recordMailboxCreationTx(ctx, tx, userID, id, now); err != nil {
 		return "", err
 	}
 	for _, f := range defaultFolderDefs() {
@@ -1628,6 +1788,138 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 		}
 	}
 	return id, nil
+}
+
+// errInactiveDomain means the target domain is missing or disabled. Checking this in
+// the creation funnel rather than per entry point closes the registration path, which
+// accepted a client-supplied domainId without verifying its status.
+var errInactiveDomain = errors.New("domain is not active")
+
+// errMailboxCountLimitReached is returned when a self-service mailbox creation
+// would push the user past their permission group's mailbox count limit.
+//
+// Not to be confused with errMailboxQuotaExceeded, which is about a mailbox's
+// storage size in bytes.
+var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
+
+// errMailboxDailyLimitReached is returned when a self-service mailbox creation
+// would exceed the per-day allowance of the user's permission group.
+var errMailboxDailyLimitReached = errors.New("mailbox daily creation limit reached")
+
+// consumeMailboxQuotaTx increments the user's lifetime mailbox counter and, when
+// enforceQuotaFor is set, refuses to do so once either the lifetime or the
+// per-day allowance is reached.
+//
+// The lifetime counter is guarded by the UPDATE itself. The daily event count
+// additionally relies on createMailboxWithPasswordHashTx locking the user row
+// before its first table read. An UPDATE alone is insufficient: after waiting
+// PostgreSQL rechecks the user row but its subquery can still see an old snapshot
+// of mailbox_creation_events. Keep the lock and the count in separate statements.
+func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
+	lifetimeLimit := 0
+	dailyLimit := 0
+	if enforceQuotaFor != nil {
+		lifetimeLimit = effectiveMailboxLimit(enforceQuotaFor)
+		dailyLimit = enforceQuotaFor.Limits.MaxMailboxesPerDay
+	}
+
+	query := `UPDATE users SET mailboxes_created_total=mailboxes_created_total+1, updated_at=? WHERE id=?`
+	args := []any{now, userID}
+	windowStart := a.now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
+
+	// A limit of 0 means unlimited, so that guard is simply omitted. Both bounds are
+	// interpolated rather than bound as parameters: they are ints from our own
+	// config, and PostgreSQL cannot infer a type for a bare placeholder compared
+	// against COUNT(*).
+	if lifetimeLimit > 0 {
+		query += fmt.Sprintf(` AND mailboxes_created_total<%d`, lifetimeLimit)
+	}
+	if dailyLimit > 0 {
+		// The event for this creation is inserted after this statement, so the
+		// subquery only ever counts prior creations.
+		query += fmt.Sprintf(` AND (SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?)<%d`, dailyLimit)
+		args = append(args, userID, windowStart)
+	}
+
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 1 {
+		return nil
+	}
+	if lifetimeLimit == 0 && dailyLimit == 0 {
+		// No guard was applied, so the only way to match zero rows is a missing user.
+		return errNotFound
+	}
+	return a.classifyMailboxQuotaFailureTx(ctx, tx, userID, windowStart, lifetimeLimit, dailyLimit)
+}
+
+// classifyMailboxQuotaFailureTx works out which guard rejected the UPDATE so the
+// caller can return a meaningful message. It only runs on the failure path, where
+// an extra pair of reads costs nothing.
+func (a *App) classifyMailboxQuotaFailureTx(ctx context.Context, tx *sql.Tx, userID, windowStart string, lifetimeLimit, dailyLimit int) error {
+	if dailyLimit > 0 {
+		var used int
+		if err := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=? AND created_at>=?`,
+			userID, windowStart).Scan(&used); err != nil {
+			return err
+		}
+		if used >= dailyLimit {
+			return errMailboxDailyLimitReached
+		}
+	}
+	if lifetimeLimit > 0 {
+		var total int
+		if err := tx.QueryRowContext(ctx, `SELECT mailboxes_created_total FROM users WHERE id=?`, userID).Scan(&total); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return errNotFound
+			}
+			return err
+		}
+		if total >= lifetimeLimit {
+			return errMailboxCountLimitReached
+		}
+	}
+	// Neither bound is exceeded, so the row itself is gone.
+	return errNotFound
+}
+
+// recordMailboxCreationTx appends to the creation log. It runs for every path,
+// including administrative ones, so that the log stays a complete history.
+//
+// The row must be inserted after consumeMailboxQuotaTx, whose per-day subquery
+// counts only prior creations.
+func (a *App) recordMailboxCreationTx(ctx context.Context, tx *sql.Tx, userID, mailboxID, now string) error {
+	_, err := tx.ExecContext(ctx,
+		`INSERT INTO mailbox_creation_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`,
+		newID("mce"), userID, mailboxID, now)
+	return err
+}
+
+// mailboxCountLimitMessage explains the limit in the user's own terms. The
+// cumulative wording matters: deleting a mailbox does not free up an allowance,
+// which is otherwise counter-intuitive.
+func mailboxCountLimitMessage(u *User) string {
+	limit := effectiveMailboxLimit(u)
+	if limit <= 0 {
+		return "邮箱数量已达上限"
+	}
+	return fmt.Sprintf("邮箱数量已达上限（%d 个，按累计创建数计算，删除邮箱不会释放额度）", limit)
+}
+
+// mailboxDailyLimitMessage states the per-day allowance. The rolling window is
+// spelled out because users otherwise expect the count to reset at midnight.
+func mailboxDailyLimitMessage(u *User) string {
+	if u == nil || u.Limits.MaxMailboxesPerDay <= 0 {
+		return "今日创建邮箱数已达上限"
+	}
+	return fmt.Sprintf("今日创建邮箱数已达上限（每 24 小时最多 %d 个，额度不累积）", u.Limits.MaxMailboxesPerDay)
 }
 
 func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {
@@ -1666,5 +1958,12 @@ func (a *App) seedWelcomeMessage(ctx context.Context, mailboxID string) error {
 		IsRead:     false,
 	}
 	_, err = a.insertMessage(ctx, msg, nil)
+	return err
+}
+
+// lockUserQuotaRowTx serializes concurrent quota checks for one user. See
+// lockUserQuotaRowSQL for why counting without this is unsafe on every driver.
+func (a *App) lockUserQuotaRowTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	_, err := tx.ExecContext(ctx, lockUserQuotaRowSQL(a.cfg.DBDriver), userID)
 	return err
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/subtle"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -806,7 +807,7 @@ type ScheduledSend struct {
 
 func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -817,7 +818,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 	msg, err := a.sendMailNow(r.Context(), currentUser(r), mb, req)
 	if err != nil {
-		if errors.Is(err, errNoRecipients) {
+		if errors.Is(err, errNoRecipients) || errors.Is(err, errTooManyRecipients) {
 			badRequest(w, err)
 			return
 		}
@@ -825,7 +826,7 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, err)
 			return
 		}
-		if errors.Is(err, errAttachmentTooLarge) {
+		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) {
 			badRequest(w, err)
 			return
 		}
@@ -848,6 +849,16 @@ func (a *App) handleMailSend(w http.ResponseWriter, r *http.Request) {
 }
 
 var errNoRecipients = errors.New("at least one recipient is required")
+
+// maxRecipientsPerMessage bounds a single send.
+//
+// Without it one message could carry thousands of recipients while consuming a
+// single unit of the SMTP quota, which both defeats the quota and turns the local
+// delivery loop into an amplifier: every local recipient costs an insertMessage plus
+// a Maildir write.
+const maxRecipientsPerMessage = 100
+
+var errTooManyRecipients = errors.New("too many recipients")
 var errInvalidMIME = errors.New("invalid mime message")
 var errAttachmentTooLarge = errors.New("attachment size exceeds permission limit")
 var errSMTPRateLimited = errors.New("smtp send rate limit exceeded")
@@ -871,6 +882,9 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 	if len(allRecipients) == 0 {
 		return nil, errNoRecipients
 	}
+	if len(allRecipients) > maxRecipientsPerMessage {
+		return nil, fmt.Errorf("%w: max %d", errTooManyRecipients, maxRecipientsPerMessage)
+	}
 	if strings.TrimSpace(req.Subject) == "" {
 		req.Subject = "(no subject)"
 	}
@@ -891,14 +905,17 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 		fromName = strings.TrimSpace(req.FromName)
 	}
 	messageID := fmt.Sprintf("<%s@%s>", newID("msg"), strings.Split(mb.Address, "@")[1])
+	// Charge the send quota before building the MIME message: BuildMIME encodes every
+	// attachment, so doing it first let a user who is already over their limit burn
+	// that work on every rejected attempt.
+	if err := a.recordSMTPRate(ctx, user, mb, len(allRecipients)); err != nil {
+		return nil, err
+	}
 	mimeBytes, err := BuildMIME(MIMEMessage{
 		From: fromAddress, FromName: fromName, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, MessageID: messageID, Date: now, Attachments: req.Attachments,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errInvalidMIME, err)
-	}
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
-		return nil, err
 	}
 
 	sentFolderID, err := a.ensureFolder(ctx, mb.ID, "Sent")
@@ -982,12 +999,53 @@ func userLimits(user *User) PermissionLimits {
 	return user.Limits
 }
 
+// maxAttachmentsPerMessage bounds how many parts one message may carry.
+//
+// The size limit is per attachment, so without a count bound a single request could
+// carry thousands of tiny files, each costing a MIME part, an attachments row and a
+// file on disk.
+const maxAttachmentsPerMessage = 20
+
+var errTooManyAttachments = errors.New("too many attachments")
+
+// composeRequestBodyLimit derives a compose endpoint's request body cap from the
+// sender's attachment allowance instead of always using the global ceiling.
+//
+// base64 inflates by 4/3 and a message may carry up to maxAttachmentsPerMessage parts,
+// so that is the bound, plus 1 MB for headers and both bodies. An unlimited attachment
+// allowance keeps the global ceiling, and so does any computed value above it.
+func composeRequestBodyLimit(limits PermissionLimits) int64 {
+	limitBytes := attachmentLimitBytes(limits)
+	if limitBytes <= 0 {
+		return maxJSONRequestBodyBytes
+	}
+	limit := limitBytes/3*4*maxAttachmentsPerMessage + 1<<20
+	if limit <= 0 || limit > maxJSONRequestBodyBytes {
+		return maxJSONRequestBodyBytes
+	}
+	return limit
+}
+
+func (a *App) decodeComposeJSON(r *http.Request, dst any) error {
+	return decodeJSONWithLimit(r, dst, composeRequestBodyLimit(userLimits(currentUser(r))))
+}
+
 func validateAttachmentLimit(attachments []AttachmentInput, limits PermissionLimits) error {
+	if len(attachments) > maxAttachmentsPerMessage {
+		return fmt.Errorf("%w: max %d", errTooManyAttachments, maxAttachmentsPerMessage)
+	}
 	limitBytes := attachmentLimitBytes(limits)
 	if limitBytes == 0 {
 		return nil
 	}
 	for i := range attachments {
+		// Reject from the encoded length first. base64 expands by 4/3 plus padding, so
+		// anything longer than that bound cannot fit under the limit once decoded, and
+		// checking it here avoids materialising an oversized attachment in memory just
+		// to refuse it. Requests are capped at 64 MB, far above the 25 MB default.
+		if int64(len(attachments[i].ContentBase64)) > limitBytes/3*4+16 {
+			return fmt.Errorf("%w: max %d MB", errAttachmentTooLarge, limits.MaxAttachmentMB)
+		}
 		decoded, err := attachments[i].contentBytes()
 		if err != nil {
 			return fmt.Errorf("%w: %v", errInvalidMIME, err)
@@ -1012,6 +1070,9 @@ func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Ma
 		return err
 	}
 	defer tx.Rollback()
+	if err := a.lockUserQuotaRowTx(ctx, tx, user.ID); err != nil {
+		return err
+	}
 	if dailyLimit > 0 {
 		var count int
 		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table+" WHERE user_id=? AND created_at>=?", user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
@@ -1036,7 +1097,21 @@ func (a *App) checkAndRecordProtocolRate(ctx context.Context, user *User, mb *Ma
 	return tx.Commit()
 }
 
+// handleAuthPolicy answers Dovecot's auth policy lookups.
+//
+// It is registered outside /api and carries no session, because Dovecot has no
+// credentials to present. The bundled nginx configurations do not proxy it and the
+// API port is never published, so it is reachable only from inside the deployment;
+// LANQIN_AUTH_POLICY_SECRET adds a shared secret for setups that expose 8080
+// directly. Responses deliberately do not distinguish "no such user" from
+// "disabled" so the endpoint cannot be used to enumerate mailboxes.
 func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
+	if secret := strings.TrimSpace(a.cfg.AuthPolicySecret); secret != "" {
+		if subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("key")), []byte(secret)) != 1 {
+			respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "policy rejected"})
+			return
+		}
+	}
 	var req struct {
 		Login        string `json:"login"`
 		Protocol     string `json:"protocol"`
@@ -1068,7 +1143,7 @@ func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if user == nil || user.Disabled {
-		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "user not found or disabled"})
+		respondJSON(w, http.StatusOK, map[string]any{"status": -1, "msg": "policy rejected"})
 		return
 	}
 	if user.Role == "admin" {
@@ -1102,7 +1177,18 @@ func (a *App) handleAuthPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error {
+// recordSMTPRate charges the sender's SMTP allowance for one message.
+//
+// recipients is the number of addresses the message carries. The daily allowance is a
+// volume budget, so it is charged per recipient: charging one unit per message let a
+// user with smtpDailyLimit=200 push maxRecipientsPerMessage times that many addresses
+// through it, which is both a quota bypass and an outbound-spam amplifier.
+//
+// The per-minute allowance is deliberately still counted per message. It exists to
+// throttle request rate, not volume, and operators have already configured values in
+// that unit — reinterpreting them as recipients would silently make a legitimate
+// 30-address send impossible under the default of 20.
+func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox, recipients int) error {
 	if user == nil || mb == nil || user.Role == "admin" {
 		return nil
 	}
@@ -1110,18 +1196,24 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 	if limits.SMTPDailyLimit == 0 && limits.SMTPMinuteLimit == 0 {
 		return nil
 	}
+	if recipients < 1 {
+		recipients = 1
+	}
 	now := a.now().UTC()
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if err := a.lockUserQuotaRowTx(ctx, tx, user.ID); err != nil {
+		return err
+	}
 	if limits.SMTPDailyLimit > 0 {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&count); err != nil {
+		var used int
+		if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(recipients),0) FROM smtp_send_events WHERE user_id=? AND created_at>=?`, user.ID, now.Add(-24*time.Hour).Format(time.RFC3339Nano)).Scan(&used); err != nil {
 			return err
 		}
-		if count >= limits.SMTPDailyLimit {
+		if used+recipients > limits.SMTPDailyLimit {
 			return fmt.Errorf("%w: daily limit %d", errSMTPRateLimited, limits.SMTPDailyLimit)
 		}
 	}
@@ -1134,7 +1226,7 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 			return fmt.Errorf("%w: per-minute limit %d", errSMTPRateLimited, limits.SMTPMinuteLimit)
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at) VALUES(?,?,?,?)`, newID("smtp"), user.ID, mb.ID, now.Format(time.RFC3339Nano)); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO smtp_send_events(id,user_id,mailbox_id,created_at,recipients) VALUES(?,?,?,?,?)`, newID("smtp"), user.ID, mb.ID, now.Format(time.RFC3339Nano), recipients); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1142,7 +1234,7 @@ func (a *App) recordSMTPRate(ctx context.Context, user *User, mb *Mailbox) error
 
 func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	var req mailDraftInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -1153,7 +1245,7 @@ func (a *App) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Attachments != nil {
 		if err := validateAttachmentLimit(*req.Attachments, userLimits(currentUser(r))); err != nil {
-			if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+			if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) || errors.Is(err, errInvalidMIME) {
 				badRequest(w, err)
 				return
 			}
@@ -1624,7 +1716,7 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 		DraftID     string            `json:"draftId"`
 		SendAt      string            `json:"sendAt"`
 	}
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -1644,7 +1736,7 @@ func (a *App) handleScheduleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	compose := mailComposeInput{MailboxID: req.MailboxID, To: req.To, CC: req.CC, BCC: req.BCC, Subject: req.Subject, Text: req.Text, HTML: req.HTML, Attachments: req.Attachments}
 	if err := validateAttachmentLimit(compose.Attachments, userLimits(currentUser(r))); err != nil {
-		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errInvalidMIME) {
+		if errors.Is(err, errAttachmentTooLarge) || errors.Is(err, errTooManyAttachments) || errors.Is(err, errInvalidMIME) {
 			badRequest(w, err)
 			return
 		}
@@ -2054,9 +2146,7 @@ func (a *App) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	writeAttachmentHeaders(w, contentType, filename, size)
 	_, _ = io.Copy(w, f)
 }
 
@@ -2075,13 +2165,27 @@ func (a *App) handleAdminAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer f.Close()
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(filename, `"`, "")+`"`)
-	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	writeAttachmentHeaders(w, contentType, filename, size)
 	_, _ = io.Copy(w, f)
 }
 
+// maxSSEConnectionsPerUser bounds how many event streams one account may hold.
+//
+// Each stream costs a goroutine and a ticker for as long as it stays open, so without
+// a cap a single account could pin an unbounded number of them.
+const maxSSEConnectionsPerUser = 8
+
 func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if user == nil {
+		respondError(w, http.StatusUnauthorized, "authentication required")
+		return
+	}
+	if !a.acquireSSESlot(user.ID) {
+		respondError(w, http.StatusTooManyRequests, "打开的实时连接过多，请关闭其他标签页后重试")
+		return
+	}
+	defer a.releaseSSESlot(user.ID)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -2090,7 +2194,7 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if flusher != nil {
 		flusher.Flush()
 	}
-	syncEvents, unsubscribe := a.subscribeSyncEvents()
+	syncEvents, unsubscribe := a.subscribeSyncEvents(user.ID)
 	defer unsubscribe()
 	ticker := time.NewTicker(25 * time.Second)
 	defer ticker.Stop()
@@ -2112,13 +2216,36 @@ func (a *App) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {
+func (a *App) acquireSSESlot(userID string) bool {
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	if a.sseConnections == nil {
+		a.sseConnections = make(map[string]int)
+	}
+	if a.sseConnections[userID] >= maxSSEConnectionsPerUser {
+		return false
+	}
+	a.sseConnections[userID]++
+	return true
+}
+
+func (a *App) releaseSSESlot(userID string) {
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	if a.sseConnections[userID] <= 1 {
+		delete(a.sseConnections, userID)
+		return
+	}
+	a.sseConnections[userID]--
+}
+
+func (a *App) subscribeSyncEvents(userID string) (<-chan struct{}, func()) {
 	client := make(chan struct{}, 1)
 	a.syncEventsMu.Lock()
 	if a.syncEventClients == nil {
-		a.syncEventClients = make(map[chan struct{}]struct{})
+		a.syncEventClients = make(map[chan struct{}]string)
 	}
-	a.syncEventClients[client] = struct{}{}
+	a.syncEventClients[client] = userID
 	a.syncEventsMu.Unlock()
 	return client, func() {
 		a.syncEventsMu.Lock()
@@ -2127,7 +2254,9 @@ func (a *App) subscribeSyncEvents() (<-chan struct{}, func()) {
 	}
 }
 
-func (a *App) publishSyncEvent() {
+// publishSyncEventToAll wakes every open stream. Used when a change cannot be
+// attributed to a mailbox, and as the fallback when the audience lookup fails.
+func (a *App) publishSyncEventToAll() {
 	a.syncEventsMu.Lock()
 	defer a.syncEventsMu.Unlock()
 	for client := range a.syncEventClients {
@@ -2136,6 +2265,97 @@ func (a *App) publishSyncEvent() {
 		default:
 		}
 	}
+}
+
+func (a *App) publishSyncEventToUsers(userIDs map[string]struct{}) {
+	if len(userIDs) == 0 {
+		return
+	}
+	a.syncEventsMu.Lock()
+	defer a.syncEventsMu.Unlock()
+	for client, owner := range a.syncEventClients {
+		if _, ok := userIDs[owner]; !ok {
+			continue
+		}
+		select {
+		case client <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// publishSyncEventForCounts delivers one maildir run's event to the clients that can
+// see what changed.
+//
+// Before this, every sync woke every open stream: one user receiving mail refreshed
+// every other logged-in browser, which is both a thundering herd and a timing signal
+// that somebody on the server just got mail.
+func (a *App) publishSyncEventForCounts(ctx context.Context, counts maildirSyncCounts) {
+	if counts.broadcast || len(counts.affectedMailboxIDs) == 0 {
+		a.publishSyncEventToAll()
+		return
+	}
+	mailboxIDs := make([]string, 0, len(counts.affectedMailboxIDs))
+	for id := range counts.affectedMailboxIDs {
+		mailboxIDs = append(mailboxIDs, id)
+	}
+	a.publishSyncEventForMailboxes(ctx, mailboxIDs)
+}
+
+// publishSyncEventForMailboxes notifies the owner of each mailbox plus anyone holding a
+// live share of it.
+//
+// The audience is resolved at publish time rather than at subscribe time on purpose: a
+// mailbox created or shared during a long-lived stream still reaches that stream.
+func (a *App) publishSyncEventForMailboxes(ctx context.Context, mailboxIDs []string) {
+	users, err := a.usersForMailboxes(ctx, mailboxIDs)
+	if err != nil {
+		// A failed lookup must not cost anyone their live refresh.
+		a.log.Warn("failed to resolve sync event audience", "error", err)
+		a.publishSyncEventToAll()
+		return
+	}
+	a.publishSyncEventToUsers(users)
+}
+
+func (a *App) usersForMailboxes(ctx context.Context, mailboxIDs []string) (map[string]struct{}, error) {
+	users := map[string]struct{}{}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	for _, mailboxID := range mailboxIDs {
+		var owner string
+		if err := a.db.QueryRowContext(ctx, `SELECT user_id FROM mailboxes WHERE id=?`, mailboxID).Scan(&owner); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return nil, err
+		}
+		if strings.TrimSpace(owner) != "" {
+			users[owner] = struct{}{}
+		}
+		rows, err := a.db.QueryContext(ctx, `SELECT shared_with_user_id FROM mailbox_shares
+			WHERE mailbox_id=? AND revoked_at IS NULL AND left_at IS NULL AND (expires_at IS NULL OR expires_at>?)`, mailboxID, now)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var sharedWith string
+			if err := rows.Scan(&sharedWith); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if strings.TrimSpace(sharedWith) != "" {
+				users[sharedWith] = struct{}{}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return users, nil
 }
 
 func (a *App) mailboxForCurrentUser(r *http.Request) (*Mailbox, error) {
@@ -2482,16 +2702,23 @@ func normalizeLabelColor(color string) string {
 func (a *App) deleteMessageFiles(ctx context.Context, messageID string) {
 	rows, err := a.db.QueryContext(ctx, `SELECT storage_path FROM attachments WHERE message_id=?`, messageID)
 	if err != nil {
+		a.log.Warn("failed to list attachment files for deletion", "error", err, "message_id", messageID)
 		return
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var p string
 		if rows.Scan(&p) == nil {
-			_ = os.Remove(p)
+			if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+				a.log.Warn("failed to delete attachment file", "error", err, "message_id", messageID)
+			}
 		}
 	}
-	_ = os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID))
+	// A failure here leaves files on disk with no database row pointing at them.
+	// Nothing retries, so the warning is the only trace an operator gets.
+	if err := os.RemoveAll(filepath.Join(a.cfg.DataDir, "attachments", messageID)); err != nil {
+		a.log.Warn("failed to remove attachment directory", "error", err, "message_id", messageID)
+	}
 }
 
 func (a *App) deleteMessage(ctx context.Context, messageID string) {

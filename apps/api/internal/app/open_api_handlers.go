@@ -196,8 +196,8 @@ func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request)
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	domain, err := a.domainByID(r.Context(), req.DomainID)
@@ -231,7 +231,9 @@ func (a *App) handleOpenAPICreateMailbox(w http.ResponseWriter, r *http.Request)
 		respondMailboxOwnerError(w, err)
 		return
 	}
-	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), req.QuotaMB, "active")
+	// Same rationale as the admin panel: an API caller with mailbox-write scope is
+	// trusted to exceed a user's quota, but the creation is still counted.
+	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), req.QuotaMB, "active", nil)
 	if err != nil {
 		badRequest(w, err)
 		return
@@ -371,8 +373,8 @@ func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.R
 		badRequest(w, err)
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("password must be at least 8 characters"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	var userID string
@@ -401,6 +403,12 @@ func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.R
 		respondError(w, http.StatusInternalServerError, "failed to reset mailbox passwords")
 		return
 	}
+	// Same containment as the admin UI reset: this endpoint resets somebody else's
+	// password, so their sessions and API tokens go with it.
+	if err := a.containUserAfterAdminResetTx(r.Context(), tx, userID, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke sessions")
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save password")
 		return
@@ -411,7 +419,7 @@ func (a *App) handleOpenAPIResetMailboxPassword(w http.ResponseWriter, r *http.R
 
 func (a *App) handleOpenAPISendMail(w http.ResponseWriter, r *http.Request) {
 	var req mailComposeInput
-	if err := decodeJSON(r, &req); err != nil {
+	if err := a.decodeComposeJSON(r, &req); err != nil {
 		badRequest(w, err)
 		return
 	}
@@ -841,7 +849,7 @@ func respondMailboxOwnerError(w http.ResponseWriter, err error) {
 
 func respondSendError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, errNoRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge):
+	case errors.Is(err, errNoRecipients), errors.Is(err, errTooManyRecipients), errors.Is(err, errInvalidMIME), errors.Is(err, errAttachmentTooLarge), errors.Is(err, errTooManyAttachments):
 		badRequest(w, err)
 	case errors.Is(err, errSMTPRateLimited):
 		respondError(w, http.StatusTooManyRequests, err.Error())

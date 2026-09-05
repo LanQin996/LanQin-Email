@@ -1,5 +1,4 @@
 import * as React from "react"
-import DOMPurify from "dompurify"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
@@ -91,6 +90,7 @@ import {
   permissionLimitText as limitText,
   type AdminSection as Section,
 } from "@/components/admin-config"
+import { MailHtmlFrame } from "@/components/mail-html-frame"
 import { useMe } from "@/hooks/use-me"
 import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
@@ -976,7 +976,7 @@ function PermissionLimitEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label>SMTP 每日封数</Label>
+          <Label>SMTP 每日收件人数</Label>
           <Input
             type="number"
             min={0}
@@ -1010,6 +1010,34 @@ function PermissionLimitEditor({
             value={value.pop3MinuteLimit}
             onChange={(event) => update("pop3MinuteLimit", event.target.value)}
           />
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <Label>邮箱数量上限</Label>
+            <span className="text-xs text-muted-foreground">按累计创建数计算</span>
+          </div>
+          <Input
+            type="number"
+            min={0}
+            value={value.maxMailboxes}
+            onChange={(event) => update("maxMailboxes", event.target.value)}
+          />
+          <span className="block text-xs text-muted-foreground">删除邮箱不会释放额度</span>
+        </div>
+        <div className="space-y-2">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <Label>每日新建邮箱上限</Label>
+            <span className="text-xs text-muted-foreground">滚动 24 小时</span>
+          </div>
+          <Input
+            type="number"
+            min={0}
+            value={value.maxMailboxesPerDay}
+            onChange={(event) => update("maxMailboxesPerDay", event.target.value)}
+          />
+          <span className="block text-xs text-muted-foreground">
+            额度不累积，与数量上限同时生效
+          </span>
         </div>
       </div>
     </div>
@@ -1050,7 +1078,7 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
         附件 {limitText(value.maxAttachmentMb, "MB")}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        SMTP 每日 {limitText(value.smtpDailyLimit, "封")}
+        SMTP 每日 {limitText(value.smtpDailyLimit, "人")}
       </Badge>
       <Badge variant="secondary" className="font-normal">
         SMTP 每分钟 {limitText(value.smtpMinuteLimit, "封")}
@@ -1060,6 +1088,12 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
       </Badge>
       <Badge variant="secondary" className="font-normal">
         POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}
+      </Badge>
+      <Badge variant="secondary" className="font-normal">
+        邮箱数量 {limitText(value.maxMailboxes, "个")}
+      </Badge>
+      <Badge variant="secondary" className="font-normal">
+        每日新建 {limitText(value.maxMailboxesPerDay, "个")}
       </Badge>
     </div>
   )
@@ -2105,6 +2139,11 @@ function SystemSettingsSection({
   const { toast } = useToast()
   const canSettingsView = hasPermission(user, "admin.settings.view")
   const canUpdateSettings = hasPermission(user, "admin.settings.update")
+  // Invite codes and the Linux.do registration group are restricted to real super
+  // administrators server-side, because both can grant permission groups. Gating on
+  // identity rather than a permission keeps the UI from offering actions that always
+  // return 403.
+  const isSuperAdmin = user?.role === "admin"
   const canTestSMTP = hasPermission(user, "admin.settings.test_smtp")
   const canViewTemplates = hasPermission(user, "admin.templates.view")
   const canUpdateTemplates = hasPermission(user, "admin.templates.update")
@@ -2131,6 +2170,12 @@ function SystemSettingsSection({
   const [turnstileEnabled, setTurnstileEnabled] = React.useState(false)
   const [linuxDoSSOEnabled, setLinuxDoSSOEnabled] = React.useState(false)
   const [linuxDoRegistrationEnabled, setLinuxDoRegistrationEnabled] = React.useState(false)
+  const [linuxDoRegistrationGroupIds, setLinuxDoRegistrationGroupIds] = React.useState<string[]>([])
+  const settingsPermissionGroups = useQuery({
+    queryKey: ["admin", "permission-groups"],
+    queryFn: api.permissionGroups,
+    enabled: linuxDoRegistrationEnabled,
+  })
   const [catchAllEnabled, setCatchAllEnabled] = React.useState(false)
   const [mailAutoRefresh, setMailAutoRefresh] = React.useState(true)
   const [userMailboxApplyEnabled, setUserMailboxApplyEnabled] = React.useState(false)
@@ -2147,6 +2192,7 @@ function SystemSettingsSection({
     setTurnstileEnabled(settings.turnstileEnabled)
     setLinuxDoSSOEnabled(settings.linuxDoSSOEnabled)
     setLinuxDoRegistrationEnabled(settings.linuxDoRegistrationEnabled)
+    setLinuxDoRegistrationGroupIds(settings.linuxDoRegistrationGroupIds || [])
     setCatchAllEnabled(settings.catchAllEnabled)
     setMailAutoRefresh(settings.mailAutoRefresh)
     setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
@@ -2180,6 +2226,7 @@ function SystemSettingsSection({
         turnstileSecretKey: fieldValue(form, "turnstileSecretKey", ""),
         linuxDoSSOEnabled,
         linuxDoRegistrationEnabled,
+        linuxDoRegistrationGroupIds,
         linuxDoClientId: fieldValue(form, "linuxDoClientId", settings?.linuxDoClientId || ""),
         linuxDoClientSecret: fieldValue(form, "linuxDoClientSecret", ""),
         catchAllEnabled,
@@ -2247,6 +2294,7 @@ function SystemSettingsSection({
         settings.turnstileSecretSet,
         settings.linuxDoSSOEnabled,
         settings.linuxDoRegistrationEnabled,
+        settings.linuxDoRegistrationGroupIds,
         settings.linuxDoClientId,
         settings.linuxDoClientSecretSet,
         settings.linuxDoCallbackUrl,
@@ -2644,7 +2692,7 @@ function SystemSettingsSection({
             <div className="text-xs text-muted-foreground">
               普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。
             </div>
-            <RegistrationInvitesPanel canUpdate={canUpdateSettings} />
+            {isSuperAdmin && <RegistrationInvitesPanel />}
             <Separator />
             <SwitchRow
               label="双因素认证 (2FA)"
@@ -2691,6 +2739,36 @@ function SystemSettingsSection({
                 checked={linuxDoRegistrationEnabled}
                 onCheckedChange={setLinuxDoRegistrationEnabled}
               />
+              {linuxDoRegistrationEnabled && isSuperAdmin && (
+                <div className="space-y-2">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <Label>Linux.do 注册后加入的用户组</Label>
+                    <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                  </div>
+                  <Select
+                    value={linuxDoRegistrationGroupIds[0] || "none"}
+                    onValueChange={(value) =>
+                      setLinuxDoRegistrationGroupIds(value === "none" ? [] : [value])
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">默认用户组</SelectItem>
+                      {(settingsPermissionGroups.data?.items || [])
+                        .filter(
+                          (item) => item.id !== "pg_super_admin" && item.id !== "pg_regular_user"
+                        )
+                        .map((item) => (
+                          <SelectItem key={item.id} value={item.id}>
+                            {item.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
                   name="linuxDoClientId"
@@ -2732,7 +2810,7 @@ function SystemSettingsSection({
   )
 }
 
-function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
+function RegistrationInvitesPanel() {
   const qc = useQueryClient()
   const { toast } = useToast()
   const invites = useQuery({
@@ -2742,14 +2820,31 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
   const [createOpen, setCreateOpen] = React.useState(false)
   const [code, setCode] = React.useState("")
   const [maxUses, setMaxUses] = React.useState(1)
+  const [groupId, setGroupId] = React.useState("")
   const [removeItem, setRemoveItem] = React.useState<RegistrationInvite | null>(null)
+  const groups = useQuery({
+    queryKey: ["admin", "permission-groups"],
+    queryFn: api.permissionGroups,
+    enabled: createOpen,
+  })
+  // pg_super_admin and pg_regular_user are not assignable: the former would let a
+  // code hand out super administrator rights, the latter is inherited by everyone.
+  const assignableGroups = (groups.data?.items || []).filter(
+    (item) => item.id !== "pg_super_admin" && item.id !== "pg_regular_user"
+  )
   const create = useMutation({
-    mutationFn: () => api.createRegistrationInvite({ code: code.trim() || undefined, maxUses }),
+    mutationFn: () =>
+      api.createRegistrationInvite({
+        code: code.trim() || undefined,
+        maxUses,
+        permissionGroupIds: groupId ? [groupId] : [],
+      }),
     onSuccess: (item) => {
       qc.invalidateQueries({ queryKey: ["admin", "registration-invites"] })
       setCreateOpen(false)
       setCode("")
       setMaxUses(1)
+      setGroupId("")
       toast({ title: "邀请码已创建", description: item.code })
     },
     onError: (error) => toast({ title: "创建失败", description: error.message }),
@@ -2780,69 +2875,90 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
             邀请码可重复查看，每次成功注册会扣减一次。
           </div>
         </div>
-        {canUpdate && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button type="button" size="sm">
-                <Plus className="h-4 w-4" />
-                创建邀请码
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>创建邀请码</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="registrationInviteCode">邀请码</Label>
-                  <Input
-                    id="registrationInviteCode"
-                    value={code}
-                    onChange={(event) => setCode(event.target.value)}
-                    maxLength={64}
-                    autoComplete="off"
-                    className="font-mono uppercase"
-                    placeholder="留空自动生成"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="registrationInviteMaxUses">可用次数</Label>
-                  <Input
-                    id="registrationInviteMaxUses"
-                    type="number"
-                    min={1}
-                    max={1_000_000}
-                    value={maxUses}
-                    onChange={(event) => setMaxUses(Number(event.target.value))}
-                  />
-                </div>
+        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+          <DialogTrigger asChild>
+            <Button type="button" size="sm">
+              <Plus className="h-4 w-4" />
+              创建邀请码
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>创建邀请码</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="registrationInviteCode">邀请码</Label>
+                <Input
+                  id="registrationInviteCode"
+                  value={code}
+                  onChange={(event) => setCode(event.target.value)}
+                  maxLength={64}
+                  autoComplete="off"
+                  className="font-mono uppercase"
+                  placeholder="留空自动生成"
+                />
               </div>
-              <DialogFooter>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setCreateOpen(false)}
-                  disabled={create.isPending}
+              <div className="space-y-2">
+                <Label htmlFor="registrationInviteMaxUses">可用次数</Label>
+                <Input
+                  id="registrationInviteMaxUses"
+                  type="number"
+                  min={1}
+                  max={1_000_000}
+                  value={maxUses}
+                  onChange={(event) => setMaxUses(Number(event.target.value))}
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <Label>注册后加入的用户组</Label>
+                  <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                </div>
+                <Select
+                  value={groupId || "none"}
+                  onValueChange={(value) => setGroupId(value === "none" ? "" : value)}
                 >
-                  取消
-                </Button>
-                <Button type="button" onClick={submitCreate} disabled={create.isPending}>
-                  {create.isPending ? "创建中..." : "创建"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        )}
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">默认用户组</SelectItem>
+                    {assignableGroups.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {item.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+                disabled={create.isPending}
+              >
+                取消
+              </Button>
+              <Button type="button" onClick={submitCreate} disabled={create.isPending}>
+                {create.isPending ? "创建中..." : "创建"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="overflow-x-auto rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>邀请码</TableHead>
+              <TableHead>用户组</TableHead>
               <TableHead>使用情况</TableHead>
               <TableHead>创建人</TableHead>
               <TableHead>创建时间</TableHead>
-              {canUpdate && <TableHead className="w-14" />}
+              <TableHead className="w-14" />
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -2869,6 +2985,19 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
                   </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
+                  {(item.permissionGroups || []).length === 0 ? (
+                    <span className="text-sm text-muted-foreground">默认用户组</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1">
+                      {item.permissionGroups.map((group) => (
+                        <Badge key={group.id} variant="secondary" className="font-normal">
+                          {group.name}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
                   {item.usedCount} / {item.maxUses}{" "}
                   <span className="text-muted-foreground">（剩余 {item.remainingUses}）</span>
                 </TableCell>
@@ -2878,20 +3007,18 @@ function RegistrationInvitesPanel({ canUpdate }: { canUpdate: boolean }) {
                 <TableCell className="whitespace-nowrap text-muted-foreground">
                   {formatDate(item.createdAt)}
                 </TableCell>
-                {canUpdate && (
-                  <TableCell>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      title="删除邀请码"
-                      aria-label="删除邀请码"
-                      onClick={() => setRemoveItem(item)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </TableCell>
-                )}
+                <TableCell>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title="删除邀请码"
+                    aria-label="删除邀请码"
+                    onClick={() => setRemoveItem(item)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -3472,15 +3599,12 @@ function AdminMessageDialog({
               <MessageMeta label="文件夹" value={folderName(message.folder)} />
               <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
             </div>
-            <div
-              className="mail-html prose max-w-none rounded-lg border p-5 text-sm leading-7"
-              dangerouslySetInnerHTML={{
-                __html: DOMPurify.sanitize(
-                  message.bodyHtml ||
-                    `<pre>${escapeHtml(message.bodyText || message.snippet || "")}</pre>`
-                ),
-              }}
-            />
+            <div className="overflow-hidden rounded-lg border">
+              <MailHtmlFrame
+                bodyHtml={message.bodyHtml}
+                bodyText={message.bodyText || message.snippet}
+              />
+            </div>
             {message.attachments && message.attachments.length > 0 && (
               <div className="rounded-lg border p-4">
                 <div className="mb-3 font-medium">附件</div>
@@ -3527,14 +3651,6 @@ function folderName(folder: string) {
     Unregistered: "未注册收件",
   }
   return labels[folder] || folder
-}
-
-function escapeHtml(value: string) {
-  return value.replace(
-    /[&<>"']/g,
-    (char) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] || char
-  )
 }
 
 function adminSenderDisplayName(message: MailMessage) {
@@ -3746,6 +3862,14 @@ function UserActions({
   const [passwordOpen, setPasswordOpen] = React.useState(false)
   const canUpdate = hasPermission(currentUser, "admin.users.update")
   const canResetPassword = hasPermission(currentUser, "admin.users.reset_password")
+  const resetTwoFactor = useMutation({
+    mutationFn: () => api.resetUserTwoFactor(user.id),
+    onSuccess: () => {
+      invalidateAdmin(qc)
+      toast({ title: "已重置双因素认证", description: "该用户的会话与 API Token 已同时失效" })
+    },
+    onError: (e) => toast({ title: "重置失败", description: e.message }),
+  })
   const update = useMutation({
     mutationFn: (payload: {
       displayName: string
@@ -3783,6 +3907,14 @@ function UserActions({
           )}
           {canResetPassword && (
             <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>重置密码</DropdownMenuItem>
+          )}
+          {canResetPassword && user.twoFactorEnabled && (
+            <DropdownMenuItem
+              disabled={resetTwoFactor.isPending}
+              onSelect={() => resetTwoFactor.mutate()}
+            >
+              重置双因素认证
+            </DropdownMenuItem>
           )}
           {!user.protected && canUpdate && (
             <>

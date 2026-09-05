@@ -406,9 +406,13 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusUnauthorized, "人机验证失败，请重试")
 		return
 	}
-	localPart := normalizeLocalPart(req.LocalPart)
-	if localPart == "" || strings.TrimSpace(req.DomainID) == "" {
+	if strings.TrimSpace(req.DomainID) == "" {
 		badRequest(w, errors.New("请选择邮箱域名并填写邮箱前缀"))
+		return
+	}
+	localPart, err := requireCleanLocalPart(req.LocalPart)
+	if err != nil {
+		badRequest(w, err)
 		return
 	}
 	for _, reserved := range parseReservedPrefixes(a.cfg.ReservedMailboxPrefixes) {
@@ -417,8 +421,8 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -452,13 +456,29 @@ func (a *App) handleLinuxDoRegister(w http.ResponseWriter, r *http.Request) {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
 	}
-	if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), 1024, "active"); err != nil {
+	// The account was inserted moments ago inside this transaction, so its
+	// mailbox counter is 0 and no quota could reject the very first mailbox.
+	// Loading a *User here would also have to read permission groups outside
+	// this transaction, where the new row is not yet visible. The counter is
+	// still incremented by the call below.
+	if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, localPart, displayName, string(passwordHash), 1024, "active", nil); err != nil {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
 	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO oauth_identities(provider,subject,user_id,username,created_at,updated_at) VALUES(?,?,?,?,?,?)`, linuxDoProvider, challenge.Subject, userID, challenge.Username, now, now); err != nil {
 		a.respondLinuxDoRegistrationDBError(w, err)
 		return
+	}
+	// Linux.do registrations may be placed into preconfigured permission groups.
+	// Like the invite path, this has no actor, so the actor-based grant checks do
+	// not apply; the IDs are validated here instead. A stale group ID is skipped
+	// rather than fatal, because an administrator deleting a group should not break
+	// the SSO sign-up flow.
+	if groupIDs := a.linuxDoRegistrationGroupIDs(r.Context(), tx); len(groupIDs) > 0 {
+		if err := a.writeUserPermissionGroups(r.Context(), tx, userID, groupIDs); err != nil {
+			a.respondLinuxDoRegistrationDBError(w, err)
+			return
+		}
 	}
 	result, err := tx.ExecContext(r.Context(), `DELETE FROM oauth_registration_challenges WHERE token_hash=?`, hashToken(token))
 	if err != nil {
@@ -514,7 +534,7 @@ func (a *App) handleLinuxDoTwoFactor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, secret, err := a.loadUserAuthByID(r.Context(), challenge.UserID)
-	if err != nil || user.Disabled || !user.TwoFactorEnabled || !verifyTOTP(secret, req.Code, a.now().UTC()) {
+	if err != nil || user.Disabled || !user.TwoFactorEnabled || !a.consumeTOTP(r.Context(), user.ID, secret, req.Code) {
 		respondError(w, http.StatusUnauthorized, "验证码错误")
 		return
 	}
@@ -614,7 +634,11 @@ func (a *App) verifyLinuxDoReauthentication(ctx context.Context, userID, passwor
 	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) != nil {
 		return errors.New("invalid password")
 	}
-	if intBool(enabled) && !verifyTOTP(secret, code, a.now().UTC()) {
+	plainSecret, err := a.decryptTOTPSecret(secret)
+	if err != nil {
+		return err
+	}
+	if intBool(enabled) && !a.consumeTOTP(ctx, userID, plainSecret, code) {
 		return errors.New("invalid two-factor code")
 	}
 	return nil
@@ -722,4 +746,26 @@ func (a *App) redirectLinuxDoResult(w http.ResponseWriter, r *http.Request, path
 	base.RawQuery = query.Encode()
 	base.Fragment = ""
 	http.Redirect(w, r, base.String(), http.StatusFound)
+}
+
+// linuxDoRegistrationGroupIDs returns the configured groups for Linux.do sign-ups,
+// dropping any that no longer exist or are not assignable.
+//
+// Unknown IDs are skipped instead of failing: the setting is a static list that an
+// administrator may leave stale after deleting a group, and blocking registration
+// on that would be a worse outcome than granting only the groups that remain.
+func (a *App) linuxDoRegistrationGroupIDs(ctx context.Context, tx *sql.Tx) []string {
+	configured := cleanIDList(strings.Split(a.cfg.LinuxDoRegistrationGroupIDs, ","))
+	if len(configured) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(configured))
+	for _, groupID := range configured {
+		if err := a.validateAssignableGroupIDsTx(ctx, tx, []string{groupID}); err != nil {
+			a.log.Warn("skipping unavailable Linux.do registration group", "group_id", groupID, "error", err)
+			continue
+		}
+		out = append(out, groupID)
+	}
+	return out
 }

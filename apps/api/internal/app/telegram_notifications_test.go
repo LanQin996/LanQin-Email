@@ -17,7 +17,7 @@ const testTelegramBotToken = "123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijk"
 
 func newTelegramTestApp(t *testing.T) *App {
 	t.Helper()
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a := newTestAppWithConfig(t, Config{
 		Addr:                  ":0",
 		DBPath:                filepath.Join(dir, "lanqin.db"),

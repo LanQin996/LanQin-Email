@@ -39,6 +39,8 @@ type Config struct {
 	MaildirRoot                     string
 	MaildirScanSeconds              int
 	AllowInsecureHTTP               bool
+	TrustedProxyCount               int
+	AuthPolicySecret                string
 	OpenRegistration                bool
 	InviteRegistrationEnabled       bool
 	TwoFactorEnabled                bool
@@ -49,6 +51,7 @@ type Config struct {
 	LinuxDoRegistrationEnabled      bool
 	LinuxDoClientID                 string
 	LinuxDoClientSecret             string
+	LinuxDoRegistrationGroupIDs     string
 	CatchAllEnabled                 bool
 	MailAutoRefresh                 bool
 	MailRefreshSeconds              int
@@ -104,7 +107,9 @@ func LoadConfig() Config {
 		TLSKeyFile:                      getenv("LANQIN_TLS_KEY_FILE", ""),
 		MaildirRoot:                     getenv("LANQIN_MAILDIR_ROOT", ""),
 		MaildirScanSeconds:              getenvInt("LANQIN_MAILDIR_SCAN_SECONDS", defaultMaildirScanSeconds),
-		AllowInsecureHTTP:               getenvBool("LANQIN_ALLOW_INSECURE_HTTP", true),
+		AllowInsecureHTTP:               getenvBool("LANQIN_ALLOW_INSECURE_HTTP", false),
+		TrustedProxyCount:               getenvInt("LANQIN_TRUSTED_PROXY_COUNT", 0),
+		AuthPolicySecret:                getenv("LANQIN_AUTH_POLICY_SECRET", ""),
 		OpenRegistration:                getenvBool("LANQIN_OPEN_REGISTRATION", false),
 		InviteRegistrationEnabled:       false,
 		TwoFactorEnabled:                getenvBool("LANQIN_TWO_FACTOR_ENABLED", false),
@@ -115,6 +120,7 @@ func LoadConfig() Config {
 		LinuxDoRegistrationEnabled:      false,
 		LinuxDoClientID:                 "",
 		LinuxDoClientSecret:             "",
+		LinuxDoRegistrationGroupIDs:     getenv("LANQIN_LINUXDO_REGISTRATION_GROUP_IDS", ""),
 		CatchAllEnabled:                 getenvBool("LANQIN_CATCH_ALL_ENABLED", false),
 		MailAutoRefresh:                 getenvBool("LANQIN_MAIL_AUTO_REFRESH", true),
 		MailRefreshSeconds:              getenvInt("LANQIN_MAIL_REFRESH_SECONDS", 30),
