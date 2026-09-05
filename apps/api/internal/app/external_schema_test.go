@@ -1,6 +1,8 @@
 package app
 
 import (
+	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -278,4 +280,61 @@ func schemaTableNames(statements []string) []string {
 		}
 	}
 	return names
+}
+
+// TestEveryMigratedColumnExistsInFreshSchema is a structural guard against the trap
+// CLAUDE.md warns about: adding a column to the migration chain but not to the fresh
+// schema leaves upgraded databases correct while every *new* MySQL/PostgreSQL install
+// crashes on the missing column. Local SQLite development cannot surface it, and the
+// per-feature contract tests only cover columns somebody remembered to add them for.
+//
+// The migration statements live as literals inside external_schema.go, so they are read
+// back from the source. That keeps the check automatic for future migrations rather than
+// something each one has to opt into.
+func TestEveryMigratedColumnExistsInFreshSchema(t *testing.T) {
+	t.Parallel()
+	source, err := os.ReadFile("external_schema.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alter := regexp.MustCompile("ALTER TABLE ([a-z_]+) ADD COLUMN ([a-z_]+)")
+	matches := alter.FindAllStringSubmatch(string(source), -1)
+	if len(matches) == 0 {
+		t.Fatal("found no ALTER TABLE ... ADD COLUMN statements; has the migration chain moved?")
+	}
+	for name, schema := range map[string][]string{
+		"postgres": postgresFreshSchema(),
+		"mysql":    mysqlFreshSchema(),
+	} {
+		for _, match := range matches {
+			table, column := match[1], match[2]
+			fragment := ""
+			for _, statement := range schema {
+				if strings.HasPrefix(strings.TrimSpace(statement), "CREATE TABLE "+table+" ") {
+					fragment = statement
+					break
+				}
+			}
+			if fragment == "" {
+				t.Errorf("%s fresh schema is missing table %s, which a migration alters", name, table)
+				continue
+			}
+			if !columnDeclaredIn(fragment, column) {
+				t.Errorf("%s fresh schema: %s.%s is added by a migration but absent from CREATE TABLE — new installs will fail on it", name, table, column)
+			}
+		}
+	}
+}
+
+// columnDeclaredIn looks for a column declaration rather than a bare substring, so a
+// name that merely appears inside another column, an index or a default value does not
+// count as declared.
+func columnDeclaredIn(createTable, column string) bool {
+	for _, line := range strings.Split(createTable, "\n") {
+		fields := strings.Fields(strings.TrimSpace(line))
+		if len(fields) >= 2 && fields[0] == column {
+			return true
+		}
+	}
+	return false
 }

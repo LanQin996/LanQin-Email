@@ -36,9 +36,14 @@ type MIMEMessage struct {
 func BuildMIME(m MIMEMessage) ([]byte, error) {
 	var buf bytes.Buffer
 	writeHeader := func(k, v string) {
-		if strings.TrimSpace(v) != "" {
-			fmt.Fprintf(&buf, "%s: %s\r\n", k, v)
+		if strings.TrimSpace(v) == "" {
+			return
 		}
+		// Defence in depth: recipients are validated upstream by dedupeEmails, but a
+		// header value that still carries CR or LF would split into extra headers.
+		// Folding whitespace is not produced here, so any such byte is an injection.
+		v = strings.NewReplacer("\r", " ", "\n", " ").Replace(v)
+		fmt.Fprintf(&buf, "%s: %s\r\n", k, v)
 	}
 	writeHeader("From", formatAddressHeader(m.FromName, m.From))
 	writeHeader("To", strings.Join(m.To, ", "))

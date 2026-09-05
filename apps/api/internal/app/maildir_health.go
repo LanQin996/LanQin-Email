@@ -18,10 +18,37 @@ type maildirSyncCounts struct {
 	Cleaned            int      `json:"cleaned"`
 	FileErrors         int      `json:"fileErrors"`
 	fileErrorDetails   []string `json:"-"`
+	// affectedMailboxIDs and broadcast decide who the sync event reaches. A run that
+	// only touched known mailboxes notifies just those audiences; a change that cannot
+	// be attributed to a mailbox — unregistered catch-all mail, the SQLite-to-Maildir
+	// backfill — falls back to notifying every subscriber, as it always did.
+	affectedMailboxIDs map[string]struct{} `json:"-"`
+	broadcast          bool                `json:"-"`
 }
 
 func (c maildirSyncCounts) total() int {
 	return c.Imported + c.Backfilled + c.Cleaned
+}
+
+// clientVisibleChanges counts the changes a connected client could observe.
+//
+// The backfill is excluded on purpose: it copies rows that are already in the database
+// out to Maildir, so it never gives a browser anything new to fetch. Publishing on it
+// meant that on any deployment with a populated database the first scan broadcast to
+// everyone, which is exactly the fan-out the targeting is meant to avoid.
+func (c maildirSyncCounts) clientVisibleChanges() int {
+	return c.Imported + c.Cleaned
+}
+
+func (c *maildirSyncCounts) markMailbox(id string) {
+	if strings.TrimSpace(id) == "" {
+		c.broadcast = true
+		return
+	}
+	if c.affectedMailboxIDs == nil {
+		c.affectedMailboxIDs = map[string]struct{}{}
+	}
+	c.affectedMailboxIDs[id] = struct{}{}
 }
 
 type maildirSyncRun struct {

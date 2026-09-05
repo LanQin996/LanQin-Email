@@ -348,7 +348,11 @@ export function ProfilePage() {
     onError: (error) => toast({ title: "启用失败", description: error.message }),
   })
   const disableTwoFactor = useMutation({
-    mutationFn: (form: FormData) => api.disableTwoFactor(String(form.get("code") || "")),
+    mutationFn: (form: FormData) =>
+      api.disableTwoFactor(
+        String(form.get("code") || ""),
+        String(form.get("currentPassword") || "")
+      ),
     onSuccess: (data) => {
       qc.setQueryData(["me"], data)
       twoFactorFormRef.current?.reset()
@@ -871,6 +875,17 @@ export function ProfilePage() {
           mailboxes={canAccessMail ? mailboxes.data?.items || [] : []}
           applyOptions={mailboxApplyOptions.data}
           applyPending={applyMailbox.isPending}
+          mailboxQuota={
+            user
+              ? {
+                  used: user.mailboxesCreatedTotal,
+                  limit:
+                    user.limits.maxMailboxes > 0
+                      ? user.limits.maxMailboxes + user.mailboxQuotaBonus
+                      : 0,
+                }
+              : undefined
+          }
           selectedMailboxId={mailboxId}
           externalImapEnabled={externalImapEnabled}
           externalAccounts={externalImapAccounts.data?.items || []}
@@ -1092,7 +1107,7 @@ function ProfileOverview({
         <CardContent>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
             <LimitBadge label="附件上限" value={user.limits?.maxAttachmentMb} unit="MB" />
-            <LimitBadge label="SMTP 每日" value={user.limits?.smtpDailyLimit} unit="封" />
+            <LimitBadge label="SMTP 每日" value={user.limits?.smtpDailyLimit} unit="人" />
             <LimitBadge label="SMTP 每分钟" value={user.limits?.smtpMinuteLimit} unit="封" />
             <LimitBadge label="IMAP 每分钟" value={user.limits?.imapMinuteLimit} unit="次" />
             <LimitBadge label="POP3 每分钟" value={user.limits?.pop3MinuteLimit} unit="次" />
@@ -1280,6 +1295,9 @@ function ProfileOverview({
                   required
                 />
               </Field>
+              <Field label="当前密码">
+                <PasswordInput name="currentPassword" autoComplete="current-password" required />
+              </Field>
               <div className="flex justify-end">
                 <Button variant="destructive" disabled={disableTwoFactor.isPending}>
                   {disableTwoFactor.isPending ? "关闭中..." : "关闭双因素认证"}
@@ -1443,6 +1461,7 @@ function MailboxManagement({
   mailboxes,
   applyOptions,
   applyPending,
+  mailboxQuota,
   selectedMailboxId,
   externalImapEnabled,
   externalAccounts,
@@ -1468,6 +1487,7 @@ function MailboxManagement({
   mailboxes: Mailbox[]
   applyOptions?: MailboxApplyOptions
   applyPending: boolean
+  mailboxQuota?: { used: number; limit: number }
   selectedMailboxId: string
   externalImapEnabled: boolean
   externalAccounts: ExternalImapAccount[]
@@ -1497,7 +1517,15 @@ function MailboxManagement({
   const selectedMailbox = mailboxes.find((item) => item.id === selectedMailboxId)
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-3">
+        {mailboxQuota && (
+          <Badge variant="secondary" className="font-normal">
+            邮箱额度{" "}
+            {mailboxQuota.limit > 0
+              ? `${mailboxQuota.used} / ${mailboxQuota.limit}`
+              : `${mailboxQuota.used} / 不限`}
+          </Badge>
+        )}
         {canApply && (
           <ApplyMailboxDialog options={applyOptions} pending={applyPending} onApply={onApply} />
         )}

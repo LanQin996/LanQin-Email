@@ -137,20 +137,31 @@ type PermissionGroup struct {
 }
 
 type PermissionLimits struct {
-	MaxAttachmentMB  int `json:"maxAttachmentMb"`
-	SMTPDailyLimit   int `json:"smtpDailyLimit"`
-	SMTPMinuteLimit  int `json:"smtpMinuteLimit"`
-	IMAPMinuteLimit  int `json:"imapMinuteLimit"`
-	POP3MinuteLimit  int `json:"pop3MinuteLimit"`
+	MaxAttachmentMB int `json:"maxAttachmentMb"`
+	SMTPDailyLimit  int `json:"smtpDailyLimit"`
+	SMTPMinuteLimit int `json:"smtpMinuteLimit"`
+	IMAPMinuteLimit int `json:"imapMinuteLimit"`
+	POP3MinuteLimit int `json:"pop3MinuteLimit"`
+	// MaxMailboxes limits how many mailboxes a user may create over their
+	// lifetime. Like every other field here, 0 means unlimited. The count is
+	// cumulative and includes deleted mailboxes, so deleting a mailbox does not
+	// free up quota; see users.mailboxes_created_total.
+	MaxMailboxes int `json:"maxMailboxes"`
+	// MaxMailboxesPerDay caps creations within a rolling 24 hour window and
+	// applies on top of MaxMailboxes, so both must pass. Unused allowance does
+	// not accumulate: skipping a day never grants two the next day.
+	MaxMailboxesPerDay int `json:"maxMailboxesPerDay"`
 }
 
 func defaultPermissionLimits() PermissionLimits {
 	return PermissionLimits{
-		MaxAttachmentMB: 25,
-		SMTPDailyLimit:  200,
-		SMTPMinuteLimit: 20,
-		IMAPMinuteLimit: 200,
-		POP3MinuteLimit: 150,
+		MaxAttachmentMB:    25,
+		SMTPDailyLimit:     200,
+		SMTPMinuteLimit:    20,
+		IMAPMinuteLimit:    200,
+		POP3MinuteLimit:    150,
+		MaxMailboxes:       3,
+		MaxMailboxesPerDay: 1,
 	}
 }
 
@@ -169,6 +180,12 @@ func normalizePermissionLimits(limits PermissionLimits) (PermissionLimits, error
 	}
 	if limits.POP3MinuteLimit < 0 {
 		return PermissionLimits{}, errors.New("pop3MinuteLimit cannot be negative")
+	}
+	if limits.MaxMailboxes < 0 {
+		return PermissionLimits{}, errors.New("maxMailboxes cannot be negative")
+	}
+	if limits.MaxMailboxesPerDay < 0 {
+		return PermissionLimits{}, errors.New("maxMailboxesPerDay cannot be negative")
 	}
 	return limits, nil
 }
@@ -197,11 +214,13 @@ func encodePermissionLimits(limits PermissionLimits) string {
 
 func mergePermissionLimits(left, right PermissionLimits) PermissionLimits {
 	return PermissionLimits{
-		MaxAttachmentMB:  mergeLimitValue(left.MaxAttachmentMB, right.MaxAttachmentMB),
-		SMTPDailyLimit:   mergeLimitValue(left.SMTPDailyLimit, right.SMTPDailyLimit),
-		SMTPMinuteLimit:  mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
-		IMAPMinuteLimit:  mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
-		POP3MinuteLimit:  mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
+		MaxAttachmentMB:    mergeLimitValue(left.MaxAttachmentMB, right.MaxAttachmentMB),
+		SMTPDailyLimit:     mergeLimitValue(left.SMTPDailyLimit, right.SMTPDailyLimit),
+		SMTPMinuteLimit:    mergeLimitValue(left.SMTPMinuteLimit, right.SMTPMinuteLimit),
+		IMAPMinuteLimit:    mergeLimitValue(left.IMAPMinuteLimit, right.IMAPMinuteLimit),
+		POP3MinuteLimit:    mergeLimitValue(left.POP3MinuteLimit, right.POP3MinuteLimit),
+		MaxMailboxes:       mergeLimitValue(left.MaxMailboxes, right.MaxMailboxes),
+		MaxMailboxesPerDay: mergeLimitValue(left.MaxMailboxesPerDay, right.MaxMailboxesPerDay),
 	}
 }
 
@@ -216,15 +235,22 @@ func mergeLimitValue(left, right int) int {
 }
 
 func minimalLimits() PermissionLimits {
-	// minimalLimits sets every field to 1 so that mergePermissionLimits 
-	// (which takes the max of each field) produces correct aggregation 
+	// minimalLimits sets every field to 1 so that mergePermissionLimits
+	// (which takes the max of each field) produces correct aggregation
 	// when no group has a limit set for a given field.
+	//
+	// Every field MUST be non-zero here. mergeLimitValue treats 0 as
+	// "unlimited" and lets it absorb any other value, so a field left at its
+	// zero value would make the merged limit permanently unlimited without
+	// raising an error. TestMinimalLimitsHasNoZeroField guards this.
 	return PermissionLimits{
-		MaxAttachmentMB: 1,
-		SMTPDailyLimit:  1,
-		SMTPMinuteLimit: 1,
-		IMAPMinuteLimit: 1,
-		POP3MinuteLimit: 1,
+		MaxAttachmentMB:    1,
+		SMTPDailyLimit:     1,
+		SMTPMinuteLimit:    1,
+		IMAPMinuteLimit:    1,
+		POP3MinuteLimit:    1,
+		MaxMailboxes:       1,
+		MaxMailboxesPerDay: 1,
 	}
 }
 
@@ -239,7 +265,9 @@ func actorCanGrantLimits(actor *User, limits PermissionLimits) bool {
 		canGrantLimitValue(actor.Limits.SMTPDailyLimit, limits.SMTPDailyLimit) &&
 		canGrantLimitValue(actor.Limits.SMTPMinuteLimit, limits.SMTPMinuteLimit) &&
 		canGrantLimitValue(actor.Limits.IMAPMinuteLimit, limits.IMAPMinuteLimit) &&
-		canGrantLimitValue(actor.Limits.POP3MinuteLimit, limits.POP3MinuteLimit)
+		canGrantLimitValue(actor.Limits.POP3MinuteLimit, limits.POP3MinuteLimit) &&
+		canGrantLimitValue(actor.Limits.MaxMailboxes, limits.MaxMailboxes) &&
+		canGrantLimitValue(actor.Limits.MaxMailboxesPerDay, limits.MaxMailboxesPerDay)
 }
 
 func canGrantLimitValue(actorLimit, requestedLimit int) bool {
@@ -257,6 +285,21 @@ func attachmentLimitBytes(limits PermissionLimits) int64 {
 		return 0
 	}
 	return int64(limits.MaxAttachmentMB) * 1024 * 1024
+}
+
+// effectiveMailboxLimit returns how many mailboxes the user may create in
+// total, or 0 when unlimited. The per-user bonus earned through quota
+// redemption codes is added on top of the group limit, but only when the group
+// limit is finite: 0 already means unlimited, so adding a bonus to it would
+// turn "unlimited" into a finite number.
+func effectiveMailboxLimit(u *User) int {
+	if u == nil {
+		return 0
+	}
+	if u.Limits.MaxMailboxes == 0 {
+		return 0
+	}
+	return u.Limits.MaxMailboxes + u.MailboxQuotaBonus
 }
 
 var legacyPermissionExpansions = map[string][]string{
@@ -612,6 +655,13 @@ func (a *App) attachUserAuthorization(ctx context.Context, u *User) error {
 	u.Limits = authorization.Limits
 	u.PermissionGroupIDs = authorization.GroupIDs
 	u.PermissionGroups = authorization.Groups
+	// The mailbox counters live on users rather than in limits_json because
+	// they are per-user, not per-group. Loading them here keeps every
+	// authentication path (session cookie, API token, SSO) in sync without
+	// touching each individual users SELECT.
+	if err := a.attachMailboxQuotaCounters(ctx, u); err != nil {
+		return err
+	}
 	u.Protected = a.isDefaultAdminUser(u)
 	return nil
 }
@@ -621,6 +671,25 @@ type userAuthorization struct {
 	Limits      PermissionLimits
 	GroupIDs    []string
 	Groups      []PermissionGroupSummary
+}
+
+// attachMailboxQuotaCounters loads the per-user mailbox counters. Missing rows
+// are tolerated so that callers holding a user struct for an already-deleted
+// account do not fail authorization with a confusing error.
+func (a *App) attachMailboxQuotaCounters(ctx context.Context, u *User) error {
+	var createdTotal, bonus int
+	err := a.db.QueryRowContext(ctx,
+		`SELECT mailboxes_created_total, mailbox_quota_bonus FROM users WHERE id=?`, u.ID).
+		Scan(&createdTotal, &bonus)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	u.MailboxesCreatedTotal = createdTotal
+	u.MailboxQuotaBonus = bonus
+	return nil
 }
 
 func (a *App) authorizationForUser(ctx context.Context, userID, role string) (userAuthorization, error) {
@@ -831,6 +900,23 @@ func (a *App) requireAdminAccess(next http.Handler) http.Handler {
 	})
 }
 
+// requireSuperAdmin restricts a route to actual super administrators.
+//
+// This is deliberately not expressed as a permission key: a key could be
+// granted through a permission group, which is exactly what the callers of
+// this middleware must prevent. Note that it is stricter than
+// requireAdminAccess, which only means "holds some admin.* permission".
+func (a *App) requireSuperAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user := currentUser(r)
+		if user == nil || user.Role != "admin" {
+			respondError(w, http.StatusForbidden, "super administrator required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (a *App) requirePermission(permission string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -949,6 +1035,64 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	if !actorCanGrantLimits(actor, groupLimits) {
 		return errors.New("cannot assign limits above your own")
 	}
+	return a.writeUserPermissionGroups(ctx, tx, userID, groupIDs)
+}
+
+// permissionLimitsForGroupsTx merges the quota limits of an explicit group set.
+//
+// Self-registration writes the user's group rows inside the same transaction as the
+// user, so attachUserAuthorization cannot be used there: it reads through a.db and
+// therefore cannot see uncommitted membership. The group IDs are known at that point,
+// so the limits are merged straight from permission_groups, which is committed data.
+//
+// Precedence mirrors authorizationForUser: the regular-user group replaces the
+// built-in defaults, and every other assignable group is merged on top.
+func (a *App) permissionLimitsForGroupsTx(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
+	limits := defaultPermissionLimits()
+	var regularJSON string
+	err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&regularJSON)
+	switch {
+	case err == nil:
+		limits = decodeStoredLimits(regularJSON)
+	case errors.Is(err, sql.ErrNoRows):
+	default:
+		return PermissionLimits{}, err
+	}
+	for _, groupID := range cleanIDList(groupIDs) {
+		if groupID == PermissionGroupRegular || !isAssignablePermissionGroupID(groupID) {
+			continue
+		}
+		var limitsJSON string
+		if err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, groupID).Scan(&limitsJSON); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			}
+			return PermissionLimits{}, err
+		}
+		limits = mergePermissionLimits(limits, decodeStoredLimits(limitsJSON))
+	}
+	return limits, nil
+}
+
+// writeUserPermissionGroups replaces a user's group membership without checking
+// an actor's authority to grant it.
+//
+// This bypasses actorCanGrantPermissions / actorCanGrantLimits, which is only
+// correct because self-registration has no actor at all: actorCanGrantPermissions
+// returns false for a nil actor, so setUserPermissionGroups can never be used on
+// the registration path. Do not call this from anything an authenticated user
+// drives — that is what setUserPermissionGroups is for.
+//
+// Callers must still validate the group IDs. The invite path does so twice: once
+// when the code is created and again when it is consumed, because a group may
+// have been deleted in between.
+func (a *App) writeUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID string, groupIDs []string) error {
+	groupIDs = cleanIDList(groupIDs)
+	for _, groupID := range groupIDs {
+		if !isAssignablePermissionGroupID(groupID) {
+			return fmt.Errorf("permission group not assignable: %s", groupID)
+		}
+	}
 	exec := func(query string, args ...any) error {
 		var err error
 		if tx != nil {
@@ -964,6 +1108,31 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	for _, groupID := range groupIDs {
 		if err := exec(`INSERT INTO user_permission_groups(user_id,group_id,created_at) VALUES(?,?,?)`, userID, groupID, now); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// validateAssignableGroupIDsTx confirms every ID is an existing, assignable
+// group. Used when binding groups to an invite code and again when consuming it.
+func (a *App) validateAssignableGroupIDsTx(ctx context.Context, tx *sql.Tx, groupIDs []string) error {
+	for _, groupID := range cleanIDList(groupIDs) {
+		if !isAssignablePermissionGroupID(groupID) {
+			return fmt.Errorf("permission group not assignable: %s", groupID)
+		}
+		var exists string
+		query := `SELECT id FROM permission_groups WHERE id=?`
+		var err error
+		if tx != nil {
+			err = tx.QueryRowContext(ctx, query, groupID).Scan(&exists)
+		} else {
+			err = a.db.QueryRowContext(ctx, query, groupID).Scan(&exists)
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("permission group not found: %s", groupID)
+		}
+		if err != nil {
 			return err
 		}
 	}

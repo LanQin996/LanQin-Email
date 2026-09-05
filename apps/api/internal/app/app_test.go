@@ -39,9 +39,15 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// Scratch files are removed with a bounded retry: see releaseTestDBFiles.
+const (
+	testFileRemoveAttempts = 40
+	testFileRemoveInterval = 25 * time.Millisecond
+)
+
 func newTestApp(t *testing.T) *App {
 	t.Helper()
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	cfg := Config{
 		Addr:              ":0",
 		DBPath:            filepath.Join(dir, "lanqin.db"),
@@ -63,8 +69,63 @@ func newTestAppWithConfig(t *testing.T, cfg Config) *App {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = a.Close() })
+	t.Cleanup(func() {
+		_ = a.Close()
+		releaseTestDBFiles(t, cfg.DBPath)
+	})
 	return a
+}
+
+// releaseTestDBFiles removes the SQLite files this test created, retrying briefly.
+//
+// A residual lock is reported with t.Logf rather than failing the test. It is not a
+// leaked *sql.DB: App.Close cancels the workers, waits for them, and closes the pool,
+// and the SQLite pool is capped at one connection — a connection held open would
+// deadlock the test long before cleanup. What is left is an external handle on the
+// file (Windows indexer or anti-malware scanning a just-written file), which is not
+// deterministic and says nothing about the behaviour under test.
+func releaseTestDBFiles(t *testing.T, dbPath string) {
+	t.Helper()
+	if dbPath == "" {
+		return
+	}
+	for _, suffix := range []string{"-wal", "-shm", ""} {
+		path := dbPath + suffix
+		var err error
+		for attempt := 0; attempt < testFileRemoveAttempts; attempt++ {
+			if err = os.Remove(path); err == nil || os.IsNotExist(err) {
+				err = nil
+				break
+			}
+			time.Sleep(testFileRemoveInterval)
+		}
+		if err != nil {
+			t.Logf("test database file %s still held by another process: %v", path, err)
+		}
+	}
+}
+
+// newTestDir returns a scratch directory for a test database.
+//
+// t.TempDir cannot be used for SQLite files: its cleanup fails the test if any file is
+// still locked, so the external handle described on releaseTestDBFiles turns into a red
+// suite that hides real failures. Removal is attempted the same way but only logged.
+func newTestDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "lanqin-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		for attempt := 0; attempt < testFileRemoveAttempts; attempt++ {
+			if err := os.RemoveAll(dir); err == nil {
+				return
+			}
+			time.Sleep(testFileRemoveInterval)
+		}
+		t.Logf("test directory %s could not be removed", dir)
+	})
+	return dir
 }
 
 func stopTestWorkers(a *App) {
@@ -764,7 +825,7 @@ func TestMailboxSharingCustomScopeIsReadOnlyAndRevocable(t *testing.T) {
 }
 
 func TestExternalIMAPAccountEncryptsPasswordAndDoesNotReturnSecret(t *testing.T) {
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a := newTestAppWithConfig(t, Config{
 		Addr:                          ":0",
 		DBPath:                        filepath.Join(dir, "lanqin.db"),
@@ -888,7 +949,7 @@ func TestExternalIMAPRejectsPrivateHostsByDefault(t *testing.T) {
 }
 
 func TestExternalIMAPOAuthStateDoesNotDefaultToLocalMailbox(t *testing.T) {
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a := newTestAppWithConfig(t, Config{
 		Addr:                            ":0",
 		DBPath:                          filepath.Join(dir, "lanqin.db"),
@@ -1000,7 +1061,7 @@ func testIDToken(claims map[string]any) string {
 }
 
 func TestExternalIMAPAccountOwnershipIsolation(t *testing.T) {
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a := newTestAppWithConfig(t, Config{
 		Addr:                          ":0",
 		DBPath:                        filepath.Join(dir, "lanqin.db"),
@@ -1613,7 +1674,7 @@ func TestOpenRegistrationCreatesLoginUserOnly(t *testing.T) {
 }
 
 func TestLegacyBootstrapMailboxMigrationRemovesImplicitAdminMailbox(t *testing.T) {
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	cfg := Config{
 		Addr:              ":0",
 		DBPath:            filepath.Join(dir, "lanqin.db"),
@@ -4023,6 +4084,9 @@ func TestUserMailSignaturesDefaultResolution(t *testing.T) {
 func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 	a := newTestApp(t)
 	a.cfg.TwoFactorEnabled = true
+	// One accepted code burns its 30-second step, so each use below needs a new step.
+	clock := time.Now().UTC().Truncate(time.Second)
+	a.now = func() time.Time { return clock }
 	ts := httptest.NewServer(a.Router())
 	defer ts.Close()
 	client := &testClient{t: t, server: ts}
@@ -4055,6 +4119,7 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 		t.Fatalf("enable status=%d user=%+v", status, enabled.User)
 	}
 
+	clock = clock.Add(31 * time.Second)
 	fresh := &testClient{t: t, server: ts}
 	var challenge struct {
 		TwoFactorRequired bool   `json:"twoFactorRequired"`
@@ -4073,7 +4138,20 @@ func TestUserTwoFactorSetupAndLogin(t *testing.T) {
 	if status := fresh.do("POST", "/api/auth/login", map[string]string{"challengeToken": challenge.ChallengeToken, "twoFactorCode": code}, &login); status != http.StatusOK || fresh.cookie == nil {
 		t.Fatalf("2fa login status=%d body=%v cookie=%v", status, login, fresh.cookie)
 	}
-	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code}, &enabled); status != http.StatusOK || enabled.User.TwoFactorEnabled {
+	// Reusing the code that just logged in must fail; a fresh step plus the account
+	// password is now required to remove the second factor.
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code, "currentPassword": "ChangeMe123!"}, &out); status != http.StatusUnauthorized {
+		t.Fatalf("replayed disable status=%d body=%v", status, out)
+	}
+	clock = clock.Add(31 * time.Second)
+	code, err = generateTOTP(setup.Secret, a.now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code}, &out); status != http.StatusUnauthorized {
+		t.Fatalf("disable without password status=%d body=%v", status, out)
+	}
+	if status := fresh.do("POST", "/api/me/2fa/disable", map[string]string{"code": code, "currentPassword": "ChangeMe123!"}, &enabled); status != http.StatusOK || enabled.User.TwoFactorEnabled {
 		t.Fatalf("disable status=%d user=%+v", status, enabled.User)
 	}
 }

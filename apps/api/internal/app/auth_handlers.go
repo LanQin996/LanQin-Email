@@ -88,7 +88,7 @@ func (a *App) handleLogin(w http.ResponseWriter, r *http.Request) {
 			respondLoginRateLimited(w, retryAfter)
 			return
 		}
-		if !verifyTOTP(secret, req.TwoFactorCode, a.now().UTC()) {
+		if !a.consumeTOTP(r.Context(), user.ID, secret, req.TwoFactorCode) {
 			retryAfter, recordErr := a.recordLoginFailure(r.Context(), user.Email, clientIP)
 			if recordErr != nil {
 				a.log.Warn("failed to record authentication failure", "stage", "totp", "error", recordErr)
@@ -235,8 +235,8 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("邮箱地址无效"))
 		return
 	}
-	if len(req.Password) < 8 {
-		badRequest(w, errors.New("密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.Password); err != nil {
+		badRequest(w, err)
 		return
 	}
 	displayName := strings.TrimSpace(req.DisplayName)
@@ -251,7 +251,12 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var mailboxLocalPart string
 	if strings.TrimSpace(req.DomainID) != "" && strings.TrimSpace(req.LocalPart) != "" {
 		mailboxDomainID = strings.TrimSpace(req.DomainID)
-		mailboxLocalPart = normalizeLocalPart(req.LocalPart)
+		cleaned, err := requireCleanLocalPart(req.LocalPart)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		mailboxLocalPart = cleaned
 	} else {
 		if err := a.db.QueryRowContext(r.Context(), `SELECT id FROM domains WHERE status='active' ORDER BY created_at ASC LIMIT 1`).Scan(&mailboxDomainID); err != nil {
 			mailboxDomainID = ""
@@ -288,15 +293,21 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+	var inviteGroupIDs []string
 	if !a.cfg.OpenRegistration {
-		if err := a.consumeRegistrationInviteTx(r.Context(), tx, req.InviteCode); err != nil {
-			if errors.Is(err, errRegistrationInviteInvalid) {
+		granted, err := a.consumeRegistrationInviteTx(r.Context(), tx, req.InviteCode)
+		if err != nil {
+			switch {
+			case errors.Is(err, errRegistrationInviteInvalid):
 				respondError(w, http.StatusForbidden, "邀请码无效或可用次数已耗尽")
-			} else {
+			case errors.Is(err, errRegistrationInviteGroupUnavailable):
+				respondError(w, http.StatusConflict, "该邀请码绑定的用户组已不存在，请联系管理员")
+			default:
 				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 			}
 			return
 		}
+		inviteGroupIDs = granted
 	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?)`, userID, email, displayName, "user", string(passwordHash), 0, now, now); err != nil {
@@ -306,6 +317,46 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
 		return
+	}
+	// Self-registration has no actor, so the actor-based grant checks in
+	// setUserPermissionGroups cannot apply here. The groups were validated when
+	// the invite was created and again when it was consumed.
+	if len(inviteGroupIDs) > 0 {
+		if err := a.writeUserPermissionGroups(r.Context(), tx, userID, inviteGroupIDs); err != nil {
+			respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			return
+		}
+	}
+	// The mailbox is created in the same transaction as the user.
+	//
+	// Doing it after the commit meant that an inactive domain, a taken prefix or a
+	// quota rejection left the caller with 201, a live session and no mailbox, with
+	// nothing but a log line to show for it. Rolling the whole registration back
+	// instead keeps the account and its mailbox from ever disagreeing.
+	if mailboxDomainID != "" && mailboxLocalPart != "" {
+		limits, err := a.permissionLimitsForGroupsTx(r.Context(), tx, inviteGroupIDs)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			return
+		}
+		// attachUserAuthorization cannot run against the uncommitted user, so the
+		// quota subject is assembled by hand. consumeMailboxQuotaTx only reads the
+		// limits from it; the counters it compares against come from the transaction.
+		quotaUser := &User{ID: userID, Limits: limits}
+		if _, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active", quotaUser); err != nil {
+			switch {
+			case errors.Is(err, errInactiveDomain):
+				respondError(w, http.StatusBadRequest, "所选域名不可用，请选择其他域名")
+			case errors.Is(err, errMailboxCountLimitReached), errors.Is(err, errMailboxDailyLimitReached):
+				respondError(w, http.StatusForbidden, "邮箱数量已达上限，请联系管理员")
+			case isUniqueViolation(err):
+				respondError(w, http.StatusConflict, "该邮箱前缀已被使用，请换一个前缀")
+			default:
+				a.log.Warn("failed to create mailbox for registered user", "error", err, "email", email)
+				respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
+			}
+			return
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		respondError(w, http.StatusInternalServerError, "注册失败，请稍后重试")
@@ -320,14 +371,6 @@ func (a *App) handleRegister(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "登录失败，请稍后重试")
 		return
 	}
-
-	// Create a mailbox for the registered user.
-	if mailboxDomainID != "" && mailboxLocalPart != "" {
-		if _, mbErr := a.createMailboxWithPasswordHash(r.Context(), user.ID, mailboxDomainID, mailboxLocalPart, displayName, string(passwordHash), 1024, "active"); mbErr != nil {
-			a.log.Warn("failed to create mailbox for registered user", "error", mbErr, "email", email)
-		}
-	}
-
 	respondJSON(w, http.StatusCreated, map[string]any{"user": user})
 }
 
@@ -385,8 +428,8 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if len(req.NewPassword) < 8 {
-		badRequest(w, errors.New("新密码至少需要 8 个字符"))
+	if err := validatePasswordLength(req.NewPassword); err != nil {
+		badRequest(w, err)
 		return
 	}
 	row := a.db.QueryRowContext(r.Context(), `SELECT password_hash FROM users WHERE id=?`, user.ID)
@@ -417,6 +460,18 @@ func (a *App) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if _, err := tx.ExecContext(r.Context(), `UPDATE mailboxes SET password_hash=?, updated_at=? WHERE user_id=?`, string(newHash), now, user.ID); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update mailbox password")
+		return
+	}
+	// Changing a password is the one recovery action a user knows to take after a
+	// suspected compromise, so it has to end the attacker's other sessions. The
+	// current session is kept alive to avoid logging the user out of the page they
+	// are on.
+	keep := ""
+	if cookie, err := r.Cookie(a.cfg.CookieName); err == nil {
+		keep = hashToken(cookie.Value)
+	}
+	if err := revokeUserSessionsTx(r.Context(), tx, user.ID, keep); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke other sessions")
 		return
 	}
 	if err := tx.Commit(); err != nil {

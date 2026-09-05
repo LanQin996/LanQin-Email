@@ -9,14 +9,110 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
+	"net"
 	"net/http"
+	netmail "net/mail"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/microcosm-cc/bluemonday"
 )
+
+// isPublicUnicastIP reports whether ip is a globally routable unicast address.
+//
+// Every outbound-connection guard shares this predicate on purpose: when the
+// rules lived in one copy per feature they drifted apart, and the weaker copy
+// silently became the SSRF hole.
+func isPublicUnicastIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	return ip.IsGlobalUnicast() &&
+		!ip.IsLoopback() &&
+		!ip.IsPrivate() &&
+		!ip.IsLinkLocalUnicast() &&
+		!ip.IsLinkLocalMulticast() &&
+		!ip.IsMulticast() &&
+		!ip.IsUnspecified()
+}
+
+// safeAttachmentContentType reduces a stored MIME type to a well-formed media
+// type. The value originates from the sender's headers, so it is untrusted;
+// parameters are dropped because responses are always sent as a download.
+func safeAttachmentContentType(value string) string {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil || mediaType == "" {
+		return "application/octet-stream"
+	}
+	return mediaType
+}
+
+// attachmentDisposition builds a Content-Disposition value that survives
+// non-ASCII filenames. The quoted form is kept as an ASCII fallback for old
+// clients and the RFC 5987 form carries the real name.
+//
+// Do not use mime.QEncoding here: RFC 2047 encoded-words are an email header
+// construct and browsers render them literally in HTTP responses.
+func attachmentDisposition(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "attachment"
+	}
+	if runes := []rune(filename); len(runes) > 120 {
+		filename = string(runes[:120])
+	}
+	var fallback strings.Builder
+	fallback.Grow(len(filename))
+	for _, r := range filename {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			// Drop control characters, including CR and LF.
+		case r > 0x7e || r == '"' || r == '\\':
+			fallback.WriteByte('_')
+		default:
+			fallback.WriteRune(r)
+		}
+	}
+	ascii := strings.TrimSpace(fallback.String())
+	if ascii == "" {
+		ascii = "attachment"
+	}
+	return `attachment; filename="` + ascii + `"; filename*=UTF-8''` + rfc5987Escape(filename)
+}
+
+// rfc5987Escape percent-encodes everything outside the unreserved set, which is
+// always a valid subset of RFC 5987 attr-char.
+func rfc5987Escape(value string) string {
+	const hexDigits = "0123456789ABCDEF"
+	var b strings.Builder
+	b.Grow(len(value))
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+			c == '-' || c == '.' || c == '_' || c == '~' {
+			b.WriteByte(c)
+			continue
+		}
+		b.WriteByte('%')
+		b.WriteByte(hexDigits[c>>4])
+		b.WriteByte(hexDigits[c&0x0f])
+	}
+	return b.String()
+}
+
+// writeAttachmentHeaders applies the download headers shared by every
+// attachment endpoint. nosniff is defence in depth: Content-Disposition already
+// prevents rendering, but the media type is attacker-controlled.
+func writeAttachmentHeaders(w http.ResponseWriter, contentType, filename string, size int64) {
+	w.Header().Set("Content-Type", safeAttachmentContentType(contentType))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Disposition", attachmentDisposition(filename))
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+}
 
 type HTMLPolicy struct{ policy *bluemonday.Policy }
 
@@ -131,6 +227,35 @@ func normalizeDomain(s string) string {
 	return s
 }
 
+// domainRe mirrors localPartRe for the right-hand side of an address. Without it
+// normalizeDomain would let embedded CR/LF through, and every recipient string
+// eventually reaches BuildMIME, which writes headers verbatim.
+var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9\-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9\-]*[a-z0-9])?)*$`)
+
+// validRecipientAddress reports whether an already-normalized address is safe to
+// place in a mail header.
+//
+// This deliberately follows normalizeRuleForwardAddress: parse, re-normalize, then
+// require the parse to agree with the normalized form. Any address that survives a
+// round-trip through net/mail cannot contain a bare CR or LF.
+func validRecipientAddress(email string) bool {
+	if email == "" || len(email) > 320 {
+		return false
+	}
+	if strings.ContainsAny(email, "\r\n") {
+		return false
+	}
+	local, domain, ok := strings.Cut(email, "@")
+	if !ok || local == "" || domain == "" {
+		return false
+	}
+	if !domainRe.MatchString(domain) {
+		return false
+	}
+	parsed, err := netmail.ParseAddress(email)
+	return err == nil && strings.EqualFold(parsed.Address, email)
+}
+
 var localPartRe = regexp.MustCompile(`[^a-z0-9._%+\-]`)
 
 func normalizeLocalPart(s string) string {
@@ -149,12 +274,17 @@ func normalizeEmail(s string) string {
 	return normalizeLocalPart(parts[0]) + "@" + normalizeDomain(parts[1])
 }
 
+// dedupeEmails normalizes, validates and de-duplicates recipient addresses.
+//
+// Invalid entries are dropped rather than reported: callers treat an empty result
+// as "no recipients" and reject the send, so a request consisting only of malformed
+// addresses still fails loudly.
 func dedupeEmails(items []string) []string {
 	seen := map[string]bool{}
 	out := make([]string, 0, len(items))
 	for _, item := range items {
 		email := normalizeEmail(item)
-		if email == "" || !strings.Contains(email, "@") || seen[email] {
+		if !validRecipientAddress(email) || seen[email] {
 			continue
 		}
 		seen[email] = true
@@ -286,3 +416,43 @@ func requireString(name, value string) error {
 }
 
 var errNotFound = errors.New("not found")
+
+// maxPasswordBytes is bcrypt's hard input limit. golang.org/x/crypto returns
+// ErrPasswordTooLong beyond it, which callers would otherwise surface as a 500.
+const maxPasswordBytes = 72
+
+// validatePasswordLength enforces both bounds in one place.
+//
+// The lower bound counts bytes rather than runes to stay consistent with what bcrypt
+// consumes; the message says characters because that is what a user can act on.
+func validatePasswordLength(password string) error {
+	if len(password) < 8 {
+		return errors.New("密码至少需要 8 个字符")
+	}
+	if len(password) > maxPasswordBytes {
+		return fmt.Errorf("密码过长，最多 %d 字节（一个中文字符约占 3 字节）", maxPasswordBytes)
+	}
+	return nil
+}
+
+// requireCleanLocalPart normalizes a user-supplied mailbox prefix and rejects it if
+// normalization had to change anything.
+//
+// normalizeLocalPart silently strips characters outside its allow-list, so a request
+// for "a/b" would quietly create "ab" — a different address than the user asked for,
+// with no indication in the response. Reserved-prefix checks also read more
+// predictably when the stored value equals the submitted one.
+func requireCleanLocalPart(value string) (string, error) {
+	trimmed := strings.TrimSpace(value)
+	normalized := normalizeLocalPart(trimmed)
+	if normalized == "" {
+		return "", errors.New("邮箱前缀无效")
+	}
+	if normalized != strings.ToLower(trimmed) {
+		return "", errors.New("邮箱前缀只能包含字母、数字以及 . _ % + - ，且不能以点开头或结尾")
+	}
+	if len(normalized) > 64 {
+		return "", errors.New("邮箱前缀过长")
+	}
+	return normalized, nil
+}

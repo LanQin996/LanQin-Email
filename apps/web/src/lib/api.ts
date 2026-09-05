@@ -166,10 +166,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ code }),
     }),
-  disableTwoFactor: (code: string) =>
+  disableTwoFactor: (code: string, currentPassword: string) =>
     request<{ user: User }>("/api/me/2fa/disable", {
       method: "POST",
-      body: JSON.stringify({ code }),
+      body: JSON.stringify({ code, currentPassword }),
     }),
   contacts: () => request<ListResponse<Contact>>("/api/me/contacts"),
   createContact: (payload: { name: string; email: string; note: string }) =>
@@ -380,6 +380,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ password }),
     }),
+  resetUserTwoFactor: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/users/${id}/two-factor/reset`, { method: "POST" }),
   deleteUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   domains: () => request<ListResponse<Domain>>("/api/admin/domains"),
@@ -480,7 +482,11 @@ export const api = {
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   registrationInvites: () =>
     request<ListResponse<RegistrationInvite>>("/api/admin/registration-invites"),
-  createRegistrationInvite: (payload: { code?: string; maxUses: number }) =>
+  createRegistrationInvite: (payload: {
+    code?: string
+    maxUses: number
+    permissionGroupIds?: string[]
+  }) =>
     request<RegistrationInvite>("/api/admin/registration-invites", {
       method: "POST",
       body: JSON.stringify(payload),

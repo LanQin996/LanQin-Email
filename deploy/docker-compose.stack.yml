@@ -82,6 +82,10 @@ services:
   dovecot:
     image: ${LANQIN_DOVECOT_IMAGE:-ghcr.io/lanqin996/lanqin-email-dovecot:latest}
     env_file: .env
+    environment:
+      # The API is a separate service here, so the default 127.0.0.1 would resolve to
+      # this container and the IMAP/POP3 rate limits would never be enforced.
+      LANQIN_AUTH_POLICY_URL: http://api:8080/auth-policy
     volumes:
       - ./data:/data
       - ./mail:/var/mail/vhosts

@@ -139,7 +139,16 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 		return err
 	}
 	if replace || state.RawPath != "" {
-		a.removeMaildirPath(ctx, state.RawPath)
+		// Skip the removal when the rewrite landed on the same path it came from.
+		//
+		// maildirFilename is derived from the wall clock, whose granularity is about
+		// 0.5 ms on Windows. Saving a message and immediately rewriting it therefore
+		// produces the identical filename, os.Rename overwrites in place, and removing
+		// the old path would delete the file just written — leaving raw_path pointing
+		// at nothing while the database still claims the message is on disk.
+		if !sameMaildirPath(state.RawPath, finalPath) {
+			a.removeMaildirPath(ctx, state.RawPath)
+		}
 	}
 	if updateFolder {
 		if state.IMAPUID > 0 && folderID == "" {
@@ -518,12 +527,36 @@ func maildirOwnershipDirs(base, folderBase string) []string {
 	return dirs
 }
 
+// maildirFilename builds a unique-per-message Maildir name.
+//
+// The timestamp alone is not a uniqueness guarantee: Windows advances the wall clock in
+// steps of roughly half a millisecond, so two writes for the same message in quick
+// succession get the same name. That is harmless for distinct messages, whose names also
+// carry their own ids, but callers rewriting one message must handle the collision — see
+// the sameMaildirPath guard in writeRawMessageToMaildirFolder.
 func maildirFilename(messageID, headerMessageID string) string {
 	base := strings.TrimSpace(headerMessageID)
 	if base == "" {
 		base = messageID
 	}
 	return fmt.Sprintf("%d.%s.%s", time.Now().UnixNano(), safeMaildirName(messageID), safeMaildirName(base))
+}
+
+// sameMaildirPath reports whether two Maildir paths denote the same file.
+//
+// Comparison is case-insensitive on Windows and macOS, whose filesystems are by default
+// too: a case-only difference there is the same file, and treating it as a different one
+// would delete what was just written.
+func sameMaildirPath(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	a, b = filepath.Clean(a), filepath.Clean(b)
+	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func safeMaildirName(value string) string {

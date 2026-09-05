@@ -58,6 +58,8 @@ export type PermissionLimits = {
   smtpMinuteLimit: number
   imapMinuteLimit: number
   pop3MinuteLimit: number
+  maxMailboxes: number
+  maxMailboxesPerDay: number
 }
 export type PermissionGroupSummary = { id: string; name: string }
 export type PermissionGroup = {
@@ -83,6 +85,8 @@ export type User = {
   limits: PermissionLimits
   permissionGroupIds: string[]
   permissionGroups: PermissionGroupSummary[]
+  mailboxesCreatedTotal: number
+  mailboxQuotaBonus: number
   createdAt: string
 }
 export type APIToken = {
@@ -577,6 +581,7 @@ export type SystemSettings = {
   linuxDoClientId: string
   linuxDoClientSecretSet: boolean
   linuxDoCallbackUrl: string
+  linuxDoRegistrationGroupIds: string[]
   catchAllEnabled: boolean
   mailAutoRefresh: boolean
   mailRefreshSeconds: number
@@ -646,6 +651,8 @@ export type RegistrationInvite = {
   maxUses: number
   usedCount: number
   remainingUses: number
+  permissionGroupIds: string[]
+  permissionGroups: PermissionGroupSummary[]
   createdByEmail?: string
   createdAt: string
 }

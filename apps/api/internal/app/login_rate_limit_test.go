@@ -20,6 +20,27 @@ type loginTestResponse struct {
 	body       map[string]any
 }
 
+// newTestAppBehindProxy mirrors the bundled Compose deployment, where Nginx fronts
+// the API and appends the real peer to X-Forwarded-For. Without a trusted proxy
+// count the forwarding header is ignored, so these tests could not vary client IP.
+func newTestAppBehindProxy(t *testing.T) *App {
+	t.Helper()
+	dir := newTestDir(t)
+	return newTestAppWithConfig(t, Config{
+		Addr:              ":0",
+		DBPath:            filepath.Join(dir, "lanqin.db"),
+		DataDir:           filepath.Join(dir, "data"),
+		CookieName:        "lanqin_test",
+		SessionTTLHours:   24,
+		AdminEmail:        "admin@lanqin.local",
+		AdminPassword:     "ChangeMe123!",
+		PublicHostname:    "mail.example.test",
+		PublicBaseURL:     "http://localhost:5173",
+		AllowInsecureHTTP: true,
+		TrustedProxyCount: 1,
+	})
+}
+
 func doLoginTestRequest(t *testing.T, serverURL, clientIP string, payload map[string]string) loginTestResponse {
 	t.Helper()
 	body, err := json.Marshal(payload)
@@ -45,7 +66,7 @@ func doLoginTestRequest(t *testing.T, serverURL, clientIP string, payload map[st
 }
 
 func TestLoginRateLimitPasswordAccountAndSuccessReset(t *testing.T) {
-	a := newTestApp(t)
+	a := newTestAppBehindProxy(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	a.now = func() time.Time { return now }
 	server := httptest.NewServer(a.Router())
@@ -111,7 +132,7 @@ func TestLoginRateLimitPasswordAccountAndSuccessReset(t *testing.T) {
 }
 
 func TestLoginRateLimitIPAddressAcrossAccounts(t *testing.T) {
-	a := newTestApp(t)
+	a := newTestAppBehindProxy(t)
 	now := time.Now().UTC().Truncate(time.Second)
 	a.now = func() time.Time { return now }
 	server := httptest.NewServer(a.Router())
@@ -151,7 +172,7 @@ func TestLoginRateLimitIPAddressAcrossAccounts(t *testing.T) {
 }
 
 func TestLoginRateLimitTOTPAndSuccessfulCleanup(t *testing.T) {
-	a := newTestApp(t)
+	a := newTestAppBehindProxy(t)
 	a.cfg.TwoFactorEnabled = true
 	now := time.Now().UTC().Truncate(time.Second)
 	a.now = func() time.Time { return now }
@@ -225,7 +246,7 @@ func TestLoginRateLimitTOTPAndSuccessfulCleanup(t *testing.T) {
 
 func TestLoginAuditDoesNotLogCredentialsOrTokens(t *testing.T) {
 	var logs bytes.Buffer
-	dir := t.TempDir()
+	dir := newTestDir(t)
 	a, err := New(Config{
 		Addr:              ":0",
 		DBPath:            filepath.Join(dir, "lanqin.db"),

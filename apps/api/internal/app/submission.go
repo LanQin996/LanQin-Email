@@ -160,6 +160,11 @@ func (s *submissionSession) Rcpt(to string, _ *smtpserver.RcptOptions) error {
 	if to == "" || !strings.Contains(to, "@") {
 		return smtpError(501, smtpserver.EnhancedCode{5, 1, 3}, "invalid recipient")
 	}
+	// The same cap the compose paths apply, refused at RCPT so the client never gets
+	// to stream a message that would only be rejected afterwards.
+	if len(s.recipients) >= maxRecipientsPerMessage {
+		return smtpError(452, smtpserver.EnhancedCode{4, 5, 3}, fmt.Sprintf("too many recipients: max %d", maxRecipientsPerMessage))
+	}
 	s.recipients = append(s.recipients, to)
 	return nil
 }
@@ -222,7 +227,7 @@ func (a *App) authenticateSubmission(ctx context.Context, username, password str
 }
 
 func (a *App) submitSMTPMessage(ctx context.Context, user *User, mb *Mailbox, mailFrom string, recipients []string, r io.Reader) error {
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+	if err := a.recordSMTPRate(ctx, user, mb, len(recipients)); err != nil {
 		if errors.Is(err, errSMTPRateLimited) {
 			return smtpError(452, smtpserver.EnhancedCode{4, 7, 0}, err.Error())
 		}

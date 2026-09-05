@@ -277,7 +277,7 @@ func (a *App) handleDeleteForwardAddress(w http.ResponseWriter, r *http.Request)
 }
 
 func (a *App) enqueueForwardVerification(ctx context.Context, user *User, mb *Mailbox, email, code string) error {
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+	if err := a.recordSMTPRate(ctx, user, mb, 1); err != nil {
 		return err
 	}
 	now := a.now().UTC()
@@ -471,7 +471,7 @@ func (a *App) enqueueRuleForward(ctx context.Context, mailboxID, messageID, rule
 	if err != nil || suppressed {
 		return err
 	}
-	if err := a.recordSMTPRate(ctx, user, mb); err != nil {
+	if err := a.recordSMTPRate(ctx, user, mb, len(targets)); err != nil {
 		return err
 	}
 	now := a.now().UTC()
