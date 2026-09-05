@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -791,5 +793,45 @@ func TestMaildirRewriteKeepsFileWhenNameCollides(t *testing.T) {
 		if _, err := os.Stat(firstPath); err == nil {
 			t.Errorf("old maildir file was left behind: %s", firstPath)
 		}
+	}
+}
+
+func TestDeploymentCSPAllowsTurnstile(t *testing.T) {
+	t.Parallel()
+	header := regexp.MustCompile("add_header\\s+Content-Security-Policy\\s+\"([^\"]+)\"\\s+always;")
+	for _, name := range []string{"nginx/default.conf", "all-in-one/nginx.conf"} {
+		t.Run(name, func(t *testing.T) {
+			content, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "deploy", name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			match := header.FindStringSubmatch(string(content))
+			if len(match) != 2 {
+				t.Fatal("missing enforced CSP header")
+			}
+			directives := map[string][]string{}
+			for _, directive := range strings.Split(match[1], ";") {
+				parts := strings.Fields(directive)
+				if len(parts) > 0 {
+					directives[parts[0]] = parts[1:]
+				}
+			}
+			for _, key := range []string{"script-src", "frame-src"} {
+				values := directives[key]
+				if !slices.Contains(values, "https://challenges.cloudflare.com") {
+					t.Errorf("%s blocks Turnstile: %v", key, values)
+				}
+				for _, unsafe := range []string{"*", "https:", "'unsafe-inline'", "'unsafe-eval'"} {
+					if slices.Contains(values, unsafe) {
+						t.Errorf("%s must not be broadened to %s", key, unsafe)
+					}
+				}
+			}
+			for key, want := range map[string]string{"default-src": "'self'", "object-src": "'none'", "frame-ancestors": "'none'"} {
+				if !slices.Equal(directives[key], []string{want}) {
+					t.Errorf("%s=%v, want %s", key, directives[key], want)
+				}
+			}
+		})
 	}
 }

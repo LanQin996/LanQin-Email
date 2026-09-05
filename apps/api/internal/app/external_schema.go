@@ -746,7 +746,8 @@ func migrateExternalSchemaV9(ctx context.Context, conn *sql.Conn, driver string,
 		return fmt.Errorf("external schema: unsupported migration history before v9 (count=%d, version=%d)", count, version)
 	}
 	statements := []string{
-		`ALTER TABLE registration_invites ADD COLUMN permission_group_ids_json TEXT NOT NULL DEFAULT '[]'`,
+		// MySQL requires expression defaults for TEXT; parentheses also work in PostgreSQL.
+		`ALTER TABLE registration_invites ADD COLUMN permission_group_ids_json TEXT NOT NULL DEFAULT ('[]')`,
 		`CREATE TABLE mailbox_creation_events (
 			id VARCHAR(64) PRIMARY KEY,
 			user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,

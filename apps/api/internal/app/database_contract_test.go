@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -42,11 +43,38 @@ func TestExternalDatabaseContract(t *testing.T) {
 				t.Fatal("external database must use the portable search fallback")
 			}
 			assertExternalDatabaseContract(t, a)
+			t.Run("concurrent mailbox daily quota", func(t *testing.T) {
+				if tt.driver != databaseDriverPostgres {
+					t.Skip("PostgreSQL statement-snapshot regression")
+				}
+				t.Run("commit consumes the slot", func(t *testing.T) {
+					assertPostgresConcurrentMailboxDailyQuota(t, a, true)
+				})
+				t.Run("rollback preserves the slot", func(t *testing.T) {
+					assertPostgresConcurrentMailboxDailyQuota(t, a, false)
+				})
+			})
 			if err := a.Close(); err != nil {
 				t.Fatalf("close first app: %v", err)
 			}
 
-			// Reopening validates migration idempotency and persisted seed data.
+			// Exercise a real V8 upgrade, not just a fresh-schema reopen.
+			prepareExternalSchemaV8Upgrade(t, cfg)
+			cfg.DataDir = filepath.Join(dataDir, "upgrade")
+			upgraded, err := New(cfg, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+			if err != nil {
+				t.Fatalf("upgrade %s from V8: %v", tt.driver, err)
+			}
+			t.Run("upgraded invite defaults", func(t *testing.T) {
+				defer func() {
+					if err := upgraded.Close(); err != nil {
+						t.Errorf("close upgraded app: %v", err)
+					}
+				}()
+				assertUpgradedInviteDefaults(t, upgraded)
+			})
+
+			// Reopening validates upgrade idempotency and persisted seed data.
 			cfg.DataDir = filepath.Join(dataDir, "reopen")
 			reopened, err := New(cfg, slog.New(slog.NewTextHandler(os.Stderr, nil)))
 			if err != nil {
@@ -213,5 +241,158 @@ func assertExternalDeliveryCascade(t *testing.T, ctx context.Context, a *App, ad
 		if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM `+table+` WHERE id=?`, id).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("cascade cleanup %s count=%d err=%v", table, count, err)
 		}
+	}
+}
+
+// The contract DSNs must point at dedicated test databases. Downgrade only the
+// V9-V11 additions after closing the app so its workers cannot race the fixture.
+func prepareExternalSchemaV8Upgrade(t *testing.T, cfg Config) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	db, err := openDatabase(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	indexSuffix := ""
+	if cfg.DBDriver == databaseDriverMySQL {
+		indexSuffix = " ON sessions"
+		// V8 had an implicit FK index. MySQL discarded it when the newer
+		// explicit index was added, so restore a supporting index first.
+		if _, err := db.ExecContext(ctx, "CREATE INDEX idx_sessions_user_v8_fixture ON sessions(user_id)"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	statements := []string{
+		"DROP TABLE mailbox_creation_events",
+		"ALTER TABLE registration_invites DROP COLUMN permission_group_ids_json",
+		"DROP INDEX idx_sessions_user" + indexSuffix,
+		"DROP INDEX idx_sessions_expires" + indexSuffix,
+		"ALTER TABLE users DROP COLUMN two_factor_last_counter",
+		"ALTER TABLE smtp_send_events DROP COLUMN recipients",
+		"DELETE FROM schema_migrations WHERE version>=9",
+	}
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("prepare V8: %s: %v", statement, err)
+		}
+	}
+}
+
+func assertUpgradedInviteDefaults(t *testing.T, a *App) {
+	t.Helper()
+	ctx := t.Context()
+	var groups string
+	var maxUses, used int
+	if err := a.db.QueryRowContext(ctx, "SELECT permission_group_ids_json,max_uses,used_count FROM registration_invites WHERE code=?", "CONTRACT-CODE").Scan(&groups, &maxUses, &used); err != nil {
+		t.Fatal(err)
+	}
+	if groups != "[]" || maxUses != 2 || used != 0 {
+		t.Fatalf("upgraded invite groups=%q maxUses=%d used=%d", groups, maxUses, used)
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	id := newID("inv")
+	if _, err := a.db.ExecContext(ctx, "INSERT INTO registration_invites(id,code,max_uses,created_at,updated_at) VALUES(?,?,1,?,?)", id, id, now, now); err != nil {
+		t.Fatalf("insert using upgraded default: %v", err)
+	}
+	defer a.db.ExecContext(ctx, "DELETE FROM registration_invites WHERE id=?", id)
+	if err := a.db.QueryRowContext(ctx, "SELECT permission_group_ids_json FROM registration_invites WHERE id=?", id).Scan(&groups); err != nil {
+		t.Fatal(err)
+	}
+	if groups != "[]" {
+		t.Fatalf("new invite default=%q, want []", groups)
+	}
+}
+
+func assertPostgresConcurrentMailboxDailyQuota(t *testing.T, a *App, commitFirst bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	userID := newID("usr")
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, "INSERT INTO users(id,email,display_name,role,password_hash,created_at,updated_at) VALUES(?,?,?,'user','unused',?,?)", userID, userID+"@contract.test", "Quota Contract", now, now); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.ExecContext(ctx, "DELETE FROM users WHERE id=?", userID)
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, "SELECT id FROM domains WHERE name=?", "contract.test").Scan(&domainID); err != nil {
+		t.Fatal(err)
+	}
+	user := &User{ID: userID, Limits: PermissionLimits{MaxMailboxes: 10, MaxMailboxesPerDay: 1}}
+	first, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Rollback()
+	if _, err := a.createMailboxWithPasswordHashTx(ctx, first, userID, domainID, userID+"-a", "First", "unused", 1024, "active", user); err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Rollback()
+	var pid int
+	if err := second.QueryRowContext(ctx, "SELECT pg_backend_pid()").Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := a.createMailboxWithPasswordHashTx(ctx, second, userID, domainID, userID+"-b", "Second", "unused", 1024, "active", user)
+		if err == nil {
+			err = second.Commit()
+		} else {
+			_ = second.Rollback()
+		}
+		done <- err
+	}()
+	// Observe a real lock wait instead of sleeping and hoping both requests overlap.
+	for {
+		var waiting bool
+		if err := a.db.QueryRowContext(ctx, "SELECT COALESCE(wait_event_type='Lock',false) FROM pg_stat_activity WHERE pid=?", pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("second creation completed before first committed: %v", err)
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	if commitFirst {
+		err = first.Commit()
+	} else {
+		err = first.Rollback()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if commitFirst && !errors.Is(err, errMailboxDailyLimitReached) {
+			t.Errorf("second creation error=%v, want daily quota rejection", err)
+		} else if !commitFirst && err != nil {
+			t.Errorf("second creation after rollback: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	var total, events, mailboxes int
+	if err := a.db.QueryRowContext(ctx, "SELECT mailboxes_created_total FROM users WHERE id=?", userID).Scan(&total); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mailbox_creation_events WHERE user_id=?", userID).Scan(&events); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mailboxes WHERE user_id=?", userID).Scan(&mailboxes); err != nil {
+		t.Fatal(err)
+	}
+	if total != 1 || events != 1 || mailboxes != 1 {
+		t.Errorf("daily limit=1: total=%d events=%d mailboxes=%d", total, events, mailboxes)
 	}
 }

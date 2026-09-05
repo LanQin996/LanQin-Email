@@ -70,3 +70,4 @@ desktop.ini
 # Local AI assistant scratch space (审查/审计报告等工作产物，不属于项目代码)
 /A/
 CLAUDE.md
+.playwright-mcp

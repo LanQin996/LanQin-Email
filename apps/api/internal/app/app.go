@@ -1748,6 +1748,14 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 	if status == "" {
 		status = "active"
 	}
+	if enforceQuotaFor != nil && enforceQuotaFor.Limits.MaxMailboxesPerDay > 0 {
+		// Lock before the first table read. PostgreSQL needs a fresh statement
+		// snapshot after waiting, and MySQL REPEATABLE READ must not establish
+		// its read view before the preceding creation commits.
+		if err := a.lockUserQuotaRowTx(ctx, tx, userID); err != nil {
+			return "", err
+		}
+	}
 	var domain string
 	if err := tx.QueryRowContext(ctx, `SELECT name FROM domains WHERE id=? AND status='active'`, domainID).Scan(&domain); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1802,14 +1810,11 @@ var errMailboxDailyLimitReached = errors.New("mailbox daily creation limit reach
 // enforceQuotaFor is set, refuses to do so once either the lifetime or the
 // per-day allowance is reached.
 //
-// Both guards live in the WHERE clause of a single UPDATE on purpose. Counting
-// first and writing afterwards would let two concurrent requests observe the same
-// counts and both succeed, because none of the three supported databases run at an
-// isolation level that would prevent it by default. Folding the checks into the
-// UPDATE makes the users row the serialization point: the second transaction
-// blocks on that row lock, and when it resumes the statement re-evaluates its
-// WHERE against the now-committed state of the first. This mirrors how
-// consumeRegistrationInviteTx guards invite codes.
+// The lifetime counter is guarded by the UPDATE itself. The daily event count
+// additionally relies on createMailboxWithPasswordHashTx locking the user row
+// before its first table read. An UPDATE alone is insufficient: after waiting
+// PostgreSQL rechecks the user row but its subquery can still see an old snapshot
+// of mailbox_creation_events. Keep the lock and the count in separate statements.
 func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
 	lifetimeLimit := 0
 	dailyLimit := 0
