@@ -200,10 +200,10 @@ SMTP 每日额度按**收件人数**扣减，一封发给 10 个地址的邮件�
 | `LANQIN_EXTERNAL_IMAP_ALLOW_PRIVATE_HOSTS` | 是否允许外部 IMAP 连接内网/localhost 主机；也可在后台配置 | `false` |
 | `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_GMAIL_CLIENT_SECRET` | Gmail 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/gmail/callback` | 空 |
 | `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_ID` / `LANQIN_EXTERNAL_IMAP_OUTLOOK_CLIENT_SECRET` | Microsoft 365 / Outlook 外部 IMAP OAuth2，回调为 `/api/external-imap-oauth/outlook/callback` | 空 |
-| `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置 | 随机长字符串 |
+| `LANQIN_NOTIFICATION_SECRET_KEY` | 用户级 Telegram Bot Token 的加密主密钥，启用 Telegram 规则动作前必须设置；同时用于加密 TOTP 两步验证种子 | 随机长字符串 |
 | `LANQIN_AUTH_POLICY_SECRET` | Dovecot 查询 IMAP/POP3 频率限制的共享密钥。仅在直接暴露 API 8080 时需要设置 | 空 |
 
-该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密。
+该密钥无需向 Telegram 申请，由部署者自行生成并保管。例如 PowerShell 可运行 `$b = New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Fill($b); [Convert]::ToBase64String($b)`，Linux/macOS 可运行 `openssl rand -base64 32`，再写入部署环境的 `.env` 并重启 API。它是加密根密钥，不会通过后台界面保存；丢失或更换会导致已保存的 Bot Token 无法解密，已加密的 TOTP 种子同样失效。配置该密钥之前写入的种子仍以明文保存、照常可用；受影响的用户可由管理员在“**管理后台 > 用户 > 重置双因素认证**”清除后重新绑定，该操作同时会撤销该用户的会话并停用其 API Token。
 
 ## 架构
 

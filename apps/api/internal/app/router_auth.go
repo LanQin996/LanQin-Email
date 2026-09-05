@@ -158,6 +158,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionUsersCreate)).Post("/admin/users", a.handleCreateUser)
 			r.With(a.requirePermission(PermissionUsersUpdate)).Post("/admin/users/{id}", a.handleUpdateUser)
 			r.With(a.requirePermission(PermissionUsersResetPassword)).Post("/admin/users/{id}/password", a.handleResetUserPassword)
+			r.With(a.requirePermission(PermissionUsersResetPassword)).Post("/admin/users/{id}/two-factor/reset", a.handleAdminResetTwoFactor)
 			r.With(a.requirePermission(PermissionUsersDelete)).Delete("/admin/users/{id}", a.handleDeleteUser)
 			r.With(a.requireAnyPermission(PermissionGroupsView, PermissionUsersView)).Get("/admin/permission-limits/defaults", a.handleDefaultPermissionLimits)
 			r.With(a.requireAnyPermission(PermissionGroupsView, PermissionUsersView)).Get("/admin/permissions", a.handlePermissionCatalog)

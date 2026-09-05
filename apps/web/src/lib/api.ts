@@ -108,6 +108,7 @@ export const api = {
   createUser: (payload: { email: string; displayName: string; role: "admin" | "user"; password: string; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>("/api/admin/users", { method: "POST", body: JSON.stringify(payload) }),
   updateUser: (id: string, payload: { displayName: string; role: "admin" | "user"; disabled: boolean; permissionGroupIds?: string[] }) => request<AdminUser>(`/api/admin/users/${id}`, { method: "POST", body: JSON.stringify(payload) }),
   resetUserPassword: (id: string, password: string) => request<{ ok: boolean }>(`/api/admin/users/${id}/password`, { method: "POST", body: JSON.stringify({ password }) }),
+  resetUserTwoFactor: (id: string) => request<{ ok: boolean }>(`/api/admin/users/${id}/two-factor/reset`, { method: "POST" }),
   deleteUser: (id: string) => request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
   domains: () => request<ListResponse<Domain>>("/api/admin/domains"),
   createDomain: (name: string) => request<Domain>("/api/admin/domains", { method: "POST", body: JSON.stringify({ name }) }),

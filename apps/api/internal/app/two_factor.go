@@ -2,11 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha1"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -154,6 +159,101 @@ func (a *App) deleteLoginChallenge(ctx context.Context, id string) {
 	_, _ = a.db.ExecContext(ctx, `DELETE FROM login_challenges WHERE id=?`, id)
 }
 
+// totpSecretEncryptionPrefix marks a stored seed as ciphertext.
+//
+// An explicit marker is used rather than sniffing the encoding: a base32 seed can be
+// valid base64, so guessing would eventually misread a plaintext seed as ciphertext.
+const totpSecretEncryptionPrefix = "enc:v1:"
+
+// encryptTOTPSecret protects a seed at rest when a root key is configured.
+//
+// TOTP is core authentication and predates both root keys, so a missing key must not
+// break it: the seed is then stored as it always was. Deployments that do set a key get
+// encryption for seeds written from then on, and existing plaintext rows keep working
+// because decryptTOTPSecret falls back on the absence of the marker.
+//
+// Losing a configured key makes those seeds unreadable. That is recoverable rather than
+// terminal only because an administrator can clear a user's second factor
+// (handleAdminResetTwoFactor); do not remove that entry point while this exists.
+func (a *App) encryptTOTPSecret(secret string) (string, error) {
+	if strings.TrimSpace(secret) == "" {
+		return "", nil
+	}
+	key, ok := a.totpSecretEncryptionKey()
+	if !ok {
+		return secret, nil
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return "", err
+	}
+	out := append(nonce, gcm.Seal(nil, nonce, []byte(secret), nil)...)
+	return totpSecretEncryptionPrefix + base64.StdEncoding.EncodeToString(out), nil
+}
+
+// decryptTOTPSecret reverses encryptTOTPSecret. Values without the marker are returned
+// unchanged: that is both a pre-encryption row and a deployment with no key set.
+func (a *App) decryptTOTPSecret(stored string) (string, error) {
+	if !strings.HasPrefix(stored, totpSecretEncryptionPrefix) {
+		return stored, nil
+	}
+	key, ok := a.totpSecretEncryptionKey()
+	if !ok {
+		// Refusing here is the point: treating ciphertext as a seed would silently
+		// reject every correct code instead of naming the missing key.
+		return "", errors.New("two-factor secret is encrypted but no encryption key is configured")
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(stored, totpSecretEncryptionPrefix))
+	if err != nil {
+		return "", errors.New("invalid encrypted two-factor secret")
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", errors.New("invalid encrypted two-factor secret")
+	}
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], nil)
+	if err != nil {
+		return "", errors.New("invalid encrypted two-factor secret")
+	}
+	return string(plain), nil
+}
+
+// totpSecretEncryptionKey reuses whichever root key the deployment already sets, in
+// preference order, rather than adding a third one to lose.
+// totpSecretEncryptionKey derives the seed-encryption key from exactly one root key.
+//
+// LANQIN_NOTIFICATION_SECRET_KEY is the only accepted source, and there is no fallback
+// to the other root key on purpose. A key that can change identity is worse than no key
+// at all here: a deployment holding only the IMAP key that later added a notification
+// key would start deriving a different key, and every seed written under the old one
+// would stop decrypting — locking those users out with no signal beforehand.
+//
+// The value is domain-separated so this key cannot coincide with the one protecting
+// Telegram tokens even though both derive from the same secret.
+func (a *App) totpSecretEncryptionKey() ([]byte, bool) {
+	trimmed := strings.TrimSpace(a.cfg.NotificationSecretKey)
+	if trimmed == "" {
+		return nil, false
+	}
+	sum := sha256.Sum256([]byte("lanqin-totp-seed\x00" + trimmed))
+	return sum[:], true
+}
+
 func (a *App) loadUserAuthByID(ctx context.Context, id string) (*User, string, error) {
 	row := a.db.QueryRowContext(ctx, `SELECT id,email,display_name,role,disabled,two_factor_enabled,two_factor_secret,created_at FROM users WHERE id=?`, id)
 	var u User
@@ -171,7 +271,11 @@ func (a *App) loadUserAuthByID(ctx context.Context, id string) (*User, string, e
 	if err := a.attachUserAuthorization(ctx, &u); err != nil {
 		return nil, "", err
 	}
-	return &u, secret, nil
+	plainSecret, err := a.decryptTOTPSecret(secret)
+	if err != nil {
+		return nil, "", err
+	}
+	return &u, plainSecret, nil
 }
 
 func (a *App) handleTwoFactorSetup(w http.ResponseWriter, r *http.Request) {
@@ -198,8 +302,13 @@ func (a *App) handleTwoFactorSetup(w http.ResponseWriter, r *http.Request) {
 		respondError(w, http.StatusInternalServerError, "failed to generate secret")
 		return
 	}
+	stored, err := a.encryptTOTPSecret(secret)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to protect secret")
+		return
+	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	if _, err := a.db.ExecContext(r.Context(), `UPDATE users SET two_factor_secret=?, two_factor_enabled=0, updated_at=? WHERE id=?`, secret, now, user.ID); err != nil {
+	if _, err := a.db.ExecContext(r.Context(), `UPDATE users SET two_factor_secret=?, two_factor_enabled=0, updated_at=? WHERE id=?`, stored, now, user.ID); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save secret")
 		return
 	}
@@ -311,4 +420,56 @@ func (a *App) verifyCurrentPassword(ctx context.Context, userID, password string
 		return err
 	}
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+}
+
+// handleAdminResetTwoFactor clears another user's second factor.
+//
+// Without this there is no recovery path at all: only the account holder can disable
+// their own 2FA, so a lost authenticator means a permanently locked account that
+// requires direct database access to fix.
+//
+// It carries the same containment semantics as an administrator password reset — the
+// action is taken because the account is in trouble, so every session and API token of
+// the target goes with it. It deliberately requires PermissionUsersResetPassword rather
+// than the broader update permission: stripping somebody's second factor is the same
+// class of act as resetting their password.
+func (a *App) handleAdminResetTwoFactor(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSpace(chi.URLParam(r, "id"))
+	if id == "" {
+		respondError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	tx, err := a.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to start transaction")
+		return
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(r.Context(), `UPDATE users SET two_factor_secret='', two_factor_enabled=0, updated_at=? WHERE id=?`, now, id)
+	if err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reset two-factor authentication")
+		return
+	}
+	if affected, _ := res.RowsAffected(); affected == 0 {
+		respondError(w, http.StatusNotFound, "user not found")
+		return
+	}
+	if err := a.containUserAfterAdminResetTx(r.Context(), tx, id, now); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to revoke sessions")
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to reset two-factor authentication")
+		return
+	}
+	a.log.Info("administrator reset two-factor authentication", "target", id, "actor", actorID(r))
+	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func actorID(r *http.Request) string {
+	if user := currentUser(r); user != nil {
+		return user.ID
+	}
+	return ""
 }

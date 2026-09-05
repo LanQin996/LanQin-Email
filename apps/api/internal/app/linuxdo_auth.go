@@ -634,7 +634,11 @@ func (a *App) verifyLinuxDoReauthentication(ctx context.Context, userID, passwor
 	if bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(password)) != nil {
 		return errors.New("invalid password")
 	}
-	if intBool(enabled) && !a.consumeTOTP(ctx, userID, secret, code) {
+	plainSecret, err := a.decryptTOTPSecret(secret)
+	if err != nil {
+		return err
+	}
+	if intBool(enabled) && !a.consumeTOTP(ctx, userID, plainSecret, code) {
 		return errors.New("invalid two-factor code")
 	}
 	return nil

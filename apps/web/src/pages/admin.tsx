@@ -1989,6 +1989,11 @@ function UserActions({ user, permissionGroups, onDelete }: { user: AdminUser; pe
   const [passwordOpen, setPasswordOpen] = React.useState(false)
   const canUpdate = hasPermission(currentUser, "admin.users.update")
   const canResetPassword = hasPermission(currentUser, "admin.users.reset_password")
+  const resetTwoFactor = useMutation({
+    mutationFn: () => api.resetUserTwoFactor(user.id),
+    onSuccess: () => { invalidateAdmin(qc); toast({ title: "已重置双因素认证", description: "该用户的会话与 API Token 已同时失效" }) },
+    onError: (e) => toast({ title: "重置失败", description: e.message }),
+  })
   const update = useMutation({
     mutationFn: (payload: { displayName: string; role: "admin" | "user"; disabled: boolean; permissionGroupIds?: string[] }) => api.updateUser(user.id, payload),
     onSuccess: () => { invalidateAdmin(qc); toast({ title: "用户已更新" }) },
@@ -2004,7 +2009,7 @@ function UserActions({ user, permissionGroups, onDelete }: { user: AdminUser; pe
     })
   }
   if (!canUpdate && !canResetPassword && !onDelete) return null
-  return <><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{canUpdate && <DropdownMenuItem onSelect={() => setEditOpen(true)}>编辑用户</DropdownMenuItem>}{canResetPassword && <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>重置密码</DropdownMenuItem>}{!user.protected && canUpdate && <><DropdownMenuSeparator /><DropdownMenuItem onSelect={() => quickPatch({ disabled: !user.disabled })}>{user.disabled ? "启用用户" : "停用用户"}</DropdownMenuItem><DropdownMenuItem onSelect={() => quickPatch({ role: user.role === "admin" ? "user" : "admin" })}>{user.role === "admin" ? "设为普通用户" : "设为超级管理员"}</DropdownMenuItem></>}{!user.protected && onDelete && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" onSelect={onDelete}>删除用户</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu>{canUpdate && <EditUserDialog user={user} permissionGroups={permissionGroups} open={editOpen} onOpenChange={setEditOpen} />}{canResetPassword && <ResetPasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />}</>
+  return <><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end">{canUpdate && <DropdownMenuItem onSelect={() => setEditOpen(true)}>编辑用户</DropdownMenuItem>}{canResetPassword && <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>重置密码</DropdownMenuItem>}{canResetPassword && user.twoFactorEnabled && <DropdownMenuItem disabled={resetTwoFactor.isPending} onSelect={() => resetTwoFactor.mutate()}>重置双因素认证</DropdownMenuItem>}{!user.protected && canUpdate && <><DropdownMenuSeparator /><DropdownMenuItem onSelect={() => quickPatch({ disabled: !user.disabled })}>{user.disabled ? "启用用户" : "停用用户"}</DropdownMenuItem><DropdownMenuItem onSelect={() => quickPatch({ role: user.role === "admin" ? "user" : "admin" })}>{user.role === "admin" ? "设为普通用户" : "设为超级管理员"}</DropdownMenuItem></>}{!user.protected && onDelete && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" onSelect={onDelete}>删除用户</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu>{canUpdate && <EditUserDialog user={user} permissionGroups={permissionGroups} open={editOpen} onOpenChange={setEditOpen} />}{canResetPassword && <ResetPasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />}</>
 }
 
 function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGroup[] }) {

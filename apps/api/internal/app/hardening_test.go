@@ -562,3 +562,177 @@ func TestOpenAPIPasswordResetAlsoContainsTheAccount(t *testing.T) {
 		t.Errorf("the operator's token was disabled too: code=%d", code)
 	}
 }
+
+// TestTOTPSecretIsEncryptedAtRestWhenKeyConfigured covers the last of the report's L1
+// recommendations: the seed used to sit in the users table in plaintext, unlike every
+// other secret of its class.
+func TestTOTPSecretIsEncryptedAtRestWhenKeyConfigured(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.TwoFactorEnabled = true
+	a.cfg.NotificationSecretKey = "totp-seed-root-key"
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	client := &testClient{t: t, server: ts}
+	if code := client.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("login code=%d", code)
+	}
+
+	var setup struct {
+		Secret string `json:"secret"`
+	}
+	if code := client.do("POST", "/api/me/2fa/setup", nil, &setup); code != http.StatusOK || setup.Secret == "" {
+		t.Fatalf("2fa setup code=%d secret=%q", code, setup.Secret)
+	}
+
+	var stored string
+	if err := a.db.QueryRow(`SELECT two_factor_secret FROM users WHERE email=?`, "admin@lanqin.local").Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stored, setup.Secret) {
+		t.Error("the seed was stored in a form that still contains the plaintext")
+	}
+	if !strings.HasPrefix(stored, totpSecretEncryptionPrefix) {
+		t.Errorf("stored seed is not marked as ciphertext: %q", stored)
+	}
+
+	// The round trip must still authenticate, otherwise encryption has locked the
+	// account out rather than protected it.
+	code, err := generateTOTP(setup.Secret, a.now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var enabled struct {
+		User User `json:"user"`
+	}
+	if status := client.do("POST", "/api/me/2fa/enable", map[string]string{"code": code}, &enabled); status != http.StatusOK || !enabled.User.TwoFactorEnabled {
+		t.Fatalf("enable with an encrypted seed status=%d user=%+v", status, enabled.User)
+	}
+}
+
+// TestTOTPPlaintextSecretsKeepWorking guards the compatibility half of the change:
+// seeds written before encryption existed carry no marker and must still verify.
+func TestTOTPPlaintextSecretsKeepWorking(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.NotificationSecretKey = "totp-seed-root-key"
+	secret, err := newTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var userID string
+	if err := a.db.QueryRow(`SELECT id FROM users WHERE email=?`, "admin@lanqin.local").Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	// Written the way the pre-encryption code did: no marker, no ciphertext.
+	if _, err := a.db.Exec(`UPDATE users SET two_factor_enabled=1, two_factor_secret=? WHERE id=?`, secret, userID); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, stored, err := a.loadUserAuthByID(t.Context(), userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.TwoFactorEnabled || stored != secret {
+		t.Fatalf("plaintext seed did not survive the read path: %q", stored)
+	}
+	code, err := generateTOTP(stored, a.now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.consumeTOTP(t.Context(), userID, stored, code) {
+		t.Error("a pre-encryption seed no longer verifies")
+	}
+}
+
+// TestEncryptedTOTPSecretWithoutKeyFailsLoudly checks the failure mode is named rather
+// than silent. Treating ciphertext as a seed would reject every correct code and look
+// like the user's authenticator was broken.
+func TestEncryptedTOTPSecretWithoutKeyFailsLoudly(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.NotificationSecretKey = "totp-seed-root-key"
+	secret, err := newTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := a.encryptTOTPSecret(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	a.cfg.NotificationSecretKey = ""
+	if _, err := a.decryptTOTPSecret(stored); err == nil {
+		t.Fatal("decrypting without the key silently succeeded")
+	}
+}
+
+// TestAdminCanResetAnotherUsersTwoFactor covers the recovery path that makes seed
+// encryption survivable: with no administrative reset, a lost key or lost authenticator
+// locks the account permanently.
+func TestAdminCanResetAnotherUsersTwoFactor(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.TwoFactorEnabled = true
+	ts := httptest.NewServer(a.Router())
+	defer ts.Close()
+	admin := &testClient{t: t, server: ts}
+	if code := admin.do("POST", "/api/auth/login", map[string]string{"email": "admin@lanqin.local", "password": "ChangeMe123!"}, nil); code != http.StatusOK {
+		t.Fatalf("admin login code=%d", code)
+	}
+	domainID := mustDefaultDomainID(t, a)
+	locked := createTestMailbox(t, admin, domainID, "lost-authenticator", "Locked Out", "Password123!", nil)
+
+	secret, err := newTOTPSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := a.encryptTOTPSecret(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The session and token are established before the second factor goes on the row:
+	// once it is enabled, logging in only yields a 2FA challenge. They stand in for
+	// whatever the user still holds at the moment they lose their authenticator.
+	owner := &testClient{t: t, server: ts}
+	if code := owner.do("POST", "/api/auth/login", map[string]string{"email": locked.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Fatalf("owner login code=%d", code)
+	}
+	bearer := &testClient{t: t, server: ts, bearer: createTestAPIToken(t, owner, "locked-out")}
+	if _, err := a.db.Exec(`UPDATE users SET two_factor_enabled=1, two_factor_secret=? WHERE id=?`, encrypted, locked.UserID); err != nil {
+		t.Fatal(err)
+	}
+	// With 2FA on and the authenticator gone, the password alone no longer gets in.
+	stuck := &testClient{t: t, server: ts}
+	var challenge struct {
+		TwoFactorRequired bool `json:"twoFactorRequired"`
+	}
+	if code := stuck.do("POST", "/api/auth/login", map[string]string{"email": locked.Address, "password": "Password123!"}, &challenge); code != http.StatusOK || !challenge.TwoFactorRequired {
+		t.Fatalf("expected a 2fa challenge before the reset: code=%d challenge=%+v", code, challenge)
+	}
+
+	if code := admin.do("POST", "/api/admin/users/"+locked.UserID+"/two-factor/reset", nil, nil); code != http.StatusOK {
+		t.Fatalf("admin 2fa reset code=%d", code)
+	}
+
+	var enabled int
+	var stored string
+	if err := a.db.QueryRow(`SELECT two_factor_enabled,two_factor_secret FROM users WHERE id=?`, locked.UserID).Scan(&enabled, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if intBool(enabled) || stored != "" {
+		t.Errorf("second factor survived the reset: enabled=%d secret=%q", enabled, stored)
+	}
+	// Same containment semantics as a password reset: the account is in trouble, so
+	// its sessions and tokens go with it.
+	if code := owner.do("GET", "/api/me", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("session survived the 2fa reset: code=%d", code)
+	}
+	if code := bearer.do("GET", "/api/open/v1/send", nil, nil); code != http.StatusUnauthorized {
+		t.Errorf("api token survived the 2fa reset: code=%d", code)
+	}
+	// The account is usable again with the password alone.
+	fresh := &testClient{t: t, server: ts}
+	if code := fresh.do("POST", "/api/auth/login", map[string]string{"email": locked.Address, "password": "Password123!"}, nil); code != http.StatusOK {
+		t.Errorf("login after the reset code=%d", code)
+	}
+	if code := fresh.do("GET", "/api/admin/users/"+locked.UserID+"/two-factor/reset", nil, nil); code == http.StatusOK {
+		t.Error("a non-admin reached the reset endpoint")
+	}
+}
