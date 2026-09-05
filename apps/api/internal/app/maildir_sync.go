@@ -683,7 +683,7 @@ func (a *App) syncExistingMaildirMessageState(ctx context.Context, mailboxID, fo
 func (a *App) removeDuplicateMaildirMessage(ctx context.Context, rawPath, mailboxID, folderID, messageID string) {
 	var existing string
 	err := a.db.QueryRowContext(ctx, `SELECT raw_path FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? AND message_id <> '' AND raw_path<>'' LIMIT 1`, mailboxID, folderID, messageID).Scan(&existing)
-	if err != nil || existing == "" || existing == rawPath {
+	if err != nil || existing == "" || sameMaildirPath(existing, rawPath) {
 		return
 	}
 	a.removeMaildirPath(ctx, rawPath)

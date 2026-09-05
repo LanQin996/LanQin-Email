@@ -736,3 +736,60 @@ func TestAdminCanResetAnotherUsersTwoFactor(t *testing.T) {
 		t.Error("a non-admin reached the reset endpoint")
 	}
 }
+
+// TestMaildirRewriteKeepsFileWhenNameCollides covers a real bug the draft test caught
+// only intermittently: maildirFilename is derived from the wall clock, which advances in
+// ~0.5 ms steps on Windows, so saving a message and immediately rewriting it produced the
+// same filename. os.Rename then overwrote in place and the unconditional cleanup of the
+// old path deleted the file just written, leaving raw_path pointing at nothing.
+func TestMaildirRewriteKeepsFileWhenNameCollides(t *testing.T) {
+	a := newTestApp(t)
+	a.cfg.MaildirRoot = newTestDir(t)
+	ctx := t.Context()
+	_, mb := defaultAdminUserAndMailbox(t, a)
+	clearMailboxMessagesForTest(t, a, mb.ID)
+	folderID, err := a.ensureFolder(ctx, mb.ID, "Drafts")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := a.now().UTC()
+	stored := storedMessage{
+		MailboxID: mb.ID, FolderID: folderID, MessageUID: newID("uid"),
+		MessageID: "<collision@example.test>", Subject: "first", From: mb.Address,
+		To: []string{"someone@example.test"}, SentAt: now, ReceivedAt: now,
+		BodyText: "first body", IsRead: true,
+	}
+	id, err := a.insertMessage(ctx, stored, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.writeStoredMessageToMaildir(ctx, id, stored, nil); err != nil {
+		t.Fatal(err)
+	}
+	firstPath := maildirRawPathForTest(t, a, id)
+
+	// Rewrite immediately, which is what saving and then editing a draft does.
+	if _, err := a.db.ExecContext(ctx, `UPDATE messages SET subject=?,body_text=? WHERE id=?`, "second", "second body", id); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.rewriteMessageMaildir(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	secondPath := maildirRawPathForTest(t, a, id)
+
+	raw, err := os.ReadFile(secondPath)
+	if err != nil {
+		t.Fatalf("rewritten message is not on disk: %v", err)
+	}
+	if !strings.Contains(string(raw), "Subject: second") {
+		t.Errorf("rewritten file still holds the old subject:\n%s", raw)
+	}
+	// When the name did change, the old file must be gone — the collision guard must
+	// not turn into a leak.
+	if !sameMaildirPath(firstPath, secondPath) {
+		if _, err := os.Stat(firstPath); err == nil {
+			t.Errorf("old maildir file was left behind: %s", firstPath)
+		}
+	}
+}
