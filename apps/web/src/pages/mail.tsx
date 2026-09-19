@@ -184,6 +184,7 @@ import {
   SidebarProvider,
 } from "@/components/ui/sidebar"
 import { MailHtmlFrame } from "@/components/mail-html-frame"
+import { MailAttachment } from "@/components/mail-attachment"
 import { useMe } from "@/hooks/use-me"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useToast } from "@/hooks/use-toast"
@@ -2486,34 +2487,15 @@ export function MailPage() {
                     <div className="mt-8 rounded-lg border p-4">
                       <div className="mb-3 font-medium">附件</div>
                       <div className="space-y-2">
-                        {selected.attachments.map((a) =>
-                          canDownloadAttachments ? (
-                            <a
-                              className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-accent"
-                              href={attachmentHref(selected, a.id)}
-                              key={a.id}
-                            >
-                              <span className="flex items-center gap-2">
-                                <Paperclip className="h-4 w-4" />
-                                {a.filename}
-                              </span>
-                              <span className="text-muted-foreground">
-                                {formatBytes(a.sizeBytes)}
-                              </span>
-                            </a>
-                          ) : (
-                            <div
-                              className="flex items-center justify-between rounded-md border p-3 text-sm text-muted-foreground"
-                              key={a.id}
-                            >
-                              <span className="flex items-center gap-2">
-                                <Paperclip className="h-4 w-4" />
-                                {a.filename}
-                              </span>
-                              <span>{formatBytes(a.sizeBytes)}</span>
-                            </div>
-                          )
-                        )}
+                        {selected.attachments.map((a) => (
+                          <MailAttachment
+                            key={`${selected.id}-${a.id}`}
+                            {...a}
+                            href={attachmentHref(selected, a.id)}
+                            sizeLabel={formatBytes(a.sizeBytes)}
+                            allowed={canDownloadAttachments}
+                          />
+                        ))}
                       </div>
                     </div>
                   )}
@@ -4710,32 +4692,15 @@ function CompactMessageDetail({
                 <div className="mt-8 rounded-lg border p-4">
                   <div className="mb-3 font-medium">附件</div>
                   <div className="space-y-2">
-                    {selected.attachments.map((a) =>
-                      canDownloadAttachments ? (
-                        <a
-                          className="flex flex-col gap-1 rounded-md border p-3 text-sm hover:bg-accent sm:flex-row sm:items-center sm:justify-between"
-                          href={attachmentHref(selected, a.id)}
-                          key={a.id}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <Paperclip className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{a.filename}</span>
-                          </span>
-                          <span className="text-muted-foreground">{formatBytes(a.sizeBytes)}</span>
-                        </a>
-                      ) : (
-                        <div
-                          className="flex flex-col gap-1 rounded-md border p-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between"
-                          key={a.id}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <Paperclip className="h-4 w-4 shrink-0" />
-                            <span className="truncate">{a.filename}</span>
-                          </span>
-                          <span>{formatBytes(a.sizeBytes)}</span>
-                        </div>
-                      )
-                    )}
+                    {selected.attachments.map((a) => (
+                      <MailAttachment
+                        key={`${selected.id}-${a.id}`}
+                        {...a}
+                        href={attachmentHref(selected, a.id)}
+                        sizeLabel={formatBytes(a.sizeBytes)}
+                        allowed={canDownloadAttachments}
+                      />
+                    ))}
                   </div>
                 </div>
               )}
