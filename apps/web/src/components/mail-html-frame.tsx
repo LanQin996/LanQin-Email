@@ -29,23 +29,27 @@ export function MailHtmlFrame({
   )
 
   const resize = React.useCallback(() => {
-    const doc = iframeRef.current?.contentDocument
-    if (!doc) return
+    const frame = iframeRef.current
+    const doc = frame?.contentDocument
+    if (!frame || !doc) return
     const body = doc.body
     const html = doc.documentElement
-    setHeight(
-      Math.max(
-        minHeight,
-        Math.ceil(
-          Math.max(
-            body?.scrollHeight || 0,
-            body?.offsetHeight || 0,
-            html?.scrollHeight || 0,
-            html?.offsetHeight || 0
-          )
+    // Measure without the previous viewport height, so collapsing a quote can
+    // shrink the frame again instead of leaving a large empty area.
+    frame.style.height = "0px"
+    const nextHeight = Math.max(
+      minHeight,
+      Math.ceil(
+        Math.max(
+          body?.scrollHeight || 0,
+          body?.offsetHeight || 0,
+          html?.scrollHeight || 0,
+          html?.offsetHeight || 0
         )
       )
     )
+    frame.style.height = `${nextHeight}px`
+    setHeight(nextHeight)
   }, [minHeight])
 
   React.useEffect(() => {
@@ -53,6 +57,7 @@ export function MailHtmlFrame({
     const frame = iframeRef.current
     if (!frame) return
     let observer: ResizeObserver | undefined
+    let observedDocument: Document | null = null
     const timers = [
       window.setTimeout(resize, 0),
       window.setTimeout(resize, 120),
@@ -61,6 +66,10 @@ export function MailHtmlFrame({
     const attach = () => {
       const doc = frame.contentDocument
       if (!doc) return
+      observedDocument?.removeEventListener("toggle", resize, true)
+      observedDocument = doc
+      doc.addEventListener("toggle", resize, true)
+      observer?.disconnect()
       // Links open outside the frame; without noreferrer the target would learn the
       // mailbox URL.
       doc.querySelectorAll("a[href]").forEach((link) => {
@@ -81,6 +90,7 @@ export function MailHtmlFrame({
     return () => {
       frame.removeEventListener("load", attach)
       observer?.disconnect()
+      observedDocument?.removeEventListener("toggle", resize, true)
       timers.forEach((timer) => window.clearTimeout(timer))
     }
   }, [resize, srcDoc])

@@ -2,6 +2,26 @@ import DOMPurify from "dompurify"
 
 export type ComposerValue = { text: string; html: string }
 
+export function withPrefix(subject: string, prefix: "Re:" | "Fwd:") {
+  const pattern =
+    prefix === "Re:"
+      ? /^(?:(?:re|回复|答复|回覆)\s*[:：]\s*)+/i
+      : /^(?:(?:fwd?|转发|轉寄|轉發)\s*[:：]\s*)+/i
+  return `${prefix} ${subject.trim().replace(pattern, "")}`
+}
+
+export function quotedComposerValue(headers: string, body: string): ComposerValue {
+  const quote = body
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n")
+  return {
+    text: `\n\n${headers}\n\n${quote}`,
+    html: `<p><br></p><blockquote>${plainTextToHtml(headers)}${plainTextToHtml(body)}</blockquote>`,
+  }
+}
+
 export function plainTextComposerValue(value: string): ComposerValue {
   return { text: value, html: plainTextToHtml(value) }
 }
@@ -41,22 +61,24 @@ export function escapeHtml(value: string) {
 
 export function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
   const rawBody = bodyHtml.trim() ? bodyHtml : `<pre>${escapeHtml(bodyText || "")}</pre>`
-  const sanitized = DOMPurify.sanitize(rawBody, {
-    ADD_ATTR: [
-      "style",
-      "type",
-      "align",
-      "valign",
-      "bgcolor",
-      "border",
-      "cellpadding",
-      "cellspacing",
-      "width",
-      "height",
-    ],
-    ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
-    WHOLE_DOCUMENT: /<html[\s>]/i.test(rawBody) || /<body[\s>]/i.test(rawBody),
-  })
+  const sanitized = foldMailQuotes(
+    DOMPurify.sanitize(rawBody, {
+      ADD_ATTR: [
+        "style",
+        "type",
+        "align",
+        "valign",
+        "bgcolor",
+        "border",
+        "cellpadding",
+        "cellspacing",
+        "width",
+        "height",
+      ],
+      ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
+      WHOLE_DOCUMENT: /<html[\s>]/i.test(rawBody) || /<body[\s>]/i.test(rawBody),
+    })
+  )
   if (/<html[\s>]/i.test(sanitized) || /<body[\s>]/i.test(sanitized)) {
     const hasHead = /<head[\s>]/i.test(sanitized)
     const withBase = hasHead
@@ -82,6 +104,61 @@ ${mailFrameBaseStyle()}
 </html>`
 }
 
+// Only fold our own recognizable reply header, not arbitrary blockquotes (which
+// may be the actual message). Legacy replies used plain paragraphs with `>`.
+function foldMailQuotes(html: string) {
+  const wholeDocument = /<html[\s>]|<body[\s>]/i.test(html)
+  const doc = new DOMParser().parseFromString(html, "text/html")
+  if (!wholeDocument) doc.body.innerHTML = html
+  const header =
+    /^----- 原始邮件 -----\nFrom: [^\n]*\nTo: [^\n]*\nDate: [^\n]*\nSubject: [^\n]*(?:\n|$)/
+  const fold = (quote: Element) => {
+    const details = doc.createElement("details")
+    details.className = "mail-quoted-history"
+    const summary = doc.createElement("summary")
+    summary.textContent = "显示 / 隐藏原邮件"
+    quote.replaceWith(details)
+    details.append(summary, quote)
+  }
+  for (const quote of Array.from(doc.body.querySelectorAll("blockquote"))) {
+    if (!quote.parentElement?.closest("blockquote") && header.test(stripHtml(quote.innerHTML))) {
+      fold(quote)
+    }
+  }
+  for (const element of Array.from(doc.body.children)) {
+    if (!["P", "PRE"].includes(element.tagName)) continue
+    const text = stripHtml(element.innerHTML)
+    const marker = text.indexOf("----- 原始邮件 -----")
+    if (marker < 0 || (marker > 0 && text[marker - 1] !== "\n")) continue
+    const tail = text.slice(marker)
+    if (!header.test(tail)) continue
+    // Only recognize the old plain-text format, never discard rich HTML.
+    const siblings: Element[] = []
+    let next = element.nextElementSibling
+    while (
+      next &&
+      next.tagName === "P" &&
+      /^(?:>[^\n]*(?:\n|$))+$/.test(stripHtml(next.innerHTML))
+    ) {
+      siblings.push(next)
+      next = next.nextElementSibling
+    }
+    if ([element, ...siblings].some((node) => node.querySelector(":not(br)"))) continue
+    const history = [tail, ...siblings.map((node) => stripHtml(node.innerHTML))].join("\n\n")
+    const quote = doc.createElement("blockquote")
+    quote.innerHTML = plainTextToHtml(history.replace(/^> ?/gm, ""))
+    if (marker > 0) {
+      element.innerHTML = plainTextToHtmlFragment(text.slice(0, marker))
+      element.after(quote)
+    } else {
+      element.replaceWith(quote)
+    }
+    siblings.forEach((node) => node.remove())
+    fold(quote)
+  }
+  return wholeDocument ? doc.documentElement.outerHTML : doc.body.innerHTML
+}
+
 function mailFrameBaseStyle() {
   return `<style>
   html, body { margin: 0; padding: 0; background: #fff; color: #111827; }
@@ -98,6 +175,9 @@ function mailFrameBaseStyle() {
   table { max-width: 100%; }
   pre { white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   a { color: #2563eb; }
+  blockquote { margin: 16px 0; padding-left: 16px; border-left: 3px solid #d1d5db; color: #6b7280; }
+  .mail-quoted-history { margin-top: 20px; }
+  .mail-quoted-history > summary { cursor: pointer; color: #6b7280; font-size: 13px; }
 </style>`
 }
 
@@ -115,5 +195,11 @@ export function htmlContainsMeaningfulContent(html: string) {
 function stripHtml(html: string) {
   const div = document.createElement("div")
   div.innerHTML = DOMPurify.sanitize(html)
-  return div.textContent || div.innerText || ""
+  div.querySelectorAll("br").forEach((node) => node.replaceWith("\n"))
+  div
+    .querySelectorAll("p, div, blockquote, pre, li, tr, h1, h2, h3, h4, h5, h6")
+    .forEach((node) => {
+      node.append("\n")
+    })
+  return (div.textContent || "").trim()
 }

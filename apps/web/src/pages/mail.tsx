@@ -154,7 +154,9 @@ import {
   plainTextComposerValue,
   plainTextToHtml,
   plainTextToHtmlFragment,
+  quotedComposerValue,
   sanitizeComposerHtml,
+  withPrefix,
   type ComposerValue,
 } from "@/components/mail-content"
 import {
@@ -1479,7 +1481,7 @@ export function MailPage() {
       key: `reply-${message.id}-${Date.now()}`,
       to: message.from,
       subject: withPrefix(message.subject, "Re:"),
-      text: quoteMessage(message),
+      ...quoteMessage(message),
     })
   }
   function openForward(message: MailMessage) {
@@ -1487,7 +1489,7 @@ export function MailPage() {
     openCompose({
       key: `forward-${message.id}-${Date.now()}`,
       subject: withPrefix(message.subject, "Fwd:"),
-      text: quoteMessage(message),
+      ...quoteMessage(message),
     })
   }
   async function openDraft(message: MailMessage) {
@@ -7527,16 +7529,10 @@ function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>)
     osc.stop(start + 0.18)
   }
 }
-function withPrefix(subject: string, prefix: string) {
-  return subject.toLowerCase().startsWith(prefix.toLowerCase()) ? subject : `${prefix} ${subject}`
-}
 function quoteMessage(message: MailMessage) {
-  const body = message.bodyText || stripHtml(message.bodyHtml || message.snippet || "")
-  const quote = body
-    .split("\n")
-    .map((line) => `> ${line}`)
-    .join("\n")
-  return `\n\n----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}\n\n${quote}`
+  const body = message.bodyText || htmlComposerValue(message.bodyHtml || message.snippet || "").text
+  const headers = `----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}`
+  return quotedComposerValue(headers, body)
 }
 function stripHtml(html: string) {
   const div = document.createElement("div")

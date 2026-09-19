@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" />
+  <title>Mail reply regression tests</title>
+  <pre id="results">Running…</pre>
+  <div id="preview"></div>
+  <!-- Run the web Vite dev server and open /scripts/mail-content.test.html. -->
+  <script type="module">
+    import React from "react"
+    import { createRoot } from "react-dom/client"
+    import { Editor } from "@tiptap/core"
+    import StarterKit from "@tiptap/starter-kit"
+    import { MailHtmlFrame } from "../src/components/mail-html-frame.tsx"
+    import {
+      buildMailFrameSrcDoc,
+      htmlComposerValue,
+      plainTextToHtml,
+      quotedComposerValue,
+      withPrefix,
+    } from "../src/components/mail-content.ts"
+
+    const results = []
+    function check(name, condition) {
+      if (!condition) throw new Error(name)
+      results.push(`PASS ${name}`)
+    }
+    const parse = (html, text = "") =>
+      new DOMParser().parseFromString(buildMailFrameSrcDoc(html, text), "text/html")
+    const headers =
+      "----- 原始邮件 -----\nFrom: Sender <sender@example.test>\nTo: receiver@example.test\nDate: 2026/09/19 12:00\nSubject: 回复：测试"
+    try {
+      check(
+        "normalize mixed reply prefixes",
+        withPrefix(" Re: 回复：RE: 测试", "Re:") === "Re: 测试"
+      )
+      check("normalize forward prefixes", withPrefix("转发：Fwd: 测试", "Fwd:") === "Fwd: 测试")
+      check("preserve different prefix", withPrefix("Fwd: 测试", "Re:") === "Re: Fwd: 测试")
+      const reply = quotedComposerValue(headers, "第一行\n第二行\n\n<img src=x onerror=alert(1)>")
+      check(
+        "real HTML quote",
+        reply.html.includes("<blockquote>") && !reply.html.includes("&gt; 第一行")
+      )
+      check("escape content", !parse(reply.html).querySelector("img"))
+      check(
+        "preserve plain text line breaks",
+        htmlComposerValue(reply.html).text.includes("第一行\n第二行")
+      )
+      const editor = new Editor({ extensions: [StarterKit], content: reply.html })
+      check(
+        "quote survives editor round trip",
+        parse(editor.getHTML()).querySelector("details blockquote")
+      )
+      editor.destroy()
+      const current = "<p>本次回复</p>"
+      const doc = parse(current + reply.html)
+      check("new quote collapsed", doc.querySelector("details:not([open]) blockquote"))
+      check("current reply outside quote", doc.body.firstElementChild.textContent === "本次回复")
+      const legacy = `本次回复\n\n${headers}\n\n> 第一行\n> \n> \n> 第二行`
+      for (const [name, html, text] of [
+        ["legacy HTML", plainTextToHtml(legacy), ""],
+        ["legacy plain text", "", legacy],
+      ]) {
+        const old = parse(html, text)
+        check(`${name} folded`, old.querySelector("details:not([open])"))
+        check(
+          `${name} no literal quote markers`,
+          !old.querySelector("blockquote").textContent.includes("> 第一行")
+        )
+        check(`${name} complete content`, old.body.textContent.includes("第二行"))
+      }
+      check(
+        "ordinary blockquote unchanged",
+        !parse("<blockquote>正文引用</blockquote>").querySelector("details")
+      )
+      check(
+        "header-like prose unchanged",
+        !parse("<p>讨论 ----- 原始邮件 ----- 的含义</p>").querySelector("details")
+      )
+      const rich = parse(
+        `<p>${headers.replaceAll("\n", "<br>")}<img src="https://example.test/image.png"></p>`
+      )
+      check(
+        "rich content not discarded",
+        rich.querySelector("img") && !rich.querySelector("details")
+      )
+      const full = parse(
+        "<html><head><style>p{color:red}</style></head><body><p>模板</p></body></html>"
+      )
+      check("full HTML styles preserved", full.head.textContent.includes("p{color:red}"))
+      check(
+        "scripts and handlers removed",
+        !parse('<p onclick="alert(1)">正文</p><script>alert(1)<\/script>').querySelector(
+          "script,[onclick]"
+        )
+      )
+      createRoot(document.getElementById("preview")).render(
+        React.createElement(MailHtmlFrame, {
+          bodyHtml:
+            current +
+            quotedComposerValue(
+              headers,
+              Array.from({ length: 50 }, (_, i) => `历史内容 ${i}`).join("\n")
+            ).html,
+        })
+      )
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+      const frame = document.querySelector("iframe")
+      const details = frame.contentDocument.querySelector("details")
+      const collapsed = frame.getBoundingClientRect().height
+      details.querySelector("summary").click()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      check("expand resizes iframe", frame.getBoundingClientRect().height > collapsed)
+      details.querySelector("summary").click()
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      check("collapse shrinks iframe", frame.getBoundingClientRect().height === collapsed)
+      check("iframe remains sandboxed without scripts", !frame.sandbox.contains("allow-scripts"))
+      document.getElementById("results").textContent = results.join("\n")
+      document.documentElement.dataset.result = "passed"
+    } catch (error) {
+      document.getElementById("results").textContent = results.join("\n") + "\nFAIL " + error.stack
+      document.documentElement.dataset.result = "failed"
+    }
+  </script>
+</html>
