@@ -859,19 +859,19 @@ func (a *App) migrateMessageThreads(ctx context.Context) error {
 			return err
 		}
 	}
-	// Backfill deterministically; existing messages without RFC references each
-	// become their own thread, while replies inherit the referenced message.
-	rows, err = a.db.QueryContext(ctx, `SELECT id,mailbox_id,message_id,thread_id FROM messages WHERE thread_id='' ORDER BY received_at,id`)
+	// Backfill deterministically from Message-ID, falling back to the row ID.
+	// mailbox_id may be NULL for unregistered mail and is not needed here.
+	rows, err = a.db.QueryContext(ctx, `SELECT id,message_id,thread_id FROM messages WHERE thread_id='' ORDER BY received_at,id`)
 	if err != nil {
 		return err
 	}
 	type threadBackfillItem struct {
-		id, mailboxID, messageID, threadID string
+		id, messageID, threadID string
 	}
 	items := make([]threadBackfillItem, 0)
 	for rows.Next() {
 		var item threadBackfillItem
-		if err := rows.Scan(&item.id, &item.mailboxID, &item.messageID, &item.threadID); err != nil {
+		if err := rows.Scan(&item.id, &item.messageID, &item.threadID); err != nil {
 			rows.Close()
 			return err
 		}

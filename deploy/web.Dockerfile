@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:20-bookworm-slim AS build
+FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS build
 WORKDIR /src
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json

@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
-FROM golang:1.25-bookworm AS build
+FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS build
 WORKDIR /src/apps/api
 COPY apps/api/go.mod apps/api/go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+# Keep modules in the layer: registry cache does not persist cache mounts.
+RUN go mod download
 COPY apps/api ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/lanqin-api ./cmd/server
+ARG TARGETOS
+ARG TARGETARCH
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/lanqin-api ./cmd/server
 
 FROM debian:bookworm-slim
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
