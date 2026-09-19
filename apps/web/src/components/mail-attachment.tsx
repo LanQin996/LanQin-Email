@@ -1,13 +1,8 @@
 import * as React from "react"
 import { Download, Eye, Paperclip } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog"
+import { translateUiText, useLanguage } from "@/lib/language"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 const MAX_PREVIEW_BYTES = 25 * 1024 * 1024
 
@@ -26,6 +21,8 @@ export function MailAttachment({
   href: string
   allowed: boolean
 }) {
+  const [language] = useLanguage()
+  const t = (value: string) => translateUiText(value, language)
   const [open, setOpen] = React.useState(false)
   const [url, setUrl] = React.useState("")
   const [error, setError] = React.useState("")
@@ -66,7 +63,16 @@ export function MailAttachment({
         setUrl(objectUrl)
       } catch (cause) {
         if (!controller.signal.aborted) {
-          setError(cause instanceof Error ? cause.message : "附件加载失败，请稍后重试。")
+          const knownErrors = [
+            "附件加载失败，请检查访问权限或稍后重试。",
+            "附件超过 25 MB，请下载后查看。",
+            "文件不是有效的 PDF，请下载后检查。",
+          ]
+          setError(
+            cause instanceof Error && knownErrors.includes(cause.message)
+              ? cause.message
+              : "附件加载失败，请稍后重试。"
+          )
         }
       }
     })()
@@ -78,18 +84,22 @@ export function MailAttachment({
 
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm">
+      <div
+        data-lanqin-i18n-ignore
+        className="flex flex-wrap items-center gap-3 rounded-md border p-3 text-sm"
+      >
         <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
         <div className="min-w-0 flex-1">
           {allowed && previewable && !tooLarge ? (
-            <button
+            <Button
               type="button"
-              className="block max-w-full truncate text-left hover:underline"
+              variant="link"
+              className="block h-auto max-w-full truncate p-0 text-left font-normal"
               title={filename}
               onClick={() => setOpen(true)}
             >
               {filename}
-            </button>
+            </Button>
           ) : (
             <div className="truncate" title={filename}>
               {filename}
@@ -97,13 +107,16 @@ export function MailAttachment({
           )}
           <div className="text-xs text-muted-foreground">
             {sizeLabel}
-            {!allowed
-              ? " · 无附件访问权限"
-              : tooLarge
-                ? " · 超过 25 MB，请下载查看"
-                : !previewable
-                  ? " · 此格式暂不支持在线预览"
-                  : " · 支持预览"}
+            {" · "}
+            {t(
+              !allowed
+                ? "无附件访问权限"
+                : tooLarge
+                  ? "超过 25 MB，请下载查看"
+                  : !previewable
+                    ? "此格式暂不支持在线预览"
+                    : "支持预览"
+            )}
           </div>
         </div>
         {allowed && (
@@ -111,37 +124,43 @@ export function MailAttachment({
             {previewable && !tooLarge && (
               <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
                 <Eye className="h-4 w-4" />
-                预览
+                {t("预览")}
               </Button>
             )}
             <Button variant="outline" size="sm" asChild>
               <a href={href} download={filename}>
                 <Download className="h-4 w-4" />
-                下载
+                {t("下载")}
               </a>
             </Button>
           </div>
         )}
       </div>
       <Dialog open={open && allowed} onOpenChange={setOpen}>
-        <DialogContent className="flex h-[85dvh] w-[95vw] max-w-5xl flex-col">
+        <DialogContent
+          data-lanqin-i18n-ignore
+          aria-describedby={undefined}
+          closeLabel={t("关闭")}
+          className="flex h-[85dvh] w-[95vw] max-w-5xl flex-col"
+        >
           <DialogHeader className="min-w-0 pr-6">
             <DialogTitle className="break-all">{filename}</DialogTitle>
-            <DialogDescription>
-              {sizeLabel} · 附件仅在当前浏览器预览，不发送至第三方服务。
-            </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto rounded-md border bg-muted/30">
             {error ? (
               <p role="alert" className="p-6 text-sm">
-                {error}
+                {t(error)}
               </p>
             ) : !url ? (
               <p role="status" className="p-6 text-sm text-muted-foreground">
-                正在加载附件…
+                {t("正在加载附件…")}
               </p>
             ) : isPdf ? (
-              <iframe title={`预览 ${filename}`} src={url} className="h-full w-full border-0" />
+              <iframe
+                title={`${t("预览")} ${filename}`}
+                src={url}
+                className="h-full w-full border-0"
+              />
             ) : (
               <img
                 src={url}
@@ -153,11 +172,11 @@ export function MailAttachment({
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">
-              无法显示或浏览器不支持预览？可下载后查看。
+              {t("无法显示或浏览器不支持预览？可下载后查看。")}
             </p>
             <Button variant="outline" size="sm" asChild>
               <a href={href} download={filename}>
-                下载附件
+                {t("下载附件")}
               </a>
             </Button>
           </div>

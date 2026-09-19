@@ -105,6 +105,47 @@ const exactTranslations: Record<string, Translation> = {
   取消归档: { "zh-TW": "取消封存", en: "Unarchive" },
   删除: { "zh-TW": "刪除", en: "Delete" },
   附件: { "zh-TW": "附件", en: "Attachments" },
+  下载: { "zh-TW": "下載", en: "Download" },
+  下载附件: { "zh-TW": "下載附件", en: "Download attachment" },
+  无附件访问权限: { "zh-TW": "無附件存取權限", en: "No attachment access" },
+  "超过 25 MB，请下载查看": {
+    "zh-TW": "超過 25 MB，請下載檢視",
+    en: "Over 25 MB. Download to view",
+  },
+  此格式暂不支持在线预览: {
+    "zh-TW": "此格式暫不支援線上預覽",
+    en: "Online preview is not available for this format",
+  },
+  支持预览: { "zh-TW": "支援預覽", en: "Preview available" },
+  "附件仅在当前浏览器预览，不发送至第三方服务。": {
+    "zh-TW": "附件僅在目前瀏覽器預覽，不傳送至第三方服務。",
+    en: "Attachments are previewed in this browser only, without sending them to third-party services.",
+  },
+  "正在加载附件…": { "zh-TW": "正在載入附件…", en: "Loading attachment…" },
+  "附件加载失败，请检查访问权限或稍后重试。": {
+    "zh-TW": "附件載入失敗，請檢查存取權限或稍後重試。",
+    en: "Unable to load the attachment. Check your access permissions or try again later.",
+  },
+  "附件加载失败，请稍后重试。": {
+    "zh-TW": "附件載入失敗，請稍後重試。",
+    en: "Unable to load the attachment. Please try again later.",
+  },
+  "附件超过 25 MB，请下载后查看。": {
+    "zh-TW": "附件超過 25 MB，請下載後檢視。",
+    en: "The attachment exceeds 25 MB. Download it to view.",
+  },
+  "文件不是有效的 PDF，请下载后检查。": {
+    "zh-TW": "檔案不是有效的 PDF，請下載後檢查。",
+    en: "This file is not a valid PDF. Download it to check.",
+  },
+  "图片无法预览，请下载后查看。": {
+    "zh-TW": "圖片無法預覽，請下載後檢視。",
+    en: "Unable to preview this image. Download it to view.",
+  },
+  "无法显示或浏览器不支持预览？可下载后查看。": {
+    "zh-TW": "無法顯示或瀏覽器不支援預覽？可下載後檢視。",
+    en: "Not displaying, or preview unsupported by your browser? Download the attachment to view it.",
+  },
   确认: { "zh-TW": "確認", en: "Confirm" },
   取消: { "zh-TW": "取消", en: "Cancel" },
   关闭: { "zh-TW": "關閉", en: "Close" },
