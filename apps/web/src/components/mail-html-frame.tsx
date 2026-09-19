@@ -1,5 +1,6 @@
 import * as React from "react"
 import { buildMailFrameSrcDoc } from "@/components/mail-content"
+import { translateUiText, useLanguage } from "@/lib/language"
 
 /**
  * Renders untrusted mail HTML inside a sandboxed iframe.
@@ -21,11 +22,12 @@ export function MailHtmlFrame({
   className?: string
   minHeight?: number
 }) {
+  const [language] = useLanguage()
   const iframeRef = React.useRef<HTMLIFrameElement>(null)
   const [height, setHeight] = React.useState(260)
   const srcDoc = React.useMemo(
-    () => buildMailFrameSrcDoc(bodyHtml || "", bodyText || ""),
-    [bodyHtml, bodyText]
+    () => buildMailFrameSrcDoc(bodyHtml || "", bodyText || "", language),
+    [bodyHtml, bodyText, language]
   )
 
   const resize = React.useCallback(() => {
@@ -98,7 +100,8 @@ export function MailHtmlFrame({
   return (
     <iframe
       ref={iframeRef}
-      title="邮件正文"
+      data-lanqin-i18n-ignore
+      title={translateUiText("邮件正文", language)}
       className={className || "block w-full border-0 bg-white"}
       sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox"
       referrerPolicy="no-referrer"

@@ -11,6 +11,7 @@
     import { Editor } from "@tiptap/core"
     import StarterKit from "@tiptap/starter-kit"
     import { MailHtmlFrame } from "../src/components/mail-html-frame.tsx"
+    import { getInitialLanguage, setStoredLanguage } from "../src/lib/language.tsx"
     import {
       buildMailFrameSrcDoc,
       htmlComposerValue,
@@ -28,6 +29,12 @@
       new DOMParser().parseFromString(buildMailFrameSrcDoc(html, text), "text/html")
     const headers =
       "----- 原始邮件 -----\nFrom: Sender <sender@example.test>\nTo: receiver@example.test\nDate: 2026/09/19 12:00\nSubject: 回复：测试"
+    const originalLanguage = getInitialLanguage()
+    const languages = [
+      ["zh-CN", "显示 / 隐藏原邮件", "邮件正文"],
+      ["zh-TW", "顯示 / 隱藏原郵件", "郵件內文"],
+      ["en", "Show / hide original message", "Message body"],
+    ]
     try {
       check(
         "normalize mixed reply prefixes",
@@ -56,6 +63,29 @@
       check("new quote collapsed", doc.querySelector("details:not([open]) blockquote"))
       check("current reply outside quote", doc.body.firstElementChild.textContent === "本次回复")
       const legacy = `本次回复\n\n${headers}\n\n> 第一行\n> \n> \n> 第二行`
+      for (const [language, label] of languages) {
+        for (const [name, html, text] of [
+          ["new quote", current + reply.html, ""],
+          ["legacy HTML", plainTextToHtml(legacy), ""],
+          ["legacy plain text", "", legacy],
+        ]) {
+          const localized = new DOMParser().parseFromString(
+            buildMailFrameSrcDoc(html, text, language),
+            "text/html"
+          )
+          check(
+            `${language} ${name} label`,
+            localized.querySelector("summary").textContent === label
+          )
+          check(
+            `${language} ${name} preserves headers`,
+            htmlComposerValue(localized.querySelector("blockquote").innerHTML).text.includes(
+              headers
+            )
+          )
+          check(`${language} ${name} preserves body`, localized.body.textContent.includes("第一行"))
+        }
+      }
       for (const [name, html, text] of [
         ["legacy HTML", plainTextToHtml(legacy), ""],
         ["legacy plain text", "", legacy],
@@ -114,11 +144,33 @@
       await new Promise((resolve) => setTimeout(resolve, 200))
       check("collapse shrinks iframe", frame.getBoundingClientRect().height === collapsed)
       check("iframe remains sandboxed without scripts", !frame.sandbox.contains("allow-scripts"))
+      for (const [language, label, title] of [...languages, languages[0]]) {
+        setStoredLanguage(language)
+        const deadline = Date.now() + 3000
+        while (
+          (frame.title !== title ||
+            frame.contentDocument?.querySelector("summary")?.textContent !== label) &&
+          Date.now() < deadline
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+        check(`${language} live iframe title`, frame.title === title)
+        check(
+          `${language} live quote label`,
+          frame.contentDocument.querySelector("summary").textContent === label
+        )
+        check(
+          `${language} live body unchanged`,
+          frame.contentDocument.body.textContent.includes("历史内容 49")
+        )
+      }
       document.getElementById("results").textContent = results.join("\n")
       document.documentElement.dataset.result = "passed"
     } catch (error) {
       document.getElementById("results").textContent = results.join("\n") + "\nFAIL " + error.stack
       document.documentElement.dataset.result = "failed"
+    } finally {
+      setStoredLanguage(originalLanguage)
     }
   </script>
 </html>

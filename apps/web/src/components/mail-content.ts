@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify"
+import { translateUiText, type Language } from "@/lib/language"
 
 export type ComposerValue = { text: string; html: string }
 
@@ -59,7 +60,11 @@ export function escapeHtml(value: string) {
     .replace(/'/g, "&#39;")
 }
 
-export function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
+export function buildMailFrameSrcDoc(
+  bodyHtml: string,
+  bodyText: string,
+  language: Language = "zh-CN"
+) {
   const rawBody = bodyHtml.trim() ? bodyHtml : `<pre>${escapeHtml(bodyText || "")}</pre>`
   const sanitized = foldMailQuotes(
     DOMPurify.sanitize(rawBody, {
@@ -77,7 +82,8 @@ export function buildMailFrameSrcDoc(bodyHtml: string, bodyText: string) {
       ],
       ADD_TAGS: ["html", "head", "body", "style", "center", "font"],
       WHOLE_DOCUMENT: /<html[\s>]/i.test(rawBody) || /<body[\s>]/i.test(rawBody),
-    })
+    }),
+    language
   )
   if (/<html[\s>]/i.test(sanitized) || /<body[\s>]/i.test(sanitized)) {
     const hasHead = /<head[\s>]/i.test(sanitized)
@@ -106,7 +112,7 @@ ${mailFrameBaseStyle()}
 
 // Only fold our own recognizable reply header, not arbitrary blockquotes (which
 // may be the actual message). Legacy replies used plain paragraphs with `>`.
-function foldMailQuotes(html: string) {
+function foldMailQuotes(html: string, language: Language) {
   const wholeDocument = /<html[\s>]|<body[\s>]/i.test(html)
   const doc = new DOMParser().parseFromString(html, "text/html")
   if (!wholeDocument) doc.body.innerHTML = html
@@ -116,7 +122,7 @@ function foldMailQuotes(html: string) {
     const details = doc.createElement("details")
     details.className = "mail-quoted-history"
     const summary = doc.createElement("summary")
-    summary.textContent = "显示 / 隐藏原邮件"
+    summary.textContent = translateUiText("显示 / 隐藏原邮件", language)
     quote.replaceWith(details)
     details.append(summary, quote)
   }

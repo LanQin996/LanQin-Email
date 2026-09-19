@@ -223,6 +223,10 @@ const exactTranslations: Record<string, Translation> = {
   接收时间: { "zh-TW": "接收時間", en: "Received time" },
   未填写收件人: { "zh-TW": "未填寫收件者", en: "No recipients" },
   邮件正文: { "zh-TW": "郵件內文", en: "Message body" },
+  "显示 / 隐藏原邮件": {
+    "zh-TW": "顯示 / 隱藏原郵件",
+    en: "Show / hide original message",
+  },
   邮件详情: { "zh-TW": "郵件詳情", en: "Message details" },
   上一封: { "zh-TW": "上一封", en: "Previous" },
   下一封: { "zh-TW": "下一封", en: "Next" },

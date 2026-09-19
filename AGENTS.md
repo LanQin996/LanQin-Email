@@ -1,68 +1,153 @@
 # AGENTS.md
 
-## Project overview
+## 项目概况
 
-This repository is an email-related application. Treat changes as security-sensitive by default, especially code that handles authentication, authorization, user identity, email sending/receiving, templates, attachments, deployment, and environment variables.
+本仓库是邮件应用。默认将代码变更视为安全敏感操作，尤其关注认证、授权、用户身份、邮件收发、模板、附件、部署及环境变量。
 
-## Review guidelines
+## 仓库结构与信息依据
 
-Codex should automatically review pull requests for this repository when automatic review is enabled in Codex settings. Apply these guidelines to every PR review; the author should not need to add an `@codex review` comment for normal reviews.
+- `apps/web`：基于 React、TypeScript、Vite 的邮箱前台与管理界面，使用 Tailwind、shadcn/ui、React Query 和 Tiptap。
+- `apps/api`：Go API，入口位于 `cmd/server`，业务代码与测试位于 `internal/app`。
+- 当前功能包括本地邮箱、外部 IMAP 账户、邮箱共享、权限组、附件、定时发送和投递队列。修改时应覆盖受影响的访问路径，不能只考虑主邮箱页面。
+- 数据库支持 SQLite、PostgreSQL 和 MySQL。修改持久化逻辑前，先检查数据库方言辅助函数、表结构及数据库契约测试。
+- `deploy/` 存放邮件服务及数据库部署配置；`docs/API.md` 和 `docs/openapi.json` 描述对外 API。
+- 修改前阅读相关实现与局部规范。前端变更必须先阅读 `apps/web/SHADCN_RULES.md`、`apps/web/scripts/check-shadcn.mjs` 和 `apps/web/package.json`。
+- 工具版本及验证命令以依赖清单、锁文件、`apps/api/go.mod` 和 `.github/workflows/ci.yml` 为准，不直接照搬可能过期的说明文档。
 
-When reviewing pull requests for this repository, prioritize finding issues that are actionable and likely to affect production behavior.
+## 开发流程
 
-### Security checks
+- 先查看 `git status` 和已有差异，保留与任务无关的用户修改，不重置或覆盖。
+- 先读文件再修改，优先使用小范围、可审查的补丁。保留 UTF-8 编码及原有换行风格；除非明确要求整体整理，否则只格式化本次修改的文件。
+- Windows 环境下，首选工具或 Bash 不可用时，使用可用的文件、搜索工具或等效 Node/Python 操作。不得虚构工具，也不得将 Unix shell 语法直接交给 PowerShell 执行。
+- 改变行为前，追踪受影响的界面、API 调用、授权检查及持久化或渲染链路。
+- 复用现有组件和辅助函数。根据影响范围检查桌面端、移动端、管理界面及外部邮箱、共享邮箱路径。
+- 不为局部 UI 问题引入无关依赖、数据库结构变更或大范围重构。
+- 测试数据应使用合成样本，不将真实邮件正文、附件内容、凭据或个人信息复制进测试、截图及日志。
 
-- Check authentication and authorization boundaries for bypasses, privilege escalation, insecure direct object references, and missing ownership checks.
-- Verify that authentication and authorization middleware wraps every protected route and API handler.
-- Check email-related flows for spoofing, header injection, unsafe template rendering, open redirect links, phishing-prone behavior, and unintended recipient disclosure.
-- Check input handling for SQL/NoSQL injection, command injection, path traversal, SSRF, XSS, CSRF, unsafe deserialization, and unsafe file upload or attachment handling.
-- Check that secrets, tokens, passwords, API keys, SMTP credentials, verification codes, session IDs, cookies, PII, and personal data are never committed, logged, returned in API responses, or exposed to the client unnecessarily.
-- Check cryptography and token logic for weak randomness, missing expiration, missing audience/issuer validation, replay risk, and insecure storage.
+## 前端实现要求
 
-### API and backend checks
+### shadcn/ui 与无障碍
 
-- Verify API changes include proper validation, error handling, status codes, rate limiting where appropriate, and consistent authorization checks.
-- Verify database queries and migrations preserve data integrity, are backward-compatible when needed, and do not risk data loss without an explicit migration plan.
-- Watch for race conditions, duplicate email sends, retry storms, queue/idempotency bugs, and missing transaction boundaries.
-- Check background jobs, scheduled tasks, and webhook handlers for safe retries, idempotency, signature verification, and failure logging.
+- 业务 UI 基础控件必须使用 `@/components/ui/*`，不得在业务 TSX 中直接新增原生按钮、输入框、下拉框、表格或弹窗。可点击的附件名称也应使用现有 `Button`。
+- 遵守 `apps/web/SHADCN_RULES.md`。业务组件禁止使用 `CardDescription`、`DialogDescription`、`SheetDescription`，不得在标题下增加说明性小字。不能通过换成外观相同的普通段落绕过规则。
+- 保持 shadcn 中性风格，避免蓝色品牌色、渐变和重阴影。
+- 保留可访问的弹窗标题、键盘操作、焦点管理和多语言控件标签。弹窗有意不提供描述时，显式取消 `aria-describedby`，避免引用不存在的元素。
+- 新增 UI 基础组件遵循 `SHADCN_RULES.md` 的安装流程；审查生成的差异，不整体覆盖已有定制的共享组件。
 
-### Frontend and UX checks
+### 多语言
 
-- Check that user-controlled content rendered in the UI is escaped or sanitized.
-- Check forms for validation, clear error handling, and no leakage of sensitive implementation details.
-- Check permission-dependent UI so hidden actions are also enforced by the backend.
+- 新增或修改的界面文案必须同时支持 `zh-CN`、`zh-TW` 和 `en`，覆盖加载状态、错误、权限提示、降级提示、工具提示及无障碍标签。
+- 复用 `apps/web/src/lib/language.tsx` 中的 `useLanguage`、`translateUiText` 和现有翻译字典，不另建一套多语言系统。
+- 项目同时使用 `LanguageDomSync`。显式翻译的组件应按需使用 `data-lanqin-i18n-ignore` 防止重复 DOM 翻译，注意 Portal 渲染的弹窗内容。
+- UI 翻译不得改变文件名、地址、邮件主题及正文；邮件内容翻译属于独立、显式触发的功能。
+- 错误文案在渲染时翻译，确保切换语言后已有错误提示即时更新。未知技术错误使用可翻译的通用提示，不直接显示原始异常信息。
+- 验证弹窗打开、错误提示及加载状态下的语言切换，不能只检查静态按钮文字。
 
-### Deployment and configuration checks
+### 邮件内容与附件
 
-- Review Docker, CI/CD, environment, and deployment changes for exposed ports, overly broad permissions, insecure defaults, missing health checks, and accidental secret exposure.
-- Prefer least privilege for service accounts, containers, filesystem mounts, and network access.
-- Flag production-impacting config changes that lack rollback notes or operational context.
+- 邮件 HTML、回复引用、文件名和附件均视为不可信输入。
+- 邮件 HTML 复用经过净化并使用沙箱隔离的 `MailHtmlFrame`，不得直接插入应用 DOM，也不得为解决展示问题而削弱 iframe 隔离。
+- 附件预览必须保留与下载一致的服务端授权检查，覆盖外部邮箱及共享邮箱限制。隐藏操作入口不能替代授权。
+- 不将私密附件发送至第三方预览服务。采用预览格式白名单，不支持的格式保留下载，提供明确的失败和大小限制提示。
+- 关闭预览或切换内容时取消过期请求并释放对象 URL。不得将 HTML/SVG 附件作为应用同源页面内容执行或渲染。
+- 分别验证预览与下载。创建 blob URL 或挂载 iframe，不代表真实 PDF 已成功显示。
 
-### Documentation checks
+## 代码审查规范
 
-- Flag misleading or dangerous deployment instructions.
-- Treat spelling mistakes in user-facing documentation as review comments only when they could confuse setup, security, or production operation.
+自动审查启用时，所有 PR 审查均应遵守本规范，正常审查不应要求作者额外发送 `@codex review`。本文规定审查行为，不替代平台设置或工作流配置。
 
-### Review style
+优先发现能够落实修复、且可能影响生产行为的问题。
 
-- Be concise and specific. Include file paths and the exact risky behavior.
-- Prefer high-confidence findings over speculative comments.
-- If suggesting a fix, explain the minimal safe change.
-- Do not approve changes solely because tests pass; still inspect security, correctness, and operational risk.
-- Avoid commenting on formatting-only issues unless they hide a real bug.
+### 安全检查
 
+- 检查认证和授权边界，关注绕过、提权、不安全的直接对象引用及缺失的归属校验。
+- 确认所有受保护路由和 API 处理函数均受到认证、授权中间件保护。
+- 检查邮件流程中的身份伪造、邮件头注入、不安全模板渲染、开放重定向、易被用于钓鱼的行为及意外收件人泄露。
+- 检查 SQL/NoSQL 注入、命令注入、路径穿越、SSRF、XSS、CSRF、不安全反序列化及文件上传、附件处理风险。
+- 密钥、令牌、密码、API Key、SMTP 凭据、验证码、会话 ID、Cookie 和个人信息不得意外提交至仓库、写入日志、返回 API 响应或不必要地暴露给客户端。
+- 检查加密与令牌逻辑中的弱随机数、缺失过期时间、缺失受众或签发者校验、重放风险及不安全存储。
 
-## Fix guidelines
+### API 与后端检查
 
-When a maintainer asks Codex to fix review findings in a pull request, such as `@codex fix the P1 issue`, Codex should use the pull request context and apply the smallest safe patch that resolves the requested issue.
+- API 变更应具备适当的输入校验、错误处理、状态码、必要的限流及一致的授权检查。
+- 数据库查询和迁移应保持数据完整性及必要的向后兼容性；可能丢失数据的变更必须有明确迁移方案。
+- 关注竞态条件、重复发送邮件、重试风暴、队列或幂等性缺陷及缺失的事务边界。
+- 检查后台任务、定时任务及 Webhook 的安全重试、幂等性、签名验证和失败日志。
 
-- Fix only the issue requested unless another change is required to make the fix correct.
-- Preserve existing public behavior and APIs unless the requested fix explicitly requires a breaking change.
-- Add or update focused tests when practical, especially for security, authorization, validation, and email-delivery behavior.
-- Do not introduce new dependencies, schema changes, deployment changes, or broad refactors unless clearly necessary.
-- Keep commits focused and explain the security/correctness impact in the PR response.
-- If the issue cannot be safely fixed without more information, explain the blocker and the exact decision needed.
+### 前端与交互检查
 
-## Verification expectations
-For non-trivial changes, look for relevant tests or manual verification notes. If they are missing, mention the specific behavior that should be tested rather than requesting generic test coverage.
+- 确认用户可控内容在渲染前经过转义或净化。
+- 表单应具备校验和清晰的错误处理，不泄露敏感实现细节。
+- 权限相关操作必须由后端校验，不能只依赖界面隐藏。
+
+### 部署与配置检查
+
+- 审查 Docker、CI/CD、环境变量及部署变更，关注暴露端口、过宽权限、不安全默认值、缺失健康检查和意外凭据泄露。
+- 服务账户、容器、文件系统挂载及网络访问遵循最小权限原则。
+- 影响生产行为的配置变更若缺少回滚说明或运维背景，应明确指出。
+
+### 文档检查
+
+- 指出误导性或危险的部署说明。
+- 仅当文档拼写错误可能干扰安装、安全或生产运维时，将其列为审查问题。
+
+### 审查反馈方式
+
+- 简洁、具体，包含文件路径和确切的风险行为。
+- 优先报告高置信度问题，避免推测性评论。
+- 提出修复建议时，说明最小安全改动。
+- 不因测试通过就直接认可变更，仍需检查安全性、正确性和运维风险。
+- 除非掩盖真实缺陷，否则不将纯格式问题作为代码审查发现。
+
+## 审查问题修复规范
+
+维护者要求修复 PR 审查问题（如 `@codex fix the P1 issue`）时，应结合 PR 上下文，采用能解决指定问题的最小安全补丁。
+
+- 只修复指定问题，除非其他修改是保证修复正确性所必需的。
+- 保持现有公开行为和 API，除非任务明确要求破坏性变更。
+- 条件允许时补充或更新针对性测试，尤其覆盖安全、授权、输入校验和邮件投递行为。
+- 无明确必要性时，不引入新依赖、数据库结构变更、部署变更或大范围重构。
+- 提交保持聚焦，并在 PR 回复中解释安全性或正确性影响。
+- 缺少信息导致无法安全修复时，说明阻碍和需要决定的具体事项。
+
+## 验证要求
+
+非简单变更应具备相关测试或人工验证记录。缺少验证时，指出应测试的具体行为，不笼统要求“增加测试覆盖率”。
+
+### 前端
+
+前端变更完成后，在仓库根目录执行：
+
+```text
+pnpm --dir apps/web run check
+```
+
+该命令依次执行 `check:shadcn`、全量 ESLint、Prettier 格式检查、TypeScript 检查及 Vite 构建。**仅构建成功或 Lint 通过，不代表前端完整检查通过。**
+
+- 串联命令提前中断时，明确失败阶段，并单独运行剩余相关检查，不得报告完整检查通过。
+- 与任务无关的失败应列出具体文件和失败类型，不通过全仓库格式化掩盖问题。
+- 当前 `apps/web/package.json` 没有 `test` 脚本，不得声称运行了 `pnpm test`。使用针对性的浏览器检查或现有合适的测试工具，并记录实际验证内容。
+- UI 变更应按影响范围覆盖桌面端、移动端、允许和拒绝访问、加载与失败状态，以及三种界面语言。
+
+### API 与部署
+
+在 `apps/api` 目录执行与 CI 一致的检查：
+
+```text
+gofmt -l .
+go vet ./...
+go test ./...
+```
+
+- `gofmt -l .` 应不输出任何文件名。只格式化本次修改的 Go 文件，不修改无关文件。
+- 持久化逻辑变更应使用 `.github/workflows/ci.yml` 中描述的测试 DSN，在隔离的 PostgreSQL 和 MySQL 实例上运行 `TestExternalDatabaseContract`。缺少服务或跳过测试，不代表跨数据库验证通过。
+- 部署变更应执行 CI 中适用的 shell 格式、语法检查及 Compose 数据库配置组合验证。不得为复现 CI 覆盖已有 `deploy/.env`，或启动、删除生产服务及数据卷。
+- `make api-check` 还会执行格式化并依赖 `staticcheck`，不等同于 CI 中不会改写源码的 API 验证流程。
+
+### 完成说明
+
+- 说明修改内容、已完成验证，以及尚未验证或受阻的部分。
+- 区分使用模拟响应的组件测试，与连接真实运行后端、验证实际渲染的端到端测试。
+- 未实际完成时，不得声称已经部署、提交或完整验证。
+- 仅文档变更需核对路径、命令一致性并执行 `git diff --check`；没有重新运行代码检查时，不得声称已经重跑。
 
