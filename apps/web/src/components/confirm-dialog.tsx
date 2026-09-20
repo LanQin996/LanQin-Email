@@ -1,3 +1,4 @@
+import { type UiText, uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
 import { Button } from "@/components/ui/button"
 import {
@@ -10,10 +11,10 @@ import {
 
 type ConfirmDialogProps = {
   open: boolean
-  title: string
-  description?: string
-  confirmText?: string
-  cancelText?: string
+  title: UiText
+  description?: UiText
+  confirmText?: UiText
+  cancelText?: UiText
   destructive?: boolean
   pending?: boolean
   onOpenChange: (open: boolean) => void
@@ -31,13 +32,19 @@ export function ConfirmDialog({
   onOpenChange,
   onConfirm,
 }: ConfirmDialogProps) {
+  useUiLanguage()
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent aria-describedby={undefined}>
         <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
+          <DialogTitle>{uiText(title)}</DialogTitle>
         </DialogHeader>
-        {description && <div className="text-sm text-muted-foreground">{description}</div>}
+        {description && (
+          <div className="whitespace-pre-line text-sm text-muted-foreground">
+            {uiText(description)}
+          </div>
+        )}
         <DialogFooter>
           <Button
             type="button"
@@ -45,7 +52,7 @@ export function ConfirmDialog({
             onClick={() => onOpenChange(false)}
             disabled={pending}
           >
-            {cancelText}
+            {uiText(cancelText)}
           </Button>
           <Button
             type="button"
@@ -53,7 +60,7 @@ export function ConfirmDialog({
             onClick={onConfirm}
             disabled={pending}
           >
-            {pending ? "处理中..." : confirmText}
+            {pending ? uiText("处理中...") : uiText(confirmText)}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -1,3 +1,6 @@
+import { errorMessage } from "@/lib/ui-errors"
+import { getInitialLanguage, uiText, useLanguage as useUiLanguage } from "@/lib/language"
+
 import * as React from "react"
 import { Bot, RefreshCcw, Trash2 } from "lucide-react"
 import type { TelegramSettings } from "@/lib/api"
@@ -29,6 +32,8 @@ export function TelegramSettingsCard({
   onTest,
   onDelete,
 }: TelegramSettingsCardProps) {
+  useUiLanguage()
+
   const [botToken, setBotToken] = React.useState("")
   const [chatId, setChatId] = React.useState("")
   const [enabled, setEnabled] = React.useState(true)
@@ -57,10 +62,14 @@ export function TelegramSettingsCard({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2">
             <Bot className="h-5 w-5" />
-            Telegram 通知
+            {uiText("Telegram 通知")}
           </CardTitle>
           <Badge variant={item?.configured && item.enabled ? "default" : "secondary"}>
-            {item?.configured ? (item.enabled ? "已启用" : "已停用") : "未配置"}
+            {item?.configured
+              ? item.enabled
+                ? uiText("已启用")
+                : uiText("已停用")
+              : uiText("未配置")}
           </Badge>
         </div>
         {item?.botUsername && <p className="text-sm text-muted-foreground">@{item.botUsername}</p>}
@@ -68,24 +77,24 @@ export function TelegramSettingsCard({
       <CardContent className="space-y-4">
         {unavailable && (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            服务端尚未配置通知加密密钥。
+            {uiText("服务端尚未配置通知加密密钥。")}
           </div>
         )}
         <form className="grid gap-4 md:grid-cols-2" onSubmit={submit}>
-          <Field label="Bot Token">
+          <Field label={uiText("机器人令牌")}>
             <PasswordInput
               value={botToken}
               onChange={(event) => setBotToken(event.target.value)}
-              placeholder={item?.tokenSet ? "留空以保留当前 Token" : "123456789:AA..."}
+              placeholder={item?.tokenSet ? uiText("留空以保留当前 Token") : "123456789:AA..."}
               disabled={unavailable}
               autoComplete="new-password"
             />
           </Field>
-          <Field label="Chat ID">
+          <Field label={uiText("聊天 ID")}>
             <Input
               value={chatId}
               onChange={(event) => setChatId(event.target.value)}
-              placeholder="-1001234567890 或 @channel"
+              placeholder={uiText("-1001234567890 或 @channel")}
               disabled={unavailable}
               required
             />
@@ -95,9 +104,9 @@ export function TelegramSettingsCard({
               checked={enabled}
               onCheckedChange={setEnabled}
               disabled={unavailable || pending}
-              aria-label="启用 Telegram 通知"
+              aria-label={uiText("启用 Telegram 通知")}
             />
-            <span className="text-sm">启用通知渠道</span>
+            <span className="text-sm">{uiText("启用通知渠道")}</span>
           </div>
           <div className="flex flex-wrap gap-2 md:col-span-2">
             <Button
@@ -106,7 +115,7 @@ export function TelegramSettingsCard({
                 unavailable || pending || !chatId.trim() || (!item?.tokenSet && !botToken.trim())
               }
             >
-              {pending ? "处理中..." : "保存"}
+              {pending ? uiText("处理中...") : uiText("保存")}
             </Button>
             <Button
               type="button"
@@ -115,7 +124,7 @@ export function TelegramSettingsCard({
               onClick={() => void onTest()}
             >
               <RefreshCcw className="h-4 w-4" />
-              发送测试
+              {uiText("发送测试")}
             </Button>
             {item?.configured && (
               <Button
@@ -126,7 +135,7 @@ export function TelegramSettingsCard({
                 onClick={() => setConfirmOpen(true)}
               >
                 <Trash2 className="h-4 w-4" />
-                删除
+                {uiText("删除")}
               </Button>
             )}
           </div>
@@ -134,19 +143,25 @@ export function TelegramSettingsCard({
         {(item?.lastDeliveredAt || item?.lastError) && (
           <div className="border-t pt-3 text-xs text-muted-foreground">
             {item.lastDeliveredAt && (
-              <div>最近送达：{new Date(item.lastDeliveredAt).toLocaleString()}</div>
+              <div>
+                {uiText("最近送达：{0}", [
+                  new Date(item.lastDeliveredAt).toLocaleString(getInitialLanguage()),
+                ])}
+              </div>
             )}
             {item.lastError && (
-              <div className="mt-1 break-words text-destructive">最近错误：{item.lastError}</div>
+              <div className="mt-1 break-words text-destructive">
+                {uiText("最近错误：{0}", [uiText(errorMessage(item.lastError))])}
+              </div>
             )}
           </div>
         )}
       </CardContent>
       <ConfirmDialog
         open={confirmOpen}
-        title="删除 Telegram 配置？"
-        description="待发送的 Telegram 通知也会一并取消。"
-        confirmText="删除配置"
+        title={uiText("删除 Telegram 配置？")}
+        description={uiText("待发送的 Telegram 通知也会一并取消。")}
+        confirmText={uiText("删除配置")}
         destructive
         onOpenChange={setConfirmOpen}
         onConfirm={() => {
@@ -159,9 +174,11 @@ export function TelegramSettingsCard({
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label>{uiText(label)}</Label>
       {children}
     </div>
   )

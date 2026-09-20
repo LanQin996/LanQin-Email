@@ -1,3 +1,4 @@
+import { getInitialLanguage, uiText } from "@/lib/language"
 import type { PermissionInfo, PermissionLimits } from "@/lib/api"
 import type { PermissionKey } from "@/lib/api-types"
 
@@ -65,5 +66,7 @@ export function groupPermissionCatalog(catalog: PermissionInfo[]) {
 }
 
 export function permissionLimitText(value: number, unit: string) {
-  return value > 0 ? `${value} ${unit}` : "不限"
+  return value > 0
+    ? `${new Intl.NumberFormat(getInitialLanguage()).format(value)} ${unit}`
+    : uiText("不限")
 }

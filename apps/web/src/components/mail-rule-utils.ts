@@ -1,3 +1,4 @@
+import { uiText } from "@/lib/language"
 import type { MailLabel, MailRuleAction, MailRuleCondition } from "@/lib/api"
 
 export type RuleCreatePayload = {
@@ -134,40 +135,38 @@ export function conditionSummary(
       : undefined,
   ].filter(Boolean) as MailRuleCondition[]
   const items = conditions.length > 0 ? conditions : legacyConditions
-  return items.map(conditionItemSummary).join("；") || "无条件"
+  return items.map(conditionItemSummary).join(uiText("；")) || uiText("无条件")
 }
 
 function conditionItemSummary(item: MailRuleCondition): string {
   if (item.conditions?.length) {
-    const mode = item.matchMode === "any" ? "任一" : "全部"
-    return `${mode}(${item.conditions.map(conditionItemSummary).join("；")})`
+    const mode = uiText(item.matchMode === "any" ? "任一" : "全部")
+    return `${mode}(${item.conditions.map(conditionItemSummary).join(uiText("；"))})`
   }
   const field = item.field || "from"
-  if (field === "all") return "所有邮件"
+  if (field === "all") return uiText("所有邮件")
   const operator = item.operator || defaultConditionOperator(field)
-  return `${conditionFieldLabels[field]} ${conditionOperatorLabels[operator]} ${item.value || ""}`
+  return `${uiText(conditionFieldLabels[field])} ${uiText(conditionOperatorLabels[operator])} ${item.value || ""}`
 }
 
 export function actionSummary(action: MailRuleAction) {
   if (action.type === "label")
-    return `${ruleActionLabels[action.type]}${action.value ? `：${action.value}` : ""}`
+    return `${uiText(ruleActionLabels[action.type])}${action.value ? `：${action.value}` : ""}`
   if (action.type === "move")
-    return `${ruleActionLabels[action.type]}：${folderLabel(action.value || "Archive")}`
-  if (action.type === "forward") return `${ruleActionLabels[action.type]}：${action.value || ""}`
-  return ruleActionLabels[action.type]
+    return `${uiText(ruleActionLabels[action.type])}：${folderLabel(action.value || "Archive")}`
+  if (action.type === "forward")
+    return `${uiText(ruleActionLabels[action.type])}：${action.value || ""}`
+  return uiText(ruleActionLabels[action.type])
 }
 
 function folderLabel(folder: string) {
-  return (
-    (
-      {
-        Inbox: "收件箱",
-        Sent: "已发送",
-        Drafts: "草稿箱",
-        Archive: "归档",
-        Spam: "垃圾邮件",
-        Trash: "回收站",
-      } as Record<string, string>
-    )[folder] || folder
-  )
+  const labels: Record<string, string> = {
+    Inbox: "收件箱",
+    Sent: "已发送",
+    Drafts: "草稿箱",
+    Archive: "归档",
+    Spam: "垃圾邮件",
+    Trash: "回收站",
+  }
+  return labels[folder] ? uiText(labels[folder]) : folder
 }

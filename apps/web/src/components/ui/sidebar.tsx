@@ -1,3 +1,4 @@
+import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -196,7 +197,7 @@ const Sidebar = React.forwardRef<
             aria-describedby={undefined}
           >
             <SheetHeader className="sr-only">
-              <SheetTitle>导航</SheetTitle>
+              <SheetTitle>{uiText("导航")}</SheetTitle>
             </SheetHeader>
             <div className="flex h-full w-full flex-col">{children}</div>
           </SheetContent>
@@ -255,6 +256,7 @@ const SidebarTrigger = React.forwardRef<
   React.ElementRef<typeof Button>,
   React.ComponentProps<typeof Button>
 >(({ className, onClick, ...props }, ref) => {
+  useUiLanguage()
   const { toggleSidebar } = useSidebar()
 
   return (
@@ -271,7 +273,7 @@ const SidebarTrigger = React.forwardRef<
       {...props}
     >
       <PanelLeft />
-      <span className="sr-only">Toggle Sidebar</span>
+      <span className="sr-only">{uiText("切换侧栏")}</span>
     </Button>
   )
 })
@@ -279,16 +281,17 @@ SidebarTrigger.displayName = "SidebarTrigger"
 
 const SidebarRail = React.forwardRef<HTMLButtonElement, React.ComponentProps<"button">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     const { toggleSidebar } = useSidebar()
 
     return (
       <button
         ref={ref}
         data-sidebar="rail"
-        aria-label="Toggle Sidebar"
+        aria-label={uiText("切换侧栏")}
         tabIndex={-1}
         onClick={toggleSidebar}
-        title="Toggle Sidebar"
+        title={uiText("切换侧栏")}
         className={cn(
           "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=left]:-right-4 group-data-[side=right]:left-0 sm:flex",
           "[[data-side=left]_&]:cursor-w-resize [[data-side=right]_&]:cursor-e-resize",
@@ -307,6 +310,7 @@ SidebarRail.displayName = "SidebarRail"
 
 const SidebarInset = React.forwardRef<HTMLDivElement, React.ComponentProps<"main">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     return (
       <main
         ref={ref}
@@ -326,6 +330,7 @@ const SidebarInput = React.forwardRef<
   React.ElementRef<typeof Input>,
   React.ComponentProps<typeof Input>
 >(({ className, ...props }, ref) => {
+  useUiLanguage()
   return (
     <Input
       ref={ref}
@@ -342,6 +347,7 @@ SidebarInput.displayName = "SidebarInput"
 
 const SidebarHeader = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     return (
       <div
         ref={ref}
@@ -356,6 +362,7 @@ SidebarHeader.displayName = "SidebarHeader"
 
 const SidebarFooter = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     return (
       <div
         ref={ref}
@@ -372,6 +379,7 @@ const SidebarSeparator = React.forwardRef<
   React.ElementRef<typeof Separator>,
   React.ComponentProps<typeof Separator>
 >(({ className, ...props }, ref) => {
+  useUiLanguage()
   return (
     <Separator
       ref={ref}
@@ -385,6 +393,7 @@ SidebarSeparator.displayName = "SidebarSeparator"
 
 const SidebarContent = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     return (
       <div
         ref={ref}
@@ -402,6 +411,7 @@ SidebarContent.displayName = "SidebarContent"
 
 const SidebarGroup = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   ({ className, ...props }, ref) => {
+    useUiLanguage()
     return (
       <div
         ref={ref}
@@ -418,6 +428,7 @@ const SidebarGroupLabel = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & { asChild?: boolean }
 >(({ className, asChild = false, ...props }, ref) => {
+  useUiLanguage()
   const Comp = asChild ? Slot : "div"
 
   return (
@@ -439,6 +450,7 @@ const SidebarGroupAction = React.forwardRef<
   HTMLButtonElement,
   React.ComponentProps<"button"> & { asChild?: boolean }
 >(({ className, asChild = false, ...props }, ref) => {
+  useUiLanguage()
   const Comp = asChild ? Slot : "button"
 
   return (
@@ -582,6 +594,7 @@ const SidebarMenuAction = React.forwardRef<
     showOnHover?: boolean
   }
 >(({ className, asChild = false, showOnHover = false, ...props }, ref) => {
+  useUiLanguage()
   const Comp = asChild ? Slot : "button"
 
   return (
@@ -632,6 +645,7 @@ const SidebarMenuSkeleton = React.forwardRef<
     showIcon?: boolean
   }
 >(({ className, showIcon = false, ...props }, ref) => {
+  useUiLanguage()
   // Random width between 50 to 90%.
   const width = React.useMemo(() => {
     return `${Math.floor(Math.random() * 40) + 50}%`
@@ -688,6 +702,7 @@ const SidebarMenuSubButton = React.forwardRef<
     isActive?: boolean
   }
 >(({ asChild = false, size = "md", isActive, className, ...props }, ref) => {
+  useUiLanguage()
   const Comp = asChild ? Slot : "a"
 
   return (

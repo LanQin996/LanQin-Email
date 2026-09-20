@@ -1,3 +1,4 @@
+import additionalTranslations from "./ui-translations.json"
 import * as React from "react"
 
 export type Language = "zh-CN" | "zh-TW" | "en"
@@ -15,11 +16,19 @@ export const languageOptions: {
   { value: "en", label: "English", shortLabel: "EN", htmlLang: "en" },
 ]
 
+let sessionLanguage: Language | undefined
+
 const languageValues = new Set(languageOptions.map((item) => item.value))
 
 export function getInitialLanguage(): Language {
   if (typeof window === "undefined") return "zh-CN"
-  const stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+  let stored: string | null = null
+  try {
+    stored = window.localStorage.getItem(LANGUAGE_STORAGE_KEY)
+  } catch {
+    /* Storage may be unavailable. */
+  }
+  if (sessionLanguage) return sessionLanguage
   if (stored && languageValues.has(stored as Language)) return stored as Language
   const browserLanguage = window.navigator.language.toLowerCase()
   if (
@@ -33,14 +42,20 @@ export function getInitialLanguage(): Language {
 }
 
 export function setStoredLanguage(language: Language) {
-  window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+  sessionLanguage = language
+  try {
+    window.localStorage.setItem(LANGUAGE_STORAGE_KEY, language)
+  } catch {
+    /* Keep the current session language. */
+  }
   window.dispatchEvent(new CustomEvent("lanqin:language", { detail: language }))
 }
 
 export function useLanguage() {
   const [language, setLanguageState] = React.useState<Language>(getInitialLanguage)
   React.useEffect(() => {
-    function sync() {
+    function sync(event: Event) {
+      if (event.type === "storage") sessionLanguage = undefined
       setLanguageState(getInitialLanguage())
     }
     window.addEventListener("storage", sync)
@@ -57,9 +72,10 @@ export function useLanguage() {
   return [language, setLanguage] as const
 }
 
-type Translation = { "zh-TW": string; en: string }
+type Translation = { "zh-TW": string; en: string; enOne?: string; pluralIndex?: number }
 
-const exactTranslations: Record<string, Translation> = {
+export const exactTranslations: Record<string, Translation> = {
+  ...additionalTranslations,
   收件箱: { "zh-TW": "收件匣", en: "Inbox" },
   已发送: { "zh-TW": "已傳送", en: "Sent" },
   草稿箱: { "zh-TW": "草稿匣", en: "Drafts" },
@@ -560,6 +576,8 @@ const templateTranslations: { pattern: RegExp; "zh-TW": string; en: string }[] =
 
 export function translateUiText(value: string, language: Language): string {
   if (language === "zh-CN" || !value) return value
+  if (Object.prototype.hasOwnProperty.call(exactTranslations, value))
+    return exactTranslations[value][language]
   const match = value.match(/^(\s*)([\s\S]*?)(\s*)$/)
   const leading = match?.[1] || ""
   const text = match?.[2] || value
@@ -570,7 +588,9 @@ export function translateUiText(value: string, language: Language): string {
 }
 
 function translateCore(text: string, language: Exclude<Language, "zh-CN">): string {
-  const exact = exactTranslations[text]
+  const exact = Object.prototype.hasOwnProperty.call(exactTranslations, text)
+    ? exactTranslations[text]
+    : undefined
   if (exact) return exact[language]
   for (const rule of templateTranslations) {
     if (rule.pattern.test(text)) return text.replace(rule.pattern, rule[language])
@@ -578,111 +598,70 @@ function translateCore(text: string, language: Exclude<Language, "zh-CN">): stri
   return text
 }
 
-const textSources = new WeakMap<Text, string>()
-const textLastApplied = new WeakMap<Text, string>()
-const attrSources = new WeakMap<Element, Partial<Record<string, string>>>()
-const attrLastApplied = new WeakMap<Element, Partial<Record<string, string>>>()
-const translatableAttributes = ["placeholder", "title", "aria-label"] as const
-let translateTimer: number | undefined
+// UI messages retain their source and arguments until render, so open notices
+// follow language changes without translating user-provided parameter values.
+export type UiMessage = {
+  key: string
+  values?: readonly UiValue[]
+  lines?: readonly UiText[]
+}
+export type UiText = string | UiMessage
+export type UiValue = string | number | undefined | null | { date: string } | UiMessage
+
+export function uiMessage(key: string, values?: readonly UiValue[]): UiMessage {
+  return { key, values }
+}
+
+export function uiText(
+  value: UiText,
+  values?: readonly UiValue[],
+  language = getInitialLanguage()
+): string {
+  if (typeof value !== "string" && value.lines)
+    return value.lines.map((line) => uiText(line, undefined, language)).join("\n")
+  const source = typeof value === "string" ? value : value.key
+  const parameters = typeof value === "string" ? values : value.values
+  let translated = translateUiText(source, language)
+  const entry = Object.prototype.hasOwnProperty.call(exactTranslations, source)
+    ? exactTranslations[source]
+    : undefined
+  if (language === "en" && entry?.enOne && parameters) {
+    const count = parameters[entry.pluralIndex ?? 0]
+    if (typeof count === "number" && new Intl.PluralRules(language).select(count) === "one")
+      translated = entry.enOne
+  }
+  return parameters
+    ? translated.replace(/\{(\d+)\}/g, (match, index: string) => {
+        if (!(Number(index) in parameters)) return match
+        const parameter = parameters[Number(index)]
+        if (typeof parameter === "number") return new Intl.NumberFormat(language).format(parameter)
+        if (parameter && typeof parameter === "object") {
+          if ("key" in parameter) return uiText(parameter, undefined, language)
+          const date = new Date(parameter.date)
+          return Number.isNaN(date.getTime())
+            ? ""
+            : new Intl.DateTimeFormat(language, {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              }).format(date)
+        }
+        return String(parameter ?? "")
+      })
+    : translated
+}
 
 export function LanguageDomSync() {
   const [language] = useLanguage()
   React.useEffect(() => {
-    document.documentElement.lang =
-      languageOptions.find((item) => item.value === language)?.htmlLang || language
-    scheduleLocalize(language)
-    const observer = new MutationObserver(() => scheduleLocalize(language))
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributes: true,
-      attributeFilter: [...translatableAttributes],
-    })
-    return () => {
-      observer.disconnect()
-      if (translateTimer) window.clearTimeout(translateTimer)
-    }
+    document.documentElement.lang = language
   }, [language])
   return null
 }
 
-function scheduleLocalize(language: Language) {
-  if (typeof window === "undefined") return
-  if (translateTimer) window.clearTimeout(translateTimer)
-  translateTimer = window.setTimeout(() => localizeDocument(language), 0)
-}
-
-function localizeDocument(language: Language) {
-  if (!document.body) return
-  localizeElement(document.body, language)
-}
-
-function localizeElement(root: Element, language: Language) {
-  if (shouldSkipElement(root)) return
-  localizeAttributes(root, language)
-  for (const child of Array.from(root.childNodes)) {
-    if (child.nodeType === Node.TEXT_NODE) localizeTextNode(child as Text, language)
-    else if (child.nodeType === Node.ELEMENT_NODE) localizeElement(child as Element, language)
-  }
-}
-
-function localizeTextNode(node: Text, language: Language) {
-  if (!node.parentElement || shouldSkipElement(node.parentElement)) return
-  const current = node.textContent || ""
-  if (!current.trim()) return
-  let source = textSources.get(node)
-  const last = textLastApplied.get(node)
-  if (!source || (last !== undefined && current !== last && shouldTranslate(current))) {
-    source = current
-    textSources.set(node, source)
-  }
-  if (!source || !shouldTranslate(source)) return
-  const next = translateUiText(source, language)
-  textLastApplied.set(node, next)
-  if (current !== next) node.textContent = next
-}
-
-function localizeAttributes(element: Element, language: Language) {
-  if (shouldSkipElement(element)) return
-  for (const attr of translatableAttributes) {
-    const current = element.getAttribute(attr)
-    if (!current || !current.trim()) continue
-    let sources = attrSources.get(element)
-    if (!sources) {
-      sources = {}
-      attrSources.set(element, sources)
-    }
-    let applied = attrLastApplied.get(element)
-    if (!applied) {
-      applied = {}
-      attrLastApplied.set(element, applied)
-    }
-    if (
-      !sources[attr] ||
-      (applied[attr] !== undefined && current !== applied[attr] && shouldTranslate(current))
-    )
-      sources[attr] = current
-    const source = sources[attr]
-    if (!source || !shouldTranslate(source)) continue
-    const next = translateUiText(source, language)
-    applied[attr] = next
-    if (current !== next) element.setAttribute(attr, next)
-  }
-}
-
-function shouldSkipElement(element: Element) {
-  const tag = element.tagName.toLowerCase()
-  if (["script", "style", "code", "pre", "textarea", "option"].includes(tag)) return true
-  return Boolean(
-    element.closest("[data-lanqin-i18n-ignore], [contenteditable='true'], .ProseMirror")
-  )
-}
-
-function shouldTranslate(value: string) {
-  const text = value.trim()
-  if (!text) return false
-  return (
-    Boolean(exactTranslations[text]) || templateTranslations.some((rule) => rule.pattern.test(text))
-  )
+export function UiLabel({ text }: { text: UiText }) {
+  const [language] = useLanguage()
+  return <>{uiText(text, undefined, language)}</>
 }

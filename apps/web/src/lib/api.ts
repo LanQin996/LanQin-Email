@@ -1,3 +1,4 @@
+import { ApiError, errorMessage } from "./ui-errors"
 import type {
   User,
   AdminUser,
@@ -92,14 +93,16 @@ async function request<T>(
       } catch {
         // Keep the HTTP status when the error response is not JSON.
       }
-      throw new Error(message)
+      throw new ApiError(res.status, message)
     }
     return res.json() as Promise<T>
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("请求超时，请检查后端服务是否正常")
     }
-    throw error instanceof Error ? error : new Error("网络请求失败")
+    throw error instanceof ApiError
+      ? error
+      : new Error(error instanceof TypeError ? "网络请求失败" : errorMessage(error))
   } finally {
     window.clearTimeout(timeout)
   }

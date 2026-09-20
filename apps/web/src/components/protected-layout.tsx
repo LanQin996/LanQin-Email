@@ -1,3 +1,5 @@
+import { LanguageSelector } from "@/components/language-selector"
+import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
 import { Outlet, Link, useLocation } from "react-router-dom"
 import {
@@ -69,6 +71,8 @@ const adminSections: {
 ]
 
 export function ProtectedLayout() {
+  useUiLanguage()
+
   return (
     <AuthGuard>
       <ProtectedContent />
@@ -77,6 +81,8 @@ export function ProtectedLayout() {
 }
 
 function ProtectedContent() {
+  useUiLanguage()
+
   const me = useMe()
   const location = useLocation()
   const logout = useLogout()
@@ -128,6 +134,9 @@ function ProtectedContent() {
         <SidebarFooter>
           <SidebarMenu>
             <SidebarMenuItem>
+              <LanguageSelector variant="sidebar" />
+            </SidebarMenuItem>
+            <SidebarMenuItem>
               <SidebarMenuButton size="lg" className="group-data-[collapsible=icon]:!p-0" asChild>
                 <Link to="/profile">
                   <Avatar className="h-8 w-8 rounded-lg">
@@ -143,7 +152,7 @@ function ProtectedContent() {
                     variant={user.role === "admin" ? "default" : "secondary"}
                     className="ml-auto text-[10px]"
                   >
-                    {user.role === "admin" ? "超级管理员" : "普通用户"}
+                    {user.role === "admin" ? uiText("超级管理员") : uiText("普通用户")}
                   </Badge>
                 </Link>
               </SidebarMenuButton>
@@ -152,7 +161,7 @@ function ProtectedContent() {
           <div className="p-2">
             <Button variant="outline" size="sm" className="w-full gap-2 text-xs" onClick={logout}>
               <LogOut className="h-3.5 w-3.5" />
-              退出登录
+              {uiText("退出登录")}
             </Button>
           </div>
         </SidebarFooter>
@@ -161,11 +170,13 @@ function ProtectedContent() {
       <SidebarInset>
         <div className="flex min-h-svh flex-col bg-muted/20">
           <div className="flex h-12 items-center gap-3 border-b bg-background px-3 md:hidden">
-            <SidebarTrigger aria-label="打开导航" />
+            <SidebarTrigger aria-label={uiText("打开导航")} />
             <div className="min-w-0 flex-1 truncate text-sm font-semibold">
               {isAdminRoute
-                ? visibleAdminSections.find((item) => item.key === adminSection)?.label ||
-                  "系统管理"
+                ? uiText(
+                    visibleAdminSections.find((item) => item.key === adminSection)?.label ||
+                      "系统管理"
+                  )
                 : "LanQin Email"}
             </div>
           </div>
@@ -183,6 +194,8 @@ function AdminSectionItems({
   activeSection: string
   sections: typeof adminSections
 }) {
+  useUiLanguage()
+
   const { isMobile, setOpenMobile } = useSidebar()
 
   function closeMobile() {
@@ -190,10 +203,10 @@ function AdminSectionItems({
   }
   return sections.map((item) => (
     <SidebarMenuItem key={item.key}>
-      <SidebarMenuButton asChild isActive={activeSection === item.key} tooltip={item.label}>
+      <SidebarMenuButton asChild isActive={activeSection === item.key} tooltip={uiText(item.label)}>
         <Link to={`/admin?section=${item.key}`} onClick={closeMobile}>
           {item.icon}
-          <span>{item.label}</span>
+          <span>{uiText(item.label)}</span>
         </Link>
       </SidebarMenuButton>
     </SidebarMenuItem>

@@ -1,0 +1,4448 @@
+{
+  "概览": {
+    "zh-TW": "概覽",
+    "en": "Overview"
+  },
+  "用户": {
+    "zh-TW": "使用者",
+    "en": "Users"
+  },
+  "权限组": {
+    "zh-TW": "權限組",
+    "en": "Permission groups"
+  },
+  "域名": {
+    "zh-TW": "域名",
+    "en": "Domains"
+  },
+  "邮箱账号": {
+    "zh-TW": "信箱帳號",
+    "en": "Mailbox accounts"
+  },
+  "别名转发": {
+    "zh-TW": "別名轉發",
+    "en": "Aliases and forwarding"
+  },
+  "发送审计": {
+    "zh-TW": "傳送審計",
+    "en": "Send audit"
+  },
+  "投递队列": {
+    "zh-TW": "投遞佇列",
+    "en": "Delivery queue"
+  },
+  "系统设置": {
+    "zh-TW": "系統設定",
+    "en": "System settings"
+  },
+  "不限": {
+    "zh-TW": "不限",
+    "en": "Unlimited"
+  },
+  "无法连接后端服务": {
+    "zh-TW": "無法連線後端服務",
+    "en": "Unable to connect to the server"
+  },
+  "重新加载": {
+    "zh-TW": "重新載入",
+    "en": "Reload"
+  },
+  "处理中...": {
+    "zh-TW": "處理中...",
+    "en": "Processing..."
+  },
+  "----- 原始邮件 -----": {
+    "zh-TW": "----- 原始郵件 -----",
+    "en": "----- Original message -----"
+  },
+  "所有邮件": {
+    "zh-TW": "所有郵件",
+    "en": "All messages"
+  },
+  "收件人地址": {
+    "zh-TW": "收件者地址",
+    "en": "Recipient address"
+  },
+  "抄送地址": {
+    "zh-TW": "抄送地址",
+    "en": "Cc address"
+  },
+  "邮件主题": {
+    "zh-TW": "郵件主旨",
+    "en": "Message subject"
+  },
+  "附件名称": {
+    "zh-TW": "附件名稱",
+    "en": "Attachment name"
+  },
+  "邮件大小": {
+    "zh-TW": "郵件大小",
+    "en": "Message size"
+  },
+  "收信日期": {
+    "zh-TW": "收信日期",
+    "en": "Received date"
+  },
+  "包含": {
+    "zh-TW": "包含",
+    "en": "Contains"
+  },
+  "不包含": {
+    "zh-TW": "不包含",
+    "en": "Does not contain"
+  },
+  "等于": {
+    "zh-TW": "等於",
+    "en": "Equals"
+  },
+  "不等于": {
+    "zh-TW": "不等於",
+    "en": "Does not equal"
+  },
+  "开头是": {
+    "zh-TW": "開頭是",
+    "en": "Starts with"
+  },
+  "结尾是": {
+    "zh-TW": "結尾是",
+    "en": "Ends with"
+  },
+  "大于": {
+    "zh-TW": "大於",
+    "en": "Greater than"
+  },
+  "大于等于": {
+    "zh-TW": "大於等於",
+    "en": "Greater than or equal to"
+  },
+  "小于": {
+    "zh-TW": "小於",
+    "en": "Less than"
+  },
+  "小于等于": {
+    "zh-TW": "小於等於",
+    "en": "Less than or equal to"
+  },
+  "早于": {
+    "zh-TW": "早於",
+    "en": "Before"
+  },
+  "晚于": {
+    "zh-TW": "晚於",
+    "en": "After"
+  },
+  "当天": {
+    "zh-TW": "當天",
+    "en": "On this date"
+  },
+  "移入归档": {
+    "zh-TW": "移入封存",
+    "en": "Move to archive"
+  },
+  "标记已读": {
+    "zh-TW": "標記已讀",
+    "en": "Mark as read"
+  },
+  "自动转发到": {
+    "zh-TW": "自動轉發到",
+    "en": "Automatically forward to"
+  },
+  "发送 Telegram 通知": {
+    "zh-TW": "傳送 Telegram 通知",
+    "en": "Send a Telegram notification"
+  },
+  "例如 10mb": {
+    "zh-TW": "例如 10mb",
+    "en": "e.g. 10mb"
+  },
+  "选择日期": {
+    "zh-TW": "選擇日期",
+    "en": "Select a date"
+  },
+  "输入附件名或扩展名": {
+    "zh-TW": "輸入附件名或副檔名",
+    "en": "Enter an attachment name or extension"
+  },
+  "输入值": {
+    "zh-TW": "輸入值",
+    "en": "Enter a value"
+  },
+  "无条件": {
+    "zh-TW": "無條件",
+    "en": "No conditions"
+  },
+  "任一": {
+    "zh-TW": "任一",
+    "en": "Any"
+  },
+  "全部": {
+    "zh-TW": "全部",
+    "en": "All"
+  },
+  "30 分钟后": {
+    "zh-TW": "30 分鐘後",
+    "en": "In 30 minutes"
+  },
+  "2 小时后": {
+    "zh-TW": "2 小時後",
+    "en": "In 2 hours"
+  },
+  "超级管理员": {
+    "zh-TW": "超級管理員",
+    "en": "Super administrator"
+  },
+  "普通用户": {
+    "zh-TW": "普通使用者",
+    "en": "Standard user"
+  },
+  "退出登录": {
+    "zh-TW": "登出",
+    "en": "Sign out"
+  },
+  "系统管理": {
+    "zh-TW": "系統管理",
+    "en": "Administration"
+  },
+  "Telegram 通知": {
+    "zh-TW": "Telegram 通知",
+    "en": "Telegram notifications"
+  },
+  "已启用": {
+    "zh-TW": "已啟用",
+    "en": "Enabled"
+  },
+  "已停用": {
+    "zh-TW": "已停用",
+    "en": "Disabled"
+  },
+  "未配置": {
+    "zh-TW": "未配置",
+    "en": "Not configured"
+  },
+  "服务端尚未配置通知加密密钥。": {
+    "zh-TW": "服務端尚未配置通知加密金鑰。",
+    "en": "The server notification encryption key has not been configured."
+  },
+  "留空以保留当前 Token": {
+    "zh-TW": "留空以保留當前 Token",
+    "en": "Leave blank to keep the current token"
+  },
+  "-1001234567890 或 @channel": {
+    "zh-TW": "-1001234567890 或 @channel",
+    "en": "-1001234567890 or @channel"
+  },
+  "启用 Telegram 通知": {
+    "zh-TW": "啟用 Telegram 通知",
+    "en": "Enable Telegram notifications"
+  },
+  "启用通知渠道": {
+    "zh-TW": "啟用通知渠道",
+    "en": "Enable notification channel"
+  },
+  "保存": {
+    "zh-TW": "儲存",
+    "en": "Save"
+  },
+  "发送测试": {
+    "zh-TW": "傳送測試",
+    "en": "Send test"
+  },
+  "最近送达：": {
+    "zh-TW": "最近送達：",
+    "en": "Last delivered:"
+  },
+  "最近错误：": {
+    "zh-TW": "最近錯誤：",
+    "en": "Latest error:"
+  },
+  "删除 Telegram 配置？": {
+    "zh-TW": "刪除 Telegram 配置？",
+    "en": "Delete Telegram configuration?"
+  },
+  "待发送的 Telegram 通知也会一并取消。": {
+    "zh-TW": "待傳送的 Telegram 通知也會一併取消。",
+    "en": "Pending Telegram notifications will also be cancelled."
+  },
+  "删除配置": {
+    "zh-TW": "刪除配置",
+    "en": "Delete configuration"
+  },
+  "隐藏密码": {
+    "zh-TW": "隱藏密碼",
+    "en": "Hide password"
+  },
+  "显示密码": {
+    "zh-TW": "顯示密碼",
+    "en": "Show password"
+  },
+  "导航": {
+    "zh-TW": "導航",
+    "en": "Navigation"
+  },
+  "请求超时": {
+    "zh-TW": "請求超時",
+    "en": "Request timed out"
+  },
+  "请求超时，请检查后端服务是否正常": {
+    "zh-TW": "請求超時，請檢查後端服務是否正常",
+    "en": "The request timed out. Please try again later."
+  },
+  "网络请求失败": {
+    "zh-TW": "網路請求失敗",
+    "en": "Network request failed"
+  },
+  "两次输入的密码不一致": {
+    "zh-TW": "兩次輸入的密碼不一致",
+    "en": "The passwords do not match"
+  },
+  "存储": {
+    "zh-TW": "儲存",
+    "en": "Storage"
+  },
+  "系统状态": {
+    "zh-TW": "系統狀態",
+    "en": "System status"
+  },
+  "活跃用户": {
+    "zh-TW": "活躍使用者",
+    "en": "Active users"
+  },
+  "活跃邮箱": {
+    "zh-TW": "活躍信箱",
+    "en": "Active mailboxes"
+  },
+  "首次配置": {
+    "zh-TW": "首次配置",
+    "en": "Initial setup"
+  },
+  "DNS 状态": {
+    "zh-TW": "DNS 狀態",
+    "en": "DNS status"
+  },
+  "暂无域名": {
+    "zh-TW": "暫無域名",
+    "en": "No domains yet"
+  },
+  "运行提示": {
+    "zh-TW": "執行提示",
+    "en": "Operational notes"
+  },
+  "公网地址": {
+    "zh-TW": "公網地址",
+    "en": "Public address"
+  },
+  "注册": {
+    "zh-TW": "註冊",
+    "en": "Registration"
+  },
+  "已开放": {
+    "zh-TW": "已開放",
+    "en": "Open"
+  },
+  "仅邀请码": {
+    "zh-TW": "僅邀請碼",
+    "en": "Invitation only"
+  },
+  "用户自助申请": {
+    "zh-TW": "使用者自助申請",
+    "en": "Self-service applications"
+  },
+  "添加邮件域名": {
+    "zh-TW": "新增郵件域名",
+    "en": "Add a mail domain"
+  },
+  "先添加 example.com 这样的邮件域名": {
+    "zh-TW": "先新增 example.com 這樣的郵件域名",
+    "en": "First add a mail domain such as example.com"
+  },
+  "完成 DNS 检测": {
+    "zh-TW": "完成 DNS 檢測",
+    "en": "Complete DNS checks"
+  },
+  "至少一个域名 DNS 正常": {
+    "zh-TW": "至少一個域名 DNS 正常",
+    "en": "At least one domain must pass DNS checks"
+  },
+  "配置 MX、SPF、DKIM、DMARC 后执行检测": {
+    "zh-TW": "配置 MX、SPF、DKIM、DMARC 後執行檢測",
+    "en": "Configure MX, SPF, DKIM and DMARC, then run the checks"
+  },
+  "创建邮箱账号": {
+    "zh-TW": "建立信箱帳號",
+    "en": "Create a mailbox account"
+  },
+  "给超级管理员或普通用户创建第一个邮箱": {
+    "zh-TW": "給超級管理員或普通使用者建立第一個信箱",
+    "en": "Create the first mailbox for an administrator or a standard user"
+  },
+  "确认发信链路": {
+    "zh-TW": "確認發信鏈路",
+    "en": "Verify outbound delivery"
+  },
+  "默认使用内置 Postfix": {
+    "zh-TW": "預設使用內建 Postfix",
+    "en": "Uses the built-in Postfix by default"
+  },
+  "完成收发测试": {
+    "zh-TW": "完成收發測試",
+    "en": "Test sending and receiving"
+  },
+  "发送或接收一封测试邮件": {
+    "zh-TW": "傳送或接收一封測試郵件",
+    "en": "Send or receive a test message"
+  },
+  "用户已删除": {
+    "zh-TW": "使用者已刪除",
+    "en": "User deleted"
+  },
+  "删除失败": {
+    "zh-TW": "刪除失敗",
+    "en": "Unable to delete"
+  },
+  "用户管理": {
+    "zh-TW": "使用者管理",
+    "en": "User management"
+  },
+  "搜索用户、邮箱、显示名称": {
+    "zh-TW": "搜尋使用者、信箱、顯示名稱",
+    "en": "Search users, email addresses or display names"
+  },
+  "全部角色": {
+    "zh-TW": "全部角色",
+    "en": "All roles"
+  },
+  "正常": {
+    "zh-TW": "正常",
+    "en": "Active"
+  },
+  "停用": {
+    "zh-TW": "停用",
+    "en": "Disable"
+  },
+  "删除用户？": {
+    "zh-TW": "刪除使用者？",
+    "en": "Delete user?"
+  },
+  "删除用户": {
+    "zh-TW": "刪除使用者",
+    "en": "Delete user"
+  },
+  "身份": {
+    "zh-TW": "身份",
+    "en": "Role"
+  },
+  "邮箱": {
+    "zh-TW": "信箱",
+    "en": "Mailbox"
+  },
+  "创建时间": {
+    "zh-TW": "建立時間",
+    "en": "Created at"
+  },
+  "没有匹配的用户": {
+    "zh-TW": "沒有匹配的使用者",
+    "en": "No matching users"
+  },
+  "权限组已删除": {
+    "zh-TW": "權限組已刪除",
+    "en": "Permission group deleted"
+  },
+  "权限组管理": {
+    "zh-TW": "權限組管理",
+    "en": "Permission group management"
+  },
+  "注册用户默认继承“普通用户”系统组；编辑该组并取消“发送邮件”即可统一设为只收不发。": {
+    "zh-TW": "註冊使用者預設繼承“普通使用者”系統組；編輯該組並取消“傳送郵件”即可統一設為只收不發。",
+    "en": "New users inherit the Standard user system group. Remove its Send mail permission to allow receiving only."
+  },
+  "搜索权限组、说明或权限键": {
+    "zh-TW": "搜尋權限組、說明或權限鍵",
+    "en": "Search permission groups, descriptions or permission keys"
+  },
+  "系统组": {
+    "zh-TW": "系統組",
+    "en": "System group"
+  },
+  "人": {
+    "zh-TW": "人",
+    "en": "people"
+  },
+  "未填写说明": {
+    "zh-TW": "未填寫說明",
+    "en": "No description"
+  },
+  "编辑权限组": {
+    "zh-TW": "編輯權限組",
+    "en": "Edit permission group"
+  },
+  "删除权限组？": {
+    "zh-TW": "刪除權限組？",
+    "en": "Delete permission group?"
+  },
+  "删除权限组": {
+    "zh-TW": "刪除權限組",
+    "en": "Delete permission group"
+  },
+  "暂无匹配的权限组": {
+    "zh-TW": "暫無匹配的權限組",
+    "en": "No matching permission groups"
+  },
+  "权限组已更新": {
+    "zh-TW": "權限組已更新",
+    "en": "Permission group updated"
+  },
+  "权限组已创建": {
+    "zh-TW": "權限組已建立",
+    "en": "Permission group created"
+  },
+  "创建失败": {
+    "zh-TW": "建立失敗",
+    "en": "Unable to create"
+  },
+  "创建权限组": {
+    "zh-TW": "建立權限組",
+    "en": "Create permission group"
+  },
+  "名称": {
+    "zh-TW": "名稱",
+    "en": "Name"
+  },
+  "例如：客服主管": {
+    "zh-TW": "例如：客服主管",
+    "en": "e.g. Support manager"
+  },
+  "说明": {
+    "zh-TW": "說明",
+    "en": "Description"
+  },
+  "菜单与操作权限": {
+    "zh-TW": "選單與操作權限",
+    "en": "Menu and action permissions"
+  },
+  "项": {
+    "zh-TW": "項",
+    "en": "items"
+  },
+  "账号配额": {
+    "zh-TW": "帳號配額",
+    "en": "Account limits"
+  },
+  "填 0 表示不限制": {
+    "zh-TW": "填 0 表示不限制",
+    "en": "Enter 0 for unlimited"
+  },
+  "附件上限 MB": {
+    "zh-TW": "附件上限 MB",
+    "en": "Attachment limit (MB)"
+  },
+  "SMTP 每日收件人数": {
+    "zh-TW": "SMTP 每日收件者數",
+    "en": "SMTP recipients per day"
+  },
+  "SMTP 每分钟封数": {
+    "zh-TW": "SMTP 每分鐘封數",
+    "en": "SMTP messages per minute"
+  },
+  "IMAP 每分钟命令数": {
+    "zh-TW": "IMAP 每分鐘命令數",
+    "en": "IMAP commands per minute"
+  },
+  "POP3 每分钟命令数": {
+    "zh-TW": "POP3 每分鐘命令數",
+    "en": "POP3 commands per minute"
+  },
+  "邮箱数量上限": {
+    "zh-TW": "信箱數量上限",
+    "en": "Mailbox creation limit"
+  },
+  "按累计创建数计算": {
+    "zh-TW": "按累計建立數計算",
+    "en": "Based on the total number created"
+  },
+  "删除邮箱不会释放额度": {
+    "zh-TW": "刪除信箱不會釋放額度",
+    "en": "Deleting a mailbox does not restore the quota"
+  },
+  "每日新建邮箱上限": {
+    "zh-TW": "每日新建信箱上限",
+    "en": "Daily mailbox creation limit"
+  },
+  "滚动 24 小时": {
+    "zh-TW": "滾動 24 小時",
+    "en": "Rolling 24 hours"
+  },
+  "额度不累积，与数量上限同时生效": {
+    "zh-TW": "額度不累積，與數量上限同時生效",
+    "en": "Unused quota does not carry over. The total limit also applies."
+  },
+  "无后台权限": {
+    "zh-TW": "無後台權限",
+    "en": "No administration permissions"
+  },
+  "SMTP 每日": {
+    "zh-TW": "SMTP 每日",
+    "en": "SMTP per day"
+  },
+  "SMTP 每分钟": {
+    "zh-TW": "SMTP 每分鐘",
+    "en": "SMTP per minute"
+  },
+  "封": {
+    "zh-TW": "封",
+    "en": "messages"
+  },
+  "IMAP 每分钟": {
+    "zh-TW": "IMAP 每分鐘",
+    "en": "IMAP per minute"
+  },
+  "次": {
+    "zh-TW": "次",
+    "en": "requests"
+  },
+  "POP3 每分钟": {
+    "zh-TW": "POP3 每分鐘",
+    "en": "POP3 per minute"
+  },
+  "邮箱数量": {
+    "zh-TW": "信箱數量",
+    "en": "Mailbox count"
+  },
+  "个": {
+    "zh-TW": "個",
+    "en": "items"
+  },
+  "每日新建": {
+    "zh-TW": "每日新建",
+    "en": "Created per day"
+  },
+  "域名已更新": {
+    "zh-TW": "域名已更新",
+    "en": "Domain updated"
+  },
+  "域名已删除": {
+    "zh-TW": "域名已刪除",
+    "en": "Domain deleted"
+  },
+  "域名管理": {
+    "zh-TW": "域名管理",
+    "en": "Domain management"
+  },
+  "启用": {
+    "zh-TW": "啟用",
+    "en": "Enable"
+  },
+  "DNS 正常": {
+    "zh-TW": "DNS 正常",
+    "en": "DNS healthy"
+  },
+  "删除域名？": {
+    "zh-TW": "刪除域名？",
+    "en": "Delete domain?"
+  },
+  "删除域名": {
+    "zh-TW": "刪除域名",
+    "en": "Delete domain"
+  },
+  "邮箱已删除": {
+    "zh-TW": "信箱已刪除",
+    "en": "Mailbox deleted"
+  },
+  "邮箱账号管理": {
+    "zh-TW": "信箱帳號管理",
+    "en": "Mailbox account management"
+  },
+  "删除邮箱？": {
+    "zh-TW": "刪除信箱？",
+    "en": "Delete mailbox?"
+  },
+  "删除邮箱": {
+    "zh-TW": "刪除信箱",
+    "en": "Delete mailbox"
+  },
+  "未命名": {
+    "zh-TW": "未命名",
+    "en": "Untitled"
+  },
+  "地址": {
+    "zh-TW": "地址",
+    "en": "Address"
+  },
+  "归属用户": {
+    "zh-TW": "歸屬使用者",
+    "en": "Owner"
+  },
+  "配额": {
+    "zh-TW": "配額",
+    "en": "Quota"
+  },
+  "暂无邮箱账号": {
+    "zh-TW": "暫無信箱帳號",
+    "en": "No mailbox accounts"
+  },
+  "别名已更新": {
+    "zh-TW": "別名已更新",
+    "en": "Alias updated"
+  },
+  "别名已删除": {
+    "zh-TW": "別名已刪除",
+    "en": "Alias deleted"
+  },
+  "地址别名投递": {
+    "zh-TW": "地址別名投遞",
+    "en": "Address alias delivery"
+  },
+  "将某个收件地址投递到目标邮箱；用户收件后的自动转发请在“个人设置 → 收件规则”中配置。": {
+    "zh-TW": "將某個收件地址投遞到目標信箱；使用者收件後的自動轉發請在“個人設定 → 收件規則”中配置。",
+    "en": "Deliver mail for an address to a target mailbox. Configure forwarding after receipt under Personal settings → Mail rules."
+  },
+  "删除别名？": {
+    "zh-TW": "刪除別名？",
+    "en": "Delete alias?"
+  },
+  "删除别名": {
+    "zh-TW": "刪除別名",
+    "en": "Delete alias"
+  },
+  "来源": {
+    "zh-TW": "來源",
+    "en": "Source"
+  },
+  "目标": {
+    "zh-TW": "目標",
+    "en": "Destination"
+  },
+  "暂无别名转发": {
+    "zh-TW": "暫無別名轉發",
+    "en": "No aliases or forwarding rules"
+  },
+  "搜索主题、发件人、收件人、邮箱": {
+    "zh-TW": "搜尋主旨、寄件者、收件者、信箱",
+    "en": "Search subjects, senders, recipients or mailboxes"
+  },
+  "全部邮箱": {
+    "zh-TW": "全部信箱",
+    "en": "All mailboxes"
+  },
+  "未注册收件": {
+    "zh-TW": "未註冊收件",
+    "en": "Unregistered recipients"
+  },
+  "全部文件夹": {
+    "zh-TW": "全部資料夾",
+    "en": "All folders"
+  },
+  "查看": {
+    "zh-TW": "檢視",
+    "en": "View"
+  },
+  "邮箱：": {
+    "zh-TW": "信箱：",
+    "en": "Mailbox:"
+  },
+  "发件人：": {
+    "zh-TW": "寄件者：",
+    "en": "From:"
+  },
+  "收件人：": {
+    "zh-TW": "收件者：",
+    "en": "To:"
+  },
+  "暂无邮件": {
+    "zh-TW": "暫無郵件",
+    "en": "No messages"
+  },
+  "Message-ID 或已发送邮件 ID": {
+    "zh-TW": "Message-ID 或已傳送郵件 ID",
+    "en": "Message-ID or sent message ID"
+  },
+  "全部事件": {
+    "zh-TW": "全部事件",
+    "en": "All events"
+  },
+  "开始日期": {
+    "zh-TW": "開始日期",
+    "en": "Start date"
+  },
+  "结束日期": {
+    "zh-TW": "結束日期",
+    "en": "End date"
+  },
+  "错误：": {
+    "zh-TW": "錯誤：",
+    "en": "Error:"
+  },
+  "事件": {
+    "zh-TW": "事件",
+    "en": "Event"
+  },
+  "错误": {
+    "zh-TW": "錯誤",
+    "en": "Error"
+  },
+  "暂无发送审计": {
+    "zh-TW": "暫無傳送審計",
+    "en": "No send audit records"
+  },
+  "已重新加入队列": {
+    "zh-TW": "已重新加入佇列",
+    "en": "Added back to the queue"
+  },
+  "任务已取消": {
+    "zh-TW": "任務已取消",
+    "en": "Task cancelled"
+  },
+  "发信": {
+    "zh-TW": "發信",
+    "en": "Outbound mail"
+  },
+  "状态 Webhook": {
+    "zh-TW": "狀態 Webhook",
+    "en": "Status webhook"
+  },
+  "待处理": {
+    "zh-TW": "待處理",
+    "en": "Pending"
+  },
+  "失败": {
+    "zh-TW": "失敗",
+    "en": "Failed"
+  },
+  "全部类型": {
+    "zh-TW": "全部型別",
+    "en": "All types"
+  },
+  "尝试：": {
+    "zh-TW": "嘗試：",
+    "en": "Attempts:"
+  },
+  "下次重试：": {
+    "zh-TW": "下次重試：",
+    "en": "Next retry:"
+  },
+  "更新时间：": {
+    "zh-TW": "更新時間：",
+    "en": "Updated at:"
+  },
+  "类型": {
+    "zh-TW": "型別",
+    "en": "Type"
+  },
+  "任务 ID": {
+    "zh-TW": "任務 ID",
+    "en": "Task ID"
+  },
+  "尝试": {
+    "zh-TW": "嘗試",
+    "en": "Attempts"
+  },
+  "下次重试": {
+    "zh-TW": "下次重試",
+    "en": "Next retry"
+  },
+  "暂无队列任务": {
+    "zh-TW": "暫無佇列任務",
+    "en": "No queued tasks"
+  },
+  "系统设置已保存": {
+    "zh-TW": "系統設定已儲存",
+    "en": "System settings saved"
+  },
+  "保存失败": {
+    "zh-TW": "儲存失敗",
+    "en": "Unable to save"
+  },
+  "基础": {
+    "zh-TW": "基礎",
+    "en": "General"
+  },
+  "外部 IMAP": {
+    "zh-TW": "外部 IMAP",
+    "en": "External IMAP"
+  },
+  "模板": {
+    "zh-TW": "模板",
+    "en": "Templates"
+  },
+  "安全": {
+    "zh-TW": "安全",
+    "en": "Security"
+  },
+  "关于": {
+    "zh-TW": "關於",
+    "en": "About"
+  },
+  "基础设置": {
+    "zh-TW": "基礎設定",
+    "en": "General settings"
+  },
+  "公网主机名": {
+    "zh-TW": "公網主機名",
+    "en": "Public hostname"
+  },
+  "访问地址": {
+    "zh-TW": "訪問地址",
+    "en": "Public URL"
+  },
+  "登录有效期小时": {
+    "zh-TW": "登入有效期小時",
+    "en": "Session lifetime (hours)"
+  },
+  "Maildir 扫描秒数": {
+    "zh-TW": "Maildir 掃描秒數",
+    "en": "Maildir scan interval (seconds)"
+  },
+  "允许 HTTP 调试": {
+    "zh-TW": "允許 HTTP 除錯",
+    "en": "Allow HTTP debugging"
+  },
+  "发信通道": {
+    "zh-TW": "發信通道",
+    "en": "Outbound delivery"
+  },
+  "当前默认：内置 Postfix": {
+    "zh-TW": "當前預設：內建 Postfix",
+    "en": "Current default: built-in Postfix"
+  },
+  "Host 填 127.0.0.1、端口 25、用户名/密码留空、强制 TLS 关闭。这里的“强制 TLS”仅用于外部 SMTP 中继（587 STARTTLS 或 465 TLS）。": {
+    "zh-TW": "Host 填 127.0.0.1、埠 25、使用者名稱/密碼留空、強制 TLS 關閉。這裡的“強制 TLS”僅用於外部 SMTP 中繼（587 STARTTLS 或 465 TLS）。",
+    "en": "Use host 127.0.0.1 and port 25, leave credentials blank and disable Require TLS. Require TLS applies only to external SMTP relays (587 STARTTLS or 465 TLS)."
+  },
+  "发信主机": {
+    "zh-TW": "發信主機",
+    "en": "SMTP host"
+  },
+  "发信端口": {
+    "zh-TW": "發信埠",
+    "en": "SMTP port"
+  },
+  "中继用户名（内置 Postfix 留空）": {
+    "zh-TW": "中繼使用者名稱（內建 Postfix 留空）",
+    "en": "Relay username (blank for built-in Postfix)"
+  },
+  "中继密码（留空不变）": {
+    "zh-TW": "中繼密碼（留空不變）",
+    "en": "Relay password (blank to keep current)"
+  },
+  "中继密码（内置 Postfix 留空）": {
+    "zh-TW": "中繼密碼（內建 Postfix 留空）",
+    "en": "Relay password (blank for built-in Postfix)"
+  },
+  "外部中继强制 TLS": {
+    "zh-TW": "外部中繼強制 TLS",
+    "en": "Require TLS for external relay"
+  },
+  "存储设置": {
+    "zh-TW": "儲存設定",
+    "en": "Storage settings"
+  },
+  "Maildir 根目录": {
+    "zh-TW": "Maildir 根目錄",
+    "en": "Maildir root directory"
+  },
+  "邮件设置": {
+    "zh-TW": "郵件設定",
+    "en": "Mail settings"
+  },
+  "无人收件": {
+    "zh-TW": "無人收件",
+    "en": "Unclaimed mail"
+  },
+  "用户自助申请邮箱": {
+    "zh-TW": "使用者自助申請信箱",
+    "en": "Self-service mailbox applications"
+  },
+  "开放域名": {
+    "zh-TW": "開放域名",
+    "en": "Available domains"
+  },
+  "禁止前缀": {
+    "zh-TW": "禁止字首",
+    "en": "Blocked prefixes"
+  },
+  "自动刷新": {
+    "zh-TW": "自動重新整理",
+    "en": "Auto-refresh"
+  },
+  "刷新间隔秒数": {
+    "zh-TW": "重新整理間隔秒數",
+    "en": "Refresh interval (seconds)"
+  },
+  "外部 IMAP 接入": {
+    "zh-TW": "外部 IMAP 接入",
+    "en": "External IMAP access"
+  },
+  "默认关闭。关闭后用户端会隐藏外部 IMAP 接入，相关后端接口也会返回禁用。": {
+    "zh-TW": "預設關閉。關閉後使用者端會隱藏外部 IMAP 接入，相關後端介面也會返回禁用。",
+    "en": "Disabled by default. Disabling hides external IMAP access and disables the corresponding API endpoints."
+  },
+  "启用外部 IMAP": {
+    "zh-TW": "啟用外部 IMAP",
+    "en": "Enable external IMAP"
+  },
+  "密码加密密钥（留空不变）": {
+    "zh-TW": "密碼加密金鑰（留空不變）",
+    "en": "Password encryption key (blank to keep current)"
+  },
+  "密码加密密钥": {
+    "zh-TW": "密碼加密金鑰",
+    "en": "Password encryption key"
+  },
+  "后台同步间隔秒数": {
+    "zh-TW": "後台同步間隔秒數",
+    "en": "Background sync interval (seconds)"
+  },
+  "允许 localhost / 内网 / link-local IMAP 主机": {
+    "zh-TW": "允許 localhost / 內網 / link-local IMAP 主機",
+    "en": "Allow localhost, private network and link-local IMAP hosts"
+  },
+  "回调地址：": {
+    "zh-TW": "回撥地址：",
+    "en": "Callback URL:"
+  },
+  "Gmail Client Secret（留空不变）": {
+    "zh-TW": "Gmail Client Secret（留空不變）",
+    "en": "Gmail client secret (blank to keep current)"
+  },
+  "Outlook Client Secret（留空不变）": {
+    "zh-TW": "Outlook Client Secret（留空不變）",
+    "en": "Outlook client secret (blank to keep current)"
+  },
+  "安全设置": {
+    "zh-TW": "安全設定",
+    "en": "Security settings"
+  },
+  "开放注册": {
+    "zh-TW": "開放註冊",
+    "en": "Open registration"
+  },
+  "邀请码注册": {
+    "zh-TW": "邀請碼註冊",
+    "en": "Invitation registration"
+  },
+  "普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。": {
+    "zh-TW": "普通註冊關閉時，使用者可憑有效邀請碼註冊；兩者都關閉時不允許普通帳號註冊。",
+    "en": "When open registration is disabled, a valid invitation permits registration. Disabling both prevents standard account registration."
+  },
+  "双因素认证 (2FA)": {
+    "zh-TW": "雙因素認證 (2FA)",
+    "en": "Two-factor authentication (2FA)"
+  },
+  "Secret Key（留空不变）": {
+    "zh-TW": "Secret Key（留空不變）",
+    "en": "Secret key (blank to keep current)"
+  },
+  "关闭 SSO 不会删除用户已有的 Linux.do 绑定。": {
+    "zh-TW": "關閉 SSO 不會刪除使用者已有的 Linux.do 綁定。",
+    "en": "Disabling SSO does not remove existing Linux.do account links."
+  },
+  "启用 Linux.do 登录": {
+    "zh-TW": "啟用 Linux.do 登入",
+    "en": "Enable Linux.do sign-in"
+  },
+  "允许 Linux.do 用户注册本站账号": {
+    "zh-TW": "允許 Linux.do 使用者註冊本站帳號",
+    "en": "Allow Linux.do users to register"
+  },
+  "Linux.do 注册后加入的用户组": {
+    "zh-TW": "Linux.do 註冊後加入的使用者組",
+    "en": "Groups assigned after Linux.do registration"
+  },
+  "留空则仅普通用户": {
+    "zh-TW": "留空則僅普通使用者",
+    "en": "Leave blank for Standard user only"
+  },
+  "默认用户组": {
+    "zh-TW": "預設使用者組",
+    "en": "Default user group"
+  },
+  "Client Secret（留空不变）": {
+    "zh-TW": "Client Secret（留空不變）",
+    "en": "Client secret (blank to keep current)"
+  },
+  "回调地址": {
+    "zh-TW": "回撥地址",
+    "en": "Callback URL"
+  },
+  "保存设置": {
+    "zh-TW": "儲存設定",
+    "en": "Save settings"
+  },
+  "邀请码已创建": {
+    "zh-TW": "邀請碼已建立",
+    "en": "Invitation created"
+  },
+  "邀请码已删除": {
+    "zh-TW": "邀請碼已刪除",
+    "en": "Invitation deleted"
+  },
+  "可用次数必须在 1 到 1000000 之间": {
+    "zh-TW": "可用次數必須在 1 到 1000000 之間",
+    "en": "Allowed uses must be between 1 and 1,000,000"
+  },
+  "邀请码": {
+    "zh-TW": "邀請碼",
+    "en": "Invitation code"
+  },
+  "邀请码可重复查看，每次成功注册会扣减一次。": {
+    "zh-TW": "邀請碼可重複檢視，每次成功註冊會扣減一次。",
+    "en": "Invitation codes can be viewed again. Each successful registration consumes one use."
+  },
+  "创建邀请码": {
+    "zh-TW": "建立邀請碼",
+    "en": "Create invitation"
+  },
+  "留空自动生成": {
+    "zh-TW": "留空自動生成",
+    "en": "Leave blank to generate automatically"
+  },
+  "可用次数": {
+    "zh-TW": "可用次數",
+    "en": "Allowed uses"
+  },
+  "注册后加入的用户组": {
+    "zh-TW": "註冊後加入的使用者組",
+    "en": "Groups assigned after registration"
+  },
+  "用户组": {
+    "zh-TW": "使用者組",
+    "en": "User groups"
+  },
+  "使用情况": {
+    "zh-TW": "使用情況",
+    "en": "Usage"
+  },
+  "创建人": {
+    "zh-TW": "建立人",
+    "en": "Created by"
+  },
+  "复制邀请码": {
+    "zh-TW": "複製邀請碼",
+    "en": "Copy invitation code"
+  },
+  "邀请码已复制": {
+    "zh-TW": "邀請碼已複製",
+    "en": "Invitation code copied"
+  },
+  "（剩余": {
+    "zh-TW": "（剩餘",
+    "en": "(remaining"
+  },
+  "删除邀请码": {
+    "zh-TW": "刪除邀請碼",
+    "en": "Delete invitation"
+  },
+  "正在加载邀请码...": {
+    "zh-TW": "正在載入邀請碼...",
+    "en": "Loading invitations..."
+  },
+  "暂无邀请码": {
+    "zh-TW": "暫無邀請碼",
+    "en": "No invitations"
+  },
+  "Maildir 同步健康": {
+    "zh-TW": "Maildir 同步健康",
+    "en": "Maildir sync health"
+  },
+  "未配置 Maildir 根目录": {
+    "zh-TW": "未配置 Maildir 根目錄",
+    "en": "Maildir root directory is not configured"
+  },
+  "已配置": {
+    "zh-TW": "已配置",
+    "en": "Configured"
+  },
+  "运行中": {
+    "zh-TW": "執行中",
+    "en": "Running"
+  },
+  "worker 已启动": {
+    "zh-TW": "worker 已啟動",
+    "en": "Worker started"
+  },
+  "worker 未启动": {
+    "zh-TW": "worker 未啟動",
+    "en": "Worker not started"
+  },
+  "当前状态": {
+    "zh-TW": "當前狀態",
+    "en": "Current status"
+  },
+  "最近开始": {
+    "zh-TW": "最近開始",
+    "en": "Last started"
+  },
+  "最近结束": {
+    "zh-TW": "最近結束",
+    "en": "Last finished"
+  },
+  "进行中": {
+    "zh-TW": "進行中",
+    "en": "In progress"
+  },
+  "最近耗时": {
+    "zh-TW": "最近耗時",
+    "en": "Last duration"
+  },
+  "扫描间隔": {
+    "zh-TW": "掃描間隔",
+    "en": "Scan interval"
+  },
+  "下次运行": {
+    "zh-TW": "下次執行",
+    "en": "Next run"
+  },
+  "最后错误": {
+    "zh-TW": "最後錯誤",
+    "en": "Last error"
+  },
+  "错误数": {
+    "zh-TW": "錯誤數",
+    "en": "Error count"
+  },
+  "最近错误": {
+    "zh-TW": "最近錯誤",
+    "en": "Recent errors"
+  },
+  "正在读取同步状态...": {
+    "zh-TW": "正在讀取同步狀態...",
+    "en": "Loading sync status..."
+  },
+  "暂无同步错误": {
+    "zh-TW": "暫無同步錯誤",
+    "en": "No sync errors"
+  },
+  "未知错误": {
+    "zh-TW": "未知錯誤",
+    "en": "An unexpected error occurred"
+  },
+  "等待下次扫描": {
+    "zh-TW": "等待下次掃描",
+    "en": "Waiting for the next scan"
+  },
+  "部分成功": {
+    "zh-TW": "部分成功",
+    "en": "Partially successful"
+  },
+  "未启用": {
+    "zh-TW": "未啟用",
+    "en": "Not enabled"
+  },
+  "检查目录": {
+    "zh-TW": "檢查目錄",
+    "en": "Check directories"
+  },
+  "扫描目录": {
+    "zh-TW": "掃描目錄",
+    "en": "Scan directories"
+  },
+  "扫描文件": {
+    "zh-TW": "掃描檔案",
+    "en": "Scan files"
+  },
+  "导入": {
+    "zh-TW": "匯入",
+    "en": "Import"
+  },
+  "回填": {
+    "zh-TW": "回填",
+    "en": "Backfill"
+  },
+  "清理": {
+    "zh-TW": "清理",
+    "en": "Clean up"
+  },
+  "文件错误": {
+    "zh-TW": "檔案錯誤",
+    "en": "File error"
+  },
+  "读取 Maildir 同步健康失败": {
+    "zh-TW": "讀取 Maildir 同步健康失敗",
+    "en": "Unable to load Maildir sync health"
+  },
+  "发现新版本": {
+    "zh-TW": "發現新版本",
+    "en": "Update available"
+  },
+  "版本": {
+    "zh-TW": "版本",
+    "en": "Version"
+  },
+  "新版本": {
+    "zh-TW": "新版本",
+    "en": "New version"
+  },
+  "检查更新中...": {
+    "zh-TW": "檢查更新中...",
+    "en": "Checking for updates..."
+  },
+  "未发布版本": {
+    "zh-TW": "未釋出版本",
+    "en": "Unreleased version"
+  },
+  "交流": {
+    "zh-TW": "交流",
+    "en": "Community"
+  },
+  "Telegram 群组": {
+    "zh-TW": "Telegram 群組",
+    "en": "Telegram group"
+  },
+  "支持": {
+    "zh-TW": "支援",
+    "en": "Support"
+  },
+  "给项目点 Star": {
+    "zh-TW": "給專案點 Star",
+    "en": "Star the project"
+  },
+  "帮助": {
+    "zh-TW": "幫助",
+    "en": "Help"
+  },
+  "项目文档": {
+    "zh-TW": "專案文件",
+    "en": "Documentation"
+  },
+  "开源协议": {
+    "zh-TW": "開源協議",
+    "en": "License"
+  },
+  "测试邮件已发送": {
+    "zh-TW": "測試郵件已傳送",
+    "en": "Test message sent"
+  },
+  "测试发送": {
+    "zh-TW": "測試傳送",
+    "en": "Test delivery"
+  },
+  "SMTP 测试发送": {
+    "zh-TW": "SMTP 測試傳送",
+    "en": "Send SMTP test"
+  },
+  "收件邮箱": {
+    "zh-TW": "收件信箱",
+    "en": "Recipient email"
+  },
+  "模板已保存": {
+    "zh-TW": "模板已儲存",
+    "en": "Template saved"
+  },
+  "模板已恢复": {
+    "zh-TW": "模板已恢復",
+    "en": "Template restored"
+  },
+  "恢复失败": {
+    "zh-TW": "恢復失敗",
+    "en": "Unable to restore"
+  },
+  "暂无模板": {
+    "zh-TW": "暫無模板",
+    "en": "No templates"
+  },
+  "邮件模板": {
+    "zh-TW": "郵件模板",
+    "en": "Mail templates"
+  },
+  "主题": {
+    "zh-TW": "主旨",
+    "en": "Subject"
+  },
+  "纯文本": {
+    "zh-TW": "純文字",
+    "en": "Plain text"
+  },
+  "恢复中...": {
+    "zh-TW": "恢復中...",
+    "en": "Restoring..."
+  },
+  "恢复默认": {
+    "zh-TW": "恢復預設",
+    "en": "Restore defaults"
+  },
+  "保存模板": {
+    "zh-TW": "儲存模板",
+    "en": "Save template"
+  },
+  "所属邮箱": {
+    "zh-TW": "所屬信箱",
+    "en": "Mailbox"
+  },
+  "所属用户": {
+    "zh-TW": "所屬使用者",
+    "en": "Owner"
+  },
+  "已接受": {
+    "zh-TW": "已接受",
+    "en": "Accepted"
+  },
+  "已入队": {
+    "zh-TW": "已入隊",
+    "en": "Queued"
+  },
+  "未绑定": {
+    "zh-TW": "未綁定",
+    "en": "Not linked"
+  },
+  "暂无可分配权限组": {
+    "zh-TW": "暫無可分配權限組",
+    "en": "No permission groups available"
+  },
+  "默认账号": {
+    "zh-TW": "預設帳號",
+    "en": "Default account"
+  },
+  "已重置双因素认证": {
+    "zh-TW": "已重置雙因素認證",
+    "en": "Two-factor authentication reset"
+  },
+  "该用户的会话与 API Token 已同时失效": {
+    "zh-TW": "該使用者的會話與 API Token 已同時失效",
+    "en": "This user's sessions and API tokens have also been invalidated"
+  },
+  "重置失败": {
+    "zh-TW": "重置失敗",
+    "en": "Unable to reset"
+  },
+  "用户已更新": {
+    "zh-TW": "使用者已更新",
+    "en": "User updated"
+  },
+  "编辑用户": {
+    "zh-TW": "編輯使用者",
+    "en": "Edit user"
+  },
+  "重置密码": {
+    "zh-TW": "重置密碼",
+    "en": "Reset password"
+  },
+  "重置双因素认证": {
+    "zh-TW": "重置雙因素認證",
+    "en": "Reset two-factor authentication"
+  },
+  "启用用户": {
+    "zh-TW": "啟用使用者",
+    "en": "Enable user"
+  },
+  "停用用户": {
+    "zh-TW": "停用使用者",
+    "en": "Disable user"
+  },
+  "设为普通用户": {
+    "zh-TW": "設為普通使用者",
+    "en": "Make standard user"
+  },
+  "设为超级管理员": {
+    "zh-TW": "設為超級管理員",
+    "en": "Make super administrator"
+  },
+  "用户已创建": {
+    "zh-TW": "使用者已建立",
+    "en": "User created"
+  },
+  "创建用户": {
+    "zh-TW": "建立使用者",
+    "en": "Create user"
+  },
+  "登录邮箱": {
+    "zh-TW": "登入信箱",
+    "en": "Sign-in email"
+  },
+  "显示名称": {
+    "zh-TW": "顯示名稱",
+    "en": "Display name"
+  },
+  "用户名称": {
+    "zh-TW": "使用者名稱稱",
+    "en": "User name"
+  },
+  "初始密码": {
+    "zh-TW": "初始密碼",
+    "en": "Initial password"
+  },
+  "编辑邮箱": {
+    "zh-TW": "編輯信箱",
+    "en": "Edit mailbox"
+  },
+  "密码已重置": {
+    "zh-TW": "密碼已重置",
+    "en": "Password reset"
+  },
+  "新密码": {
+    "zh-TW": "新密碼",
+    "en": "New password"
+  },
+  "重置中...": {
+    "zh-TW": "重置中...",
+    "en": "Resetting..."
+  },
+  "重置": {
+    "zh-TW": "重置",
+    "en": "Reset"
+  },
+  "邮箱已更新": {
+    "zh-TW": "信箱已更新",
+    "en": "Mailbox updated"
+  },
+  "邮箱地址": {
+    "zh-TW": "信箱地址",
+    "en": "Email address"
+  },
+  "配额 MB": {
+    "zh-TW": "配額 MB",
+    "en": "Quota (MB)"
+  },
+  "域名已创建": {
+    "zh-TW": "域名已建立",
+    "en": "Domain created"
+  },
+  "添加域名": {
+    "zh-TW": "新增域名",
+    "en": "Add domain"
+  },
+  "邮箱已创建": {
+    "zh-TW": "信箱已建立",
+    "en": "Mailbox created"
+  },
+  "账号": {
+    "zh-TW": "帳號",
+    "en": "Account"
+  },
+  "显示名": {
+    "zh-TW": "顯示名",
+    "en": "Display name"
+  },
+  "归属方式": {
+    "zh-TW": "歸屬方式",
+    "en": "Ownership"
+  },
+  "新建/按邮箱匹配用户": {
+    "zh-TW": "新建/按信箱匹配使用者",
+    "en": "Create or match user by email"
+  },
+  "追加到已有用户": {
+    "zh-TW": "追加到已有使用者",
+    "en": "Assign to an existing user"
+  },
+  "已有用户": {
+    "zh-TW": "已有使用者",
+    "en": "Existing user"
+  },
+  "归属用户邮箱": {
+    "zh-TW": "歸屬使用者信箱",
+    "en": "Owner email"
+  },
+  "留空则使用新邮箱": {
+    "zh-TW": "留空則使用新信箱",
+    "en": "Leave blank to use the new mailbox"
+  },
+  "密码": {
+    "zh-TW": "密碼",
+    "en": "Password"
+  },
+  "至少 8 位": {
+    "zh-TW": "至少 8 位",
+    "en": "At least 8 characters"
+  },
+  "别名已创建": {
+    "zh-TW": "別名已建立",
+    "en": "Alias created"
+  },
+  "别名": {
+    "zh-TW": "別名",
+    "en": "Alias"
+  },
+  "创建别名/转发": {
+    "zh-TW": "建立別名/轉發",
+    "en": "Create alias or forwarding rule"
+  },
+  "sales 或 sales@example.com": {
+    "zh-TW": "sales 或 sales@example.com",
+    "en": "sales or sales@example.com"
+  },
+  "目标邮箱": {
+    "zh-TW": "目標信箱",
+    "en": "Destination email"
+  },
+  "DNS 检测通过": {
+    "zh-TW": "DNS 檢測透過",
+    "en": "DNS checks passed"
+  },
+  "DNS 检测未通过": {
+    "zh-TW": "DNS 檢測未透過",
+    "en": "DNS checks failed"
+  },
+  "请选择域名": {
+    "zh-TW": "請選擇域名",
+    "en": "Select a domain"
+  },
+  "以下为需要在域名 DNS 管理中添加的记录：": {
+    "zh-TW": "以下為需要在域名 DNS 管理中新增的記錄：",
+    "en": "Add the following records in your domain's DNS settings:"
+  },
+  "检测结果": {
+    "zh-TW": "檢測結果",
+    "en": "Check results"
+  },
+  "检测": {
+    "zh-TW": "檢測",
+    "en": "Check"
+  },
+  "DNS 记录": {
+    "zh-TW": "DNS 記錄",
+    "en": "DNS records"
+  },
+  "声明域名的 DMARC 策略（如何处理未通过 SPF/DKIM 验证的邮件）。": {
+    "zh-TW": "宣告域名的 DMARC 策略（如何處理未透過 SPF/DKIM 驗證的郵件）。",
+    "en": "Defines the domain's DMARC policy for messages that fail SPF or DKIM authentication."
+  },
+  "DKIM 公钥。收件服务器用此密钥验证邮件是否由你发出。": {
+    "zh-TW": "DKIM 公鑰。收件伺服器用此金鑰驗證郵件是否由你發出。",
+    "en": "DKIM public key. Receiving servers use it to verify your messages."
+  },
+  "授权邮件服务器主机名用于 SMTP HELO，避免对方报告 HELO 未发布 SPF。": {
+    "zh-TW": "授權郵件伺服器主機名用於 SMTP HELO，避免對方報告 HELO 未釋出 SPF。",
+    "en": "Authorizes the mail server hostname for SMTP HELO, preventing missing HELO SPF reports."
+  },
+  "声明哪些服务器有权使用你的域名发件，防止伪造。": {
+    "zh-TW": "宣告哪些伺服器有權使用你的域名發件，防止偽造。",
+    "en": "Declares which servers may send mail for your domain to prevent spoofing."
+  },
+  "已复制": {
+    "zh-TW": "已複製",
+    "en": "Copied"
+  },
+  "复制": {
+    "zh-TW": "複製",
+    "en": "Copy"
+  },
+  "选择域名": {
+    "zh-TW": "選擇域名",
+    "en": "Select domain"
+  },
+  "请输入双因素验证码": {
+    "zh-TW": "請輸入雙因素驗證碼",
+    "en": "Enter your two-factor authentication code"
+  },
+  "登录失败": {
+    "zh-TW": "登入失敗",
+    "en": "Sign-in failed"
+  },
+  "验证失败": {
+    "zh-TW": "驗證失敗",
+    "en": "Verification failed"
+  },
+  "已取消 Linux.do 授权": {
+    "zh-TW": "已取消 Linux.do 授權",
+    "en": "Linux.do authorization cancelled"
+  },
+  "授权状态无效或已过期，请重新登录": {
+    "zh-TW": "授權狀態無效或已過期，請重新登入",
+    "en": "Authorization is invalid or expired. Please sign in again."
+  },
+  "Linux.do 未返回授权码": {
+    "zh-TW": "Linux.do 未返回授權碼",
+    "en": "Linux.do did not return an authorization code"
+  },
+  "无法验证 Linux.do 账号，请稍后重试": {
+    "zh-TW": "無法驗證 Linux.do 帳號，請稍後重試",
+    "en": "Unable to verify the Linux.do account. Please try again later."
+  },
+  "Linux.do SSO 配置已变更或当前不可用": {
+    "zh-TW": "Linux.do SSO 配置已變更或當前不可用",
+    "en": "Linux.do SSO configuration has changed or is unavailable"
+  },
+  "该 Linux.do 账号未激活或已被禁言": {
+    "zh-TW": "該 Linux.do 帳號未啟用或已被禁言",
+    "en": "This Linux.do account is inactive or suspended"
+  },
+  "对应的本站账号已停用": {
+    "zh-TW": "對應的本站帳號已停用",
+    "en": "The linked local account is disabled"
+  },
+  "该 Linux.do 账号尚未绑定，请先使用本站账号登录后绑定": {
+    "zh-TW": "該 Linux.do 帳號尚未綁定，請先使用本站帳號登入後綁定",
+    "en": "This Linux.do account is not linked. Sign in with your local account first to link it."
+  },
+  "登录会话创建失败，请稍后重试": {
+    "zh-TW": "登入會話建立失敗，請稍後重試",
+    "en": "Unable to create a session. Please try again later."
+  },
+  "无法查询 Linux.do 绑定，请稍后重试": {
+    "zh-TW": "無法查詢 Linux.do 綁定，請稍後重試",
+    "en": "Unable to retrieve the Linux.do link. Please try again later."
+  },
+  "无法开始账号注册，请稍后重试": {
+    "zh-TW": "無法開始帳號註冊，請稍後重試",
+    "en": "Unable to start registration. Please try again later."
+  },
+  "Linux.do 登录失败": {
+    "zh-TW": "Linux.do 登入失敗",
+    "en": "Linux.do sign-in failed"
+  },
+  "Linux.do 登录未完成": {
+    "zh-TW": "Linux.do 登入未完成",
+    "en": "Linux.do sign-in was not completed"
+  },
+  "双因素验证": {
+    "zh-TW": "雙因素驗證",
+    "en": "Two-factor verification"
+  },
+  "账号登录": {
+    "zh-TW": "帳號登入",
+    "en": "Sign in"
+  },
+  "请先完成人机验证": {
+    "zh-TW": "請先完成人機驗證",
+    "en": "Complete the verification challenge first"
+  },
+  "双因素验证码": {
+    "zh-TW": "雙因素驗證碼",
+    "en": "Two-factor authentication code"
+  },
+  "登录中...": {
+    "zh-TW": "登入中...",
+    "en": "Signing in..."
+  },
+  "验证登录": {
+    "zh-TW": "驗證登入",
+    "en": "Verify and sign in"
+  },
+  "登录": {
+    "zh-TW": "登入",
+    "en": "Sign in"
+  },
+  "返回登录": {
+    "zh-TW": "返回登入",
+    "en": "Back to sign-in"
+  },
+  "或": {
+    "zh-TW": "或",
+    "en": "or"
+  },
+  "使用 Linux.do 登录": {
+    "zh-TW": "使用 Linux.do 登入",
+    "en": "Sign in with Linux.do"
+  },
+  "没有账号？": {
+    "zh-TW": "沒有帳號？",
+    "en": "No account?"
+  },
+  "注册账号": {
+    "zh-TW": "註冊帳號",
+    "en": "Create an account"
+  },
+  "已删除": {
+    "zh-TW": "已刪除",
+    "en": "Deleted"
+  },
+  "已移动": {
+    "zh-TW": "已移動",
+    "en": "Moved"
+  },
+  "无法打开邮件": {
+    "zh-TW": "無法開啟郵件",
+    "en": "Unable to open message"
+  },
+  "邮件链接无效或当前账号无权访问": {
+    "zh-TW": "郵件連結無效或當前帳號無權訪問",
+    "en": "The message link is invalid or you do not have access"
+  },
+  "封定时邮件": {
+    "zh-TW": "封定時郵件",
+    "en": "scheduled messages"
+  },
+  "发给": {
+    "zh-TW": "發給",
+    "en": "To"
+  },
+  "移除记录": {
+    "zh-TW": "移除記錄",
+    "en": "Remove record"
+  },
+  "取消发送": {
+    "zh-TW": "取消傳送",
+    "en": "Cancel sending"
+  },
+  "个发送任务": {
+    "zh-TW": "個傳送任務",
+    "en": "send tasks"
+  },
+  "下次": {
+    "zh-TW": "下次",
+    "en": "Next"
+  },
+  "投递于": {
+    "zh-TW": "投遞於",
+    "en": "Delivered at"
+  },
+  "尝试次数：": {
+    "zh-TW": "嘗試次數：",
+    "en": "Attempts:"
+  },
+  "转发邮箱验证": {
+    "zh-TW": "轉發信箱驗證",
+    "en": "Forwarding address verification"
+  },
+  "收件规则自动转发": {
+    "zh-TW": "收件規則自動轉發",
+    "en": "Automatic forwarding by mail rule"
+  },
+  "已选": {
+    "zh-TW": "已選",
+    "en": "Selected"
+  },
+  "返回": {
+    "zh-TW": "返回",
+    "en": "Back"
+  },
+  "同会话邮件 (": {
+    "zh-TW": "同會話郵件 (",
+    "en": "Messages in this conversation ("
+  },
+  "翻译失败": {
+    "zh-TW": "翻譯失敗",
+    "en": "Translation failed"
+  },
+  "显示译文": {
+    "zh-TW": "顯示譯文",
+    "en": "Show translation"
+  },
+  "显示原文": {
+    "zh-TW": "顯示原文",
+    "en": "Show original"
+  },
+  "（内容较长，仅翻译前半部分）": {
+    "zh-TW": "（內容較長，僅翻譯前半部分）",
+    "en": "(Only the first part was translated because the content is long)"
+  },
+  "翻译中...": {
+    "zh-TW": "翻譯中...",
+    "en": "Translating..."
+  },
+  "重新翻译": {
+    "zh-TW": "重新翻譯",
+    "en": "Translate again"
+  },
+  "翻译": {
+    "zh-TW": "翻譯",
+    "en": "Translate"
+  },
+  "简体中文": {
+    "zh-TW": "簡體中文",
+    "en": "Simplified Chinese"
+  },
+  "繁體中文": {
+    "zh-TW": "繁體中文",
+    "en": "Traditional Chinese"
+  },
+  "选择邮件": {
+    "zh-TW": "選擇郵件",
+    "en": "Select message"
+  },
+  "已定时": {
+    "zh-TW": "已定時",
+    "en": "Scheduled"
+  },
+  "当前邮箱": {
+    "zh-TW": "當前信箱",
+    "en": "Current mailbox"
+  },
+  "来自": {
+    "zh-TW": "來自",
+    "en": "From"
+  },
+  "蓝": {
+    "zh-TW": "藍",
+    "en": "Blue"
+  },
+  "定时发送失败": {
+    "zh-TW": "定時傳送失敗",
+    "en": "Unable to schedule message"
+  },
+  "这封邮件还没有主题。": {
+    "zh-TW": "這封郵件還沒有主旨。",
+    "en": "This message has no subject."
+  },
+  "正文还是空的。": {
+    "zh-TW": "內文還是空的。",
+    "en": "The message body is empty."
+  },
+  "正文提到了附件，但还没有添加附件。": {
+    "zh-TW": "內文提到了附件，但還沒有新增附件。",
+    "en": "The message mentions an attachment, but none has been added."
+  },
+  "附件超过权限组上限": {
+    "zh-TW": "附件超過權限組上限",
+    "en": "The attachment exceeds your permission group's limit"
+  },
+  "name@example.com，多个地址用逗号或空格分隔": {
+    "zh-TW": "name@example.com，多個地址用逗號或空格分隔",
+    "en": "name@example.com; separate addresses with commas or spaces"
+  },
+  "主 题": {
+    "zh-TW": "主 題",
+    "en": "Subject"
+  },
+  "15分钟": {
+    "zh-TW": "15分鐘",
+    "en": "15 minutes"
+  },
+  "30分钟": {
+    "zh-TW": "30分鐘",
+    "en": "30 minutes"
+  },
+  "1小时": {
+    "zh-TW": "1小時",
+    "en": "1 hour"
+  },
+  "2小时": {
+    "zh-TW": "2小時",
+    "en": "2 hours"
+  },
+  "1天": {
+    "zh-TW": "1天",
+    "en": "1 day"
+  },
+  "5分钟前": {
+    "zh-TW": "5分鐘前",
+    "en": "5 minutes before"
+  },
+  "15分钟前": {
+    "zh-TW": "15分鐘前",
+    "en": "15 minutes before"
+  },
+  "30分钟前": {
+    "zh-TW": "30分鐘前",
+    "en": "30 minutes before"
+  },
+  "1小时前": {
+    "zh-TW": "1小時前",
+    "en": "1 hour before"
+  },
+  "1天前": {
+    "zh-TW": "1天前",
+    "en": "1 day before"
+  },
+  "页面不存在": {
+    "zh-TW": "頁面不存在",
+    "en": "Page not found"
+  },
+  "返回首页": {
+    "zh-TW": "返回首頁",
+    "en": "Go to home"
+  },
+  "去登录": {
+    "zh-TW": "去登入",
+    "en": "Go to sign-in"
+  },
+  "账户资料": {
+    "zh-TW": "賬戶資料",
+    "en": "Account profile"
+  },
+  "邮箱管理": {
+    "zh-TW": "信箱管理",
+    "en": "Mailbox management"
+  },
+  "第三方客户端": {
+    "zh-TW": "第三方客戶端",
+    "en": "Mail clients"
+  },
+  "签名管理": {
+    "zh-TW": "簽名管理",
+    "en": "Signatures"
+  },
+  "联系人管理": {
+    "zh-TW": "聯絡人管理",
+    "en": "Contacts"
+  },
+  "邮件清理": {
+    "zh-TW": "郵件清理",
+    "en": "Mail cleanup"
+  },
+  "收件规则": {
+    "zh-TW": "收件規則",
+    "en": "Mail rules"
+  },
+  "被拦截邮件": {
+    "zh-TW": "被攔截郵件",
+    "en": "Blocked mail"
+  },
+  "数据统计": {
+    "zh-TW": "資料統計",
+    "en": "Statistics"
+  },
+  "个人资料已保存": {
+    "zh-TW": "個人資料已儲存",
+    "en": "Profile saved"
+  },
+  "两次输入的新密码不一致": {
+    "zh-TW": "兩次輸入的新密碼不一致",
+    "en": "The new passwords do not match"
+  },
+  "密码已更新": {
+    "zh-TW": "密碼已更新",
+    "en": "Password updated"
+  },
+  "修改失败": {
+    "zh-TW": "修改失敗",
+    "en": "Unable to update"
+  },
+  "双因素密钥已生成": {
+    "zh-TW": "雙因素金鑰已生成",
+    "en": "Two-factor secret generated"
+  },
+  "生成失败": {
+    "zh-TW": "生成失敗",
+    "en": "Unable to generate"
+  },
+  "双因素认证已启用": {
+    "zh-TW": "雙因素認證已啟用",
+    "en": "Two-factor authentication enabled"
+  },
+  "启用失败": {
+    "zh-TW": "啟用失敗",
+    "en": "Unable to enable"
+  },
+  "双因素认证已关闭": {
+    "zh-TW": "雙因素認證已關閉",
+    "en": "Two-factor authentication disabled"
+  },
+  "关闭失败": {
+    "zh-TW": "關閉失敗",
+    "en": "Unable to disable"
+  },
+  "API Token 已创建": {
+    "zh-TW": "API Token 已建立",
+    "en": "API token created"
+  },
+  "API Token 已更新": {
+    "zh-TW": "API Token 已更新",
+    "en": "API token updated"
+  },
+  "API Token 已撤销": {
+    "zh-TW": "API Token 已撤銷",
+    "en": "API token revoked"
+  },
+  "撤销失败": {
+    "zh-TW": "撤銷失敗",
+    "en": "Unable to revoke"
+  },
+  "联系人已保存": {
+    "zh-TW": "聯絡人已儲存",
+    "en": "Contact saved"
+  },
+  "联系人已删除": {
+    "zh-TW": "聯絡人已刪除",
+    "en": "Contact deleted"
+  },
+  "签名已保存": {
+    "zh-TW": "簽名已儲存",
+    "en": "Signature saved"
+  },
+  "签名已更新": {
+    "zh-TW": "簽名已更新",
+    "en": "Signature updated"
+  },
+  "默认签名已更新": {
+    "zh-TW": "預設簽名已更新",
+    "en": "Default signature updated"
+  },
+  "设置失败": {
+    "zh-TW": "設定失敗",
+    "en": "Unable to apply settings"
+  },
+  "签名已删除": {
+    "zh-TW": "簽名已刪除",
+    "en": "Signature deleted"
+  },
+  "收件规则已保存": {
+    "zh-TW": "收件規則已儲存",
+    "en": "Mail rule saved"
+  },
+  "规则已删除": {
+    "zh-TW": "規則已刪除",
+    "en": "Rule deleted"
+  },
+  "Telegram 通知已保存": {
+    "zh-TW": "Telegram 通知已儲存",
+    "en": "Telegram notifications saved"
+  },
+  "Telegram 测试消息已发送": {
+    "zh-TW": "Telegram 測試訊息已傳送",
+    "en": "Telegram test message sent"
+  },
+  "测试失败": {
+    "zh-TW": "測試失敗",
+    "en": "Test failed"
+  },
+  "Telegram 配置已删除": {
+    "zh-TW": "Telegram 配置已刪除",
+    "en": "Telegram configuration deleted"
+  },
+  "邮箱已验证": {
+    "zh-TW": "信箱已驗證",
+    "en": "Email verified"
+  },
+  "验证码已发送": {
+    "zh-TW": "驗證碼已傳送",
+    "en": "Verification code sent"
+  },
+  "转发邮箱验证成功": {
+    "zh-TW": "轉發信箱驗證成功",
+    "en": "Forwarding address verified"
+  },
+  "转发邮箱已移除": {
+    "zh-TW": "轉發信箱已移除",
+    "en": "Forwarding address removed"
+  },
+  "移除失败": {
+    "zh-TW": "移除失敗",
+    "en": "Unable to remove"
+  },
+  "拦截规则已保存": {
+    "zh-TW": "攔截規則已儲存",
+    "en": "Block rule saved"
+  },
+  "拦截规则已删除": {
+    "zh-TW": "攔截規則已刪除",
+    "en": "Block rule deleted"
+  },
+  "清理失败": {
+    "zh-TW": "清理失敗",
+    "en": "Cleanup failed"
+  },
+  "邮箱已申请": {
+    "zh-TW": "信箱已申請",
+    "en": "Mailbox application submitted"
+  },
+  "申请失败": {
+    "zh-TW": "申請失敗",
+    "en": "Application failed"
+  },
+  "外部 IMAP 已保存": {
+    "zh-TW": "外部 IMAP 已儲存",
+    "en": "External IMAP account saved"
+  },
+  "外部 IMAP 已更新": {
+    "zh-TW": "外部 IMAP 已更新",
+    "en": "External IMAP account updated"
+  },
+  "外部 IMAP 已删除": {
+    "zh-TW": "外部 IMAP 已刪除",
+    "en": "External IMAP account deleted"
+  },
+  "连接失败": {
+    "zh-TW": "連線失敗",
+    "en": "Connection failed"
+  },
+  "同步失败": {
+    "zh-TW": "同步失敗",
+    "en": "Sync failed"
+  },
+  "授权失败": {
+    "zh-TW": "授權失敗",
+    "en": "Authorization failed"
+  },
+  "Linux.do 账号已绑定": {
+    "zh-TW": "Linux.do 帳號已綁定",
+    "en": "Linux.do account linked"
+  },
+  "Linux.do 绑定失败": {
+    "zh-TW": "Linux.do 綁定失敗",
+    "en": "Unable to link Linux.do account"
+  },
+  "授权状态无效或已过期，请重试": {
+    "zh-TW": "授權狀態無效或已過期，請重試",
+    "en": "Authorization is invalid or expired. Please try again."
+  },
+  "该身份或当前用户已有其他绑定": {
+    "zh-TW": "該身份或當前使用者已有其他綁定",
+    "en": "This identity or user is already linked to another account"
+  },
+  "登录会话已失效，请重新登录": {
+    "zh-TW": "登入會話已失效，請重新登入",
+    "en": "Your session has expired. Please sign in again."
+  },
+  "绑定信息保存失败，请稍后重试": {
+    "zh-TW": "綁定資訊儲存失敗，請稍後重試",
+    "en": "Unable to save the account link. Please try again later."
+  },
+  "Linux.do 绑定未完成": {
+    "zh-TW": "Linux.do 綁定未完成",
+    "en": "Linux.do account linking was not completed"
+  },
+  "登录状态已失效": {
+    "zh-TW": "登入狀態已失效",
+    "en": "Your session has expired"
+  },
+  "个人中心": {
+    "zh-TW": "個人中心",
+    "en": "Personal settings"
+  },
+  "个人中心导航": {
+    "zh-TW": "個人中心導航",
+    "en": "Personal settings navigation"
+  },
+  "返回邮箱": {
+    "zh-TW": "返回信箱",
+    "en": "Back to mail"
+  },
+  "附件上限": {
+    "zh-TW": "附件上限",
+    "en": "Attachment limit"
+  },
+  "账户信息": {
+    "zh-TW": "賬戶資訊",
+    "en": "Account information"
+  },
+  "用户名": {
+    "zh-TW": "使用者名稱",
+    "en": "Username"
+  },
+  "保存资料": {
+    "zh-TW": "儲存資料",
+    "en": "Save profile"
+  },
+  "角色": {
+    "zh-TW": "角色",
+    "en": "Role"
+  },
+  "账号状态": {
+    "zh-TW": "帳號狀態",
+    "en": "Account status"
+  },
+  "界面设置": {
+    "zh-TW": "介面設定",
+    "en": "Appearance"
+  },
+  "显示模式": {
+    "zh-TW": "顯示模式",
+    "en": "Display mode"
+  },
+  "详细": {
+    "zh-TW": "詳細",
+    "en": "Detailed"
+  },
+  "简洁": {
+    "zh-TW": "簡潔",
+    "en": "Compact"
+  },
+  "双因素认证": {
+    "zh-TW": "雙因素認證",
+    "en": "Two-factor authentication"
+  },
+  "认证状态": {
+    "zh-TW": "認證狀態",
+    "en": "Authentication status"
+  },
+  "生成中...": {
+    "zh-TW": "生成中...",
+    "en": "Generating..."
+  },
+  "启用双因素认证": {
+    "zh-TW": "啟用雙因素認證",
+    "en": "Enable two-factor authentication"
+  },
+  "密钥": {
+    "zh-TW": "金鑰",
+    "en": "Secret key"
+  },
+  "绑定地址": {
+    "zh-TW": "綁定地址",
+    "en": "Setup URI"
+  },
+  "验证码": {
+    "zh-TW": "驗證碼",
+    "en": "Verification code"
+  },
+  "启用中...": {
+    "zh-TW": "啟用中...",
+    "en": "Enabling..."
+  },
+  "确认启用": {
+    "zh-TW": "確認啟用",
+    "en": "Confirm and enable"
+  },
+  "当前验证码": {
+    "zh-TW": "當前驗證碼",
+    "en": "Current verification code"
+  },
+  "当前密码": {
+    "zh-TW": "當前密碼",
+    "en": "Current password"
+  },
+  "关闭中...": {
+    "zh-TW": "關閉中...",
+    "en": "Disabling..."
+  },
+  "关闭双因素认证": {
+    "zh-TW": "關閉雙因素認證",
+    "en": "Disable two-factor authentication"
+  },
+  "修改密码": {
+    "zh-TW": "修改密碼",
+    "en": "Change password"
+  },
+  "确认新密码": {
+    "zh-TW": "確認新密碼",
+    "en": "Confirm new password"
+  },
+  "更新中...": {
+    "zh-TW": "更新中...",
+    "en": "Updating..."
+  },
+  "更新密码": {
+    "zh-TW": "更新密碼",
+    "en": "Update password"
+  },
+  "无法开始绑定": {
+    "zh-TW": "無法開始綁定",
+    "en": "Unable to start account linking"
+  },
+  "Linux.do 账号已解除绑定": {
+    "zh-TW": "Linux.do 帳號已解除綁定",
+    "en": "Linux.do account unlinked"
+  },
+  "解除绑定失败": {
+    "zh-TW": "解除綁定失敗",
+    "en": "Unable to unlink account"
+  },
+  "Linux.do 账号": {
+    "zh-TW": "Linux.do 帳號",
+    "en": "Linux.do account"
+  },
+  "加载中": {
+    "zh-TW": "載入中",
+    "en": "Loading"
+  },
+  "已绑定": {
+    "zh-TW": "已綁定",
+    "en": "Linked"
+  },
+  "正在跳转...": {
+    "zh-TW": "正在跳轉...",
+    "en": "Redirecting..."
+  },
+  "解除中...": {
+    "zh-TW": "解除中...",
+    "en": "Unlinking..."
+  },
+  "解除绑定": {
+    "zh-TW": "解除綁定",
+    "en": "Unlink account"
+  },
+  "绑定 Linux.do": {
+    "zh-TW": "綁定 Linux.do",
+    "en": "Link Linux.do"
+  },
+  "邮箱额度": {
+    "zh-TW": "信箱額度",
+    "en": "Mailbox quota"
+  },
+  "当前": {
+    "zh-TW": "當前",
+    "en": "Current"
+  },
+  "设为当前": {
+    "zh-TW": "設為當前",
+    "en": "Make current"
+  },
+  "进入邮箱": {
+    "zh-TW": "進入信箱",
+    "en": "Open mailbox"
+  },
+  "暂无邮箱账号，点击申请邮箱创建": {
+    "zh-TW": "暫無信箱帳號，點選申請信箱建立",
+    "en": "No mailboxes yet. Select Apply for mailbox to create one."
+  },
+  "接入其他邮箱，可选择同步到本地，或每次打开时直接从远端读取。": {
+    "zh-TW": "接入其他信箱，可選擇同步到本地，或每次開啟時直接從遠端讀取。",
+    "en": "Connect another mailbox and sync it locally or read directly from the remote server."
+  },
+  "请先选择一个本地邮箱": {
+    "zh-TW": "請先選擇一個本地信箱",
+    "en": "Select a local mailbox first"
+  },
+  "暂无外部 IMAP 账号": {
+    "zh-TW": "暫無外部 IMAP 帳號",
+    "en": "No external IMAP accounts"
+  },
+  "本地存储": {
+    "zh-TW": "本地儲存",
+    "en": "Local storage"
+  },
+  "远端直连": {
+    "zh-TW": "遠端直連",
+    "en": "Direct remote access"
+  },
+  "状态：": {
+    "zh-TW": "狀態：",
+    "en": "Status:"
+  },
+  "测试": {
+    "zh-TW": "測試",
+    "en": "Test"
+  },
+  "历史": {
+    "zh-TW": "歷史",
+    "en": "History"
+  },
+  "申请邮箱": {
+    "zh-TW": "申請信箱",
+    "en": "Apply for mailbox"
+  },
+  "邮箱前缀": {
+    "zh-TW": "信箱字首",
+    "en": "Mailbox prefix"
+  },
+  "域名后缀": {
+    "zh-TW": "域名字尾",
+    "en": "Domain suffix"
+  },
+  "可选": {
+    "zh-TW": "可選",
+    "en": "Optional"
+  },
+  "申请中...": {
+    "zh-TW": "申請中...",
+    "en": "Applying..."
+  },
+  "申请": {
+    "zh-TW": "申請",
+    "en": "Apply"
+  },
+  "OAuth 只适用于": {
+    "zh-TW": "OAuth 只適用於",
+    "en": "OAuth is only available for"
+  },
+  "托管邮箱。自建域名邮箱请使用“添加外部邮箱”的普通 IMAP 方式。": {
+    "zh-TW": "託管信箱。自建域名信箱請使用“新增外部信箱”的普通 IMAP 方式。",
+    "en": "hosted mailboxes. For self-hosted domains, use standard IMAP under Add external mailbox."
+  },
+  "外部邮箱地址（可选）": {
+    "zh-TW": "外部信箱地址（可選）",
+    "en": "External email address (optional)"
+  },
+  "留空时会以 OAuth 服务商返回的真实授权邮箱为准；填写后，回调时会校验它和真实授权邮箱一致。": {
+    "zh-TW": "留空時會以 OAuth 服務商返回的真實授權信箱為準；填寫後，回撥時會校驗它和真實授權信箱一致。",
+    "en": "Leave blank to use the address returned by the OAuth provider. If entered, it must match the authorized address."
+  },
+  "存储模式": {
+    "zh-TW": "儲存模式",
+    "en": "Storage mode"
+  },
+  "同步到本地": {
+    "zh-TW": "同步到本地",
+    "en": "Sync locally"
+  },
+  "跳转中...": {
+    "zh-TW": "跳轉中...",
+    "en": "Redirecting..."
+  },
+  "前往授权": {
+    "zh-TW": "前往授權",
+    "en": "Authorize"
+  },
+  "编辑": {
+    "zh-TW": "編輯",
+    "en": "Edit"
+  },
+  "添加外部邮箱": {
+    "zh-TW": "新增外部信箱",
+    "en": "Add external mailbox"
+  },
+  "编辑外部 IMAP": {
+    "zh-TW": "編輯外部 IMAP",
+    "en": "Edit external IMAP account"
+  },
+  "添加外部 IMAP": {
+    "zh-TW": "新增外部 IMAP",
+    "en": "Add external IMAP account"
+  },
+  "Gmail / 工作邮箱": {
+    "zh-TW": "Gmail / 工作信箱",
+    "en": "Gmail / Work email"
+  },
+  "服务器": {
+    "zh-TW": "伺服器",
+    "en": "Server"
+  },
+  "端口": {
+    "zh-TW": "埠",
+    "en": "Port"
+  },
+  "加密方式": {
+    "zh-TW": "加密方式",
+    "en": "Encryption"
+  },
+  "不加密": {
+    "zh-TW": "不加密",
+    "en": "Unencrypted"
+  },
+  "密码（留空则不修改）": {
+    "zh-TW": "密碼（留空則不修改）",
+    "en": "Password (blank to keep current)"
+  },
+  "不修改请留空": {
+    "zh-TW": "不修改請留空",
+    "en": "Leave blank to keep current"
+  },
+  "外部邮箱密码或授权码": {
+    "zh-TW": "外部信箱密碼或授權碼",
+    "en": "External mailbox password or app password"
+  },
+  "同步已读状态": {
+    "zh-TW": "同步已讀狀態",
+    "en": "Sync read status"
+  },
+  "启用此账号": {
+    "zh-TW": "啟用此帳號",
+    "en": "Enable this account"
+  },
+  "未同步": {
+    "zh-TW": "未同步",
+    "en": "Not synced"
+  },
+  "同步中": {
+    "zh-TW": "同步中",
+    "en": "Syncing"
+  },
+  "单文件夹同步": {
+    "zh-TW": "單資料夾同步",
+    "en": "Sync one folder"
+  },
+  "选择远端文件夹": {
+    "zh-TW": "選擇遠端資料夾",
+    "en": "Select remote folder"
+  },
+  "同步文件夹": {
+    "zh-TW": "同步資料夾",
+    "en": "Sync folder"
+  },
+  "最近同步记录": {
+    "zh-TW": "最近同步記錄",
+    "en": "Recent sync history"
+  },
+  "暂无同步记录": {
+    "zh-TW": "暫無同步記錄",
+    "en": "No sync history"
+  },
+  "· 跳过": {
+    "zh-TW": "· 跳過",
+    "en": "· Skipped"
+  },
+  "· 失败": {
+    "zh-TW": "· 失敗",
+    "en": "· Failed"
+  },
+  "IMAP 服务器": {
+    "zh-TW": "IMAP 伺服器",
+    "en": "IMAP server"
+  },
+  "POP3 服务器": {
+    "zh-TW": "POP3 伺服器",
+    "en": "POP3 server"
+  },
+  "SMTP 服务器": {
+    "zh-TW": "SMTP 伺服器",
+    "en": "SMTP server"
+  },
+  "IMAP / POP3 / SMTP 配置用于 Thunderbird、Apple Mail、手机邮件客户端等。": {
+    "zh-TW": "IMAP / POP3 / SMTP 配置用於 Thunderbird、Apple Mail、手機郵件客戶端等。",
+    "en": "Use these IMAP, POP3 and SMTP settings with Thunderbird, Apple Mail or mobile mail clients."
+  },
+  "客户端配置": {
+    "zh-TW": "客戶端配置",
+    "en": "Client settings"
+  },
+  "邮箱登录密码": {
+    "zh-TW": "信箱登入密碼",
+    "en": "Mailbox password"
+  },
+  "暂无邮箱账号，创建邮箱后可查看客户端配置": {
+    "zh-TW": "暫無信箱帳號，建立信箱後可檢視客戶端配置",
+    "en": "Create a mailbox to view client settings"
+  },
+  "发送邮件": {
+    "zh-TW": "傳送郵件",
+    "en": "Send mail"
+  },
+  "读取邮件与投递状态": {
+    "zh-TW": "讀取郵件與投遞狀態",
+    "en": "Read mail and delivery status"
+  },
+  "重试或取消发送": {
+    "zh-TW": "重試或取消傳送",
+    "en": "Retry or cancel sending"
+  },
+  "查看域名": {
+    "zh-TW": "檢視域名",
+    "en": "View domains"
+  },
+  "管理域名": {
+    "zh-TW": "管理域名",
+    "en": "Manage domains"
+  },
+  "查看邮箱": {
+    "zh-TW": "檢視信箱",
+    "en": "View mailboxes"
+  },
+  "管理邮箱": {
+    "zh-TW": "管理信箱",
+    "en": "Manage mailboxes"
+  },
+  "查看 DNS": {
+    "zh-TW": "檢視 DNS",
+    "en": "View DNS"
+  },
+  "执行 DNS 检测": {
+    "zh-TW": "執行 DNS 檢測",
+    "en": "Run DNS checks"
+  },
+  "查看别名": {
+    "zh-TW": "檢視別名",
+    "en": "View aliases"
+  },
+  "管理别名": {
+    "zh-TW": "管理別名",
+    "en": "Manage aliases"
+  },
+  "只显示一次": {
+    "zh-TW": "只顯示一次",
+    "en": "Shown only once"
+  },
+  "到期日期": {
+    "zh-TW": "到期日期",
+    "en": "Expiration date"
+  },
+  "创建 Token": {
+    "zh-TW": "建立 Token",
+    "en": "Create token"
+  },
+  "授权范围": {
+    "zh-TW": "授權範圍",
+    "en": "Scopes"
+  },
+  "已创建的 Token": {
+    "zh-TW": "已建立的 Token",
+    "en": "Created tokens"
+  },
+  "已禁用": {
+    "zh-TW": "已禁用",
+    "en": "Disabled"
+  },
+  "已过期": {
+    "zh-TW": "已過期",
+    "en": "Expired"
+  },
+  "可用": {
+    "zh-TW": "可用",
+    "en": "Available"
+  },
+  "创建：": {
+    "zh-TW": "建立：",
+    "en": "Created:"
+  },
+  "过期：": {
+    "zh-TW": "過期：",
+    "en": "Expires:"
+  },
+  "未设置": {
+    "zh-TW": "未設定",
+    "en": "Not set"
+  },
+  "最后使用：": {
+    "zh-TW": "最後使用：",
+    "en": "Last used:"
+  },
+  "从未使用": {
+    "zh-TW": "從未使用",
+    "en": "Never used"
+  },
+  "编辑权限": {
+    "zh-TW": "編輯權限",
+    "en": "Edit permissions"
+  },
+  "禁用": {
+    "zh-TW": "禁用",
+    "en": "Disable"
+  },
+  "撤销 API Token？": {
+    "zh-TW": "撤銷 API Token？",
+    "en": "Revoke API token?"
+  },
+  "撤销 Token": {
+    "zh-TW": "撤銷 Token",
+    "en": "Revoke token"
+  },
+  "暂无 API Token": {
+    "zh-TW": "暫無 API Token",
+    "en": "No API tokens"
+  },
+  "编辑 Token 权限": {
+    "zh-TW": "編輯 Token 權限",
+    "en": "Edit token permissions"
+  },
+  "保存权限": {
+    "zh-TW": "儲存權限",
+    "en": "Save permissions"
+  },
+  "支持全局签名和按发件邮箱绑定的默认签名。": {
+    "zh-TW": "支援全域性簽名和按發件信箱綁定的預設簽名。",
+    "en": "Supports global signatures and default signatures for individual sender mailboxes."
+  },
+  "共": {
+    "zh-TW": "共",
+    "en": "Total"
+  },
+  "个签名": {
+    "zh-TW": "個簽名",
+    "en": "signatures"
+  },
+  "签名名称": {
+    "zh-TW": "簽名名稱",
+    "en": "Signature name"
+  },
+  "例如：默认签名": {
+    "zh-TW": "例如：預設簽名",
+    "en": "e.g. Default signature"
+  },
+  "绑定邮箱": {
+    "zh-TW": "綁定信箱",
+    "en": "Linked mailbox"
+  },
+  "签名内容": {
+    "zh-TW": "簽名內容",
+    "en": "Signature content"
+  },
+  "支持多行文本，写信时会自动转为 HTML": {
+    "zh-TW": "支援多行文字，寫信時會自動轉為 HTML",
+    "en": "Supports multiple lines; converted to HTML when composing"
+  },
+  "设为当前范围默认签名": {
+    "zh-TW": "設為當前範圍預設簽名",
+    "en": "Set as default for this scope"
+  },
+  "创建签名": {
+    "zh-TW": "建立簽名",
+    "en": "Create signature"
+  },
+  "签名列表": {
+    "zh-TW": "簽名列表",
+    "en": "Signature list"
+  },
+  "未知邮箱": {
+    "zh-TW": "未知信箱",
+    "en": "Unknown mailbox"
+  },
+  "全局签名": {
+    "zh-TW": "全域性簽名",
+    "en": "Global signature"
+  },
+  "设为默认": {
+    "zh-TW": "設為預設",
+    "en": "Set as default"
+  },
+  "删除签名？": {
+    "zh-TW": "刪除簽名？",
+    "en": "Delete signature?"
+  },
+  "删除签名": {
+    "zh-TW": "刪除簽名",
+    "en": "Delete signature"
+  },
+  "暂无签名": {
+    "zh-TW": "暫無簽名",
+    "en": "No signatures"
+  },
+  "编辑签名": {
+    "zh-TW": "編輯簽名",
+    "en": "Edit signature"
+  },
+  "保存修改": {
+    "zh-TW": "儲存修改",
+    "en": "Save changes"
+  },
+  "新增联系人": {
+    "zh-TW": "新增聯絡人",
+    "en": "Add contact"
+  },
+  "姓名": {
+    "zh-TW": "姓名",
+    "en": "Name"
+  },
+  "张三": {
+    "zh-TW": "張三",
+    "en": "Alex Chen"
+  },
+  "备注": {
+    "zh-TW": "備註",
+    "en": "Notes"
+  },
+  "保存联系人": {
+    "zh-TW": "儲存聯絡人",
+    "en": "Save contact"
+  },
+  "联系人列表": {
+    "zh-TW": "聯絡人列表",
+    "en": "Contact list"
+  },
+  "删除联系人？": {
+    "zh-TW": "刪除聯絡人？",
+    "en": "Delete contact?"
+  },
+  "删除联系人": {
+    "zh-TW": "刪除聯絡人",
+    "en": "Delete contact"
+  },
+  "暂无联系人": {
+    "zh-TW": "暫無聯絡人",
+    "en": "No contacts"
+  },
+  "请先选择邮箱。": {
+    "zh-TW": "請先選擇信箱。",
+    "en": "Select a mailbox first."
+  },
+  "确认清空": {
+    "zh-TW": "確認清空",
+    "en": "Confirm emptying"
+  },
+  "确认处理": {
+    "zh-TW": "確認處理",
+    "en": "Confirm action"
+  },
+  "清理当前邮箱": {
+    "zh-TW": "清理當前信箱",
+    "en": "Clean up current mailbox"
+  },
+  "归档已读收件箱": {
+    "zh-TW": "封存已讀收件匣",
+    "en": "Archive read messages in Inbox"
+  },
+  "归档已读收件箱？": {
+    "zh-TW": "封存已讀收件匣？",
+    "en": "Archive read messages in Inbox?"
+  },
+  "清空垃圾邮件": {
+    "zh-TW": "清空垃圾郵件",
+    "en": "Empty spam"
+  },
+  "清空垃圾邮件？": {
+    "zh-TW": "清空垃圾郵件？",
+    "en": "Empty spam?"
+  },
+  "清空回收站": {
+    "zh-TW": "清空垃圾桶",
+    "en": "Empty trash"
+  },
+  "清空回收站？": {
+    "zh-TW": "清空垃圾桶？",
+    "en": "Empty trash?"
+  },
+  "新建规则": {
+    "zh-TW": "新建規則",
+    "en": "Create rule"
+  },
+  "规则列表": {
+    "zh-TW": "規則列表",
+    "en": "Rule list"
+  },
+  "暂无收件规则": {
+    "zh-TW": "暫無收件規則",
+    "en": "No mail rules"
+  },
+  "自动转发只能使用已通过验证码确认的目标邮箱。": {
+    "zh-TW": "自動轉發只能使用已透過驗證碼確認的目標信箱。",
+    "en": "Automatic forwarding is available only for addresses verified with a code."
+  },
+  "发送验证码": {
+    "zh-TW": "傳送驗證碼",
+    "en": "Send verification code"
+  },
+  "暂无已验证的转发邮箱": {
+    "zh-TW": "暫無已驗證的轉發信箱",
+    "en": "No verified forwarding addresses"
+  },
+  "已验证": {
+    "zh-TW": "已驗證",
+    "en": "Verified"
+  },
+  "等待验证": {
+    "zh-TW": "等待驗證",
+    "en": "Awaiting verification"
+  },
+  "6 位验证码": {
+    "zh-TW": "6 位驗證碼",
+    "en": "6-digit verification code"
+  },
+  "验证": {
+    "zh-TW": "驗證",
+    "en": "Verify"
+  },
+  "移除转发邮箱": {
+    "zh-TW": "移除轉發信箱",
+    "en": "Remove forwarding address"
+  },
+  "我的规则": {
+    "zh-TW": "我的規則",
+    "en": "My rules"
+  },
+  "适用邮箱": {
+    "zh-TW": "適用信箱",
+    "en": "Applies to mailbox"
+  },
+  "当新邮件到达时，满足以下": {
+    "zh-TW": "當新郵件到達時，滿足以下",
+    "en": "When a new message arrives, match"
+  },
+  "所有条件": {
+    "zh-TW": "所有條件",
+    "en": "All conditions"
+  },
+  "任一条件": {
+    "zh-TW": "任一條件",
+    "en": "Any condition"
+  },
+  "全部收到的邮件": {
+    "zh-TW": "全部收到的郵件",
+    "en": "All received messages"
+  },
+  "执行以下动作": {
+    "zh-TW": "執行以下動作",
+    "en": "Perform these actions"
+  },
+  "立即启用": {
+    "zh-TW": "立即啟用",
+    "en": "Enable immediately"
+  },
+  "应用于现有邮件（不执行自动转发或 Telegram 通知）": {
+    "zh-TW": "應用於現有郵件（不執行自動轉發或 Telegram 通知）",
+    "en": "Apply to existing mail (without forwarding or Telegram notifications)"
+  },
+  "终止规则：命中此规则后不再应用其他规则": {
+    "zh-TW": "終止規則：命中此規則後不再應用其他規則",
+    "en": "Stop processing further rules after this rule matches"
+  },
+  "选择标签": {
+    "zh-TW": "選擇標籤",
+    "en": "Select label"
+  },
+  "标签名称": {
+    "zh-TW": "標籤名稱",
+    "en": "Label name"
+  },
+  "自定义文件夹": {
+    "zh-TW": "自定義資料夾",
+    "en": "Custom folder"
+  },
+  "输入或选择文件夹名": {
+    "zh-TW": "輸入或選擇資料夾名",
+    "en": "Enter or select a folder name"
+  },
+  "选择已验证邮箱": {
+    "zh-TW": "選擇已驗證信箱",
+    "en": "Select a verified address"
+  },
+  "请先验证转发邮箱": {
+    "zh-TW": "請先驗證轉發信箱",
+    "en": "Verify a forwarding address first"
+  },
+  "无需填写": {
+    "zh-TW": "無需填寫",
+    "en": "No value required"
+  },
+  "删除收件规则？": {
+    "zh-TW": "刪除收件規則？",
+    "en": "Delete mail rule?"
+  },
+  "删除规则": {
+    "zh-TW": "刪除規則",
+    "en": "Delete rule"
+  },
+  "新增拦截发件人": {
+    "zh-TW": "新增攔截寄件者",
+    "en": "Block a sender"
+  },
+  "发件人邮箱": {
+    "zh-TW": "寄件者信箱",
+    "en": "Sender email"
+  },
+  "原因": {
+    "zh-TW": "原因",
+    "en": "Reason"
+  },
+  "加入拦截": {
+    "zh-TW": "加入攔截",
+    "en": "Block sender"
+  },
+  "移除拦截规则？": {
+    "zh-TW": "移除攔截規則？",
+    "en": "Remove block rule?"
+  },
+  "移除规则": {
+    "zh-TW": "移除規則",
+    "en": "Remove rule"
+  },
+  "暂无拦截发件人": {
+    "zh-TW": "暫無攔截寄件者",
+    "en": "No blocked senders"
+  },
+  "移除": {
+    "zh-TW": "移除",
+    "en": "Remove"
+  },
+  "邮箱已共享": {
+    "zh-TW": "信箱已共享",
+    "en": "Mailbox shared"
+  },
+  "共享失败": {
+    "zh-TW": "共享失敗",
+    "en": "Unable to share mailbox"
+  },
+  "共享已撤销": {
+    "zh-TW": "共享已撤銷",
+    "en": "Share revoked"
+  },
+  "已退出邮箱共享": {
+    "zh-TW": "已退出信箱共享",
+    "en": "Left shared mailbox"
+  },
+  "退出失败": {
+    "zh-TW": "退出失敗",
+    "en": "Unable to leave"
+  },
+  "7 天": {
+    "zh-TW": "7 天",
+    "en": "7 days"
+  },
+  "30 天": {
+    "zh-TW": "30 天",
+    "en": "30 days"
+  },
+  "90 天": {
+    "zh-TW": "90 天",
+    "en": "90 days"
+  },
+  "自定义时间": {
+    "zh-TW": "自定義時間",
+    "en": "Custom time"
+  },
+  "自定义到期时间": {
+    "zh-TW": "自定義到期時間",
+    "en": "Custom expiration time"
+  },
+  "到期时间必须晚于当前时间": {
+    "zh-TW": "到期時間必須晚於當前時間",
+    "en": "Expiration must be in the future"
+  },
+  "允许下载附件": {
+    "zh-TW": "允許下載附件",
+    "en": "Allow attachment downloads"
+  },
+  "关闭后仍可阅读邮件正文，但附件下载入口不可用": {
+    "zh-TW": "關閉後仍可閱讀郵件內文，但附件下載入口不可用",
+    "en": "Disabling allows reading messages but prevents attachment downloads"
+  },
+  "共享通知": {
+    "zh-TW": "共享通知",
+    "en": "Sharing notifications"
+  },
+  "我发起的": {
+    "zh-TW": "我發起的",
+    "en": "Shared by me"
+  },
+  "可下载附件": {
+    "zh-TW": "可下載附件",
+    "en": "Attachments allowed"
+  },
+  "仅正文": {
+    "zh-TW": "僅內文",
+    "en": "Message body only"
+  },
+  "最后访问": {
+    "zh-TW": "最後訪問",
+    "en": "Last accessed"
+  },
+  "查看审计": {
+    "zh-TW": "檢視審計",
+    "en": "View audit"
+  },
+  "续期或恢复": {
+    "zh-TW": "續期或恢復",
+    "en": "Extend or restore"
+  },
+  "退出共享": {
+    "zh-TW": "退出共享",
+    "en": "Leave share"
+  },
+  "退出邮箱共享？": {
+    "zh-TW": "退出信箱共享？",
+    "en": "Leave shared mailbox?"
+  },
+  "保持当前（": {
+    "zh-TW": "保持當前（",
+    "en": "Keep current ("
+  },
+  "到期）": {
+    "zh-TW": "到期）",
+    "en": "expires)"
+  },
+  "关闭后接收人只能阅读正文": {
+    "zh-TW": "關閉後接收人只能閱讀內文",
+    "en": "Disabling restricts recipients to reading message bodies"
+  },
+  "更新权限": {
+    "zh-TW": "更新權限",
+    "en": "Update permissions"
+  },
+  "接收人退出": {
+    "zh-TW": "接收人退出",
+    "en": "Recipient left"
+  },
+  "访问邮箱": {
+    "zh-TW": "訪問信箱",
+    "en": "Access mailbox"
+  },
+  "共享审计": {
+    "zh-TW": "共享審計",
+    "en": "Share audit"
+  },
+  "暂无审计记录": {
+    "zh-TW": "暫無審計記錄",
+    "en": "No audit records"
+  },
+  "生效中": {
+    "zh-TW": "生效中",
+    "en": "Active"
+  },
+  "即将到期": {
+    "zh-TW": "即將到期",
+    "en": "Expiring soon"
+  },
+  "已撤销": {
+    "zh-TW": "已撤銷",
+    "en": "Revoked"
+  },
+  "对方已退出": {
+    "zh-TW": "對方已退出",
+    "en": "Recipient left"
+  },
+  "未选择范围": {
+    "zh-TW": "未選擇範圍",
+    "en": "No scope selected"
+  },
+  "当前统计：": {
+    "zh-TW": "當前統計：",
+    "en": "Statistics for:"
+  },
+  "未选择邮箱": {
+    "zh-TW": "未選擇信箱",
+    "en": "No mailbox selected"
+  },
+  "文件夹分布": {
+    "zh-TW": "資料夾分佈",
+    "en": "Folder distribution"
+  },
+  "未读": {
+    "zh-TW": "未讀",
+    "en": "Unread"
+  },
+  "总邮件": {
+    "zh-TW": "總郵件",
+    "en": "Total messages"
+  },
+  "星标": {
+    "zh-TW": "星標",
+    "en": "Starred"
+  },
+  "容量": {
+    "zh-TW": "容量",
+    "en": "Storage"
+  },
+  "请选择邮箱域名并填写邮箱前缀": {
+    "zh-TW": "請選擇信箱域名並填寫信箱字首",
+    "en": "Select a domain and enter a mailbox prefix"
+  },
+  "请输入邮箱前缀": {
+    "zh-TW": "請輸入信箱字首",
+    "en": "Enter a mailbox prefix"
+  },
+  "Linux.do 账号注册成功": {
+    "zh-TW": "Linux.do 帳號註冊成功",
+    "en": "Linux.do account registration completed"
+  },
+  "注册成功": {
+    "zh-TW": "註冊成功",
+    "en": "Registration completed"
+  },
+  "注册失败": {
+    "zh-TW": "註冊失敗",
+    "en": "Registration failed"
+  },
+  "补全 Linux.do 注册信息": {
+    "zh-TW": "補全 Linux.do 註冊資訊",
+    "en": "Complete Linux.do registration"
+  },
+  "正在加载已验证的 Linux.do 账号...": {
+    "zh-TW": "正在載入已驗證的 Linux.do 帳號...",
+    "en": "Loading verified Linux.do account..."
+  },
+  "重新登录": {
+    "zh-TW": "重新登入",
+    "en": "Sign in again"
+  },
+  "当前没有可用于注册的邮箱域名": {
+    "zh-TW": "當前沒有可用於註冊的信箱域名",
+    "en": "No mail domains are available for registration"
+  },
+  "当前未开放注册": {
+    "zh-TW": "當前未開放註冊",
+    "en": "Registration is currently closed"
+  },
+  "已验证 Linux.do 用户": {
+    "zh-TW": "已驗證 Linux.do 使用者",
+    "en": "Verified Linux.do user"
+  },
+  "请输入邀请码": {
+    "zh-TW": "請輸入邀請碼",
+    "en": "Enter an invitation code"
+  },
+  "确认密码": {
+    "zh-TW": "確認密碼",
+    "en": "Confirm password"
+  },
+  "注册中...": {
+    "zh-TW": "註冊中...",
+    "en": "Registering..."
+  },
+  "完成注册": {
+    "zh-TW": "完成註冊",
+    "en": "Complete registration"
+  },
+  "已有账号？": {
+    "zh-TW": "已有帳號？",
+    "en": "Already have an account?"
+  },
+  "用于服务端集成调用 `/api/open`，创建后请立即保存。": {
+    "zh-TW": "用於服務端整合呼叫 `/api/open`，建立後請立即儲存。",
+    "en": "For server integrations using /api/open. Save the token immediately after creation."
+  },
+  "最近送达：{0}": {
+    "zh-TW": "最近送達：{0}",
+    "en": "Last delivered: {0}"
+  },
+  "最近错误：{0}": {
+    "zh-TW": "最近錯誤：{0}",
+    "en": "Latest error: {0}"
+  },
+  "{0} 人": {
+    "zh-TW": "{0} 人",
+    "en": "{0} members",
+    "enOne": "{0} member",
+    "pluralIndex": 0
+  },
+  "{0} 项": {
+    "zh-TW": "{0} 項",
+    "en": "{0} items",
+    "enOne": "{0} item",
+    "pluralIndex": 0
+  },
+  "附件 {0}": {
+    "zh-TW": "附件 {0}",
+    "en": "Attachments: {0}"
+  },
+  "SMTP 每日 {0}": {
+    "zh-TW": "SMTP 每日 {0}",
+    "en": "SMTP per day: {0}"
+  },
+  "SMTP 每分钟 {0}": {
+    "zh-TW": "SMTP 每分鐘 {0}",
+    "en": "SMTP per minute: {0}"
+  },
+  "IMAP 每分钟 {0}": {
+    "zh-TW": "IMAP 每分鐘 {0}",
+    "en": "IMAP per minute: {0}"
+  },
+  "POP3 每分钟 {0}": {
+    "zh-TW": "POP3 每分鐘 {0}",
+    "en": "POP3 per minute: {0}"
+  },
+  "邮箱数量 {0}": {
+    "zh-TW": "信箱數量 {0}",
+    "en": "Mailbox count: {0}"
+  },
+  "每日新建 {0}": {
+    "zh-TW": "每日新建 {0}",
+    "en": "Created per day: {0}"
+  },
+  "邮箱：{0}": {
+    "zh-TW": "信箱：{0}",
+    "en": "Mailbox: {0}"
+  },
+  "发件人：{0}": {
+    "zh-TW": "寄件者：{0}",
+    "en": "From: {0}"
+  },
+  "收件人：{0}": {
+    "zh-TW": "收件者：{0}",
+    "en": "To: {0}"
+  },
+  "错误：{0}": {
+    "zh-TW": "錯誤：{0}",
+    "en": "Error: {0}"
+  },
+  "尝试：{0}/{1}": {
+    "zh-TW": "嘗試：{0}/{1}",
+    "en": "Attempts: {0}/{1}"
+  },
+  "下次重试：{0}": {
+    "zh-TW": "下次重試：{0}",
+    "en": "Next retry: {0}"
+  },
+  "更新时间：{0}": {
+    "zh-TW": "更新時間：{0}",
+    "en": "Updated at: {0}"
+  },
+  "回调地址：{0}/api/external-imap-oauth/gmail/callback": {
+    "zh-TW": "回撥地址：{0}/api/external-imap-oauth/gmail/callback",
+    "en": "Callback URL: {0}/api/external-imap-oauth/gmail/callback"
+  },
+  "回调地址：{0}/api/external-imap-oauth/outlook/callback": {
+    "zh-TW": "回撥地址：{0}/api/external-imap-oauth/outlook/callback",
+    "en": "Callback URL: {0}/api/external-imap-oauth/outlook/callback"
+  },
+  "（剩余 {0}）": {
+    "zh-TW": "（剩餘 {0}）",
+    "en": "({0} remaining)"
+  },
+  "邀请码 {0} 删除后将立即失效。": {
+    "zh-TW": "邀請碼 {0} 刪除後將立即失效。",
+    "en": "Invitation code {0} will become invalid immediately after deletion."
+  },
+  "新版本 {0}": {
+    "zh-TW": "新版本 {0}",
+    "en": "New version {0}"
+  },
+  "删除标签 {0}": {
+    "zh-TW": "刪除標籤 {0}",
+    "en": "Delete label {0}"
+  },
+  "已选 {0} 封": {
+    "zh-TW": "已選 {0} 封",
+    "en": "{0} selected"
+  },
+  "{0} / {1} 封邮件": {
+    "zh-TW": "{0} / {1} 封郵件",
+    "en": "{0} / {1} messages",
+    "enOne": "{0} / {1} message",
+    "pluralIndex": 1
+  },
+  "已刷新 {0}": {
+    "zh-TW": "已重新整理 {0}",
+    "en": "Refreshed {0}"
+  },
+  "{0} / {1} 封定时邮件": {
+    "zh-TW": "{0} / {1} 封定時郵件",
+    "en": "{0} / {1} scheduled messages",
+    "enOne": "{0} / {1} scheduled message",
+    "pluralIndex": 1
+  },
+  "发给 {0}": {
+    "zh-TW": "發給 {0}",
+    "en": "To {0}"
+  },
+  "{0} / {1} 个发送任务": {
+    "zh-TW": "{0} / {1} 個傳送任務",
+    "en": "{0} / {1} send tasks",
+    "enOne": "{0} / {1} send task",
+    "pluralIndex": 1
+  },
+  "尝试 {0}/{1}": {
+    "zh-TW": "嘗試 {0}/{1}",
+    "en": "Attempts {0}/{1}"
+  },
+  "下次 {0}": {
+    "zh-TW": "下次 {0}",
+    "en": "Next: {0}"
+  },
+  "投递于 {0}": {
+    "zh-TW": "投遞於 {0}",
+    "en": "Delivered at {0}"
+  },
+  "尝试次数：{0}": {
+    "zh-TW": "嘗試次數：{0}",
+    "en": "Attempts: {0}"
+  },
+  "移除 {0}": {
+    "zh-TW": "移除 {0}",
+    "en": "Remove {0}"
+  },
+  "第 {0} 页": {
+    "zh-TW": "第 {0} 頁",
+    "en": "Page {0}"
+  },
+  "{0} / {1} 封": {
+    "zh-TW": "{0} / {1} 封",
+    "en": "{0} / {1} messages",
+    "enOne": "{0} / {1} message",
+    "pluralIndex": 1
+  },
+  "{0} 封": {
+    "zh-TW": "{0} 封",
+    "en": "{0} messages",
+    "enOne": "{0} message",
+    "pluralIndex": 0
+  },
+  "同会话邮件 ({0})": {
+    "zh-TW": "同會話郵件 ({0})",
+    "en": "Messages in this conversation ({0})"
+  },
+  "已翻译为 {0}，当前{1}": {
+    "zh-TW": "已翻譯為 {0}，當前{1}",
+    "en": "Translated into {0}; currently {1}"
+  },
+  "检测到邮件可能不是当前语言，可翻译为 {0}": {
+    "zh-TW": "檢測到郵件可能不是當前語言，可翻譯為 {0}",
+    "en": "This message may be in another language. Translate into {0}."
+  },
+  "来自 {0}": {
+    "zh-TW": "來自 {0}",
+    "en": "From {0}"
+  },
+  "移除标签 {0}": {
+    "zh-TW": "移除標籤 {0}",
+    "en": "Remove label {0}"
+  },
+  "草稿已保存 {0}": {
+    "zh-TW": "草稿已儲存 {0}",
+    "en": "Draft saved {0}"
+  },
+  "{0} / 不限": {
+    "zh-TW": "{0} / 不限",
+    "en": "{0} / Unlimited"
+  },
+  "邮箱额度{0}{1}": {
+    "zh-TW": "信箱額度{0}{1}",
+    "en": "Mailbox quota {0}{1}"
+  },
+  " · 最近同步 {0}": {
+    "zh-TW": " · 最近同步 {0}",
+    "en": " · Last synced {0}"
+  },
+  "状态：{0}{1}{2}": {
+    "zh-TW": "狀態：{0}{1}{2}",
+    "en": "Status: {0}{1}{2}"
+  },
+  "OAuth 只适用于{0}{1}{2}托管邮箱。自建域名邮箱请使用“添加外部邮箱”的普通 IMAP 方式。": {
+    "zh-TW": "OAuth 只適用於{0}{1}{2}託管信箱。自建域名信箱請使用“新增外部信箱”的普通 IMAP 方式。",
+    "en": "OAuth is only available for {0}{1}{2} hosted mailboxes. For self-hosted domains, use standard IMAP under Add external mailbox."
+  },
+  "导入 {0} · 跳过 {1} · 失败 {2}": {
+    "zh-TW": "匯入 {0} · 跳過 {1} · 失敗 {2}",
+    "en": "Imported {0} · Skipped {1} · Failed {2}"
+  },
+  "{0} 个": {
+    "zh-TW": "{0} 個",
+    "en": "{0} items",
+    "enOne": "{0} item",
+    "pluralIndex": 0
+  },
+  "创建：{0}": {
+    "zh-TW": "建立：{0}",
+    "en": "Created: {0}"
+  },
+  "过期：{0}": {
+    "zh-TW": "過期：{0}",
+    "en": "Expires: {0}"
+  },
+  "最后使用：{0}": {
+    "zh-TW": "最後使用：{0}",
+    "en": "Last used: {0}"
+  },
+  "共 {0} 个签名": {
+    "zh-TW": "共 {0} 個簽名",
+    "en": "{0} signatures in total",
+    "enOne": "{0} signature in total",
+    "pluralIndex": 0
+  },
+  "规则“{0}”将不再处理后续邮件。": {
+    "zh-TW": "規則“{0}”將不再處理後續郵件。",
+    "en": "Rule “{0}” will no longer process incoming messages."
+  },
+  "{0} 到期": {
+    "zh-TW": "{0} 到期",
+    "en": "Expires {0}"
+  },
+  "最后访问 {0}": {
+    "zh-TW": "最後訪問 {0}",
+    "en": "Last accessed {0}"
+  },
+  "{0} 将立即失去 {1} 的只读访问权限。": {
+    "zh-TW": "{0} 將立即失去 {1} 的只讀訪問權限。",
+    "en": "{0} will immediately lose read-only access to {1}."
+  },
+  "退出后，你将无法继续读取 {0}。": {
+    "zh-TW": "退出後，你將無法繼續讀取 {0}。",
+    "en": "After leaving, you will no longer be able to read {0}."
+  },
+  "保持当前（{0} 到期）": {
+    "zh-TW": "保持當前（{0} 到期）",
+    "en": "Keep current (expires {0})"
+  },
+  "当前统计：{0}": {
+    "zh-TW": "當前統計：{0}",
+    "en": "Statistics for: {0}"
+  },
+  "未读 {0}": {
+    "zh-TW": "未讀 {0}",
+    "en": "Unread: {0}"
+  },
+  "已验证 Linux.do 用户{0}": {
+    "zh-TW": "已驗證 Linux.do 使用者{0}",
+    "en": "Verified Linux.do user {0}"
+  },
+  "{0} 个域名已添加": {
+    "zh-TW": "{0} 個域名已新增",
+    "en": "{0} domains added",
+    "enOne": "{0} domain added",
+    "pluralIndex": 0
+  },
+  "{0} 个活跃邮箱": {
+    "zh-TW": "{0} 個活躍信箱",
+    "en": "{0} active mailboxes",
+    "enOne": "{0} active mailbox",
+    "pluralIndex": 0
+  },
+  "内置 Postfix：{0}:{1}": {
+    "zh-TW": "內建 Postfix：{0}:{1}",
+    "en": "Built-in Postfix: {0}:{1}"
+  },
+  "{0} 封邮件已入库": {
+    "zh-TW": "{0} 封郵件已入庫",
+    "en": "{0} messages stored",
+    "enOne": "{0} message stored",
+    "pluralIndex": 0
+  },
+  "将删除 {0} 及其关联数据。": {
+    "zh-TW": "將刪除 {0} 及其關聯資料。",
+    "en": "This will delete {0} and its associated data."
+  },
+  "{0} 删除后不能再分配给用户。": {
+    "zh-TW": "{0} 刪除後不能再分配給使用者。",
+    "en": "After deletion, {0} can no longer be assigned to users."
+  },
+  "将删除 {0}，相关邮箱、别名和邮件也可能受影响。": {
+    "zh-TW": "將刪除 {0}，相關信箱、別名和郵件也可能受影響。",
+    "en": "This will delete {0}. Associated mailboxes, aliases and messages may also be affected."
+  },
+  "将删除 {0} 和其中邮件。": {
+    "zh-TW": "將刪除 {0} 和其中郵件。",
+    "en": "This will delete {0} and its messages."
+  },
+  "{0} 将不再转发到 {1}。": {
+    "zh-TW": "{0} 將不再轉發到 {1}。",
+    "en": "{0} will no longer forward to {1}."
+  },
+  "{0} 秒": {
+    "zh-TW": "{0} 秒",
+    "en": "{0} seconds",
+    "enOne": "{0} second",
+    "pluralIndex": 0
+  },
+  "进行中 {0}": {
+    "zh-TW": "進行中 {0}",
+    "en": "In progress: {0}"
+  },
+  "{0} 已可用，点击版本号查看详情。": {
+    "zh-TW": "{0} 已可用，點選版本號檢視詳情。",
+    "en": "{0} is available. Select the version number for details."
+  },
+  "确保 {0} 的 A 记录已指向你的服务器 IP，邮件才能到达。": {
+    "zh-TW": "確保 {0} 的 A 記錄已指向你的伺服器 IP，郵件才能到達。",
+    "en": "Point the A record for {0} to your server's IP address to receive mail."
+  },
+  "已将 {0} 封邮件移回收件箱": {
+    "zh-TW": "已將 {0} 封郵件移回收件匣",
+    "en": "Moved {0} messages back to Inbox",
+    "enOne": "Moved {0} message back to Inbox",
+    "pluralIndex": 0
+  },
+  "已标记 {0} 封邮件为已读": {
+    "zh-TW": "已標記 {0} 封郵件為已讀",
+    "en": "Marked {0} messages as read",
+    "enOne": "Marked {0} message as read",
+    "pluralIndex": 0
+  },
+  "收到 {0} 封新邮件": {
+    "zh-TW": "收到 {0} 封新郵件",
+    "en": "{0} new messages",
+    "enOne": "{0} new message",
+    "pluralIndex": 0
+  },
+  "新邮件：{0}": {
+    "zh-TW": "新郵件：{0}",
+    "en": "New message: {0}"
+  },
+  "{0} 等发来新邮件": {
+    "zh-TW": "{0} 等發來新郵件",
+    "en": "{0} and others sent new mail"
+  },
+  "将删除当前选中的 {0} 封邮件，此操作无法从邮件列表中恢复。": {
+    "zh-TW": "將刪除當前選中的 {0} 封郵件，此操作無法從郵件清單中恢復。",
+    "en": "This will delete the {0} selected messages. This cannot be undone from the message list.",
+    "enOne": "This will delete the {0} selected message. This cannot be undone from the message list.",
+    "pluralIndex": 0
+  },
+  "已处理 {0} 封邮件": {
+    "zh-TW": "已處理 {0} 封郵件",
+    "en": "Processed {0} messages",
+    "enOne": "Processed {0} message",
+    "pluralIndex": 0
+  },
+  "邮件“{0}”将被删除。": {
+    "zh-TW": "郵件“{0}”將被刪除。",
+    "en": "Message “{0}” will be deleted."
+  },
+  "删除文件夹“{0}”？": {
+    "zh-TW": "刪除資料夾“{0}”？",
+    "en": "Delete folder “{0}”?"
+  },
+  "已分别发送 {0} 封邮件": {
+    "zh-TW": "已分別傳送 {0} 封郵件",
+    "en": "Sent {0} messages separately",
+    "enOne": "Sent {0} message separately",
+    "pluralIndex": 0
+  },
+  "已定时发送 {0}": {
+    "zh-TW": "已定時傳送 {0}",
+    "en": "Scheduled for {0}"
+  },
+  "当前单个附件上限 {0}": {
+    "zh-TW": "當前單個附件上限 {0}",
+    "en": "Current per-attachment limit: {0}"
+  },
+  "发送时间：{0}": {
+    "zh-TW": "傳送時間：{0}",
+    "en": "Send time: {0}"
+  },
+  "收件规则已保存，已应用 {0} 封邮件": {
+    "zh-TW": "收件規則已儲存，已應用 {0} 封郵件",
+    "en": "Mail rule saved and applied to {0} messages",
+    "enOne": "Mail rule saved and applied to {0} message",
+    "pluralIndex": 0
+  },
+  "连接成功，发现 {0} 个文件夹": {
+    "zh-TW": "連線成功，發現 {0} 個資料夾",
+    "en": "Connected; found {0} folders",
+    "enOne": "Connected; found {0} folder",
+    "pluralIndex": 0
+  },
+  "同步完成：导入 {0}，跳过 {1}": {
+    "zh-TW": "同步完成：匯入 {0}，跳過 {1}",
+    "en": "Sync complete: imported {0}, skipped {1}"
+  },
+  "{0} 同步完成：导入 {1}，跳过 {2}": {
+    "zh-TW": "{0} 同步完成：匯入 {1}，跳過 {2}",
+    "en": "{0} synced: imported {1}, skipped {2}"
+  },
+  "Token “{0}” 撤销后无法恢复，正在使用它的集成会立即失效。": {
+    "zh-TW": "Token “{0}” 撤銷後無法恢復，正在使用它的整合會立即失效。",
+    "en": "Revoking token “{0}” cannot be undone. Integrations using it will stop working immediately."
+  },
+  "签名“{0}”将被删除。": {
+    "zh-TW": "簽名“{0}”將被刪除。",
+    "en": "Signature “{0}” will be deleted."
+  },
+  "{0} 将从联系人列表中移除。": {
+    "zh-TW": "{0} 將從聯絡人列表中移除。",
+    "en": "{0} will be removed from your contacts."
+  },
+  "将对 {0} 执行此清理操作。": {
+    "zh-TW": "將對 {0} 執行此清理操作。",
+    "en": "This cleanup will be applied to {0}."
+  },
+  "{0} 之后将不再被此规则拦截。": {
+    "zh-TW": "{0} 之後將不再被此規則攔截。",
+    "en": "{0} will no longer be blocked by this rule."
+  },
+  "容量 {0}%": {
+    "zh-TW": "容量 {0}%",
+    "en": "Storage {0}%"
+  },
+  "无权执行此操作": {
+    "zh-TW": "無權執行此操作",
+    "en": "You do not have permission to perform this action"
+  },
+  "外部 IMAP 未启用": {
+    "zh-TW": "外部 IMAP 未啟用",
+    "en": "External IMAP is disabled"
+  },
+  "授权邮箱与填写的邮箱不一致": {
+    "zh-TW": "授權信箱與填寫的信箱不一致",
+    "en": "The authorized email does not match the entered address"
+  },
+  "队列任务状态已变化，请刷新后重试": {
+    "zh-TW": "佇列任務狀態已變化，請重新整理後重試",
+    "en": "The queue task has changed. Refresh and try again."
+  },
+  "无法读取文件夹，请稍后重试": {
+    "zh-TW": "無法讀取資料夾，請稍後重試",
+    "en": "Unable to load folders. Please try again later."
+  },
+  "无法读取远端邮件，请稍后重试": {
+    "zh-TW": "無法讀取遠端郵件，請稍後重試",
+    "en": "Unable to load remote mail. Please try again later."
+  },
+  "无法更新远端邮件，请稍后重试": {
+    "zh-TW": "無法更新遠端郵件，請稍後重試",
+    "en": "Unable to update remote mail. Please try again later."
+  },
+  "请求的内容不存在或无权访问": {
+    "zh-TW": "請求的內容不存在或無權訪問",
+    "en": "The requested content does not exist or you do not have access"
+  },
+  "数据已变化，请刷新后重试": {
+    "zh-TW": "資料已變化，請重新整理後重試",
+    "en": "The data has changed. Refresh and try again."
+  },
+  "请求过于频繁，请稍后重试": {
+    "zh-TW": "請求過於頻繁，請稍後重試",
+    "en": "Too many requests. Please try again later."
+  },
+  "请检查输入内容后重试": {
+    "zh-TW": "請檢查輸入內容後重試",
+    "en": "Check your input and try again"
+  },
+  "操作未完成，请稍后重试": {
+    "zh-TW": "操作未完成，請稍後重試",
+    "en": "The operation could not be completed. Please try again later."
+  },
+  "访问邮箱前台": {
+    "zh-TW": "訪問信箱前台",
+    "en": "Access mailbox interface"
+  },
+  "进入邮箱前台并查看本人邮箱列表。": {
+    "zh-TW": "進入信箱前台並檢視本人信箱列表。",
+    "en": "Open the mailbox interface and view your mailboxes."
+  },
+  "邮箱前台": {
+    "zh-TW": "信箱前台",
+    "en": "Mailbox interface"
+  },
+  "查看本人邮件": {
+    "zh-TW": "檢視本人郵件",
+    "en": "View own mail"
+  },
+  "查看本人文件夹、邮件列表、星标邮件和邮件正文。": {
+    "zh-TW": "檢視本人資料夾、郵件清單、星號郵件和郵件內文。",
+    "en": "View your folders, messages, starred mail and message bodies."
+  },
+  "使用本人邮箱发送、回复和转发邮件。": {
+    "zh-TW": "使用本人信箱傳送、回覆和轉發郵件。",
+    "en": "Send, reply to and forward messages from your mailboxes."
+  },
+  "管理草稿": {
+    "zh-TW": "管理草稿",
+    "en": "Manage drafts"
+  },
+  "保存、编辑和删除本人草稿。": {
+    "zh-TW": "儲存、編輯和刪除本人草稿。",
+    "en": "Save, edit and delete your drafts."
+  },
+  "创建、查看和取消本人定时发送任务。": {
+    "zh-TW": "建立、檢視和取消本人定時傳送任務。",
+    "en": "Create, view and cancel your scheduled messages."
+  },
+  "整理邮件": {
+    "zh-TW": "整理郵件",
+    "en": "Organize mail"
+  },
+  "标记已读、星标、移动、归档、删除和清理本人邮件。": {
+    "zh-TW": "標記已讀、星標、移動、封存、刪除和清理本人郵件。",
+    "en": "Mark as read, star, move, archive, delete and clean up your mail."
+  },
+  "管理邮件标签": {
+    "zh-TW": "管理郵件標籤",
+    "en": "Manage mail labels"
+  },
+  "创建标签，并为本人邮件添加或移除标签。": {
+    "zh-TW": "建立標籤，並為本人郵件新增或移除標籤。",
+    "en": "Create labels and add or remove them from your messages."
+  },
+  "下载本人邮件中的附件。": {
+    "zh-TW": "下載本人郵件中的附件。",
+    "en": "Download attachments from your mail."
+  },
+  "管理联系人": {
+    "zh-TW": "管理聯絡人",
+    "en": "Manage contacts"
+  },
+  "查看、新增和删除本人的联系人。": {
+    "zh-TW": "檢視、新增和刪除本人的聯絡人。",
+    "en": "View, add and delete your contacts."
+  },
+  "管理签名": {
+    "zh-TW": "管理簽名",
+    "en": "Manage signatures"
+  },
+  "查看、新增、修改和删除本人的邮件签名。": {
+    "zh-TW": "檢視、新增、修改和刪除本人的郵件簽名。",
+    "en": "View, add, edit and delete your mail signatures."
+  },
+  "管理收件规则": {
+    "zh-TW": "管理收件規則",
+    "en": "Manage mail rules"
+  },
+  "查看、新增和删除本人的收件规则。": {
+    "zh-TW": "檢視、新增和刪除本人的收件規則。",
+    "en": "View, add and delete your mail rules."
+  },
+  "管理拦截名单": {
+    "zh-TW": "管理攔截名單",
+    "en": "Manage blocked senders"
+  },
+  "查看、新增和删除本人的发件人拦截规则。": {
+    "zh-TW": "檢視、新增和刪除本人的寄件者攔截規則。",
+    "en": "View, add and delete your sender block rules."
+  },
+  "查看邮箱统计": {
+    "zh-TW": "檢視信箱統計",
+    "en": "View mailbox statistics"
+  },
+  "查看本人邮箱统计和清理概览。": {
+    "zh-TW": "檢視本人信箱統計和清理概覽。",
+    "en": "View your mailbox statistics and cleanup overview."
+  },
+  "自助申请邮箱": {
+    "zh-TW": "自助申請信箱",
+    "en": "Apply for a mailbox"
+  },
+  "在开放申请时为本人申请邮箱账号。": {
+    "zh-TW": "在開放申請時為本人申請信箱帳號。",
+    "en": "Apply for your own mailbox when applications are open."
+  },
+  "查看概览": {
+    "zh-TW": "檢視概覽",
+    "en": "View overview"
+  },
+  "查看后台统计和首次配置检查。": {
+    "zh-TW": "檢視後台統計和首次配置檢查。",
+    "en": "View administration statistics and initial setup checks."
+  },
+  "查看用户": {
+    "zh-TW": "檢視使用者",
+    "en": "View users"
+  },
+  "查看用户列表、状态和绑定邮箱。": {
+    "zh-TW": "檢視使用者列表、狀態和綁定信箱。",
+    "en": "View users, their status and linked mailboxes."
+  },
+  "创建普通用户并分配权限组。": {
+    "zh-TW": "建立普通使用者並分配權限組。",
+    "en": "Create standard users and assign permission groups."
+  },
+  "修改用户显示名称、状态和权限组。": {
+    "zh-TW": "修改使用者顯示名稱、狀態和權限組。",
+    "en": "Edit user display names, status and permission groups."
+  },
+  "删除非受保护用户。": {
+    "zh-TW": "刪除非受保護使用者。",
+    "en": "Delete users who are not protected."
+  },
+  "重置用户密码": {
+    "zh-TW": "重置使用者密碼",
+    "en": "Reset user passwords"
+  },
+  "为用户重置登录密码。": {
+    "zh-TW": "為使用者重置登入密碼。",
+    "en": "Reset users' sign-in passwords."
+  },
+  "查看权限组": {
+    "zh-TW": "檢視權限組",
+    "en": "View permission groups"
+  },
+  "查看权限组、权限目录和使用人数。": {
+    "zh-TW": "檢視權限組、權限目錄和使用人數。",
+    "en": "View permission groups, available permissions and member counts."
+  },
+  "创建自定义权限组。": {
+    "zh-TW": "建立自定義權限組。",
+    "en": "Create custom permission groups."
+  },
+  "修改自定义权限组名称、说明和权限。": {
+    "zh-TW": "修改自定義權限組名稱、說明和權限。",
+    "en": "Edit custom permission group names, descriptions and permissions."
+  },
+  "删除未被用户使用的自定义权限组。": {
+    "zh-TW": "刪除未被使用者使用的自定義權限組。",
+    "en": "Delete custom permission groups with no members."
+  },
+  "查看邮件域名和 DKIM 配置。": {
+    "zh-TW": "檢視郵件域名和 DKIM 配置。",
+    "en": "View mail domains and DKIM settings."
+  },
+  "添加新的邮件域名。": {
+    "zh-TW": "新增新的郵件域名。",
+    "en": "Add new mail domains."
+  },
+  "启停域名": {
+    "zh-TW": "啟停域名",
+    "en": "Enable or disable domains"
+  },
+  "启用或停用邮件域名。": {
+    "zh-TW": "啟用或停用郵件域名。",
+    "en": "Enable or disable mail domains."
+  },
+  "删除未被邮箱使用的域名。": {
+    "zh-TW": "刪除未被信箱使用的域名。",
+    "en": "Delete domains that have no mailboxes."
+  },
+  "查看域名需要配置的 DNS 记录。": {
+    "zh-TW": "檢視域名需要配置的 DNS 記錄。",
+    "en": "View the DNS records required for a domain."
+  },
+  "触发 MX、SPF、DKIM、DMARC 检测。": {
+    "zh-TW": "觸發 MX、SPF、DKIM、DMARC 檢測。",
+    "en": "Run MX, SPF, DKIM and DMARC checks."
+  },
+  "查看邮箱账号": {
+    "zh-TW": "檢視信箱帳號",
+    "en": "View mailbox accounts"
+  },
+  "查看邮箱账号列表和归属用户。": {
+    "zh-TW": "檢視信箱帳號列表和歸屬使用者。",
+    "en": "View mailbox accounts and their owners."
+  },
+  "创建邮箱账号并准备归属用户。": {
+    "zh-TW": "建立信箱帳號並準備歸屬使用者。",
+    "en": "Create mailbox accounts and assign their owners."
+  },
+  "编辑邮箱账号": {
+    "zh-TW": "編輯信箱帳號",
+    "en": "Edit mailbox accounts"
+  },
+  "修改邮箱归属、显示名、配额和状态。": {
+    "zh-TW": "修改信箱歸屬、顯示名、配額和狀態。",
+    "en": "Edit mailbox owners, display names, quotas and status."
+  },
+  "删除邮箱账号": {
+    "zh-TW": "刪除信箱帳號",
+    "en": "Delete mailbox accounts"
+  },
+  "删除邮箱账号及关联邮件文件。": {
+    "zh-TW": "刪除信箱帳號及關聯郵件檔案。",
+    "en": "Delete mailbox accounts and associated message files."
+  },
+  "查看别名转发": {
+    "zh-TW": "檢視別名轉發",
+    "en": "View alias forwarding"
+  },
+  "查看别名转发规则。": {
+    "zh-TW": "檢視別名轉發規則。",
+    "en": "View alias forwarding rules."
+  },
+  "创建别名转发": {
+    "zh-TW": "建立別名轉發",
+    "en": "Create alias forwarding"
+  },
+  "创建新的别名转发。": {
+    "zh-TW": "建立新的別名轉發。",
+    "en": "Create alias forwarding rules."
+  },
+  "编辑别名转发": {
+    "zh-TW": "編輯別名轉發",
+    "en": "Edit alias forwarding"
+  },
+  "修改别名转发来源、目标和启用状态。": {
+    "zh-TW": "修改別名轉發來源、目標和啟用狀態。",
+    "en": "Edit alias sources, destinations and enabled status."
+  },
+  "删除别名转发": {
+    "zh-TW": "刪除別名轉發",
+    "en": "Delete alias forwarding"
+  },
+  "删除别名转发规则。": {
+    "zh-TW": "刪除別名轉發規則。",
+    "en": "Delete alias forwarding rules."
+  },
+  "查看邮件列表": {
+    "zh-TW": "檢視郵件清單",
+    "en": "View message list"
+  },
+  "查看全局邮件列表和搜索结果。": {
+    "zh-TW": "檢視全域性郵件清單和搜尋結果。",
+    "en": "View all messages and search results."
+  },
+  "邮件审计": {
+    "zh-TW": "郵件審計",
+    "en": "Mail audit"
+  },
+  "查看邮件正文": {
+    "zh-TW": "檢視郵件內文",
+    "en": "View message bodies"
+  },
+  "查看任意邮箱及未注册收件人的邮件正文。": {
+    "zh-TW": "檢視任意信箱及未註冊收件者的郵件內文。",
+    "en": "View message bodies in any mailbox, including unregistered recipients."
+  },
+  "下载邮件附件": {
+    "zh-TW": "下載郵件附件",
+    "en": "Download mail attachments"
+  },
+  "下载全局邮件中的附件。": {
+    "zh-TW": "下載全域性郵件中的附件。",
+    "en": "Download attachments from all mail."
+  },
+  "查看系统设置": {
+    "zh-TW": "檢視系統設定",
+    "en": "View system settings"
+  },
+  "查看系统、SMTP、安全和邮件设置。": {
+    "zh-TW": "檢視系統、SMTP、安全和郵件設定。",
+    "en": "View system, SMTP, security and mail settings."
+  },
+  "修改系统设置": {
+    "zh-TW": "修改系統設定",
+    "en": "Update system settings"
+  },
+  "保存系统、SMTP、安全和邮件设置。": {
+    "zh-TW": "儲存系統、SMTP、安全和郵件設定。",
+    "en": "Save system, SMTP, security and mail settings."
+  },
+  "测试 SMTP": {
+    "zh-TW": "測試 SMTP",
+    "en": "Test SMTP"
+  },
+  "发送 SMTP 测试邮件。": {
+    "zh-TW": "傳送 SMTP 測試郵件。",
+    "en": "Send SMTP test messages."
+  },
+  "查看邮件模板": {
+    "zh-TW": "檢視郵件模板",
+    "en": "View mail templates"
+  },
+  "查看系统邮件模板。": {
+    "zh-TW": "檢視系統郵件模板。",
+    "en": "View system mail templates."
+  },
+  "编辑邮件模板": {
+    "zh-TW": "編輯郵件模板",
+    "en": "Edit mail templates"
+  },
+  "修改系统邮件模板内容。": {
+    "zh-TW": "修改系統郵件模板內容。",
+    "en": "Edit system mail template content."
+  },
+  "恢复邮件模板": {
+    "zh-TW": "恢復郵件模板",
+    "en": "Restore mail templates"
+  },
+  "将系统邮件模板恢复默认。": {
+    "zh-TW": "將系統郵件模板恢復預設。",
+    "en": "Restore system mail templates to their defaults."
+  },
+  "其他权限": {
+    "zh-TW": "其他權限",
+    "en": "Other permissions"
+  },
+  "切换侧栏": {
+    "en": "Toggle sidebar",
+    "zh-TW": "切換側欄"
+  },
+  "；": {
+    "en": "; ",
+    "zh-TW": "；"
+  },
+  "、": {
+    "en": ", ",
+    "zh-TW": "、"
+  },
+  "{0}": {
+    "en": "{0}",
+    "zh-TW": "{0}"
+  },
+  "机器人令牌": {
+    "en": "Bot token",
+    "zh-TW": "機器人令牌"
+  },
+  "聊天 ID": {
+    "en": "Chat ID",
+    "zh-TW": "聊天 ID"
+  },
+  "选择器：": {
+    "en": "Selector:",
+    "zh-TW": "選擇器："
+  },
+  "Gmail 客户端 ID": {
+    "en": "Gmail client ID",
+    "zh-TW": "Gmail 客戶端 ID"
+  },
+  "Outlook 客户端 ID": {
+    "en": "Outlook client ID",
+    "zh-TW": "Outlook 客戶端 ID"
+  },
+  "站点密钥": {
+    "en": "Site key",
+    "zh-TW": "站點金鑰"
+  },
+  "客户端 ID": {
+    "en": "Client ID",
+    "zh-TW": "客戶端 ID"
+  },
+  "问题反馈": {
+    "en": "Issues",
+    "zh-TW": "問題反饋"
+  },
+  "名称：": {
+    "en": "Name:",
+    "zh-TW": "名稱："
+  },
+  "值：": {
+    "en": "Value:",
+    "zh-TW": "值："
+  },
+  "登录失败，请稍后重试": {
+    "en": "Unable to sign in. Please try again later.",
+    "zh-TW": "登入失敗，請稍後重試"
+  },
+  "验证已过期，请重新登录": {
+    "en": "Verification expired. Please sign in again.",
+    "zh-TW": "驗證已過期，請重新登入"
+  },
+  "验证码错误": {
+    "en": "Invalid verification code",
+    "zh-TW": "驗證碼錯誤"
+  },
+  "人机验证失败，请重试": {
+    "en": "Verification challenge failed. Please try again.",
+    "zh-TW": "人機驗證失敗，請重試"
+  },
+  "邮箱或密码错误": {
+    "en": "Incorrect email or password",
+    "zh-TW": "信箱或密碼錯誤"
+  },
+  "验证码生成失败，请稍后重试": {
+    "en": "Unable to generate a verification code. Please try again later.",
+    "zh-TW": "驗證碼生成失敗，請稍後重試"
+  },
+  "邀请码无效或可用次数已耗尽": {
+    "en": "The invitation code is invalid or has no remaining uses",
+    "zh-TW": "邀請碼無效或可用次數已耗盡"
+  },
+  "注册失败，请稍后重试": {
+    "en": "Unable to register. Please try again later.",
+    "zh-TW": "註冊失敗，請稍後重試"
+  },
+  "邮箱地址无效": {
+    "en": "Invalid email address",
+    "zh-TW": "信箱地址無效"
+  },
+  "显示名称不能超过 80 个字符": {
+    "en": "Display name must not exceed 80 characters",
+    "zh-TW": "顯示名稱不能超過 80 個字元"
+  },
+  "该前缀已被保留，请使用其他前缀": {
+    "en": "This prefix is reserved. Choose another one.",
+    "zh-TW": "該字首已被保留，請使用其他字首"
+  },
+  "该邮箱已被注册": {
+    "en": "This email address is already registered",
+    "zh-TW": "該信箱已被註冊"
+  },
+  "该邀请码绑定的用户组已不存在，请联系管理员": {
+    "en": "The invitation's user group no longer exists. Contact an administrator.",
+    "zh-TW": "該邀請碼綁定的使用者組已不存在，請聯絡管理員"
+  },
+  "所选域名不可用，请选择其他域名": {
+    "en": "This domain is unavailable. Choose another one.",
+    "zh-TW": "所選域名不可用，請選擇其他域名"
+  },
+  "邮箱数量已达上限，请联系管理员": {
+    "en": "The mailbox limit has been reached. Contact an administrator.",
+    "zh-TW": "信箱數量已達上限，請聯絡管理員"
+  },
+  "该邮箱前缀已被使用，请换一个前缀": {
+    "en": "This mailbox prefix is already in use. Choose another one.",
+    "zh-TW": "該信箱字首已被使用，請換一個字首"
+  },
+  "请输入显示名称": {
+    "en": "Enter a display name",
+    "zh-TW": "請輸入顯示名稱"
+  },
+  "当前密码错误": {
+    "en": "Incorrect current password",
+    "zh-TW": "當前密碼錯誤"
+  },
+  "Linux.do Client ID 和 Client Secret 未完整配置": {
+    "en": "Linux.do client ID and client secret are not fully configured",
+    "zh-TW": "Linux.do Client ID 和 Client Secret 未完整配置"
+  },
+  "Linux.do SSO 需要有效的公网基础地址": {
+    "en": "Linux.do SSO requires a valid public base URL",
+    "zh-TW": "Linux.do SSO 需要有效的公網基礎地址"
+  },
+  "Linux.do SSO 在安全模式下必须使用 HTTPS 公网地址": {
+    "en": "Linux.do SSO requires a public HTTPS URL in secure mode",
+    "zh-TW": "Linux.do SSO 在安全模式下必須使用 HTTPS 公網地址"
+  },
+  "Linux.do SSO 未启用": {
+    "en": "Linux.do SSO is disabled",
+    "zh-TW": "Linux.do SSO 未啟用"
+  },
+  "无法启动 Linux.do 登录": {
+    "en": "Unable to start Linux.do sign-in",
+    "zh-TW": "無法啟動 Linux.do 登入"
+  },
+  "密码或双因素验证码错误": {
+    "en": "Incorrect password or two-factor authentication code",
+    "zh-TW": "密碼或雙因素驗證碼錯誤"
+  },
+  "无法启动 Linux.do 绑定": {
+    "en": "Unable to start Linux.do account linking",
+    "zh-TW": "無法啟動 Linux.do 綁定"
+  },
+  "Linux.do 注册未启用": {
+    "en": "Linux.do registration is disabled",
+    "zh-TW": "Linux.do 註冊未啟用"
+  },
+  "Linux.do 注册信息已过期，请重新授权": {
+    "en": "Linux.do registration expired. Authorize again.",
+    "zh-TW": "Linux.do 註冊資訊已過期，請重新授權"
+  },
+  "无法加载邮箱域名": {
+    "en": "Unable to load mail domains",
+    "zh-TW": "無法載入信箱域名"
+  },
+  "邮箱域名不可用": {
+    "en": "Mail domain is unavailable",
+    "zh-TW": "信箱域名不可用"
+  },
+  "Linux.do 注册信息已被使用，请重新授权": {
+    "en": "Linux.do registration information has already been used. Authorize again.",
+    "zh-TW": "Linux.do 註冊資訊已被使用，請重新授權"
+  },
+  "账号已创建，但登录失败，请重新登录": {
+    "en": "Account created, but sign-in failed. Please sign in again.",
+    "zh-TW": "帳號已建立，但登入失敗，請重新登入"
+  },
+  "账号已创建，但资料加载失败": {
+    "en": "Account created, but the profile could not be loaded",
+    "zh-TW": "帳號已建立，但資料載入失敗"
+  },
+  "邮箱地址或 Linux.do 账号已被使用": {
+    "en": "The email address or Linux.do account is already in use",
+    "zh-TW": "信箱地址或 Linux.do 帳號已被使用"
+  },
+  "无法加载 Linux.do 绑定状态": {
+    "en": "Unable to load Linux.do link status",
+    "zh-TW": "無法載入 Linux.do 綁定狀態"
+  },
+  "登录尝试过于频繁，请稍后重试": {
+    "en": "Too many sign-in attempts. Please try again later.",
+    "zh-TW": "登入嘗試過於頻繁，請稍後重試"
+  },
+  "请选择可使用邮件功能的站内用户": {
+    "en": "Select a local user with mail access",
+    "zh-TW": "請選擇可使用郵件功能的站內使用者"
+  },
+  "该邮箱已共享给此用户": {
+    "en": "This mailbox is already shared with this user",
+    "zh-TW": "該信箱已共享給此使用者"
+  },
+  "共享设置已被其他页面修改，请刷新后重试": {
+    "en": "Sharing settings changed on another page. Refresh and try again.",
+    "zh-TW": "共享設定已被其他頁面修改，請重新整理後重試"
+  },
+  "已退出该共享": {
+    "en": "You have left this share",
+    "zh-TW": "已退出該共享"
+  },
+  "共享范围过大": {
+    "en": "The sharing scope is too large",
+    "zh-TW": "共享範圍過大"
+  },
+  "共享文件夹无效": {
+    "en": "Invalid shared folder",
+    "zh-TW": "共享資料夾無效"
+  },
+  "共享标签无效": {
+    "en": "Invalid shared label",
+    "zh-TW": "共享標籤無效"
+  },
+  "只能选择一种有效期": {
+    "en": "Choose only one expiration option",
+    "zh-TW": "只能選擇一種有效期"
+  },
+  "自定义到期时间必须晚于当前时间": {
+    "en": "The custom expiration must be in the future",
+    "zh-TW": "自定義到期時間必須晚於當前時間"
+  },
+  "打开的实时连接过多，请关闭其他标签页后重试": {
+    "en": "Too many live connections. Close other tabs and try again.",
+    "zh-TW": "開啟的實時連線過多，請關閉其他標籤頁後重試"
+  },
+  "当前未开放邮箱申请": {
+    "en": "Mailbox applications are currently closed",
+    "zh-TW": "當前未開放信箱申請"
+  },
+  "该域名不可用": {
+    "en": "This domain is unavailable",
+    "zh-TW": "該域名不可用"
+  },
+  "该邮箱地址已被占用": {
+    "en": "This email address is already in use",
+    "zh-TW": "該信箱地址已被佔用"
+  },
+  "无法加载邀请码": {
+    "en": "Unable to load invitations",
+    "zh-TW": "無法載入邀請碼"
+  },
+  "该邀请码已存在": {
+    "en": "This invitation code already exists",
+    "zh-TW": "該邀請碼已存在"
+  },
+  "创建邀请码失败": {
+    "en": "Unable to create invitation",
+    "zh-TW": "建立邀請碼失敗"
+  },
+  "删除邀请码失败": {
+    "en": "Unable to delete invitation",
+    "zh-TW": "刪除邀請碼失敗"
+  },
+  "邀请码不存在": {
+    "en": "Invitation code does not exist",
+    "zh-TW": "邀請碼不存在"
+  },
+  "邀请码长度必须在 4 到 64 个字符之间": {
+    "en": "Invitation codes must be 4–64 characters long",
+    "zh-TW": "邀請碼長度必須在 4 到 64 個字元之間"
+  },
+  "邀请码只能包含字母、数字、短横线和下划线": {
+    "en": "Invitation codes may contain only letters, numbers, hyphens and underscores",
+    "zh-TW": "邀請碼只能包含字母、數字、短橫線和下劃線"
+  },
+  "只有超级管理员可以修改 Linux.do 注册用户组": {
+    "en": "Only super administrators can change Linux.do registration groups",
+    "zh-TW": "只有超級管理員可以修改 Linux.do 註冊使用者組"
+  },
+  "外部 IMAP 加密密钥未设置": {
+    "en": "The external IMAP encryption key is not configured",
+    "zh-TW": "外部 IMAP 加密金鑰未設定"
+  },
+  "SMTP 主机未设置": {
+    "en": "SMTP host is not configured",
+    "zh-TW": "SMTP 主機未設定"
+  },
+  "SMTP 端口无效": {
+    "en": "Invalid SMTP port",
+    "zh-TW": "SMTP 埠無效"
+  },
+  "收件邮箱无效": {
+    "en": "Invalid recipient email",
+    "zh-TW": "收件信箱無效"
+  },
+  "发件邮箱无效": {
+    "en": "Invalid sender email",
+    "zh-TW": "發件信箱無效"
+  },
+  "需要登录后才能操作": {
+    "en": "Sign in to continue",
+    "zh-TW": "需要登入後才能操作"
+  },
+  "密码至少需要 8 个字符": {
+    "en": "Passwords must contain at least 8 characters",
+    "zh-TW": "密碼至少需要 8 個字元"
+  },
+  "邮箱前缀无效": {
+    "en": "Invalid mailbox prefix",
+    "zh-TW": "信箱字首無效"
+  },
+  "邮箱前缀过长": {
+    "en": "Mailbox prefix is too long",
+    "zh-TW": "信箱字首過長"
+  },
+  "拥有全部后台权限，由用户身份决定，不通过权限组分配。": {
+    "en": "Has all administration permissions based on the user role, independent of permission group assignments.",
+    "zh-TW": "擁有全部後台權限，由使用者身份決定，不透過權限組分配。"
+  },
+  "所有注册用户默认继承此组；可在此统一设置收信、发信等邮箱权限。": {
+    "en": "All registered users inherit this group. Configure receiving, sending and other mailbox permissions here.",
+    "zh-TW": "所有註冊使用者預設繼承此組；可在此統一設定收信、發信等信箱權限。"
+  },
+  "欢迎邮件": {
+    "zh-TW": "歡迎郵件",
+    "en": "Welcome email"
+  },
+  "SMTP 测试": {
+    "zh-TW": "SMTP 測試",
+    "en": "SMTP test"
+  },
+  "已关闭": {
+    "zh-TW": "已關閉",
+    "en": "Disabled"
+  },
+  "通知": {
+    "zh-TW": "通知",
+    "en": "Notification"
+  },
+  "未找到 MX 记录": {
+    "zh-TW": "找不到 MX 記錄",
+    "en": "No MX record found"
+  },
+  "MX 指向正确": {
+    "zh-TW": "MX 指向正確",
+    "en": "MX points to the correct host"
+  },
+  "MX 未指向当前邮件主机": {
+    "zh-TW": "MX 未指向目前郵件主機",
+    "en": "MX does not point to the current mail host"
+  },
+  "DKIM 公钥匹配": {
+    "zh-TW": "DKIM 公鑰相符",
+    "en": "DKIM public key matches"
+  },
+  "DKIM 记录存在，但公钥与当前域名配置不匹配": {
+    "zh-TW": "DKIM 記錄存在，但公鑰與目前網域設定不符",
+    "en": "A DKIM record exists, but its public key does not match this domain's configuration"
+  },
+  "未找到 DKIM 记录": {
+    "zh-TW": "找不到 DKIM 記錄",
+    "en": "No DKIM record found"
+  },
+  "DMARC 记录存在": {
+    "zh-TW": "DMARC 記錄存在",
+    "en": "DMARC record exists"
+  },
+  "未找到 DMARC 记录": {
+    "zh-TW": "找不到 DMARC 記錄",
+    "en": "No DMARC record found"
+  },
+  "HELO 主机 {0} 的 SPF": {
+    "zh-TW": "HELO 主機 {0} 的 SPF",
+    "en": "SPF for HELO host {0}"
+  },
+  "域名 SPF": {
+    "zh-TW": "網域 SPF",
+    "en": "Domain SPF"
+  },
+  "未找到 {0} 记录": {
+    "zh-TW": "找不到 {0} 記錄",
+    "en": "No {0} record found"
+  },
+  "{0} 记录有效": {
+    "zh-TW": "{0} 記錄有效",
+    "en": "{0} record is valid"
+  },
+  "{0} 存在多条记录，会导致 SPF 校验错误": {
+    "zh-TW": "{0} 存在多筆記錄，會導致 SPF 驗證失敗",
+    "en": "Multiple {0} records will cause SPF verification to fail"
+  },
+  "未检测": {
+    "zh-TW": "尚未檢測",
+    "en": "Not checked"
+  },
+  "界面语言": {
+    "zh-TW": "介面語言",
+    "en": "Interface language"
+  }
+}

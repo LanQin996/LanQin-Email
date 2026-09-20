@@ -1,3 +1,14 @@
+import { localizePermissionInfo } from "@/lib/permission-translations"
+import { dnsCheckMessage, dnsStatusLabel } from "@/lib/diagnostic-messages"
+import {
+  uiMessage,
+  type UiText,
+  getInitialLanguage,
+  uiText,
+  useLanguage as useUiLanguage,
+} from "@/lib/language"
+import { errorMessage } from "@/lib/ui-errors"
+
 import * as React from "react"
 import { useSearchParams } from "react-router-dom"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -97,8 +108,8 @@ import { hasAnyPermission, hasPermission } from "@/lib/permissions"
 import type { PermissionKey } from "@/lib/api-types"
 
 type PendingConfirm = {
-  title: string
-  description?: string
+  title: UiText
+  description?: UiText
   confirmText: string
   onConfirm: () => void
 }
@@ -110,6 +121,8 @@ const projectReleaseUrl =
   (projectTag ? `${projectRepositoryUrl}/releases/tag/${projectTag}` : "")
 
 export function AdminPage() {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const [params, setParams] = useSearchParams()
@@ -207,17 +220,23 @@ export function AdminPage() {
     <ScrollArea className="h-[calc(100svh-3rem)] md:h-svh">
       <main className="p-4 sm:p-6">
         <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">{sectionLabels[section]}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {uiText(sectionLabels[section])}
+          </h1>
         </div>
 
         {section === "overview" && canOverview && (
           <div className="mb-6 grid gap-4 md:grid-cols-4">
-            <Stat icon={<Users />} label="用户" value={overview.data?.users || 0} />
-            <Stat icon={<Globe2 />} label="域名" value={overview.data?.domains || 0} />
-            <Stat icon={<Mailbox />} label="邮箱账号" value={overview.data?.mailboxes || 0} />
+            <Stat icon={<Users />} label={uiText("用户")} value={overview.data?.users || 0} />
+            <Stat icon={<Globe2 />} label={uiText("域名")} value={overview.data?.domains || 0} />
+            <Stat
+              icon={<Mailbox />}
+              label={uiText("邮箱账号")}
+              value={overview.data?.mailboxes || 0}
+            />
             <Stat
               icon={<ShieldCheck />}
-              label="存储"
+              label={uiText("存储")}
               value={formatBytes(overview.data?.storageBytes || 0)}
             />
           </div>
@@ -238,7 +257,7 @@ export function AdminPage() {
         {section === "permissionGroups" && (
           <PermissionGroupsSection
             groups={permissionGroups.data?.items || []}
-            catalog={permissionGroups.data?.catalog || []}
+            catalog={(permissionGroups.data?.catalog || []).map(localizePermissionInfo)}
           />
         )}
         {section === "domains" && <DomainsSection domains={domainItems} />}
@@ -280,6 +299,8 @@ function OverviewSection({
   visibleSections: Section[]
   onSectionChange: (section: Section) => void
 }) {
+  useUiLanguage()
+
   const checklist = setupChecklist(overview, domains, settings).filter((item) =>
     visibleSections.includes(item.section)
   )
@@ -288,18 +309,18 @@ function OverviewSection({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card>
           <CardHeader>
-            <CardTitle>系统状态</CardTitle>
+            <CardTitle>{uiText("系统状态")}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <InfoBox label="活跃用户" value={overview?.activeUsers || 0} />
-            <InfoBox label="活跃邮箱" value={overview?.activeMailboxes || 0} />
-            <InfoBox label="别名转发" value={overview?.aliases || 0} />
-            <InfoBox label="未读邮件" value={overview?.unreadMessages || 0} />
+            <InfoBox label={uiText("活跃用户")} value={overview?.activeUsers || 0} />
+            <InfoBox label={uiText("活跃邮箱")} value={overview?.activeMailboxes || 0} />
+            <InfoBox label={uiText("别名转发")} value={overview?.aliases || 0} />
+            <InfoBox label={uiText("未读邮件")} value={overview?.unreadMessages || 0} />
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>首次配置</CardTitle>
+            <CardTitle>{uiText("首次配置")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {checklist.map((item) => (
@@ -316,9 +337,9 @@ function OverviewSection({
                   <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
                 )}
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{item.title}</span>
+                  <span className="block font-medium">{uiText(item.title)}</span>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {item.detail}
+                    {uiText(item.detail)}
                   </span>
                 </span>
                 <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -330,38 +351,38 @@ function OverviewSection({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <Card>
           <CardHeader>
-            <CardTitle>DNS 状态</CardTitle>
+            <CardTitle>{uiText("DNS 状态")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {domains.map((domain) => (
               <DomainBadgeRow key={domain.id} domain={domain} />
             ))}
-            {domains.length === 0 && <Empty text="暂无域名" />}
+            {domains.length === 0 && <Empty text={uiText("暂无域名")} />}
           </CardContent>
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>运行提示</CardTitle>
+            <CardTitle>{uiText("运行提示")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <InfoLine label="公网地址" value={settings?.publicBaseUrl || "-"} />
+            <InfoLine label={uiText("公网地址")} value={settings?.publicBaseUrl || "-"} />
             <InfoLine
               label="SMTP"
               value={settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "-"}
             />
             <InfoLine
-              label="注册"
+              label={uiText("注册")}
               value={
                 settings?.openRegistration
                   ? "已开放"
                   : settings?.inviteRegistrationEnabled
                     ? "仅邀请码"
-                    : "关闭"
+                    : "已关闭"
               }
             />
             <InfoLine
-              label="用户自助申请"
-              value={settings?.userMailboxApplyEnabled ? "已启用" : "关闭"}
+              label={uiText("用户自助申请")}
+              value={settings?.userMailboxApplyEnabled ? "已启用" : "已关闭"}
             />
           </CardContent>
         </Card>
@@ -391,7 +412,9 @@ function setupChecklist(
     {
       key: "domain",
       title: "添加邮件域名",
-      detail: hasDomain ? `${domains.length} 个域名已添加` : "先添加 example.com 这样的邮件域名",
+      detail: hasDomain
+        ? uiText("{0} 个域名已添加", [domains.length])
+        : "先添加 example.com 这样的邮件域名",
       done: hasDomain,
       section: "domains" as Section,
     },
@@ -406,7 +429,7 @@ function setupChecklist(
       key: "mailbox",
       title: "创建邮箱账号",
       detail: hasMailbox
-        ? `${overview?.activeMailboxes || 0} 个活跃邮箱`
+        ? uiText("{0} 个活跃邮箱", [overview?.activeMailboxes || 0])
         : "给超级管理员或普通用户创建第一个邮箱",
       done: hasMailbox,
       section: "mailboxes" as Section,
@@ -415,7 +438,7 @@ function setupChecklist(
       key: "smtp",
       title: "确认发信链路",
       detail: settings?.smtpHost
-        ? `内置 Postfix：${settings.smtpHost}:${settings.smtpPort}`
+        ? uiText("内置 Postfix：{0}:{1}", [settings.smtpHost, settings.smtpPort])
         : "默认使用内置 Postfix",
       done: true,
       section: "settings" as Section,
@@ -423,7 +446,9 @@ function setupChecklist(
     {
       key: "mail",
       title: "完成收发测试",
-      detail: hasMail ? `${overview?.messages || 0} 封邮件已入库` : "发送或接收一封测试邮件",
+      detail: hasMail
+        ? uiText("{0} 封邮件已入库", [overview?.messages || 0])
+        : "发送或接收一封测试邮件",
       done: hasMail,
       section: "messages" as Section,
     },
@@ -431,10 +456,14 @@ function setupChecklist(
 }
 
 function InfoLine({ label, value }: { label: string; value: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-md border px-3 py-2">
-      <span>{label}</span>
-      <span className="min-w-0 truncate font-medium text-foreground">{value}</span>
+      <span>{uiText(label)}</span>
+      <span className="min-w-0 truncate font-medium text-foreground">
+        {typeof value === "string" ? uiText(value) : value}
+      </span>
     </div>
   )
 }
@@ -446,6 +475,8 @@ function UsersSection({
   users: AdminUser[]
   permissionGroups: PermissionGroup[]
 }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -475,13 +506,13 @@ function UsersSection({
       invalidateAdmin(qc)
       toast({ title: "用户已删除" })
     },
-    onError: (e) => toast({ title: "删除失败", description: e.message }),
+    onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>用户管理</CardTitle>
+          <CardTitle>{uiText("用户管理")}</CardTitle>
           {canCreate && <CreateUserDialog permissionGroups={permissionGroups} />}
         </div>
       </CardHeader>
@@ -492,7 +523,7 @@ function UsersSection({
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索用户、邮箱、显示名称"
+              placeholder={uiText("搜索用户、邮箱、显示名称")}
               className="pl-9"
             />
           </div>
@@ -501,9 +532,9 @@ function UsersSection({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部角色</SelectItem>
-              <SelectItem value="admin">超级管理员</SelectItem>
-              <SelectItem value="user">普通用户</SelectItem>
+              <SelectItem value="all">{uiText("全部角色")}</SelectItem>
+              <SelectItem value="admin">{uiText("超级管理员")}</SelectItem>
+              <SelectItem value="user">{uiText("普通用户")}</SelectItem>
             </SelectContent>
           </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -511,9 +542,9 @@ function UsersSection({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="active">正常</SelectItem>
-              <SelectItem value="disabled">停用</SelectItem>
+              <SelectItem value="all">{uiText("全部状态")}</SelectItem>
+              <SelectItem value="active">{uiText("正常")}</SelectItem>
+              <SelectItem value="disabled">{uiText("停用")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -533,7 +564,7 @@ function UsersSection({
                       ? () =>
                           setPendingConfirm({
                             title: "删除用户？",
-                            description: `将删除 ${user.email} 及其关联数据。`,
+                            description: uiMessage("将删除 {0} 及其关联数据。", [user.email]),
                             confirmText: "删除用户",
                             onConfirm: () => remove.mutate(user.id),
                           })
@@ -544,9 +575,11 @@ function UsersSection({
               <div className="mt-3 flex flex-wrap gap-2">
                 <RoleBadge user={user} />
                 <Badge variant={user.disabled ? "secondary" : "default"}>
-                  {user.disabled ? "停用" : "正常"}
+                  {user.disabled ? uiText("停用") : uiText("正常")}
                 </Badge>
-                <Badge variant="outline">{new Date(user.createdAt).toLocaleDateString()}</Badge>
+                <Badge variant="outline">
+                  {new Date(user.createdAt).toLocaleDateString(getInitialLanguage())}
+                </Badge>
               </div>
               <div className="mt-3">
                 <UserPermissionGroupsCell user={user} />
@@ -561,12 +594,12 @@ function UsersSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>用户</TableHead>
-                <TableHead>身份</TableHead>
-                <TableHead>权限组</TableHead>
-                <TableHead>邮箱</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>创建时间</TableHead>
+                <TableHead>{uiText("用户")}</TableHead>
+                <TableHead>{uiText("身份")}</TableHead>
+                <TableHead>{uiText("权限组")}</TableHead>
+                <TableHead>{uiText("邮箱")}</TableHead>
+                <TableHead>{uiText("状态")}</TableHead>
+                <TableHead>{uiText("创建时间")}</TableHead>
                 <TableHead className="w-16"></TableHead>
               </TableRow>
             </TableHeader>
@@ -588,11 +621,11 @@ function UsersSection({
                   </TableCell>
                   <TableCell>
                     <Badge variant={user.disabled ? "secondary" : "default"}>
-                      {user.disabled ? "停用" : "正常"}
+                      {user.disabled ? uiText("停用") : uiText("正常")}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {new Date(user.createdAt).toLocaleDateString()}
+                    {new Date(user.createdAt).toLocaleDateString(getInitialLanguage())}
                   </TableCell>
                   <TableCell>
                     <UserActions
@@ -603,7 +636,7 @@ function UsersSection({
                           ? () =>
                               setPendingConfirm({
                                 title: "删除用户？",
-                                description: `将删除 ${user.email} 及其关联数据。`,
+                                description: uiMessage("将删除 {0} 及其关联数据。", [user.email]),
                                 confirmText: "删除用户",
                                 onConfirm: () => remove.mutate(user.id),
                               })
@@ -616,13 +649,13 @@ function UsersSection({
             </TableBody>
           </Table>
         </div>
-        {filteredUsers.length === 0 && <Empty text="没有匹配的用户" />}
+        {filteredUsers.length === 0 && <Empty text={uiText("没有匹配的用户")} />}
       </CardContent>
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "删除"}
+        confirmText={pendingConfirm?.confirmText || uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -641,6 +674,8 @@ function PermissionGroupsSection({
   groups: PermissionGroup[]
   catalog: PermissionInfo[]
 }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -658,7 +693,7 @@ function PermissionGroupsSection({
       invalidateAdmin(qc)
       toast({ title: "权限组已删除" })
     },
-    onError: (e) => toast({ title: "删除失败", description: e.message }),
+    onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   const filtered = groups.filter((group) => {
     const keyword = query.trim().toLowerCase()
@@ -674,9 +709,11 @@ function PermissionGroupsSection({
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <CardTitle>权限组管理</CardTitle>
+            <CardTitle>{uiText("权限组管理")}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              注册用户默认继承“普通用户”系统组；编辑该组并取消“发送邮件”即可统一设为只收不发。
+              {uiText(
+                "注册用户默认继承“普通用户”系统组；编辑该组并取消“发送邮件”即可统一设为只收不发。"
+              )}
             </p>
           </div>
           {canCreate && <PermissionGroupDialog catalog={catalog} />}
@@ -688,7 +725,7 @@ function PermissionGroupsSection({
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="搜索权限组、说明或权限键"
+            placeholder={uiText("搜索权限组、说明或权限键")}
             className="pl-9"
           />
         </div>
@@ -698,13 +735,19 @@ function PermissionGroupsSection({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="font-medium">{group.name}</div>
-                    {group.system && <Badge variant="outline">系统组</Badge>}
-                    {!group.system && <Badge variant="secondary">自定义</Badge>}
-                    <Badge variant="outline">{group.userCount} 人</Badge>
+                    <div className="font-medium">
+                      {group.id === "pg_super_admin" || group.id === "pg_regular_user"
+                        ? uiText(group.name)
+                        : group.name}
+                    </div>
+                    {group.system && <Badge variant="outline">{uiText("系统组")}</Badge>}
+                    {!group.system && <Badge variant="secondary">{uiText("自定义")}</Badge>}
+                    <Badge variant="outline">{uiText("{0} 人", [group.userCount])}</Badge>
                   </div>
                   <div className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-                    {group.description || "未填写说明"}
+                    {group.system
+                      ? uiText(group.description)
+                      : group.description || uiText("未填写说明")}
                   </div>
                 </div>
                 {(canUpdate || canDelete) && (
@@ -719,7 +762,7 @@ function PermissionGroupsSection({
                         disabled={!isEditable(group) || !canUpdate}
                         onSelect={() => setEditing(group)}
                       >
-                        编辑权限组
+                        {uiText("编辑权限组")}
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
@@ -728,13 +771,13 @@ function PermissionGroupsSection({
                         onSelect={() =>
                           setPendingConfirm({
                             title: "删除权限组？",
-                            description: `${group.name} 删除后不能再分配给用户。`,
+                            description: uiMessage("{0} 删除后不能再分配给用户。", [group.name]),
                             confirmText: "删除权限组",
                             onConfirm: () => remove.mutate(group.id),
                           })
                         }
                       >
-                        删除权限组
+                        {uiText("删除权限组")}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -745,7 +788,7 @@ function PermissionGroupsSection({
             </div>
           ))}
         </div>
-        {filtered.length === 0 && <Empty text="暂无匹配的权限组" />}
+        {filtered.length === 0 && <Empty text={uiText("暂无匹配的权限组")} />}
       </CardContent>
       {editing && (
         <PermissionGroupDialog
@@ -761,7 +804,7 @@ function PermissionGroupsSection({
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "删除"}
+        confirmText={pendingConfirm?.confirmText || uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -784,6 +827,8 @@ function PermissionGroupDialog({
   open?: boolean
   onOpenChange?: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [internalOpen, setInternalOpen] = React.useState(false)
@@ -822,13 +867,13 @@ function PermissionGroupDialog({
       setDialogOpen(false)
       toast({ title: group ? "权限组已更新" : "权限组已创建" })
     },
-    onError: (e) => toast({ title: group ? "更新失败" : "创建失败", description: e.message }),
+    onError: (e) => toast({ title: group ? "更新失败" : "创建失败", description: errorMessage(e) }),
   })
   const trigger = group ? null : (
     <DialogTrigger asChild>
       <Button size="sm">
         <Plus className="h-4 w-4" />
-        权限组
+        {uiText("权限组")}
       </Button>
     </DialogTrigger>
   )
@@ -837,7 +882,7 @@ function PermissionGroupDialog({
       {trigger}
       <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{group ? "编辑权限组" : "创建权限组"}</DialogTitle>
+          <DialogTitle>{group ? uiText("编辑权限组") : uiText("创建权限组")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -849,13 +894,13 @@ function PermissionGroupDialog({
           <div className="grid gap-4 md:grid-cols-2">
             <Field
               name="name"
-              label="名称"
+              label={uiText("名称")}
               defaultValue={group?.name || ""}
-              placeholder="例如：客服主管"
+              placeholder={uiText("例如：客服主管")}
             />
             <Field
               name="description"
-              label="说明"
+              label={uiText("说明")}
               defaultValue={group?.description || ""}
               required={false}
             />
@@ -864,7 +909,7 @@ function PermissionGroupDialog({
           <PermissionPicker catalog={catalog} value={permissions} onChange={setPermissions} />
           <DialogFooter>
             <Button disabled={mutation.isPending}>
-              {mutation.isPending ? "保存中..." : "保存"}
+              {mutation.isPending ? uiText("保存中...") : uiText("保存")}
             </Button>
           </DialogFooter>
         </form>
@@ -882,6 +927,8 @@ function PermissionPicker({
   value: PermissionKey[]
   onChange: (value: PermissionKey[]) => void
 }) {
+  useUiLanguage()
+
   const grouped = groupPermissionCatalog(catalog)
   function toggle(permission: PermissionKey, checked: boolean) {
     onChange(
@@ -901,24 +948,25 @@ function PermissionPicker({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <Label>菜单与操作权限</Label>
-        <Badge variant="outline">{value.length} 项</Badge>
+        <Label>{uiText("菜单与操作权限")}</Label>
+        <Badge variant="outline">{uiText("{0} 项", [value.length])}</Badge>
       </div>
       <div className="space-y-3">
         {grouped.map(({ category, items }) => {
           const allChecked = items.every((item) => value.includes(item.key))
           return (
-            <div key={category} className="rounded-lg border">
+            <div key={items[0]?.key || category} className="rounded-lg border">
               <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
                 <label className="flex items-center gap-2 font-medium">
                   <Checkbox
                     checked={allChecked}
                     onCheckedChange={(next) => toggleCategory(items, next === true)}
                   />
-                  {category}
+                  {uiText(category)}
                 </label>
                 <span className="text-xs text-muted-foreground">
-                  {items.filter((item) => value.includes(item.key)).length}/{items.length}
+                  {uiText("{0}", [items.filter((item) => value.includes(item.key)).length])}/
+                  {uiText("{0}", [items.length])}
                 </span>
               </div>
               <div className="grid gap-2 p-3 md:grid-cols-2">
@@ -932,9 +980,9 @@ function PermissionPicker({
                       onCheckedChange={(next) => toggle(item.key, next === true)}
                     />
                     <span className="min-w-0">
-                      <span className="block text-sm font-medium">{item.label}</span>
+                      <span className="block text-sm font-medium">{uiText(item.label)}</span>
                       <span className="line-clamp-2 text-xs text-muted-foreground">
-                        {item.description}
+                        {uiText(item.description)}
                       </span>
                     </span>
                   </label>
@@ -955,6 +1003,8 @@ function PermissionLimitEditor({
   value: PermissionLimits
   onChange: (value: PermissionLimits) => void
 }) {
+  useUiLanguage()
+
   function update(key: keyof PermissionLimits, raw: string) {
     const next = Number(raw)
     onChange({ ...value, [key]: Number.isFinite(next) && next > 0 ? Math.floor(next) : 0 })
@@ -962,12 +1012,12 @@ function PermissionLimitEditor({
   return (
     <div className="space-y-3 rounded-lg border p-3">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-        <Label>账号配额</Label>
-        <span className="text-xs text-muted-foreground">填 0 表示不限制</span>
+        <Label>{uiText("账号配额")}</Label>
+        <span className="text-xs text-muted-foreground">{uiText("填 0 表示不限制")}</span>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         <div className="space-y-2">
-          <Label>附件上限 MB</Label>
+          <Label>{uiText("附件上限 MB")}</Label>
           <Input
             type="number"
             min={0}
@@ -976,7 +1026,7 @@ function PermissionLimitEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label>SMTP 每日收件人数</Label>
+          <Label>{uiText("SMTP 每日收件人数")}</Label>
           <Input
             type="number"
             min={0}
@@ -985,7 +1035,7 @@ function PermissionLimitEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label>SMTP 每分钟封数</Label>
+          <Label>{uiText("SMTP 每分钟封数")}</Label>
           <Input
             type="number"
             min={0}
@@ -994,7 +1044,7 @@ function PermissionLimitEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label>IMAP 每分钟命令数</Label>
+          <Label>{uiText("IMAP 每分钟命令数")}</Label>
           <Input
             type="number"
             min={0}
@@ -1003,7 +1053,7 @@ function PermissionLimitEditor({
           />
         </div>
         <div className="space-y-2">
-          <Label>POP3 每分钟命令数</Label>
+          <Label>{uiText("POP3 每分钟命令数")}</Label>
           <Input
             type="number"
             min={0}
@@ -1013,8 +1063,8 @@ function PermissionLimitEditor({
         </div>
         <div className="space-y-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <Label>邮箱数量上限</Label>
-            <span className="text-xs text-muted-foreground">按累计创建数计算</span>
+            <Label>{uiText("邮箱数量上限")}</Label>
+            <span className="text-xs text-muted-foreground">{uiText("按累计创建数计算")}</span>
           </div>
           <Input
             type="number"
@@ -1022,12 +1072,14 @@ function PermissionLimitEditor({
             value={value.maxMailboxes}
             onChange={(event) => update("maxMailboxes", event.target.value)}
           />
-          <span className="block text-xs text-muted-foreground">删除邮箱不会释放额度</span>
+          <span className="block text-xs text-muted-foreground">
+            {uiText("删除邮箱不会释放额度")}
+          </span>
         </div>
         <div className="space-y-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <Label>每日新建邮箱上限</Label>
-            <span className="text-xs text-muted-foreground">滚动 24 小时</span>
+            <Label>{uiText("每日新建邮箱上限")}</Label>
+            <span className="text-xs text-muted-foreground">{uiText("滚动 24 小时")}</span>
           </div>
           <Input
             type="number"
@@ -1036,7 +1088,7 @@ function PermissionLimitEditor({
             onChange={(event) => update("maxMailboxesPerDay", event.target.value)}
           />
           <span className="block text-xs text-muted-foreground">
-            额度不累积，与数量上限同时生效
+            {uiText("额度不累积，与数量上限同时生效")}
           </span>
         </div>
       </div>
@@ -1051,22 +1103,28 @@ function PermissionBadges({
   permissions: PermissionKey[]
   catalog: PermissionInfo[]
 }) {
+  useUiLanguage()
+
   const labelByKey = new Map(catalog.map((item) => [item.key, item.label]))
   if (permissions.length === 0)
-    return <div className="mt-3 text-sm text-muted-foreground">无后台权限</div>
+    return <div className="mt-3 text-sm text-muted-foreground">{uiText("无后台权限")}</div>
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
       {permissions.slice(0, 10).map((permission) => (
         <Badge key={permission} variant="outline" className="font-normal">
-          {labelByKey.get(permission) || permission}
+          {uiText(labelByKey.get(permission) || permission)}
         </Badge>
       ))}
-      {permissions.length > 10 && <Badge variant="secondary">+{permissions.length - 10}</Badge>}
+      {permissions.length > 10 && (
+        <Badge variant="secondary">+{uiText("{0}", [permissions.length - 10])}</Badge>
+      )}
     </div>
   )
 }
 
 function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
+  useUiLanguage()
+
   const defaultLimitsQuery = useQuery({
     queryKey: ["admin", "permission-limits", "defaults"],
     queryFn: api.defaultPermissionLimits,
@@ -1075,31 +1133,33 @@ function PermissionLimitBadges({ limits }: { limits?: PermissionLimits }) {
   return (
     <div className="mt-3 flex flex-wrap gap-1.5">
       <Badge variant="secondary" className="font-normal">
-        附件 {limitText(value.maxAttachmentMb, "MB")}
+        {uiText("附件 {0}", [limitText(value.maxAttachmentMb, "MB")])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        SMTP 每日 {limitText(value.smtpDailyLimit, "人")}
+        {uiText("SMTP 每日 {0}", [limitText(value.smtpDailyLimit, uiText("人"))])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        SMTP 每分钟 {limitText(value.smtpMinuteLimit, "封")}
+        {uiText("SMTP 每分钟 {0}", [limitText(value.smtpMinuteLimit, uiText("封"))])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        IMAP 每分钟 {limitText(value.imapMinuteLimit, "次")}
+        {uiText("IMAP 每分钟 {0}", [limitText(value.imapMinuteLimit, uiText("次"))])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        POP3 每分钟 {limitText(value.pop3MinuteLimit, "次")}
+        {uiText("POP3 每分钟 {0}", [limitText(value.pop3MinuteLimit, uiText("次"))])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        邮箱数量 {limitText(value.maxMailboxes, "个")}
+        {uiText("邮箱数量 {0}", [limitText(value.maxMailboxes, uiText("个"))])}
       </Badge>
       <Badge variant="secondary" className="font-normal">
-        每日新建 {limitText(value.maxMailboxesPerDay, "个")}
+        {uiText("每日新建 {0}", [limitText(value.maxMailboxesPerDay, uiText("个"))])}
       </Badge>
     </div>
   )
 }
 
 function DomainsSection({ domains }: { domains: Domain[] }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -1116,7 +1176,7 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
       invalidateAdmin(qc)
       toast({ title: "域名已更新" })
     },
-    onError: (e) => toast({ title: "更新失败", description: e.message }),
+    onError: (e) => toast({ title: "更新失败", description: errorMessage(e) }),
   })
   const remove = useMutation({
     mutationFn: api.deleteDomain,
@@ -1125,13 +1185,13 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
       invalidateAdmin(qc)
       toast({ title: "域名已删除" })
     },
-    onError: (e) => toast({ title: "删除失败", description: e.message }),
+    onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>域名管理</CardTitle>
+          <CardTitle>{uiText("域名管理")}</CardTitle>
           {canCreate && <CreateDomainDialog />}
         </div>
       </CardHeader>
@@ -1143,14 +1203,17 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
           >
             <div>
               <div className="font-medium">{domain.name}</div>
-              <div className="text-xs text-muted-foreground">selector: {domain.dkimSelector}</div>
+              <div className="text-xs text-muted-foreground">
+                {uiText("选择器：")}
+                {domain.dkimSelector}
+              </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={domain.status === "active" ? "default" : "secondary"}>
-                {domain.status === "active" ? "启用" : "停用"}
+                {domain.status === "active" ? uiText("启用") : uiText("停用")}
               </Badge>
               <Badge variant={domain.dnsStatus === "ok" ? "default" : "secondary"}>
-                {domain.dnsStatus === "ok" ? "DNS 正常" : domain.dnsStatus}
+                {dnsStatusLabel(domain.dnsStatus)}
               </Badge>
               {canViewDNS && <DomainDNSDialog domain={domain} />}
               {canUpdate && (
@@ -1164,7 +1227,7 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
                     })
                   }
                 >
-                  {domain.status === "active" ? "停用" : "启用"}
+                  {domain.status === "active" ? uiText("停用") : uiText("启用")}
                 </Button>
               )}
               {canDelete && (
@@ -1174,26 +1237,28 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
                   onClick={() =>
                     setPendingConfirm({
                       title: "删除域名？",
-                      description: `将删除 ${domain.name}，相关邮箱、别名和邮件也可能受影响。`,
+                      description: uiMessage("将删除 {0}，相关邮箱、别名和邮件也可能受影响。", [
+                        domain.name,
+                      ]),
                       confirmText: "删除域名",
                       onConfirm: () => remove.mutate(domain.id),
                     })
                   }
                 >
                   <Trash2 className="h-4 w-4" />
-                  删除
+                  {uiText("删除")}
                 </Button>
               )}
             </div>
           </div>
         ))}
-        {domains.length === 0 && <Empty text="暂无域名" />}
+        {domains.length === 0 && <Empty text={uiText("暂无域名")} />}
       </CardContent>
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "删除"}
+        confirmText={pendingConfirm?.confirmText || uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -1206,6 +1271,8 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
 }
 
 function DomainDNSDialog({ domain }: { domain: Domain }) {
+  useUiLanguage()
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -1232,6 +1299,8 @@ function MailboxesSection({
   users: AdminUser[]
   domains: Domain[]
 }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -1247,13 +1316,13 @@ function MailboxesSection({
       invalidateAdmin(qc)
       toast({ title: "邮箱已删除" })
     },
-    onError: (e) => toast({ title: "删除失败", description: e.message }),
+    onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>邮箱账号管理</CardTitle>
+          <CardTitle>{uiText("邮箱账号管理")}</CardTitle>
           {canCreate && <CreateMailboxDialog domains={domains} users={users} />}
         </div>
       </CardHeader>
@@ -1277,7 +1346,7 @@ function MailboxesSection({
                       ? () =>
                           setPendingConfirm({
                             title: "删除邮箱？",
-                            description: `将删除 ${mailbox.address} 和其中邮件。`,
+                            description: uiMessage("将删除 {0} 和其中邮件。", [mailbox.address]),
                             confirmText: "删除邮箱",
                             onConfirm: () => remove.mutate(mailbox.id),
                           })
@@ -1287,10 +1356,10 @@ function MailboxesSection({
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Badge variant={mailbox.status === "active" ? "default" : "secondary"}>
-                  {mailbox.status === "active" ? "启用" : "停用"}
+                  {mailbox.status === "active" ? uiText("启用") : uiText("停用")}
                 </Badge>
-                <Badge variant="outline">{mailbox.quotaMb} MB</Badge>
-                <Badge variant="outline">{mailbox.displayName || "未命名"}</Badge>
+                <Badge variant="outline">{uiText("{0}", [mailbox.quotaMb])} MB</Badge>
+                <Badge variant="outline">{mailbox.displayName || uiText("未命名")}</Badge>
               </div>
             </div>
           ))}
@@ -1299,11 +1368,11 @@ function MailboxesSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>地址</TableHead>
-                <TableHead>归属用户</TableHead>
-                <TableHead>名称</TableHead>
-                <TableHead>配额</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead>{uiText("地址")}</TableHead>
+                <TableHead>{uiText("归属用户")}</TableHead>
+                <TableHead>{uiText("名称")}</TableHead>
+                <TableHead>{uiText("配额")}</TableHead>
+                <TableHead>{uiText("状态")}</TableHead>
                 <TableHead className="w-16"></TableHead>
               </TableRow>
             </TableHeader>
@@ -1315,10 +1384,10 @@ function MailboxesSection({
                     {mailbox.userEmail || mailbox.userId}
                   </TableCell>
                   <TableCell>{mailbox.displayName}</TableCell>
-                  <TableCell>{mailbox.quotaMb} MB</TableCell>
+                  <TableCell>{uiText("{0}", [mailbox.quotaMb])} MB</TableCell>
                   <TableCell>
                     <Badge variant={mailbox.status === "active" ? "default" : "secondary"}>
-                      {mailbox.status === "active" ? "启用" : "停用"}
+                      {mailbox.status === "active" ? uiText("启用") : uiText("停用")}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -1331,7 +1400,9 @@ function MailboxesSection({
                           ? () =>
                               setPendingConfirm({
                                 title: "删除邮箱？",
-                                description: `将删除 ${mailbox.address} 和其中邮件。`,
+                                description: uiMessage("将删除 {0} 和其中邮件。", [
+                                  mailbox.address,
+                                ]),
                                 confirmText: "删除邮箱",
                                 onConfirm: () => remove.mutate(mailbox.id),
                               })
@@ -1344,13 +1415,13 @@ function MailboxesSection({
             </TableBody>
           </Table>
         </div>
-        {mailboxes.length === 0 && <Empty text="暂无邮箱账号" />}
+        {mailboxes.length === 0 && <Empty text={uiText("暂无邮箱账号")} />}
       </CardContent>
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "删除"}
+        confirmText={pendingConfirm?.confirmText || uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -1363,6 +1434,8 @@ function MailboxesSection({
 }
 
 function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domain[] }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -1383,7 +1456,7 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
       invalidateAdmin(qc)
       toast({ title: "别名已更新" })
     },
-    onError: (e) => toast({ title: "更新失败", description: e.message }),
+    onError: (e) => toast({ title: "更新失败", description: errorMessage(e) }),
   })
   const remove = useMutation({
     mutationFn: api.deleteAlias,
@@ -1392,16 +1465,18 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
       invalidateAdmin(qc)
       toast({ title: "别名已删除" })
     },
-    onError: (e) => toast({ title: "删除失败", description: e.message }),
+    onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <CardTitle>地址别名投递</CardTitle>
+            <CardTitle>{uiText("地址别名投递")}</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              将某个收件地址投递到目标邮箱；用户收件后的自动转发请在“个人设置 → 收件规则”中配置。
+              {uiText(
+                "将某个收件地址投递到目标邮箱；用户收件后的自动转发请在“个人设置 → 收件规则”中配置。"
+              )}
             </p>
           </div>
           {canCreate && <CreateAliasDialog domains={domains} />}
@@ -1436,7 +1511,10 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
                       ? () =>
                           setPendingConfirm({
                             title: "删除别名？",
-                            description: `${alias.source} 将不再转发到 ${alias.destination}。`,
+                            description: uiMessage("{0} 将不再转发到 {1}。", [
+                              alias.source,
+                              alias.destination,
+                            ]),
                             confirmText: "删除别名",
                             onConfirm: () => remove.mutate(alias.id),
                           })
@@ -1446,7 +1524,7 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
                 <Badge variant={alias.enabled ? "default" : "secondary"}>
-                  {alias.enabled ? "启用" : "停用"}
+                  {alias.enabled ? uiText("启用") : uiText("停用")}
                 </Badge>
                 <Badge variant="outline">
                   {domains.find((d) => d.id === alias.domainId)?.name || alias.domainId}
@@ -1459,10 +1537,10 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>来源</TableHead>
-                <TableHead>目标</TableHead>
-                <TableHead>域名</TableHead>
-                <TableHead>状态</TableHead>
+                <TableHead>{uiText("来源")}</TableHead>
+                <TableHead>{uiText("目标")}</TableHead>
+                <TableHead>{uiText("域名")}</TableHead>
+                <TableHead>{uiText("状态")}</TableHead>
                 <TableHead className="w-16"></TableHead>
               </TableRow>
             </TableHeader>
@@ -1476,7 +1554,7 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
                   </TableCell>
                   <TableCell>
                     <Badge variant={alias.enabled ? "default" : "secondary"}>
-                      {alias.enabled ? "启用" : "停用"}
+                      {alias.enabled ? uiText("启用") : uiText("停用")}
                     </Badge>
                   </TableCell>
                   <TableCell>
@@ -1500,7 +1578,10 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
                           ? () =>
                               setPendingConfirm({
                                 title: "删除别名？",
-                                description: `${alias.source} 将不再转发到 ${alias.destination}。`,
+                                description: uiMessage("{0} 将不再转发到 {1}。", [
+                                  alias.source,
+                                  alias.destination,
+                                ]),
                                 confirmText: "删除别名",
                                 onConfirm: () => remove.mutate(alias.id),
                               })
@@ -1513,13 +1594,13 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
             </TableBody>
           </Table>
         </div>
-        {aliases.length === 0 && <Empty text="暂无别名转发" />}
+        {aliases.length === 0 && <Empty text={uiText("暂无别名转发")} />}
       </CardContent>
       <ConfirmDialog
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "删除"}
+        confirmText={pendingConfirm?.confirmText || uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -1532,6 +1613,8 @@ function AliasesSection({ aliases, domains }: { aliases: Alias[]; domains: Domai
 }
 
 function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = React.useState(false)
   const [query, setQuery] = React.useState("")
@@ -1572,10 +1655,10 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
     <Card>
       <CardHeader>
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>全部邮件</CardTitle>
+          <CardTitle>{uiText("全部邮件")}</CardTitle>
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
             <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-            {refreshing ? "刷新中..." : "刷新"}
+            {refreshing ? uiText("刷新中...") : uiText("刷新")}
           </Button>
         </div>
       </CardHeader>
@@ -1586,7 +1669,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             <Input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索主题、发件人、收件人、邮箱"
+              placeholder={uiText("搜索主题、发件人、收件人、邮箱")}
               className="pl-9"
             />
           </div>
@@ -1595,8 +1678,8 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部邮箱</SelectItem>
-              <SelectItem value="unregistered">未注册收件</SelectItem>
+              <SelectItem value="all">{uiText("全部邮箱")}</SelectItem>
+              <SelectItem value="unregistered">{uiText("未注册收件")}</SelectItem>
               {mailboxes.map((mailbox) => (
                 <SelectItem key={mailbox.id} value={mailbox.id}>
                   {mailbox.address}
@@ -1609,13 +1692,13 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部文件夹</SelectItem>
-              <SelectItem value="Inbox">收件箱</SelectItem>
-              <SelectItem value="Sent">已发送</SelectItem>
-              <SelectItem value="Archive">归档</SelectItem>
-              <SelectItem value="Spam">垃圾邮件</SelectItem>
-              <SelectItem value="Trash">回收站</SelectItem>
-              <SelectItem value="Unregistered">未注册收件</SelectItem>
+              <SelectItem value="all">{uiText("全部文件夹")}</SelectItem>
+              <SelectItem value="Inbox">{uiText("收件箱")}</SelectItem>
+              <SelectItem value="Sent">{uiText("已发送")}</SelectItem>
+              <SelectItem value="Archive">{uiText("归档")}</SelectItem>
+              <SelectItem value="Spam">{uiText("垃圾邮件")}</SelectItem>
+              <SelectItem value="Trash">{uiText("回收站")}</SelectItem>
+              <SelectItem value="Unregistered">{uiText("未注册收件")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -1630,18 +1713,20 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                   </div>
                 </div>
                 <Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>
-                  查看
+                  {uiText("查看")}
                 </Button>
               </div>
               <div className="mt-3 space-y-2 text-sm">
                 <div className="truncate text-muted-foreground">
-                  邮箱：{message.mailboxAddress || message.recipientAddress || "-"}
+                  {uiText("邮箱：{0}", [message.mailboxAddress || message.recipientAddress || "-"])}
                 </div>
                 <div className="truncate text-muted-foreground">
-                  发件人：{adminSenderDisplayName(message)}
+                  {uiText("发件人：{0}", [adminSenderDisplayName(message)])}
                 </div>
                 <div className="truncate text-muted-foreground">
-                  收件人：{message.recipientAddress || message.to?.join(", ") || ""}
+                  {uiText("收件人：{0}", [
+                    message.recipientAddress || message.to?.join(", ") || "",
+                  ])}
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -1655,12 +1740,12 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>邮件</TableHead>
-                <TableHead>邮箱</TableHead>
-                <TableHead>发件人</TableHead>
-                <TableHead>收件人</TableHead>
-                <TableHead>文件夹</TableHead>
-                <TableHead>时间</TableHead>
+                <TableHead>{uiText("邮件")}</TableHead>
+                <TableHead>{uiText("邮箱")}</TableHead>
+                <TableHead>{uiText("发件人")}</TableHead>
+                <TableHead>{uiText("收件人")}</TableHead>
+                <TableHead>{uiText("文件夹")}</TableHead>
+                <TableHead>{uiText("时间")}</TableHead>
                 <TableHead className="w-20"></TableHead>
               </TableRow>
             </TableHeader>
@@ -1693,7 +1778,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                   </TableCell>
                   <TableCell>
                     <Button variant="ghost" size="sm" onClick={() => setSelectedId(message.id)}>
-                      查看
+                      {uiText("查看")}
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -1701,8 +1786,8 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             </TableBody>
           </Table>
         </div>
-        {messages.isLoading && <Empty text="加载中..." />}
-        {!messages.isLoading && items.length === 0 && <Empty text="暂无邮件" />}
+        {messages.isLoading && <Empty text={uiText("加载中...")} />}
+        {!messages.isLoading && items.length === 0 && <Empty text={uiText("暂无邮件")} />}
         {!messages.isLoading && messages.hasNextPage && (
           <div className="flex justify-center">
             <Button
@@ -1711,7 +1796,7 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               disabled={messages.isFetchingNextPage}
               onClick={() => messages.fetchNextPage()}
             >
-              {messages.isFetchingNextPage ? "加载中..." : "加载更多"}
+              {messages.isFetchingNextPage ? uiText("加载中...") : uiText("加载更多")}
             </Button>
           </div>
         )}
@@ -1729,6 +1814,8 @@ function AdminMessagesSection({ mailboxes }: { mailboxes: MailboxType[] }) {
 }
 
 function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const [refreshing, setRefreshing] = React.useState(false)
   const [mailboxId, setMailboxId] = React.useState("all")
@@ -1769,11 +1856,11 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle className="flex items-center gap-2">
             <ClipboardList className="h-5 w-5" />
-            发送审计
+            {uiText("发送审计")}
           </CardTitle>
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={refreshing}>
             <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />
-            {refreshing ? "刷新中..." : "刷新"}
+            {refreshing ? uiText("刷新中...") : uiText("刷新")}
           </Button>
         </div>
       </CardHeader>
@@ -1784,7 +1871,7 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             <Input
               value={messageId}
               onChange={(event) => setMessageId(event.target.value)}
-              placeholder="Message-ID 或已发送邮件 ID"
+              placeholder={uiText("Message-ID 或已发送邮件 ID")}
               className="pl-9"
             />
           </div>
@@ -1793,7 +1880,7 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部邮箱</SelectItem>
+              <SelectItem value="all">{uiText("全部邮箱")}</SelectItem>
               {mailboxes.map((mailbox) => (
                 <SelectItem key={mailbox.id} value={mailbox.id}>
                   {mailbox.address}
@@ -1806,10 +1893,10 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部事件</SelectItem>
+              <SelectItem value="all">{uiText("全部事件")}</SelectItem>
               {sendAuditEvents.map((item) => (
                 <SelectItem key={item} value={item}>
-                  {sendAuditEventLabel(item)}
+                  {uiText(sendAuditEventLabel(item))}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1818,13 +1905,13 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             type="date"
             value={from}
             onChange={(event) => setFrom(event.target.value)}
-            aria-label="开始日期"
+            aria-label={uiText("开始日期")}
           />
           <Input
             type="date"
             value={to}
             onChange={(event) => setTo(event.target.value)}
-            aria-label="结束日期"
+            aria-label={uiText("结束日期")}
           />
         </div>
         <div className="space-y-3 md:hidden">
@@ -1832,22 +1919,26 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             <div key={item.id} className="rounded-lg border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{sendAuditEventLabel(item.event || "")}</div>
+                  <div className="font-medium">{uiText(sendAuditEventLabel(item.event || ""))}</div>
                   <div className="mt-1 truncate text-xs text-muted-foreground">
                     {item.mailboxAddress || item.mailboxId || "-"}
                   </div>
                 </div>
                 <Badge variant={sendAuditBadgeVariant(item.event)}>
-                  {item.status || item.event || "-"}
+                  {uiText(sendAuditEventLabel(item.status || item.event || ""))}
                 </Badge>
               </div>
               <div className="mt-3 space-y-2 text-sm text-muted-foreground">
-                <div className="truncate">收件人：{(item.recipients || []).join(", ") || "-"}</div>
+                <div className="truncate">
+                  {uiText("收件人：{0}", [(item.recipients || []).join(", ") || "-"])}
+                </div>
                 <div className="truncate">
                   Message-ID：{item.messageId || item.sentMessageId || "-"}
                 </div>
                 {item.error && (
-                  <div className="line-clamp-2 text-destructive">错误：{item.error}</div>
+                  <div className="line-clamp-2 text-destructive">
+                    {uiText("错误：{0}", [uiText(errorMessage(item.error))])}
+                  </div>
                 )}
               </div>
               <div className="mt-3 text-xs text-muted-foreground">{formatDate(item.createdAt)}</div>
@@ -1858,12 +1949,12 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>事件</TableHead>
-                <TableHead>邮箱</TableHead>
-                <TableHead>收件人</TableHead>
+                <TableHead>{uiText("事件")}</TableHead>
+                <TableHead>{uiText("邮箱")}</TableHead>
+                <TableHead>{uiText("收件人")}</TableHead>
                 <TableHead>Message-ID</TableHead>
-                <TableHead>错误</TableHead>
-                <TableHead>时间</TableHead>
+                <TableHead>{uiText("错误")}</TableHead>
+                <TableHead>{uiText("时间")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1871,7 +1962,7 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                 <TableRow key={item.id}>
                   <TableCell>
                     <Badge variant={sendAuditBadgeVariant(item.event)}>
-                      {sendAuditEventLabel(item.event || "")}
+                      {uiText(sendAuditEventLabel(item.event || ""))}
                     </Badge>
                   </TableCell>
                   <TableCell className="max-w-[220px] truncate">
@@ -1891,9 +1982,9 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
                   </TableCell>
                   <TableCell
                     className="max-w-[260px] truncate text-destructive"
-                    title={item.error || ""}
+                    title={item.error ? uiText(errorMessage(item.error)) : ""}
                   >
-                    {item.error || "-"}
+                    {item.error ? uiText(errorMessage(item.error)) : "-"}
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {formatDate(item.createdAt)}
@@ -1903,8 +1994,8 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
             </TableBody>
           </Table>
         </div>
-        {audit.isLoading && <Empty text="加载中..." />}
-        {!audit.isLoading && items.length === 0 && <Empty text="暂无发送审计" />}
+        {audit.isLoading && <Empty text={uiText("加载中...")} />}
+        {!audit.isLoading && items.length === 0 && <Empty text={uiText("暂无发送审计")} />}
         {!audit.isLoading && audit.hasNextPage && (
           <div className="flex justify-center">
             <Button
@@ -1913,7 +2004,7 @@ function AdminSendAuditSection({ mailboxes }: { mailboxes: MailboxType[] }) {
               disabled={audit.isFetchingNextPage}
               onClick={() => audit.fetchNextPage()}
             >
-              {audit.isFetchingNextPage ? "加载中..." : "加载更多"}
+              {audit.isFetchingNextPage ? uiText("加载中...") : uiText("加载更多")}
             </Button>
           </div>
         )}
@@ -1929,6 +2020,8 @@ function AdminDeliveryQueueSection({
   items: import("@/lib/api-types").AdminDeliveryQueueItem[]
   canUpdate: boolean
 }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [type, setType] = React.useState("all")
@@ -1944,7 +2037,7 @@ function AdminDeliveryQueueSection({
       qc.invalidateQueries({ queryKey: ["admin", "delivery-queue"] })
       toast({ title: "已重新加入队列" })
     },
-    onError: (e) => toast({ title: "重试失败", description: e.message }),
+    onError: (e) => toast({ title: "重试失败", description: errorMessage(e) }),
   })
   const cancel = useMutation({
     mutationFn: (item: import("@/lib/api-types").AdminDeliveryQueueItem) =>
@@ -1953,7 +2046,7 @@ function AdminDeliveryQueueSection({
       qc.invalidateQueries({ queryKey: ["admin", "delivery-queue"] })
       toast({ title: "任务已取消" })
     },
-    onError: (e) => toast({ title: "取消失败", description: e.message }),
+    onError: (e) => toast({ title: "取消失败", description: errorMessage(e) }),
   })
   const label = (value: string) =>
     (
@@ -1973,7 +2066,7 @@ function AdminDeliveryQueueSection({
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <CardTitle className="flex items-center gap-2">
             <RefreshCcw className="h-5 w-5" />
-            投递队列
+            {uiText("投递队列")}
           </CardTitle>
           <div className="flex flex-wrap gap-2">
             <Select value={type} onValueChange={setType}>
@@ -1981,9 +2074,9 @@ function AdminDeliveryQueueSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="send">发信</SelectItem>
-                <SelectItem value="webhook">状态 Webhook</SelectItem>
+                <SelectItem value="all">{uiText("全部类型")}</SelectItem>
+                <SelectItem value="send">{uiText("发信")}</SelectItem>
+                <SelectItem value="webhook">{uiText("状态 Webhook")}</SelectItem>
                 <SelectItem value="telegram">Telegram</SelectItem>
               </SelectContent>
             </Select>
@@ -1992,11 +2085,11 @@ function AdminDeliveryQueueSection({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="pending">待处理</SelectItem>
-                <SelectItem value="failed">失败</SelectItem>
-                <SelectItem value="delivered">已投递</SelectItem>
-                <SelectItem value="canceled">已取消</SelectItem>
+                <SelectItem value="all">{uiText("全部状态")}</SelectItem>
+                <SelectItem value="pending">{uiText("待处理")}</SelectItem>
+                <SelectItem value="failed">{uiText("失败")}</SelectItem>
+                <SelectItem value="delivered">{uiText("已投递")}</SelectItem>
+                <SelectItem value="canceled">{uiText("已取消")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -2008,21 +2101,25 @@ function AdminDeliveryQueueSection({
             <div key={`${item.queueType}:${item.id}`} className="rounded-lg border p-4">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium">{label(item.queueType)}</div>
+                  <div className="font-medium">{uiText(label(item.queueType))}</div>
                   <div className="truncate text-xs text-muted-foreground">{item.id}</div>
                 </div>
                 <Badge variant={item.status === "failed" ? "destructive" : "secondary"}>
-                  {label(item.status)}
+                  {uiText(label(item.status))}
                 </Badge>
               </div>
               <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                <div>{uiText("尝试：{0}/{1}", [item.attemptCount, item.maxAttempts])}</div>
                 <div>
-                  尝试：{item.attemptCount}/{item.maxAttempts}
+                  {uiText("下次重试：{0}", [
+                    item.nextAttemptAt ? formatDate(item.nextAttemptAt) : "-",
+                  ])}
                 </div>
-                <div>下次重试：{item.nextAttemptAt ? formatDate(item.nextAttemptAt) : "-"}</div>
-                <div>更新时间：{formatDate(item.updatedAt)}</div>
+                <div>{uiText("更新时间：{0}", [formatDate(item.updatedAt)])}</div>
                 {item.lastError && (
-                  <div className="line-clamp-2 text-destructive">{item.lastError}</div>
+                  <div className="line-clamp-2 text-destructive">
+                    {uiText(errorMessage(item.lastError))}
+                  </div>
                 )}
               </div>
               <div className="mt-3 flex gap-2">
@@ -2033,7 +2130,7 @@ function AdminDeliveryQueueSection({
                     onClick={() => retry.mutate(item)}
                     disabled={retry.isPending}
                   >
-                    重试
+                    {uiText("重试")}
                   </Button>
                 )}
                 {canUpdate && item.status !== "delivered" && (
@@ -2043,7 +2140,7 @@ function AdminDeliveryQueueSection({
                     onClick={() => cancel.mutate(item)}
                     disabled={cancel.isPending}
                   >
-                    取消
+                    {uiText("取消")}
                   </Button>
                 )}
               </div>
@@ -2054,39 +2151,39 @@ function AdminDeliveryQueueSection({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>类型</TableHead>
-                <TableHead>任务 ID</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>尝试</TableHead>
-                <TableHead>下次重试</TableHead>
-                <TableHead>错误</TableHead>
-                <TableHead>更新时间</TableHead>
-                <TableHead className="text-right">操作</TableHead>
+                <TableHead>{uiText("类型")}</TableHead>
+                <TableHead>{uiText("任务 ID")}</TableHead>
+                <TableHead>{uiText("状态")}</TableHead>
+                <TableHead>{uiText("尝试")}</TableHead>
+                <TableHead>{uiText("下次重试")}</TableHead>
+                <TableHead>{uiText("错误")}</TableHead>
+                <TableHead>{uiText("更新时间")}</TableHead>
+                <TableHead className="text-right">{uiText("操作")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filtered.map((item) => (
                 <TableRow key={`${item.queueType}:${item.id}`}>
-                  <TableCell>{label(item.queueType)}</TableCell>
+                  <TableCell>{uiText(label(item.queueType))}</TableCell>
                   <TableCell className="max-w-[220px] truncate" title={item.id}>
                     {item.id}
                   </TableCell>
                   <TableCell>
                     <Badge variant={item.status === "failed" ? "destructive" : "secondary"}>
-                      {label(item.status)}
+                      {uiText(label(item.status))}
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    {item.attemptCount}/{item.maxAttempts}
+                    {uiText("{0}", [item.attemptCount])}/{uiText("{0}", [item.maxAttempts])}
                   </TableCell>
                   <TableCell className="whitespace-nowrap">
                     {item.nextAttemptAt ? formatDate(item.nextAttemptAt) : "-"}
                   </TableCell>
                   <TableCell
                     className="max-w-[240px] truncate text-destructive"
-                    title={item.lastError || ""}
+                    title={item.lastError ? uiText(errorMessage(item.lastError)) : ""}
                   >
-                    {item.lastError || "-"}
+                    {item.lastError ? uiText(errorMessage(item.lastError)) : "-"}
                   </TableCell>
                   <TableCell className="whitespace-nowrap text-muted-foreground">
                     {formatDate(item.updatedAt)}
@@ -2100,7 +2197,7 @@ function AdminDeliveryQueueSection({
                           onClick={() => retry.mutate(item)}
                           disabled={retry.isPending}
                         >
-                          重试
+                          {uiText("重试")}
                         </Button>
                       )}
                       {canUpdate && item.status !== "delivered" && (
@@ -2110,7 +2207,7 @@ function AdminDeliveryQueueSection({
                           onClick={() => cancel.mutate(item)}
                           disabled={cancel.isPending}
                         >
-                          取消
+                          {uiText("取消")}
                         </Button>
                       )}
                     </div>
@@ -2120,7 +2217,7 @@ function AdminDeliveryQueueSection({
             </TableBody>
           </Table>
         </div>
-        {filtered.length === 0 && <Empty text="暂无队列任务" />}
+        {filtered.length === 0 && <Empty text={uiText("暂无队列任务")} />}
       </CardContent>
     </Card>
   )
@@ -2133,6 +2230,8 @@ function SystemSettingsSection({
   settings?: SystemSettings
   domains: Domain[]
 }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const qc = useQueryClient()
@@ -2271,7 +2370,7 @@ function SystemSettingsSection({
       qc.invalidateQueries({ queryKey: ["public-settings"] })
       toast({ title: "系统设置已保存" })
     },
-    onError: (e) => toast({ title: "保存失败", description: e.message }),
+    onError: (e) => toast({ title: "保存失败", description: errorMessage(e) }),
   })
   const formKey = settings
     ? [
@@ -2353,7 +2452,7 @@ function SystemSettingsSection({
             size="sm"
             onClick={() => setSettingsTab(tab.key)}
           >
-            {tab.label}
+            {uiText(tab.label)}
           </Button>
         ))}
       </div>
@@ -2361,37 +2460,37 @@ function SystemSettingsSection({
       {settingsTab === "base" && (
         <Card>
           <CardHeader>
-            <CardTitle>基础设置</CardTitle>
+            <CardTitle>{uiText("基础设置")}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <Field
               name="publicHostname"
-              label="公网主机名"
+              label={uiText("公网主机名")}
               defaultValue={settings?.publicHostname || ""}
               placeholder="mail.example.com"
             />
             <Field
               name="publicBaseUrl"
-              label="访问地址"
+              label={uiText("访问地址")}
               defaultValue={settings?.publicBaseUrl || ""}
               placeholder="https://mail.example.com"
               required={false}
             />
             <Field
               name="sessionTtlHours"
-              label="登录有效期小时"
+              label={uiText("登录有效期小时")}
               type="number"
               defaultValue={String(settings?.sessionTtlHours || 168)}
             />
             <Field
               name="maildirScanSeconds"
-              label="Maildir 扫描秒数"
+              label={uiText("Maildir 扫描秒数")}
               type="number"
               min={1}
               defaultValue={String(settings?.maildirScanSeconds || 5)}
             />
             <SwitchRow
-              label="允许 HTTP 调试"
+              label={uiText("允许 HTTP 调试")}
               checked={allowInsecureHttp}
               onCheckedChange={setAllowInsecureHttp}
               className="md:col-span-2"
@@ -2405,31 +2504,36 @@ function SystemSettingsSection({
           <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle>发信通道</CardTitle>
+                <CardTitle>{uiText("发信通道")}</CardTitle>
               </div>
               {canTestSMTP && <TestSMTPDialog disabled={!settings} />}
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              <div className="font-medium text-foreground">当前默认：内置 Postfix</div>
+              <div className="font-medium text-foreground">{uiText("当前默认：内置 Postfix")}</div>
               <div>
-                Host 填 127.0.0.1、端口 25、用户名/密码留空、强制 TLS 关闭。这里的“强制
-                TLS”仅用于外部 SMTP 中继（587 STARTTLS 或 465 TLS）。
+                {uiText(
+                  "Host 填 127.0.0.1、端口 25、用户名/密码留空、强制 TLS 关闭。这里的“强制 TLS”仅用于外部 SMTP 中继（587 STARTTLS 或 465 TLS）。"
+                )}
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <Field
                 name="smtpHost"
-                label="发信主机"
+                label={uiText("发信主机")}
                 defaultValue={settings?.smtpHost || ""}
                 placeholder="127.0.0.1"
                 required={false}
               />
-              <Field name="smtpPort" label="发信端口" defaultValue={settings?.smtpPort || "25"} />
+              <Field
+                name="smtpPort"
+                label={uiText("发信端口")}
+                defaultValue={settings?.smtpPort || "25"}
+              />
               <Field
                 name="smtpUsername"
-                label="中继用户名（内置 Postfix 留空）"
+                label={uiText("中继用户名（内置 Postfix 留空）")}
                 defaultValue={settings?.smtpUsername || ""}
                 required={false}
               />
@@ -2437,14 +2541,14 @@ function SystemSettingsSection({
                 name="smtpPassword"
                 label={
                   settings?.smtpPasswordSet
-                    ? "中继密码（留空不变）"
-                    : "中继密码（内置 Postfix 留空）"
+                    ? uiText("中继密码（留空不变）")
+                    : uiText("中继密码（内置 Postfix 留空）")
                 }
                 type="password"
                 required={false}
               />
               <SwitchRow
-                label="外部中继强制 TLS"
+                label={uiText("外部中继强制 TLS")}
                 checked={smtpRequireTls}
                 onCheckedChange={setSmtpRequireTls}
                 className="md:col-span-2"
@@ -2458,12 +2562,12 @@ function SystemSettingsSection({
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>存储设置</CardTitle>
+              <CardTitle>{uiText("存储设置")}</CardTitle>
             </CardHeader>
             <CardContent>
               <Field
                 name="maildirRoot"
-                label="Maildir 根目录"
+                label={uiText("Maildir 根目录")}
                 defaultValue={settings?.maildirRoot || ""}
                 required={false}
               />
@@ -2483,24 +2587,24 @@ function SystemSettingsSection({
       {settingsTab === "mail" && (
         <Card>
           <CardHeader>
-            <CardTitle>邮件设置</CardTitle>
+            <CardTitle>{uiText("邮件设置")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <SwitchRow
-              label="无人收件"
+              label={uiText("无人收件")}
               checked={catchAllEnabled}
               onCheckedChange={setCatchAllEnabled}
             />
             <Separator />
             <SwitchRow
-              label="用户自助申请邮箱"
+              label={uiText("用户自助申请邮箱")}
               checked={userMailboxApplyEnabled}
               onCheckedChange={setUserMailboxApplyEnabled}
             />
             {userMailboxApplyEnabled && (
               <div className="space-y-5 border-t pt-5">
                 <div className="space-y-3">
-                  <Label>开放域名</Label>
+                  <Label>{uiText("开放域名")}</Label>
                   <div className="grid gap-2 md:grid-cols-2">
                     {domains.map((domain) => {
                       const checked = userMailboxDomainIds.includes(domain.id)
@@ -2529,10 +2633,10 @@ function SystemSettingsSection({
                       )
                     })}
                   </div>
-                  {domains.length === 0 && <Empty text="暂无域名" />}
+                  {domains.length === 0 && <Empty text={uiText("暂无域名")} />}
                 </div>
                 <div className="space-y-2">
-                  <Label>禁止前缀</Label>
+                  <Label>{uiText("禁止前缀")}</Label>
                   <Textarea
                     name="reservedMailboxPrefixes"
                     defaultValue={settings?.reservedMailboxPrefixes || ""}
@@ -2543,7 +2647,7 @@ function SystemSettingsSection({
             )}
             <Separator />
             <SwitchRow
-              label="自动刷新"
+              label={uiText("自动刷新")}
               checked={mailAutoRefresh}
               onCheckedChange={setMailAutoRefresh}
             />
@@ -2551,7 +2655,7 @@ function SystemSettingsSection({
               <div className="border-t pt-5">
                 <Field
                   name="mailRefreshSeconds"
-                  label="刷新间隔秒数"
+                  label={uiText("刷新间隔秒数")}
                   type="number"
                   min={5}
                   defaultValue={String(settings?.mailRefreshSeconds || 30)}
@@ -2565,14 +2669,14 @@ function SystemSettingsSection({
       {settingsTab === "externalImap" && (
         <Card>
           <CardHeader>
-            <CardTitle>外部 IMAP 接入</CardTitle>
+            <CardTitle>{uiText("外部 IMAP 接入")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <div className="rounded-lg border bg-muted/30 p-4 text-sm text-muted-foreground">
-              默认关闭。关闭后用户端会隐藏外部 IMAP 接入，相关后端接口也会返回禁用。
+              {uiText("默认关闭。关闭后用户端会隐藏外部 IMAP 接入，相关后端接口也会返回禁用。")}
             </div>
             <SwitchRow
-              label="启用外部 IMAP"
+              label={uiText("启用外部 IMAP")}
               checked={externalImapEnabled}
               onCheckedChange={setExternalImapEnabled}
             />
@@ -2582,21 +2686,23 @@ function SystemSettingsSection({
                   <Field
                     name="externalImapSecretKey"
                     label={
-                      settings?.externalImapSecretSet ? "密码加密密钥（留空不变）" : "密码加密密钥"
+                      settings?.externalImapSecretSet
+                        ? uiText("密码加密密钥（留空不变）")
+                        : uiText("密码加密密钥")
                     }
                     type="password"
                     required={!settings?.externalImapSecretSet}
                   />
                   <Field
                     name="externalImapSyncSeconds"
-                    label="后台同步间隔秒数"
+                    label={uiText("后台同步间隔秒数")}
                     type="number"
                     min={30}
                     defaultValue={String(settings?.externalImapSyncSeconds || 300)}
                   />
                 </div>
                 <SwitchRow
-                  label="允许 localhost / 内网 / link-local IMAP 主机"
+                  label={uiText("允许 localhost / 内网 / link-local IMAP 主机")}
                   checked={externalImapAllowPrivateHosts}
                   onCheckedChange={setExternalImapAllowPrivateHosts}
                 />
@@ -2605,15 +2711,15 @@ function SystemSettingsSection({
                   <div>
                     <div className="font-medium">Gmail OAuth2</div>
                     <div className="text-xs text-muted-foreground">
-                      回调地址：
-                      {(settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, "")}
-                      /api/external-imap-oauth/gmail/callback
+                      {uiText("回调地址：{0}/api/external-imap-oauth/gmail/callback", [
+                        (settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, ""),
+                      ])}
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field
                       name="externalImapGmailClientId"
-                      label="Gmail Client ID"
+                      label={uiText("Gmail 客户端 ID")}
                       defaultValue={settings?.externalImapGmailClientId || ""}
                       required={false}
                     />
@@ -2621,7 +2727,7 @@ function SystemSettingsSection({
                       name="externalImapGmailClientSecret"
                       label={
                         settings?.externalImapGmailClientSecretSet
-                          ? "Gmail Client Secret（留空不变）"
+                          ? uiText("Gmail Client Secret（留空不变）")
                           : "Gmail Client Secret"
                       }
                       type="password"
@@ -2634,15 +2740,15 @@ function SystemSettingsSection({
                   <div>
                     <div className="font-medium">Microsoft 365 / Outlook OAuth2</div>
                     <div className="text-xs text-muted-foreground">
-                      回调地址：
-                      {(settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, "")}
-                      /api/external-imap-oauth/outlook/callback
+                      {uiText("回调地址：{0}/api/external-imap-oauth/outlook/callback", [
+                        (settings?.publicBaseUrl || "${LANQIN_PUBLIC_BASE_URL}").replace(/\/$/, ""),
+                      ])}
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
                     <Field
                       name="externalImapOutlookClientId"
-                      label="Outlook Client ID"
+                      label={uiText("Outlook 客户端 ID")}
                       defaultValue={settings?.externalImapOutlookClientId || ""}
                       required={false}
                     />
@@ -2650,7 +2756,7 @@ function SystemSettingsSection({
                       name="externalImapOutlookClientSecret"
                       label={
                         settings?.externalImapOutlookClientSecretSet
-                          ? "Outlook Client Secret（留空不变）"
+                          ? uiText("Outlook Client Secret（留空不变）")
                           : "Outlook Client Secret"
                       }
                       type="password"
@@ -2676,26 +2782,26 @@ function SystemSettingsSection({
       {settingsTab === "security" && (
         <Card>
           <CardHeader>
-            <CardTitle>安全设置</CardTitle>
+            <CardTitle>{uiText("安全设置")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <SwitchRow
-              label="开放注册"
+              label={uiText("开放注册")}
               checked={openRegistration}
               onCheckedChange={setOpenRegistration}
             />
             <SwitchRow
-              label="邀请码注册"
+              label={uiText("邀请码注册")}
               checked={inviteRegistrationEnabled}
               onCheckedChange={setInviteRegistrationEnabled}
             />
             <div className="text-xs text-muted-foreground">
-              普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。
+              {uiText("普通注册关闭时，用户可凭有效邀请码注册；两者都关闭时不允许普通账号注册。")}
             </div>
             {isSuperAdmin && <RegistrationInvitesPanel />}
             <Separator />
             <SwitchRow
-              label="双因素认证 (2FA)"
+              label={uiText("双因素认证 (2FA)")}
               checked={twoFactorEnabled}
               onCheckedChange={setTwoFactorEnabled}
             />
@@ -2709,13 +2815,15 @@ function SystemSettingsSection({
               <div className="grid gap-4 border-t pt-5 md:grid-cols-2">
                 <Field
                   name="turnstileSiteKey"
-                  label="Site Key"
+                  label={uiText("站点密钥")}
                   defaultValue={settings?.turnstileSiteKey || ""}
                   required
                 />
                 <Field
                   name="turnstileSecretKey"
-                  label={settings?.turnstileSecretSet ? "Secret Key（留空不变）" : "Secret Key"}
+                  label={
+                    settings?.turnstileSecretSet ? uiText("Secret Key（留空不变）") : "Secret Key"
+                  }
                   type="password"
                   required={!settings?.turnstileSecretSet}
                 />
@@ -2726,24 +2834,26 @@ function SystemSettingsSection({
               <div>
                 <div className="font-medium">Linux.do SSO</div>
                 <div className="text-xs text-muted-foreground">
-                  关闭 SSO 不会删除用户已有的 Linux.do 绑定。
+                  {uiText("关闭 SSO 不会删除用户已有的 Linux.do 绑定。")}
                 </div>
               </div>
               <SwitchRow
-                label="启用 Linux.do 登录"
+                label={uiText("启用 Linux.do 登录")}
                 checked={linuxDoSSOEnabled}
                 onCheckedChange={setLinuxDoSSOEnabled}
               />
               <SwitchRow
-                label="允许 Linux.do 用户注册本站账号"
+                label={uiText("允许 Linux.do 用户注册本站账号")}
                 checked={linuxDoRegistrationEnabled}
                 onCheckedChange={setLinuxDoRegistrationEnabled}
               />
               {linuxDoRegistrationEnabled && isSuperAdmin && (
                 <div className="space-y-2">
                   <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                    <Label>Linux.do 注册后加入的用户组</Label>
-                    <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                    <Label>{uiText("Linux.do 注册后加入的用户组")}</Label>
+                    <span className="text-xs text-muted-foreground">
+                      {uiText("留空则仅普通用户")}
+                    </span>
                   </div>
                   <Select
                     value={linuxDoRegistrationGroupIds[0] || "none"}
@@ -2755,7 +2865,7 @@ function SystemSettingsSection({
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="none">默认用户组</SelectItem>
+                      <SelectItem value="none">{uiText("默认用户组")}</SelectItem>
                       {(settingsPermissionGroups.data?.items || [])
                         .filter(
                           (item) => item.id !== "pg_super_admin" && item.id !== "pg_regular_user"
@@ -2772,14 +2882,16 @@ function SystemSettingsSection({
               <div className="grid gap-4 md:grid-cols-2">
                 <Field
                   name="linuxDoClientId"
-                  label="Client ID"
+                  label={uiText("客户端 ID")}
                   defaultValue={settings?.linuxDoClientId || ""}
                   required={linuxDoSSOEnabled}
                 />
                 <Field
                   name="linuxDoClientSecret"
                   label={
-                    settings?.linuxDoClientSecretSet ? "Client Secret（留空不变）" : "Client Secret"
+                    settings?.linuxDoClientSecretSet
+                      ? uiText("Client Secret（留空不变）")
+                      : "Client Secret"
                   }
                   type="password"
                   required={linuxDoSSOEnabled && !settings?.linuxDoClientSecretSet}
@@ -2787,7 +2899,7 @@ function SystemSettingsSection({
               </div>
               <Field
                 name="linuxDoCallbackUrl"
-                label="回调地址"
+                label={uiText("回调地址")}
                 value={settings?.linuxDoCallbackUrl || ""}
                 readOnly
                 required={false}
@@ -2802,7 +2914,7 @@ function SystemSettingsSection({
       {settingsTab !== "about" && canUpdateSettings && (
         <div className="flex justify-end">
           <Button disabled={save.isPending || !settings}>
-            {save.isPending ? "保存中..." : "保存设置"}
+            {save.isPending ? uiText("保存中...") : uiText("保存设置")}
           </Button>
         </div>
       )}
@@ -2811,6 +2923,8 @@ function SystemSettingsSection({
 }
 
 function RegistrationInvitesPanel() {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const invites = useQuery({
@@ -2847,7 +2961,7 @@ function RegistrationInvitesPanel() {
       setGroupId("")
       toast({ title: "邀请码已创建", description: item.code })
     },
-    onError: (error) => toast({ title: "创建失败", description: error.message }),
+    onError: (error) => toast({ title: "创建失败", description: errorMessage(error) }),
   })
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteRegistrationInvite(id),
@@ -2856,7 +2970,7 @@ function RegistrationInvitesPanel() {
       setRemoveItem(null)
       toast({ title: "邀请码已删除" })
     },
-    onError: (error) => toast({ title: "删除失败", description: error.message }),
+    onError: (error) => toast({ title: "删除失败", description: errorMessage(error) }),
   })
   const items = invites.data?.items || []
   const submitCreate = () => {
@@ -2870,25 +2984,25 @@ function RegistrationInvitesPanel() {
     <div className="space-y-3 border-t pt-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="font-medium">邀请码</div>
+          <div className="font-medium">{uiText("邀请码")}</div>
           <div className="text-xs text-muted-foreground">
-            邀请码可重复查看，每次成功注册会扣减一次。
+            {uiText("邀请码可重复查看，每次成功注册会扣减一次。")}
           </div>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button type="button" size="sm">
               <Plus className="h-4 w-4" />
-              创建邀请码
+              {uiText("创建邀请码")}
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>创建邀请码</DialogTitle>
+              <DialogTitle>{uiText("创建邀请码")}</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="registrationInviteCode">邀请码</Label>
+                <Label htmlFor="registrationInviteCode">{uiText("邀请码")}</Label>
                 <Input
                   id="registrationInviteCode"
                   value={code}
@@ -2896,11 +3010,11 @@ function RegistrationInvitesPanel() {
                   maxLength={64}
                   autoComplete="off"
                   className="font-mono uppercase"
-                  placeholder="留空自动生成"
+                  placeholder={uiText("留空自动生成")}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="registrationInviteMaxUses">可用次数</Label>
+                <Label htmlFor="registrationInviteMaxUses">{uiText("可用次数")}</Label>
                 <Input
                   id="registrationInviteMaxUses"
                   type="number"
@@ -2912,8 +3026,10 @@ function RegistrationInvitesPanel() {
               </div>
               <div className="space-y-2">
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                  <Label>注册后加入的用户组</Label>
-                  <span className="text-xs text-muted-foreground">留空则仅普通用户</span>
+                  <Label>{uiText("注册后加入的用户组")}</Label>
+                  <span className="text-xs text-muted-foreground">
+                    {uiText("留空则仅普通用户")}
+                  </span>
                 </div>
                 <Select
                   value={groupId || "none"}
@@ -2923,7 +3039,7 @@ function RegistrationInvitesPanel() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">默认用户组</SelectItem>
+                    <SelectItem value="none">{uiText("默认用户组")}</SelectItem>
                     {assignableGroups.map((item) => (
                       <SelectItem key={item.id} value={item.id}>
                         {item.name}
@@ -2940,10 +3056,10 @@ function RegistrationInvitesPanel() {
                 onClick={() => setCreateOpen(false)}
                 disabled={create.isPending}
               >
-                取消
+                {uiText("取消")}
               </Button>
               <Button type="button" onClick={submitCreate} disabled={create.isPending}>
-                {create.isPending ? "创建中..." : "创建"}
+                {create.isPending ? uiText("创建中...") : uiText("创建")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -2953,11 +3069,11 @@ function RegistrationInvitesPanel() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>邀请码</TableHead>
-              <TableHead>用户组</TableHead>
-              <TableHead>使用情况</TableHead>
-              <TableHead>创建人</TableHead>
-              <TableHead>创建时间</TableHead>
+              <TableHead>{uiText("邀请码")}</TableHead>
+              <TableHead>{uiText("用户组")}</TableHead>
+              <TableHead>{uiText("使用情况")}</TableHead>
+              <TableHead>{uiText("创建人")}</TableHead>
+              <TableHead>{uiText("创建时间")}</TableHead>
               <TableHead className="w-14" />
             </TableRow>
           </TableHeader>
@@ -2972,8 +3088,8 @@ function RegistrationInvitesPanel() {
                       variant="ghost"
                       size="icon"
                       className="h-8 w-8"
-                      title="复制邀请码"
-                      aria-label="复制邀请码"
+                      title={uiText("复制邀请码")}
+                      aria-label={uiText("复制邀请码")}
                       onClick={() =>
                         navigator.clipboard
                           .writeText(item.code)
@@ -2986,20 +3102,24 @@ function RegistrationInvitesPanel() {
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {(item.permissionGroups || []).length === 0 ? (
-                    <span className="text-sm text-muted-foreground">默认用户组</span>
+                    <span className="text-sm text-muted-foreground">{uiText("默认用户组")}</span>
                   ) : (
                     <div className="flex flex-wrap gap-1">
                       {item.permissionGroups.map((group) => (
                         <Badge key={group.id} variant="secondary" className="font-normal">
-                          {group.name}
+                          {group.id === "pg_super_admin" || group.id === "pg_regular_user"
+                            ? uiText(group.name)
+                            : group.name}
                         </Badge>
                       ))}
                     </div>
                   )}
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
-                  {item.usedCount} / {item.maxUses}{" "}
-                  <span className="text-muted-foreground">（剩余 {item.remainingUses}）</span>
+                  {uiText("{0}", [item.usedCount])} / {uiText("{0}", [item.maxUses])}{" "}
+                  <span className="text-muted-foreground">
+                    {uiText("（剩余 {0}）", [item.remainingUses])}
+                  </span>
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-muted-foreground">
                   {item.createdByEmail || "-"}
@@ -3012,8 +3132,8 @@ function RegistrationInvitesPanel() {
                     type="button"
                     variant="ghost"
                     size="icon"
-                    title="删除邀请码"
-                    aria-label="删除邀请码"
+                    title={uiText("删除邀请码")}
+                    aria-label={uiText("删除邀请码")}
                     onClick={() => setRemoveItem(item)}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -3024,13 +3144,13 @@ function RegistrationInvitesPanel() {
           </TableBody>
         </Table>
       </div>
-      {invites.isLoading && <Empty text="正在加载邀请码..." />}
-      {!invites.isLoading && items.length === 0 && <Empty text="暂无邀请码" />}
+      {invites.isLoading && <Empty text={uiText("正在加载邀请码...")} />}
+      {!invites.isLoading && items.length === 0 && <Empty text={uiText("暂无邀请码")} />}
       <ConfirmDialog
         open={!!removeItem}
-        title="删除邀请码"
-        description={removeItem ? `邀请码 ${removeItem.code} 删除后将立即失效。` : ""}
-        confirmText="删除"
+        title={uiText("删除邀请码")}
+        description={removeItem ? uiText("邀请码 {0} 删除后将立即失效。", [removeItem.code]) : ""}
+        confirmText={uiText("删除")}
         destructive
         pending={remove.isPending}
         onOpenChange={(open) => {
@@ -3057,6 +3177,8 @@ function MaildirSyncHealthCard({
   refreshing: boolean
   fallbackRoot: string
 }) {
+  useUiLanguage()
+
   const root = health?.root || fallbackRoot
   const configured = health?.configured ?? !!root
   const currentRun = health?.currentRun
@@ -3069,14 +3191,14 @@ function MaildirSyncHealthCard({
       <CardHeader>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
-            <CardTitle>Maildir 同步健康</CardTitle>
+            <CardTitle>{uiText("Maildir 同步健康")}</CardTitle>
             <div className="break-all text-xs text-muted-foreground">
-              {root || "未配置 Maildir 根目录"}
+              {root || uiText("未配置 Maildir 根目录")}
             </div>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant={configured ? "default" : "secondary"}>
-              {configured ? "已配置" : "未配置"}
+              {configured ? uiText("已配置") : uiText("未配置")}
             </Badge>
             <Badge
               variant={
@@ -3084,10 +3206,10 @@ function MaildirSyncHealthCard({
               }
             >
               {health?.running
-                ? "运行中"
+                ? uiText("运行中")
                 : health?.workerStarted
-                  ? "worker 已启动"
-                  : "worker 未启动"}
+                  ? uiText("worker 已启动")
+                  : uiText("worker 未启动")}
             </Badge>
             <Button
               type="button"
@@ -3097,7 +3219,7 @@ function MaildirSyncHealthCard({
               disabled={loading || refreshing}
             >
               <RefreshCcw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
-              刷新
+              {uiText("刷新")}
             </Button>
           </div>
         </div>
@@ -3105,17 +3227,17 @@ function MaildirSyncHealthCard({
       <CardContent className="space-y-4">
         {error && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {queryErrorMessage(error)}
+            {uiText(errorMessage(queryErrorMessage(error)))}
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <InfoLine label="当前状态" value={<MaildirStatusBadge status={status} />} />
+          <InfoLine label={uiText("当前状态")} value={<MaildirStatusBadge status={status} />} />
           <InfoLine
-            label="最近开始"
+            label={uiText("最近开始")}
             value={formatOptionalDate(currentRun?.startedAt || lastRun?.startedAt)}
           />
           <InfoLine
-            label="最近结束"
+            label={uiText("最近结束")}
             value={
               lastRun?.finishedAt
                 ? formatOptionalDate(lastRun.finishedAt)
@@ -3124,22 +3246,29 @@ function MaildirSyncHealthCard({
                   : "-"
             }
           />
-          <InfoLine label="最近耗时" value={formatRunDuration(currentRun, lastRun)} />
+          <InfoLine label={uiText("最近耗时")} value={formatRunDuration(currentRun, lastRun)} />
           <InfoLine
-            label="扫描间隔"
-            value={health?.scanSeconds ? `${health.scanSeconds} 秒` : "-"}
+            label={uiText("扫描间隔")}
+            value={health?.scanSeconds ? uiText("{0} 秒", [health.scanSeconds]) : "-"}
           />
-          <InfoLine label="下次运行" value={formatOptionalDate(health?.nextRunAt)} />
-          <InfoLine label="最后错误" value={lastRun?.error || health?.lastError || "-"} />
-          <InfoLine label="错误数" value={counterValue(counters, "fileErrors")} />
+          <InfoLine label={uiText("下次运行")} value={formatOptionalDate(health?.nextRunAt)} />
+          <InfoLine
+            label={uiText("最后错误")}
+            value={
+              lastRun?.error || health?.lastError
+                ? uiText(errorMessage(lastRun?.error || health?.lastError))
+                : "-"
+            }
+          />
+          <InfoLine label={uiText("错误数")} value={counterValue(counters, "fileErrors")} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {maildirCounterRows(counters).map((item) => (
-            <InfoBox key={item.key} label={item.label} value={item.value} />
+            <InfoBox key={item.key} label={uiText(item.label)} value={item.value} />
           ))}
         </div>
         <div className="space-y-2">
-          <div className="text-sm font-medium">最近错误</div>
+          <div className="text-sm font-medium">{uiText("最近错误")}</div>
           {recentErrors.length === 0 && (
             <Empty text={loading ? "正在读取同步状态..." : "暂无同步错误"} />
           )}
@@ -3147,7 +3276,7 @@ function MaildirSyncHealthCard({
             <div className="space-y-2">
               {recentErrors.slice(0, 5).map((item, index) => (
                 <div key={`${item}-${index}`} className="rounded-lg border px-3 py-2 text-sm">
-                  <div className="break-words text-destructive">{item || "未知错误"}</div>
+                  <div className="break-words text-destructive">{uiText(errorMessage(item))}</div>
                 </div>
               ))}
             </div>
@@ -3159,15 +3288,21 @@ function MaildirSyncHealthCard({
 }
 
 function MaildirStatusBadge({ status }: { status: string }) {
+  useUiLanguage()
+
   const normalized = status.toLowerCase()
-  if (normalized === "running") return <Badge>运行中</Badge>
+  if (normalized === "running") return <Badge>{uiText("运行中")}</Badge>
   if (["ok", "success", "succeeded", "idle"].includes(normalized))
-    return <Badge variant="outline">{normalized === "idle" ? "等待下次扫描" : "正常"}</Badge>
-  if (normalized === "partial") return <Badge variant="secondary">部分成功</Badge>
+    return (
+      <Badge variant="outline">
+        {normalized === "idle" ? uiText("等待下次扫描") : uiText("正常")}
+      </Badge>
+    )
+  if (normalized === "partial") return <Badge variant="secondary">{uiText("部分成功")}</Badge>
   if (["error", "failed", "failure"].includes(normalized))
-    return <Badge variant="destructive">失败</Badge>
+    return <Badge variant="destructive">{uiText("失败")}</Badge>
   if (["disabled", "not_configured"].includes(normalized))
-    return <Badge variant="secondary">未启用</Badge>
+    return <Badge variant="secondary">{uiText("未启用")}</Badge>
   return <Badge variant="secondary">{status || "-"}</Badge>
 }
 
@@ -3202,7 +3337,7 @@ function formatOptionalDate(value?: string) {
 function formatDuration(value?: number) {
   if (value == null || !Number.isFinite(value)) return "-"
   if (value < 1000) return `${value} ms`
-  return `${(value / 1000).toFixed(value < 10_000 ? 1 : 0)} 秒`
+  return uiText("{0} 秒", [(value / 1000).toFixed(value < 10_000 ? 1 : 0)])
 }
 
 function formatRunDuration(
@@ -3212,7 +3347,7 @@ function formatRunDuration(
   if (currentRun) {
     const startedAt = Date.parse(currentRun.startedAt)
     if (Number.isFinite(startedAt)) {
-      return `进行中 ${formatDuration(Math.max(0, Date.now() - startedAt))}`
+      return uiText("进行中 {0}", [formatDuration(Math.max(0, Date.now() - startedAt))])
     }
   }
   return formatDuration(lastRun?.durationMs)
@@ -3227,6 +3362,8 @@ function parseSemver(tag: string): number[] {
 }
 
 function AboutProjectCard() {
+  useUiLanguage()
+
   const { toast } = useToast()
   const latestRelease = useQuery({
     queryKey: ["github", "latest-release"],
@@ -3256,7 +3393,7 @@ function AboutProjectCard() {
     if (updateAvailable && latestRelease.data) {
       toast({
         title: "发现新版本",
-        description: `${latestRelease.data.tag_name} 已可用，点击版本号查看详情。`,
+        description: uiMessage("{0} 已可用，点击版本号查看详情。", [latestRelease.data.tag_name]),
       })
     }
     // Only toast once on mount
@@ -3266,10 +3403,10 @@ function AboutProjectCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>关于</CardTitle>
+        <CardTitle>{uiText("关于")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 text-sm">
-        <AboutRow label="版本">
+        <AboutRow label={uiText("版本")}>
           {projectTag ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button
@@ -3292,12 +3429,12 @@ function AboutProjectCard() {
                 >
                   <a href={latestRelease.data.html_url} target="_blank" rel="noreferrer">
                     <ExternalLink className="h-5 w-5" />
-                    新版本 {latestRelease.data.tag_name}
+                    {uiText("新版本 {0}", [latestRelease.data.tag_name])}
                   </a>
                 </Button>
               )}
               {latestRelease.isLoading && (
-                <span className="text-xs text-muted-foreground">检查更新中...</span>
+                <span className="text-xs text-muted-foreground">{uiText("检查更新中...")}</span>
               )}
             </div>
           ) : (
@@ -3308,11 +3445,11 @@ function AboutProjectCard() {
               disabled
             >
               <GitBranch className="h-5 w-5 text-muted-foreground" />
-              未发布版本
+              {uiText("未发布版本")}
             </Button>
           )}
         </AboutRow>
-        <AboutRow label="交流">
+        <AboutRow label={uiText("交流")}>
           <div className="flex flex-wrap gap-3">
             <Button
               type="button"
@@ -3333,7 +3470,7 @@ function AboutProjectCard() {
             >
               <a href={`${projectRepositoryUrl}/issues`} target="_blank" rel="noreferrer">
                 <Circle className="h-5 w-5 text-muted-foreground" />
-                Issues
+                {uiText("问题反馈")}
               </a>
             </Button>
             <Button
@@ -3344,12 +3481,12 @@ function AboutProjectCard() {
             >
               <a href={projectTelegramUrl} target="_blank" rel="noreferrer">
                 <ExternalLink className="h-5 w-5 text-sky-500" />
-                Telegram 群组
+                {uiText("Telegram 群组")}
               </a>
             </Button>
           </div>
         </AboutRow>
-        <AboutRow label="支持">
+        <AboutRow label={uiText("支持")}>
           <Button
             type="button"
             variant="outline"
@@ -3358,11 +3495,11 @@ function AboutProjectCard() {
           >
             <a href={projectRepositoryUrl} target="_blank" rel="noreferrer">
               <Star className="h-5 w-5 text-yellow-500" />
-              给项目点 Star
+              {uiText("给项目点 Star")}
             </a>
           </Button>
         </AboutRow>
-        <AboutRow label="帮助">
+        <AboutRow label={uiText("帮助")}>
           <div className="flex flex-wrap gap-3">
             <Button
               type="button"
@@ -3372,7 +3509,7 @@ function AboutProjectCard() {
             >
               <a href={`${projectRepositoryUrl}#readme`} target="_blank" rel="noreferrer">
                 <BookOpen className="h-5 w-5 text-sky-500" />
-                项目文档
+                {uiText("项目文档")}
               </a>
             </Button>
             <Button
@@ -3387,7 +3524,7 @@ function AboutProjectCard() {
                 rel="noreferrer"
               >
                 <Scale className="h-5 w-5 text-emerald-500" />
-                开源协议
+                {uiText("开源协议")}
               </a>
             </Button>
           </div>
@@ -3398,15 +3535,19 @@ function AboutProjectCard() {
 }
 
 function AboutRow({ label, children }: { label: string; children: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="grid gap-2 sm:grid-cols-[4.5rem_minmax(0,1fr)] sm:items-center">
-      <div className="font-medium text-muted-foreground">{label}：</div>
+      <div className="font-medium text-muted-foreground">{uiText(label)}：</div>
       <div className="min-w-0">{children}</div>
     </div>
   )
 }
 
 function TestSMTPDialog({ disabled }: { disabled?: boolean }) {
+  useUiLanguage()
+
   const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
   const test = useMutation({
@@ -3415,18 +3556,18 @@ function TestSMTPDialog({ disabled }: { disabled?: boolean }) {
       setOpen(false)
       toast({ title: "测试邮件已发送" })
     },
-    onError: (e) => toast({ title: "发送失败", description: e.message }),
+    onError: (e) => toast({ title: "发送失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button type="button" variant="outline" size="sm" disabled={disabled}>
-          测试发送
+          {uiText("测试发送")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>SMTP 测试发送</DialogTitle>
+          <DialogTitle>{uiText("SMTP 测试发送")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -3435,9 +3576,11 @@ function TestSMTPDialog({ disabled }: { disabled?: boolean }) {
             test.mutate(new FormData(event.currentTarget))
           }}
         >
-          <Field name="to" label="收件邮箱" type="email" placeholder="test@example.com" />
+          <Field name="to" label={uiText("收件邮箱")} type="email" placeholder="test@example.com" />
           <DialogFooter>
-            <Button disabled={test.isPending}>{test.isPending ? "发送中..." : "发送"}</Button>
+            <Button disabled={test.isPending}>
+              {test.isPending ? uiText("发送中...") : uiText("发送")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -3456,6 +3599,8 @@ function MailTemplatesPanel({
   canUpdate: boolean
   canReset: boolean
 }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [selectedKey, setSelectedKey] = React.useState("")
@@ -3478,7 +3623,7 @@ function MailTemplatesPanel({
       qc.invalidateQueries({ queryKey: ["admin", "mail-templates"] })
       toast({ title: "模板已保存" })
     },
-    onError: (e) => toast({ title: "保存失败", description: e.message }),
+    onError: (e) => toast({ title: "保存失败", description: errorMessage(e) }),
   })
   const reset = useMutation({
     mutationFn: () => api.resetMailTemplate(selected!.key),
@@ -3486,13 +3631,13 @@ function MailTemplatesPanel({
       qc.invalidateQueries({ queryKey: ["admin", "mail-templates"] })
       toast({ title: "模板已恢复" })
     },
-    onError: (e) => toast({ title: "恢复失败", description: e.message }),
+    onError: (e) => toast({ title: "恢复失败", description: errorMessage(e) }),
   })
   if (loading)
     return (
       <Card>
         <CardContent className="p-6">
-          <Empty text="加载中..." />
+          <Empty text={uiText("加载中...")} />
         </CardContent>
       </Card>
     )
@@ -3500,29 +3645,29 @@ function MailTemplatesPanel({
     return (
       <Card>
         <CardContent className="p-6">
-          <Empty text="暂无模板" />
+          <Empty text={uiText("暂无模板")} />
         </CardContent>
       </Card>
     )
   return (
     <Card>
       <CardHeader>
-        <CardTitle>邮件模板</CardTitle>
+        <CardTitle>{uiText("邮件模板")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <SelectField
-          label="模板"
+          label={uiText("模板")}
           value={selected.key}
           onValueChange={setSelectedKey}
           items={templates.map((template) => [template.key, template.name])}
         />
         <div className="space-y-2">
-          <Label>主题</Label>
+          <Label>{uiText("主题")}</Label>
           <Input value={subject} onChange={(event) => setSubject(event.target.value)} />
         </div>
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="space-y-2">
-            <Label>纯文本</Label>
+            <Label>{uiText("纯文本")}</Label>
             <Textarea
               value={bodyText}
               onChange={(event) => setBodyText(event.target.value)}
@@ -3547,7 +3692,7 @@ function MailTemplatesPanel({
                 disabled={reset.isPending || save.isPending}
                 onClick={() => reset.mutate()}
               >
-                {reset.isPending ? "恢复中..." : "恢复默认"}
+                {reset.isPending ? uiText("恢复中...") : uiText("恢复默认")}
               </Button>
             )}
             {canUpdate && (
@@ -3556,7 +3701,7 @@ function MailTemplatesPanel({
                 disabled={save.isPending || reset.isPending}
                 onClick={() => save.mutate()}
               >
-                {save.isPending ? "保存中..." : "保存模板"}
+                {save.isPending ? uiText("保存中...") : uiText("保存模板")}
               </Button>
             )}
           </div>
@@ -3577,27 +3722,31 @@ function AdminMessageDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[86vh] overflow-y-auto sm:max-w-4xl">
         <DialogHeader>
-          <DialogTitle>{loading ? "加载中..." : message?.subject || "邮件详情"}</DialogTitle>
+          <DialogTitle>
+            {loading ? uiText("加载中...") : message?.subject || uiText("邮件详情")}
+          </DialogTitle>
         </DialogHeader>
         {message && (
           <div className="space-y-5">
             <div className="grid gap-3 rounded-lg border p-4 text-sm md:grid-cols-2">
               <MessageMeta
-                label="所属邮箱"
+                label={uiText("所属邮箱")}
                 value={message.mailboxAddress || message.recipientAddress || ""}
               />
-              <MessageMeta label="所属用户" value={message.ownerEmail || ""} />
-              <MessageMeta label="发件人" value={adminSenderTitle(message)} />
+              <MessageMeta label={uiText("所属用户")} value={message.ownerEmail || ""} />
+              <MessageMeta label={uiText("发件人")} value={adminSenderTitle(message)} />
               <MessageMeta
-                label="收件人"
+                label={uiText("收件人")}
                 value={message.recipientAddress || message.to?.join(", ") || ""}
               />
-              <MessageMeta label="文件夹" value={folderName(message.folder)} />
-              <MessageMeta label="时间" value={formatDate(message.receivedAt)} />
+              <MessageMeta label={uiText("文件夹")} value={folderName(message.folder)} />
+              <MessageMeta label={uiText("时间")} value={formatDate(message.receivedAt)} />
             </div>
             <div className="overflow-hidden rounded-lg border">
               <MailHtmlFrame
@@ -3607,7 +3756,7 @@ function AdminMessageDialog({
             </div>
             {message.attachments && message.attachments.length > 0 && (
               <div className="rounded-lg border p-4">
-                <div className="mb-3 font-medium">附件</div>
+                <div className="mb-3 font-medium">{uiText("附件")}</div>
                 <div className="space-y-2">
                   {message.attachments.map((attachment) => (
                     <a
@@ -3632,9 +3781,11 @@ function AdminMessageDialog({
 }
 
 function MessageMeta({ label, value }: { label: string; value: string }) {
+  useUiLanguage()
+
   return (
     <div className="min-w-0">
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-xs text-muted-foreground">{uiText(label)}</div>
       <div className="truncate font-medium">{value || "-"}</div>
     </div>
   )
@@ -3650,7 +3801,7 @@ function folderName(folder: string) {
     Trash: "回收站",
     Unregistered: "未注册收件",
   }
-  return labels[folder] || folder
+  return labels[folder] ? uiText(labels[folder]) : folder
 }
 
 function adminSenderDisplayName(message: MailMessage) {
@@ -3706,6 +3857,8 @@ function Stat({
   label: string
   value: React.ReactNode
 }) {
+  useUiLanguage()
+
   return (
     <Card>
       <CardContent className="flex items-center gap-3 p-4 sm:gap-4 sm:p-5">
@@ -3714,33 +3867,39 @@ function Stat({
         </div>
         <div className="min-w-0">
           <div className="truncate text-xl font-semibold tracking-tight sm:text-2xl">{value}</div>
-          <div className="text-xs text-muted-foreground">{label}</div>
+          <div className="text-xs text-muted-foreground">{uiText(label)}</div>
         </div>
       </CardContent>
     </Card>
   )
 }
 function InfoBox({ label, value }: { label: string; value: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="rounded-lg border p-4">
       <div className="text-xl font-semibold tracking-tight sm:text-2xl">{value}</div>
-      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="text-xs text-muted-foreground">{uiText(label)}</div>
     </div>
   )
 }
 function Empty({ text }: { text: string }) {
+  useUiLanguage()
+
   return (
     <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-      {text}
+      {uiText(text)}
     </div>
   )
 }
 function DomainBadgeRow({ domain }: { domain: Domain }) {
+  useUiLanguage()
+
   return (
     <div className="flex items-center justify-between rounded-lg border p-3">
       <span className="font-medium">{domain.name}</span>
       <Badge variant={domain.dnsStatus === "ok" ? "default" : "secondary"}>
-        {domain.dnsStatus === "ok" ? "正常" : domain.dnsStatus}
+        {dnsStatusLabel(domain.dnsStatus)}
       </Badge>
     </div>
   )
@@ -3752,8 +3911,11 @@ function invalidateAdmin(qc: ReturnType<typeof useQueryClient>) {
 }
 
 function UserMailboxCell({ user }: { user: AdminUser }) {
+  useUiLanguage()
+
   const mailboxes = user.mailboxes || []
-  if (mailboxes.length === 0) return <span className="text-muted-foreground">未绑定</span>
+  if (mailboxes.length === 0)
+    return <span className="text-muted-foreground">{uiText("未绑定")}</span>
   return (
     <div className="flex max-w-md flex-wrap gap-1">
       {mailboxes.slice(0, 2).map((mailbox) => (
@@ -3761,14 +3923,19 @@ function UserMailboxCell({ user }: { user: AdminUser }) {
           {mailbox}
         </Badge>
       ))}
-      {mailboxes.length > 2 && <Badge variant="secondary">+{mailboxes.length - 2}</Badge>}
+      {mailboxes.length > 2 && (
+        <Badge variant="secondary">+{uiText("{0}", [mailboxes.length - 2])}</Badge>
+      )}
     </div>
   )
 }
 
 function UserPermissionGroupsCell({ user }: { user: AdminUser }) {
+  useUiLanguage()
+
   const groups = user.permissionGroups || []
-  if (groups.length === 0) return <span className="text-muted-foreground">普通用户</span>
+  if (groups.length === 0)
+    return <span className="text-muted-foreground">{uiText("普通用户")}</span>
   return (
     <div className="flex max-w-md flex-wrap gap-1">
       {groups.map((group) => (
@@ -3777,7 +3944,9 @@ function UserPermissionGroupsCell({ user }: { user: AdminUser }) {
           variant={group.id === "pg_super_admin" ? "default" : "secondary"}
           className="font-normal"
         >
-          {group.name}
+          {group.id === "pg_super_admin" || group.id === "pg_regular_user"
+            ? uiText(group.name)
+            : group.name}
         </Badge>
       ))}
     </div>
@@ -3799,6 +3968,8 @@ function PermissionGroupPicker({
   value: string[]
   onChange: (value: string[]) => void
 }) {
+  useUiLanguage()
+
   function toggle(groupID: string, checked: boolean) {
     onChange(
       checked ? Array.from(new Set([...value, groupID])) : value.filter((id) => id !== groupID)
@@ -3806,7 +3977,7 @@ function PermissionGroupPicker({
   }
   return (
     <div className="space-y-2">
-      <Label>权限组</Label>
+      <Label>{uiText("权限组")}</Label>
       <div className="grid gap-2 md:grid-cols-2">
         {groups.map((group) => {
           const checked = value.includes(group.id)
@@ -3820,27 +3991,33 @@ function PermissionGroupPicker({
                 onCheckedChange={(next) => toggle(group.id, next === true)}
               />
               <span className="min-w-0">
-                <span className="block text-sm font-medium">{group.name}</span>
+                <span className="block text-sm font-medium">
+                  {group.id === "pg_super_admin" || group.id === "pg_regular_user"
+                    ? uiText(group.name)
+                    : group.name}
+                </span>
                 <span className="line-clamp-2 text-xs text-muted-foreground">
-                  {group.description}
+                  {group.system ? uiText(group.description) : group.description}
                 </span>
               </span>
             </label>
           )
         })}
       </div>
-      {groups.length === 0 && <Empty text="暂无可分配权限组" />}
+      {groups.length === 0 && <Empty text={uiText("暂无可分配权限组")} />}
     </div>
   )
 }
 
 function RoleBadge({ user }: { user: AdminUser }) {
+  useUiLanguage()
+
   return (
     <div className="flex flex-wrap gap-1">
       <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-        {user.role === "admin" ? "超级管理员" : "普通用户"}
+        {user.role === "admin" ? uiText("超级管理员") : uiText("普通用户")}
       </Badge>
-      {user.protected && <Badge variant="outline">默认账号</Badge>}
+      {user.protected && <Badge variant="outline">{uiText("默认账号")}</Badge>}
     </div>
   )
 }
@@ -3854,6 +4031,8 @@ function UserActions({
   permissionGroups: PermissionGroup[]
   onDelete?: () => void
 }) {
+  useUiLanguage()
+
   const me = useMe()
   const currentUser = me.data?.user
   const qc = useQueryClient()
@@ -3868,7 +4047,7 @@ function UserActions({
       invalidateAdmin(qc)
       toast({ title: "已重置双因素认证", description: "该用户的会话与 API Token 已同时失效" })
     },
-    onError: (e) => toast({ title: "重置失败", description: e.message }),
+    onError: (e) => toast({ title: "重置失败", description: errorMessage(e) }),
   })
   const update = useMutation({
     mutationFn: (payload: {
@@ -3881,7 +4060,7 @@ function UserActions({
       invalidateAdmin(qc)
       toast({ title: "用户已更新" })
     },
-    onError: (e) => toast({ title: "更新失败", description: e.message }),
+    onError: (e) => toast({ title: "更新失败", description: errorMessage(e) }),
   })
   function quickPatch(patch: Partial<{ role: "admin" | "user"; disabled: boolean }>) {
     const role = patch.role || user.role
@@ -3903,29 +4082,33 @@ function UserActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {canUpdate && (
-            <DropdownMenuItem onSelect={() => setEditOpen(true)}>编辑用户</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+              {uiText("编辑用户")}
+            </DropdownMenuItem>
           )}
           {canResetPassword && (
-            <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>重置密码</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setPasswordOpen(true)}>
+              {uiText("重置密码")}
+            </DropdownMenuItem>
           )}
           {canResetPassword && user.twoFactorEnabled && (
             <DropdownMenuItem
               disabled={resetTwoFactor.isPending}
               onSelect={() => resetTwoFactor.mutate()}
             >
-              重置双因素认证
+              {uiText("重置双因素认证")}
             </DropdownMenuItem>
           )}
           {!user.protected && canUpdate && (
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem onSelect={() => quickPatch({ disabled: !user.disabled })}>
-                {user.disabled ? "启用用户" : "停用用户"}
+                {user.disabled ? uiText("启用用户") : uiText("停用用户")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => quickPatch({ role: user.role === "admin" ? "user" : "admin" })}
               >
-                {user.role === "admin" ? "设为普通用户" : "设为超级管理员"}
+                {user.role === "admin" ? uiText("设为普通用户") : uiText("设为超级管理员")}
               </DropdownMenuItem>
             </>
           )}
@@ -3933,7 +4116,7 @@ function UserActions({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem className="text-destructive" onSelect={onDelete}>
-                删除用户
+                {uiText("删除用户")}
               </DropdownMenuItem>
             </>
           )}
@@ -3955,6 +4138,8 @@ function UserActions({
 }
 
 function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGroup[] }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
@@ -3977,19 +4162,19 @@ function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGr
       setPermissionGroupIds([])
       toast({ title: "用户已创建" })
     },
-    onError: (e) => toast({ title: "创建失败", description: e.message }),
+    onError: (e) => toast({ title: "创建失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="h-4 w-4" />
-          用户
+          {uiText("用户")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建用户</DialogTitle>
+          <DialogTitle>{uiText("创建用户")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -3998,12 +4183,17 @@ function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGr
             create.mutate(new FormData(event.currentTarget))
           }}
         >
-          <Field name="email" label="登录邮箱" type="email" placeholder="user@example.com" />
-          <Field name="displayName" label="显示名称" placeholder="用户名称" />
-          <Field name="password" label="初始密码" type="password" minLength={8} />
+          <Field
+            name="email"
+            label={uiText("登录邮箱")}
+            type="email"
+            placeholder="user@example.com"
+          />
+          <Field name="displayName" label={uiText("显示名称")} placeholder={uiText("用户名称")} />
+          <Field name="password" label={uiText("初始密码")} type="password" minLength={8} />
           <div className="grid grid-cols-2 gap-3">
             <SelectField
-              label="身份"
+              label={uiText("身份")}
               value={role}
               onValueChange={(value) => setRole(value as "admin" | "user")}
               items={[
@@ -4012,7 +4202,7 @@ function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGr
               ]}
             />
             <SelectField
-              label="状态"
+              label={uiText("状态")}
               value={status}
               onValueChange={setStatus}
               items={[
@@ -4029,7 +4219,9 @@ function CreateUserDialog({ permissionGroups }: { permissionGroups: PermissionGr
             />
           )}
           <DialogFooter>
-            <Button disabled={create.isPending}>{create.isPending ? "创建中..." : "创建"}</Button>
+            <Button disabled={create.isPending}>
+              {create.isPending ? uiText("创建中...") : uiText("创建")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4048,6 +4240,8 @@ function MailboxActions({
   canUpdate: boolean
   onDelete?: () => void
 }) {
+  useUiLanguage()
+
   const [open, setOpen] = React.useState(false)
   if (!canUpdate && !onDelete) return null
   return (
@@ -4060,12 +4254,12 @@ function MailboxActions({
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
           {canUpdate && (
-            <DropdownMenuItem onSelect={() => setOpen(true)}>编辑邮箱</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setOpen(true)}>{uiText("编辑邮箱")}</DropdownMenuItem>
           )}
           {canUpdate && onDelete && <DropdownMenuSeparator />}
           {onDelete && (
             <DropdownMenuItem className="text-destructive" onSelect={onDelete}>
-              删除邮箱
+              {uiText("删除邮箱")}
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
@@ -4086,6 +4280,8 @@ function AliasActions({
   onToggle?: () => void
   onDelete?: () => void
 }) {
+  useUiLanguage()
+
   if (!onToggle && !onDelete) return null
   return (
     <DropdownMenu>
@@ -4096,12 +4292,14 @@ function AliasActions({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {onToggle && (
-          <DropdownMenuItem onSelect={onToggle}>{alias.enabled ? "停用" : "启用"}</DropdownMenuItem>
+          <DropdownMenuItem onSelect={onToggle}>
+            {alias.enabled ? uiText("停用") : uiText("启用")}
+          </DropdownMenuItem>
         )}
         {onToggle && onDelete && <DropdownMenuSeparator />}
         {onDelete && (
           <DropdownMenuItem className="text-destructive" onSelect={onDelete}>
-            删除别名
+            {uiText("删除别名")}
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>
@@ -4120,6 +4318,8 @@ function EditUserDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [role, setRole] = React.useState(user.role)
@@ -4145,13 +4345,13 @@ function EditUserDialog({
       onOpenChange(false)
       toast({ title: "用户已更新" })
     },
-    onError: (e) => toast({ title: "更新失败", description: e.message }),
+    onError: (e) => toast({ title: "更新失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>编辑用户</DialogTitle>
+          <DialogTitle>{uiText("编辑用户")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4160,11 +4360,11 @@ function EditUserDialog({
             mut.mutate(new FormData(e.currentTarget))
           }}
         >
-          <Field name="email" label="登录邮箱" value={user.email} readOnly />
-          <Field name="displayName" label="显示名称" defaultValue={user.displayName} />
+          <Field name="email" label={uiText("登录邮箱")} value={user.email} readOnly />
+          <Field name="displayName" label={uiText("显示名称")} defaultValue={user.displayName} />
           <div className="grid grid-cols-2 gap-3">
             <SelectField
-              label="身份"
+              label={uiText("身份")}
               value={role}
               onValueChange={(value) => setRole(value as "admin" | "user")}
               items={[
@@ -4174,7 +4374,7 @@ function EditUserDialog({
               disabled={user.protected}
             />
             <SelectField
-              label="状态"
+              label={uiText("状态")}
               value={disabled}
               onValueChange={setDisabled}
               items={[
@@ -4192,7 +4392,9 @@ function EditUserDialog({
             />
           )}
           <DialogFooter>
-            <Button disabled={mut.isPending}>{mut.isPending ? "保存中..." : "保存"}</Button>
+            <Button disabled={mut.isPending}>
+              {mut.isPending ? uiText("保存中...") : uiText("保存")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4209,6 +4411,8 @@ function ResetPasswordDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   const { toast } = useToast()
   const mut = useMutation({
     mutationFn: (form: FormData) =>
@@ -4217,13 +4421,13 @@ function ResetPasswordDialog({
       onOpenChange(false)
       toast({ title: "密码已重置" })
     },
-    onError: (e) => toast({ title: "重置失败", description: e.message }),
+    onError: (e) => toast({ title: "重置失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>重置密码</DialogTitle>
+          <DialogTitle>{uiText("重置密码")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4233,10 +4437,12 @@ function ResetPasswordDialog({
             e.currentTarget.reset()
           }}
         >
-          <Field name="email" label="用户" value={user.email} readOnly />
-          <Field name="password" label="新密码" type="password" minLength={8} />
+          <Field name="email" label={uiText("用户")} value={user.email} readOnly />
+          <Field name="password" label={uiText("新密码")} type="password" minLength={8} />
           <DialogFooter>
-            <Button disabled={mut.isPending}>{mut.isPending ? "重置中..." : "重置"}</Button>
+            <Button disabled={mut.isPending}>
+              {mut.isPending ? uiText("重置中...") : uiText("重置")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4255,6 +4461,8 @@ function EditMailboxDialog({
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [userId, setUserId] = React.useState(mailbox.userId)
@@ -4276,13 +4484,13 @@ function EditMailboxDialog({
       onOpenChange(false)
       toast({ title: "邮箱已更新" })
     },
-    onError: (e) => toast({ title: "更新失败", description: e.message }),
+    onError: (e) => toast({ title: "更新失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>编辑邮箱</DialogTitle>
+          <DialogTitle>{uiText("编辑邮箱")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4291,24 +4499,28 @@ function EditMailboxDialog({
             mut.mutate(new FormData(e.currentTarget))
           }}
         >
-          <Field name="address" label="邮箱地址" value={mailbox.address} readOnly />
+          <Field name="address" label={uiText("邮箱地址")} value={mailbox.address} readOnly />
           <SelectField
-            label="归属用户"
+            label={uiText("归属用户")}
             value={userId}
             onValueChange={setUserId}
             items={users.filter((u) => !u.disabled).map((u) => [u.id, u.email])}
           />
           <div className="grid grid-cols-2 gap-3">
-            <Field name="displayName" label="显示名称" defaultValue={mailbox.displayName} />
+            <Field
+              name="displayName"
+              label={uiText("显示名称")}
+              defaultValue={mailbox.displayName}
+            />
             <Field
               name="quotaMb"
-              label="配额 MB"
+              label={uiText("配额 MB")}
               type="number"
               defaultValue={String(mailbox.quotaMb)}
             />
           </div>
           <SelectField
-            label="状态"
+            label={uiText("状态")}
             value={status}
             onValueChange={setStatus}
             items={[
@@ -4317,7 +4529,9 @@ function EditMailboxDialog({
             ]}
           />
           <DialogFooter>
-            <Button disabled={mut.isPending}>{mut.isPending ? "保存中..." : "保存"}</Button>
+            <Button disabled={mut.isPending}>
+              {mut.isPending ? uiText("保存中...") : uiText("保存")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4326,6 +4540,8 @@ function EditMailboxDialog({
 }
 
 function CreateDomainDialog() {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
@@ -4336,19 +4552,19 @@ function CreateDomainDialog() {
       setOpen(false)
       toast({ title: "域名已创建" })
     },
-    onError: (e) => toast({ title: "创建失败", description: e.message }),
+    onError: (e) => toast({ title: "创建失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline">
           <Plus className="h-4 w-4" />
-          域名
+          {uiText("域名")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>添加域名</DialogTitle>
+          <DialogTitle>{uiText("添加域名")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4357,9 +4573,9 @@ function CreateDomainDialog() {
             mut.mutate(new FormData(e.currentTarget))
           }}
         >
-          <Field name="name" label="域名" placeholder="example.com" />
+          <Field name="name" label={uiText("域名")} placeholder="example.com" />
           <DialogFooter>
-            <Button disabled={mut.isPending}>创建</Button>
+            <Button disabled={mut.isPending}>{uiText("创建")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4368,6 +4584,8 @@ function CreateDomainDialog() {
 }
 
 function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: AdminUser[] }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
@@ -4396,19 +4614,19 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
       setOpen(false)
       toast({ title: "邮箱已创建" })
     },
-    onError: (e) => toast({ title: "创建失败", description: e.message }),
+    onError: (e) => toast({ title: "创建失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button>
           <Plus className="h-4 w-4" />
-          邮箱
+          {uiText("邮箱")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建邮箱账号</DialogTitle>
+          <DialogTitle>{uiText("创建邮箱账号")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4419,11 +4637,11 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
         >
           <DomainSelect domains={domains} value={domainId} onChange={setDomainId} />
           <div className="grid grid-cols-2 gap-3">
-            <Field name="localPart" label="账号" placeholder="alice" />
-            <Field name="displayName" label="显示名" placeholder="Alice" />
+            <Field name="localPart" label={uiText("账号")} placeholder="alice" />
+            <Field name="displayName" label={uiText("显示名")} placeholder="Alice" />
           </div>
           <SelectField
-            label="归属方式"
+            label={uiText("归属方式")}
             value={ownerMode}
             onValueChange={setOwnerMode}
             items={[
@@ -4433,7 +4651,7 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
           />
           {ownerMode === "existing" ? (
             <SelectField
-              label="已有用户"
+              label={uiText("已有用户")}
               value={userId}
               onValueChange={setUserId}
               items={users.filter((u) => !u.disabled).map((u) => [u.id, u.email])}
@@ -4441,17 +4659,22 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
           ) : (
             <Field
               name="ownerEmail"
-              label="归属用户邮箱"
-              placeholder="留空则使用新邮箱"
+              label={uiText("归属用户邮箱")}
+              placeholder={uiText("留空则使用新邮箱")}
               required={false}
             />
           )}
           <div className="grid grid-cols-2 gap-3">
-            <Field name="password" label="密码" type="password" placeholder="至少 8 位" />
-            <Field name="quotaMb" label="配额 MB" type="number" defaultValue="1024" />
+            <Field
+              name="password"
+              label={uiText("密码")}
+              type="password"
+              placeholder={uiText("至少 8 位")}
+            />
+            <Field name="quotaMb" label={uiText("配额 MB")} type="number" defaultValue="1024" />
           </div>
           <SelectField
-            label="身份"
+            label={uiText("身份")}
             value={role}
             onValueChange={setRole}
             items={[
@@ -4460,7 +4683,7 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
             ]}
           />
           <DialogFooter>
-            <Button disabled={mut.isPending || !domainId}>创建</Button>
+            <Button disabled={mut.isPending || !domainId}>{uiText("创建")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4469,6 +4692,8 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
 }
 
 function CreateAliasDialog({ domains }: { domains: Domain[] }) {
+  useUiLanguage()
+
   const qc = useQueryClient()
   const { toast } = useToast()
   const [open, setOpen] = React.useState(false)
@@ -4489,19 +4714,19 @@ function CreateAliasDialog({ domains }: { domains: Domain[] }) {
       setOpen(false)
       toast({ title: "别名已创建" })
     },
-    onError: (e) => toast({ title: "创建失败", description: e.message }),
+    onError: (e) => toast({ title: "创建失败", description: errorMessage(e) }),
   })
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button variant="outline">
           <Plus className="h-4 w-4" />
-          别名
+          {uiText("别名")}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>创建别名/转发</DialogTitle>
+          <DialogTitle>{uiText("创建别名/转发")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4511,10 +4736,14 @@ function CreateAliasDialog({ domains }: { domains: Domain[] }) {
           }}
         >
           <DomainSelect domains={domains} value={domainId} onChange={setDomainId} />
-          <Field name="source" label="来源" placeholder="sales 或 sales@example.com" />
-          <Field name="destination" label="目标邮箱" placeholder="alice@example.com" />
+          <Field
+            name="source"
+            label={uiText("来源")}
+            placeholder={uiText("sales 或 sales@example.com")}
+          />
+          <Field name="destination" label={uiText("目标邮箱")} placeholder="alice@example.com" />
           <DialogFooter>
-            <Button disabled={mut.isPending || !domainId}>创建</Button>
+            <Button disabled={mut.isPending || !domainId}>{uiText("创建")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4523,6 +4752,8 @@ function CreateAliasDialog({ domains }: { domains: Domain[] }) {
 }
 
 function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: boolean }) {
+  useUiLanguage()
+
   const me = useMe()
   const user = me.data?.user
   const canCheckDNS = hasPermission(user, "admin.dns.check")
@@ -4548,12 +4779,14 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
   if (!domain)
     return (
       <Card>
-        <CardContent className="p-6 text-muted-foreground">请选择域名</CardContent>
+        <CardContent className="p-6 text-muted-foreground">{uiText("请选择域名")}</CardContent>
       </Card>
     )
   const content = (
     <>
-      <p className="mb-3 text-sm text-muted-foreground">以下为需要在域名 DNS 管理中添加的记录：</p>
+      <p className="mb-3 text-sm text-muted-foreground">
+        {uiText("以下为需要在域名 DNS 管理中添加的记录：")}
+      </p>
       <div className="space-y-3">
         {records.data?.items.map((r) => (
           <DNSRecordRow key={`${r.type}-${r.name}`} record={r} />
@@ -4564,7 +4797,7 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
           <Separator className="my-4" />
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <CheckCircle2 className="h-4 w-4" />
-            检测结果
+            {uiText("检测结果")}
           </div>
           <div className="mt-2 space-y-2">
             {Object.entries(check.data.checks).map(([k, v]) => (
@@ -4572,7 +4805,8 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
                 <CheckCircle2
                   className={`h-4 w-4 shrink-0 ${v.ok ? "text-green-600" : "text-destructive"}`}
                 />
-                <span className="font-medium">{dnsCheckLabel(k)}:</span> {v.message}
+                <span className="font-medium">{uiText(dnsCheckLabel(k))}:</span>{" "}
+                {dnsCheckMessage(v.message, v.ok)}
               </div>
             ))}
           </div>
@@ -4583,12 +4817,12 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
   const checkButton = canCheckDNS ? (
     <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
       <RefreshCcw className={cn("h-4 w-4", check.isPending && "animate-spin")} />
-      {check.isPending ? "检测中..." : "检测"}
+      {check.isPending ? uiText("检测中...") : uiText("检测")}
     </Button>
   ) : null
   const header = (
     <div className="flex items-center justify-between">
-      <CardTitle>DNS 记录</CardTitle>
+      <CardTitle>{uiText("DNS 记录")}</CardTitle>
       {checkButton}
     </div>
   )
@@ -4596,7 +4830,7 @@ function DNSPanel({ domain, embedded = false }: { domain?: Domain; embedded?: bo
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <div className="font-medium">DNS 记录</div>
+          <div className="font-medium">{uiText("DNS 记录")}</div>
           {checkButton}
         </div>
         {content}
@@ -4625,11 +4859,13 @@ function dnsDescription(record: DNSRecord): string {
   if (record.type === "TXT" && record.value.includes("spf1"))
     return "声明哪些服务器有权使用你的域名发件，防止伪造。"
   if (record.type === "MX")
-    return `确保 ${record.name} 的 A 记录已指向你的服务器 IP，邮件才能到达。`
+    return uiText("确保 {0} 的 A 记录已指向你的服务器 IP，邮件才能到达。", [record.name])
   return ""
 }
 
 function DNSRecordRow({ record }: { record: DNSRecord }) {
+  useUiLanguage()
+
   const { toast } = useToast()
   const text = `${record.type} ${record.name} ${record.value}`
   const desc = dnsDescription(record)
@@ -4649,19 +4885,19 @@ function DNSRecordRow({ record }: { record: DNSRecord }) {
           }}
         >
           <Copy className="h-3.5 w-3.5" />
-          复制
+          {uiText("复制")}
         </Button>
       </div>
-      {desc && <p className="mb-2 text-xs text-muted-foreground">{desc}</p>}
+      {desc && <p className="mb-2 text-xs text-muted-foreground">{uiText(desc)}</p>}
       <div className="break-all font-mono text-xs text-muted-foreground">
         <div>
-          <span className="text-foreground">Name:</span> {record.name}
+          <span className="text-foreground">{uiText("名称：")}</span> {record.name}
         </div>
         <div>
-          <span className="text-foreground">Value:</span> {record.value}
+          <span className="text-foreground">{uiText("值：")}</span> {record.value}
         </div>
         <div>
-          <span className="text-foreground">TTL:</span> {record.ttl}s
+          <span className="text-foreground">TTL:</span> {uiText("{0}", [record.ttl])}s
         </div>
       </div>
     </div>
@@ -4689,9 +4925,11 @@ function SwitchRow({
   onCheckedChange: (checked: boolean) => void
   className?: string
 }) {
+  useUiLanguage()
+
   return (
     <div className={`flex min-h-14 items-center justify-between gap-4 ${className}`}>
-      <Label className="text-base font-medium">{label}</Label>
+      <Label className="text-base font-medium">{uiText(label)}</Label>
       <Switch checked={checked} onCheckedChange={onCheckedChange} />
     </div>
   )
@@ -4701,9 +4939,11 @@ function Field({
   required = true,
   ...props
 }: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  useUiLanguage()
+
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label>{uiText(label)}</Label>
       <Input required={required} {...props} />
     </div>
   )
@@ -4721,9 +4961,11 @@ function SelectField({
   items: string[][]
   disabled?: boolean
 }) {
+  useUiLanguage()
+
   return (
     <div className="space-y-2">
-      <Label>{label}</Label>
+      <Label>{uiText(label)}</Label>
       <Select value={value} onValueChange={onValueChange} disabled={disabled}>
         <SelectTrigger>
           <SelectValue />
@@ -4731,7 +4973,7 @@ function SelectField({
         <SelectContent>
           {items.map(([value, label]) => (
             <SelectItem key={value} value={value}>
-              {label}
+              {uiText(label)}
             </SelectItem>
           ))}
         </SelectContent>
@@ -4748,12 +4990,14 @@ function DomainSelect({
   value: string
   onChange: (value: string) => void
 }) {
+  useUiLanguage()
+
   return (
     <div className="space-y-2">
-      <Label>域名</Label>
+      <Label>{uiText("域名")}</Label>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger>
-          <SelectValue placeholder="选择域名" />
+          <SelectValue placeholder={uiText("选择域名")} />
         </SelectTrigger>
         <SelectContent>
           {domains.map((d) => (

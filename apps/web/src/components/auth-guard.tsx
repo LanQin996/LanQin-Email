@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/ui-errors"
 import React from "react"
 import { Navigate, useLocation } from "react-router-dom"
 import { useMe, isTimeoutError } from "@/hooks/use-me"
@@ -9,7 +10,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (me.isLoading) return <AuthLoading />
   if (me.isError && isTimeoutError(me.error))
-    return <AuthError message={me.error.message} onRetry={() => me.refetch()} />
+    return <AuthError message={errorMessage(me.error)} onRetry={() => me.refetch()} />
   if (me.isError || !me.data?.user) {
     return (
       <Navigate

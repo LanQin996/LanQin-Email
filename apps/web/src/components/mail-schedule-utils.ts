@@ -77,8 +77,8 @@ export function scheduleToHtml(schedule: ScheduleDraft) {
     [
       "时间",
       schedule.allDay
-        ? formatDate(start.toISOString())
-        : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
+        ? formatDate(start.toISOString(), "zh-CN")
+        : `${formatDateTime(start.toISOString(), "zh-CN")} - ${formatTimeOnly(end)}`,
     ],
     ["持续", schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes)],
     ["提醒", reminderLabel(schedule.reminderMinutes)],

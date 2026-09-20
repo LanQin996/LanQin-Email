@@ -1,3 +1,4 @@
+import { getInitialLanguage, type Language } from "@/lib/language"
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 
@@ -5,10 +6,10 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatDate(value: string) {
+export function formatDate(value: string, language: Language = getInitialLanguage()) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(language, {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -16,10 +17,10 @@ export function formatDate(value: string) {
   }).format(date)
 }
 
-export function formatDateTime(value: string) {
+export function formatDateTime(value: string, language: Language = getInitialLanguage()) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ""
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(language, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -37,7 +38,7 @@ export function formatBytes(bytes: number) {
     size /= 1024
     idx++
   }
-  return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`
+  return `${new Intl.NumberFormat(getInitialLanguage(), { minimumFractionDigits: idx === 0 ? 0 : 1, maximumFractionDigits: idx === 0 ? 0 : 1 }).format(size)} ${units[idx]}`
 }
 
 /**

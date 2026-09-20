@@ -57,6 +57,9 @@ jobs:
       - name: Check shadcn/ui usage
         run: pnpm --dir apps/web run check:shadcn
 
+      - name: Check internationalization
+        run: pnpm --dir apps/web run check:i18n
+
       - name: Lint web
         run: pnpm --dir apps/web run lint
 

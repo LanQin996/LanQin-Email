@@ -1,3 +1,15 @@
+import {
+  uiMessage,
+  type UiText,
+  getInitialLanguage,
+  uiText,
+  useLanguage as useUiLanguage,
+  Language,
+  useLanguage,
+} from "@/lib/language"
+import { errorMessage } from "@/lib/ui-errors"
+import { LanguageSelector } from "@/components/language-selector"
+
 import * as React from "react"
 import DOMPurify from "dompurify"
 import {
@@ -111,7 +123,7 @@ import {
 } from "@/lib/utils"
 import { applyTheme, getInitialTheme } from "@/lib/theme"
 import { useDisplayMode } from "@/lib/display-mode"
-import { Language, languageOptions, useLanguage } from "@/lib/language"
+
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -227,15 +239,15 @@ type MailView = "folder" | "starred" | "label" | "scheduled" | "sendQueue" | "ex
 type MailListResponse = { items?: MailMessage[]; nextCursor?: string; totalCount?: number }
 type MailPageSize = 20 | 30 | 50
 type PendingConfirm = {
-  title: string
-  description?: string
+  title: UiText
+  description?: UiText
   confirmText: string
   onConfirm: () => void
 }
 type MailNotificationState = { latestId: string; latestReceivedAt: string }
 type ComposeSendIntent = {
   title: string
-  description: string
+  description: UiText
   confirmText: string
   onConfirm: () => void
 }
@@ -346,7 +358,7 @@ export function MailPage() {
   const [expandedExternalAccountIds, setExpandedExternalAccountIds] = React.useState<string[]>([])
   const [externalFolder, setExternalFolder] = React.useState("INBOX")
   const [darkMode, setDarkMode] = React.useState(getInitialTheme)
-  const [language, setLanguage] = useLanguage()
+  const [language] = useLanguage()
   const [displayMode] = useDisplayMode()
   const isMobile = useIsMobile()
   const [refreshing, setRefreshing] = React.useState(false)
@@ -671,7 +683,7 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["mail-stats"] })
       await qc.invalidateQueries({ queryKey: ["labels"] })
     },
-    onError: (error) => toast({ title: "操作失败", description: error.message }),
+    onError: (error) => toast({ title: "操作失败", description: errorMessage(error) }),
   })
   const markRead = useMutation({
     mutationFn: ({ id, read }: { id: string; read: boolean }) => api.markRead(id, read),
@@ -682,7 +694,7 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["folders"] })
       await qc.invalidateQueries({ queryKey: ["mail-stats"] })
     },
-    onError: (error) => toast({ title: "操作失败", description: error.message }),
+    onError: (error) => toast({ title: "操作失败", description: errorMessage(error) }),
   })
   const markExternalRead = useMutation({
     mutationFn: ({ id, remoteId, read }: { id: string; remoteId: string; read: boolean }) =>
@@ -693,7 +705,7 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["message"] })
       await qc.invalidateQueries({ queryKey: ["mail-external-folders"] })
     },
-    onError: (error) => toast({ title: "操作失败", description: error.message }),
+    onError: (error) => toast({ title: "操作失败", description: errorMessage(error) }),
   })
   const addLabel = useMutation({
     mutationFn: ({ id, label }: { id: string; label: MailLabel }) =>
@@ -861,7 +873,7 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["labels"] })
       toast({ title: "已删除" })
     },
-    onError: (error) => toast({ title: "删除失败", description: error.message }),
+    onError: (error) => toast({ title: "删除失败", description: errorMessage(error) }),
   })
   const move = useMutation({
     mutationFn: ({ id, folder }: { id: string; folder: string }) => api.move(id, folder),
@@ -884,7 +896,7 @@ export function MailPage() {
     onError: (error) =>
       toast({
         title: "操作失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
     onSettled: () => setCancelingScheduledId(""),
   })
@@ -899,7 +911,7 @@ export function MailPage() {
     onError: (error) =>
       toast({
         title: "创建文件夹失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
   })
   const reorderFolders = useMutation({
@@ -932,7 +944,7 @@ export function MailPage() {
       if (context?.previous) qc.setQueryData(["folders", activeMailboxId], context.previous)
       toast({
         title: "文件夹排序失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       })
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ["folders", activeMailboxId] }),
@@ -949,13 +961,14 @@ export function MailPage() {
       await refreshMailData()
       toast({
         title: "文件夹已删除",
-        description: result.moved > 0 ? `已将 ${result.moved} 封邮件移回收件箱` : undefined,
+        description:
+          result.moved > 0 ? uiMessage("已将 {0} 封邮件移回收件箱", [result.moved]) : undefined,
       })
     },
     onError: (error) =>
       toast({
         title: "删除文件夹失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
   })
   const retrySendQueue = useMutation({
@@ -969,7 +982,7 @@ export function MailPage() {
     onError: (error) =>
       toast({
         title: "重试失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
     onSettled: () => setSendQueuePendingId(""),
   })
@@ -984,7 +997,7 @@ export function MailPage() {
     onError: (error) =>
       toast({
         title: "取消失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
     onSettled: () => setSendQueuePendingId(""),
   })
@@ -999,9 +1012,11 @@ export function MailPage() {
       await qc.invalidateQueries({ queryKey: ["folders"] })
       await qc.invalidateQueries({ queryKey: ["mail-stats"] })
       await qc.invalidateQueries({ queryKey: ["labels"] })
-      toast({ title: count > 0 ? `已标记 ${count} 封邮件为已读` : "当前没有未读邮件" })
+      toast({
+        title: count > 0 ? uiMessage("已标记 {0} 封邮件为已读", [count]) : "当前没有未读邮件",
+      })
     },
-    onError: (error) => toast({ title: "操作失败", description: error.message }),
+    onError: (error) => toast({ title: "操作失败", description: errorMessage(error) }),
   })
 
   React.useEffect(() => {
@@ -1127,12 +1142,12 @@ export function MailPage() {
     const firstSender = senderDisplayName(first)
     const title =
       newMessages.length > 1
-        ? `收到 ${newMessages.length} 封新邮件`
-        : `新邮件：${first.subject || "(无主题)"}`
+        ? uiMessage("收到 {0} 封新邮件", [newMessages.length])
+        : uiMessage("新邮件：{0}", [first.subject || uiMessage("(无主题)")])
     const description =
       newMessages.length > 1
-        ? `${firstSender} 等发来新邮件`
-        : `${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`
+        ? uiMessage("{0} 等发来新邮件", [firstSender])
+        : uiMessage("{0}", [`${firstSender}${first.snippet ? ` · ${first.snippet}` : ""}`])
     const openFirstMessage = () => {
       setMailView("folder")
       setFolder("Inbox")
@@ -1153,8 +1168,8 @@ export function MailPage() {
     })
     playIncomingMailSound(mailAudioContextRef)
     if ("Notification" in window && Notification.permission === "granted") {
-      const notification = new Notification(title, {
-        body: description,
+      const notification = new Notification(uiText(title), {
+        body: uiText(description),
         tag: `lanqin-mail-${activeMailboxId}`,
       })
       notification.onclick = () => {
@@ -1341,16 +1356,18 @@ export function MailPage() {
   const selectedLabel = labelItems.find((item) => item.id === selectedLabelId)
   const viewTitle =
     mailView === "external"
-      ? `${selectedExternalAccount?.name || "外部邮箱"} · ${folderLabels[externalFolder] || externalFolder}`
+      ? `${selectedExternalAccount?.name || uiText("外部邮箱")} · ${folderLabels[externalFolder] ? uiText(folderLabels[externalFolder]) : externalFolder}`
       : mailView === "sendQueue"
-        ? "发送队列"
+        ? uiText("发送队列")
         : mailView === "scheduled"
-          ? "待发送"
+          ? uiText("待发送")
           : mailView === "starred"
-            ? "星标邮件"
+            ? uiText("星标邮件")
             : mailView === "label"
-              ? selectedLabel?.name || "标签"
-              : folderLabels[folder] || folder
+              ? selectedLabel?.name || uiText("标签")
+              : folderLabels[folder]
+                ? uiText(folderLabels[folder])
+                : folder
   const emptyMessage = getEmptyMessage(
     mailView,
     mailView === "external" ? externalFolder : folder,
@@ -1424,7 +1441,9 @@ export function MailPage() {
     if (action === "delete") {
       setPendingConfirm({
         title: "删除所选邮件？",
-        description: `将删除当前选中的 ${ids.length} 封邮件，此操作无法从邮件列表中恢复。`,
+        description: uiMessage("将删除当前选中的 {0} 封邮件，此操作无法从邮件列表中恢复。", [
+          ids.length,
+        ]),
         confirmText: "删除邮件",
         onConfirm: () => runConfirmedBulkAction("delete", ids),
       })
@@ -1451,11 +1470,11 @@ export function MailPage() {
       setCompactSelectedIds([])
       setPendingConfirm(null)
       await refreshMailData()
-      toast({ title: `已处理 ${ids.length} 封邮件` })
+      toast({ title: uiMessage("已处理 {0} 封邮件", [ids.length]) })
     } catch (error) {
       toast({
         title: "批量操作失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       })
     } finally {
       setBulkPending(false)
@@ -1464,7 +1483,7 @@ export function MailPage() {
   function confirmDeleteMessage(message: MailMessage) {
     setPendingConfirm({
       title: "删除这封邮件？",
-      description: `邮件“${message.subject || "无主题"}”将被删除。`,
+      description: uiMessage("邮件“{0}”将被删除。", [message.subject || uiMessage("无主题")]),
       confirmText: "删除邮件",
       onConfirm: () => del.mutate(message.id),
     })
@@ -1518,7 +1537,7 @@ export function MailPage() {
     } catch (error) {
       toast({
         title: "打开草稿失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       })
     }
   }
@@ -1625,7 +1644,7 @@ export function MailPage() {
       key: dragged.id,
       folderId: dragged.id,
       folderName: dragged.name,
-      label: folderLabels[dragged.name] || dragged.name,
+      label: folderLabels[dragged.name] ? uiText(folderLabels[dragged.name]) : dragged.name,
       icon: folderIcons[dragged.role] || <Inbox className="h-4 w-4" />,
       count: dragged.name === "Drafts" ? dragged.totalCount : dragged.unreadCount,
       custom: true,
@@ -1662,7 +1681,7 @@ export function MailPage() {
   function confirmDeleteFolder(item: MailMenuItem) {
     if (item.type !== "folder" || !item.custom) return
     setPendingConfirm({
-      title: `删除文件夹“${item.label}”？`,
+      title: uiMessage("删除文件夹“{0}”？", [item.label]),
       description: "文件夹内的邮件会移回收件箱，不会被删除。",
       confirmText: "删除文件夹",
       onConfirm: () => deleteFolder.mutate(item),
@@ -1814,8 +1833,7 @@ export function MailPage() {
           email={me.data?.user.email || selectedMailbox?.address}
           darkMode={darkMode}
           onToggleTheme={() => setDarkMode((value) => !value)}
-          language={language}
-          onLanguageChange={setLanguage}
+
           onSettings={openSettings}
         />
         <div className={cn("mt-2 flex gap-2", sidebarCollapsed && "justify-center")}>
@@ -1846,7 +1864,7 @@ export function MailPage() {
             disabled={!selectedMailbox}
           >
             <PencilLine className="h-4 w-4" />
-            {!sidebarCollapsed && <span>写邮件</span>}
+            {!sidebarCollapsed && <span>{uiText("写邮件")}</span>}
           </Button>
         )}
       </SidebarHeader>
@@ -1854,7 +1872,7 @@ export function MailPage() {
         <SidebarGroup>
           {!sidebarCollapsed && (
             <div className="flex items-center justify-between px-2 py-1.5">
-              <SidebarGroupLabel className="m-0 p-0">邮件夹</SidebarGroupLabel>
+              <SidebarGroupLabel className="m-0 p-0">{uiText("邮件夹")}</SidebarGroupLabel>
               {canOrganizeSelectedMailbox && (
                 <Button
                   type="button"
@@ -1921,10 +1939,14 @@ export function MailPage() {
                     onClick={() => activateSidebarItem(item)}
                   >
                     {item.icon}
-                    {!sidebarCollapsed && <span>{item.label}</span>}
+                    {!sidebarCollapsed && (
+                      <span>
+                        {item.type === "folder" && item.custom ? item.label : uiText(item.label)}
+                      </span>
+                    )}
                     {!sidebarCollapsed && item.count > 0 && (
                       <Badge variant="secondary" className="ml-auto">
-                        {item.count}
+                        {uiText("{0}", [item.count])}
                       </Badge>
                     )}
                   </SidebarMenuButton>
@@ -1954,7 +1976,7 @@ export function MailPage() {
         </SidebarGroup>
         {externalAccountItems.length > 0 && (
           <SidebarGroup>
-            {!sidebarCollapsed && <SidebarGroupLabel>外部邮箱</SidebarGroupLabel>}
+            {!sidebarCollapsed && <SidebarGroupLabel>{uiText("外部邮箱")}</SidebarGroupLabel>}
             <SidebarGroupContent>
               <SidebarMenu>
                 {externalAccountItems.map((account) => {
@@ -2005,11 +2027,13 @@ export function MailPage() {
                                 <Inbox className="h-4 w-4" />
                               )}
                               <span>
-                                {folderLabels[item.role] || folderLabels[item.name] || item.name}
+                                {folderLabels[item.role] || folderLabels[item.name]
+                                  ? uiText(folderLabels[item.role] || folderLabels[item.name])
+                                  : item.name}
                               </span>
                               {item.unreadCount > 0 && (
                                 <Badge variant="secondary" className="ml-auto">
-                                  {item.unreadCount}
+                                  {uiText("{0}", [item.unreadCount])}
                                 </Badge>
                               )}
                             </SidebarMenuButton>
@@ -2029,7 +2053,7 @@ export function MailPage() {
           <SidebarGroup>
             {!sidebarCollapsed && (
               <div className="flex items-center justify-between px-2 py-1.5">
-                <SidebarGroupLabel className="m-0 p-0">标签</SidebarGroupLabel>
+                <SidebarGroupLabel className="m-0 p-0">{uiText("标签")}</SidebarGroupLabel>
                 {canManageSelectedLabels && (
                   <div className="flex items-center gap-0.5">
                     <Button
@@ -2095,7 +2119,7 @@ export function MailPage() {
                           )}
                           {!sidebarCollapsed && !labelEditMode && !!label.messageCount && (
                             <span className="ml-auto text-[11px] text-muted-foreground">
-                              {label.messageCount}
+                              {uiText("{0}", [label.messageCount])}
                             </span>
                           )}
                           {!sidebarCollapsed && labelEditMode && canManageSelectedLabels && (
@@ -2107,7 +2131,7 @@ export function MailPage() {
                                 deleteLabel.mutate(label.id)
                               }}
                               disabled={deleteLabel.isPending}
-                              aria-label={`删除标签 ${label.name}`}
+                              aria-label={uiText("删除标签 {0}", [label.name])}
                             >
                               <Trash2 className="h-3.5 w-3.5" />
                             </button>
@@ -2120,7 +2144,9 @@ export function MailPage() {
                   !sidebarCollapsed &&
                   !labels.isLoading &&
                   labelItems.length === 0 && (
-                    <div className="px-2 py-1 text-xs text-muted-foreground">暂无标签</div>
+                    <div className="px-2 py-1 text-xs text-muted-foreground">
+                      {uiText("暂无标签")}
+                    </div>
                   )}
                 {canManageSelectedLabels && labelEditMode && newLabelEditing && (
                   <SidebarMenuItem>
@@ -2156,7 +2182,7 @@ export function MailPage() {
             ) : (
               <PanelLeftClose className="h-4 w-4" />
             )}
-            {!sidebarCollapsed && <span>收起侧栏</span>}
+            {!sidebarCollapsed && <span>{uiText("收起侧栏")}</span>}
           </Button>
         </div>
       )}
@@ -2174,14 +2200,14 @@ export function MailPage() {
 
   const contentView = !canAccessMail ? (
     <PermissionEmptyState
-      title="无邮箱前台权限"
-      description="当前账号未开启邮箱前台访问权限。"
+      title={uiText("无邮箱前台权限")}
+      description={uiText("当前账号未开启邮箱前台访问权限。")}
       onOpenSettings={openSettings}
     />
   ) : !canReadMail ? (
     <PermissionEmptyState
-      title="无邮件查看权限"
-      description="当前账号可以访问邮箱前台，但未开启邮件查看权限。"
+      title={uiText("无邮件查看权限")}
+      description={uiText("当前账号可以访问邮箱前台，但未开启邮件查看权限。")}
       onOpenSettings={openSettings}
     />
   ) : !mailboxList.isLoading && !hasMailboxes ? (
@@ -2198,8 +2224,8 @@ export function MailPage() {
     />
   ) : mailView === "scheduled" ? (
     <PermissionEmptyState
-      title="无定时发送权限"
-      description="当前账号不能查看或管理定时发送任务。"
+      title={uiText("无定时发送权限")}
+      description={uiText("当前账号不能查看或管理定时发送任务。")}
       onOpenSettings={openSettings}
     />
   ) : mailView === "sendQueue" && canViewSendQueue ? (
@@ -2234,8 +2260,8 @@ export function MailPage() {
     />
   ) : mailView === "sendQueue" ? (
     <PermissionEmptyState
-      title="无发送队列权限"
-      description="当前账号不能查看发送队列。"
+      title={uiText("无发送队列权限")}
+      description={uiText("当前账号不能查看发送队列。")}
       onOpenSettings={openSettings}
     />
   ) : isMobile || displayMode === "compact" ? (
@@ -2267,7 +2293,7 @@ export function MailPage() {
       onPageSizeChange={setMailPageSize}
       onPreviousPage={previousMessagePage}
       onNextPage={() => void nextMessagePage()}
-      emptyMessage={emptyMessage}
+      emptyMessage={uiText(emptyMessage)}
       selectedId={selectedId}
       selected={selected}
       detailLoading={detail.isLoading}
@@ -2323,7 +2349,7 @@ export function MailPage() {
             <div className="flex min-w-0 items-center gap-3">
               {canOrganizeSelectedMailbox && (
                 <Checkbox
-                  aria-label="选择当前页邮件"
+                  aria-label={uiText("选择当前页邮件")}
                   checked={
                     compactAllSelected ? true : compactSomeSelected ? "indeterminate" : false
                   }
@@ -2347,8 +2373,11 @@ export function MailPage() {
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {selectedCountOnPage > 0
-                    ? `已选 ${selectedCountOnPage} 封`
-                    : `${visibleMessages.length} / ${messageTotalCount ?? allMessages.length} 封邮件`}
+                    ? uiText("已选 {0} 封", [selectedCountOnPage])
+                    : uiText("{0} / {1} 封邮件", [
+                        visibleMessages.length,
+                        messageTotalCount ?? allMessages.length,
+                      ])}
                 </div>
               </div>
             </div>
@@ -2376,7 +2405,9 @@ export function MailPage() {
             ))}
             {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) &&
               visibleMessages.length === 0 && (
-                <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>
+                <div className="p-8 text-center text-sm text-muted-foreground">
+                  {uiText(emptyMessage)}
+                </div>
               )}
           </ScrollArea>
           <MailPagination
@@ -2399,7 +2430,7 @@ export function MailPage() {
         <section className="h-full min-h-0">
           {!selectedId && (
             <div className="grid h-full place-items-center text-muted-foreground">
-              选择一封邮件阅读
+              {uiText("选择一封邮件阅读")}
             </div>
           )}
           {detail.isLoading && (
@@ -2419,13 +2450,13 @@ export function MailPage() {
                     {canSendSelectedMailbox && (
                       <Button variant="outline" size="sm" onClick={() => openReply(selected)}>
                         <Reply className="h-4 w-4" />
-                        回复
+                        {uiText("回复")}
                       </Button>
                     )}
                     {canSendSelectedMailbox && (
                       <Button variant="outline" size="sm" onClick={() => openForward(selected)}>
                         <Forward className="h-4 w-4" />
-                        转发
+                        {uiText("转发")}
                       </Button>
                     )}
                     {mailView !== "external" && selected.sendQueueId && (
@@ -2435,7 +2466,7 @@ export function MailPage() {
                         onClick={() => openMessageSendTimeline(selected)}
                       >
                         <History className="h-4 w-4" />
-                        投递时间线
+                        {uiText("投递时间线")}
                       </Button>
                     )}
                     {mailView !== "external" &&
@@ -2446,7 +2477,7 @@ export function MailPage() {
                           size="sm"
                           onClick={() => move.mutate({ id: selected.id, folder: "Inbox" })}
                         >
-                          取消归档
+                          {uiText("取消归档")}
                         </Button>
                       ) : (
                         <Button
@@ -2454,7 +2485,7 @@ export function MailPage() {
                           size="sm"
                           onClick={() => move.mutate({ id: selected.id, folder: "Archive" })}
                         >
-                          归档
+                          {uiText("归档")}
                         </Button>
                       ))}
                     {mailView !== "external" && canOrganizeSelectedMailbox && (
@@ -2463,7 +2494,7 @@ export function MailPage() {
                         size="sm"
                         onClick={() => confirmDeleteMessage(selected)}
                       >
-                        删除
+                        {uiText("删除")}
                       </Button>
                     )}
                   </div>
@@ -2487,7 +2518,7 @@ export function MailPage() {
                   <TranslatableMailBody message={selected} language={language} />
                   {selected.attachments && selected.attachments.length > 0 && (
                     <div className="mt-8 rounded-lg border p-4">
-                      <div className="mb-3 font-medium">附件</div>
+                      <div className="mb-3 font-medium">{uiText("附件")}</div>
                       <div className="space-y-2">
                         {selected.attachments.map((a) => (
                           <MailAttachment
@@ -2519,7 +2550,7 @@ export function MailPage() {
               <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
                 <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
                   <SheetTrigger asChild>
-                    <Button size="icon" variant="ghost" aria-label="打开导航">
+                    <Button size="icon" variant="ghost" aria-label={uiText("打开导航")}>
                       <PanelLeftOpen className="h-4 w-4" />
                     </Button>
                   </SheetTrigger>
@@ -2528,7 +2559,7 @@ export function MailPage() {
                     className="w-[86vw] max-w-80 p-0 [&>button]:hidden"
                     aria-describedby={undefined}
                   >
-                    <SheetTitle className="sr-only">邮箱导航</SheetTitle>
+                    <SheetTitle className="sr-only">{uiText("邮箱导航")}</SheetTitle>
                     <div className="h-svh">{sidebarContent}</div>
                   </SheetContent>
                 </Sheet>
@@ -2541,7 +2572,7 @@ export function MailPage() {
                     "transition-all",
                     (refreshing || autoRefreshing) && "bg-primary/5 text-primary"
                   )}
-                  title={autoRefreshing ? "自动刷新中" : "刷新邮件"}
+                  title={autoRefreshing ? uiText("自动刷新中") : uiText("刷新邮件")}
                 >
                   <RefreshCcw
                     className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")}
@@ -2568,7 +2599,7 @@ export function MailPage() {
                     size="icon"
                     onClick={() => openCompose()}
                     disabled={!selectedMailbox}
-                    aria-label="写邮件"
+                    aria-label={uiText("写邮件")}
                   >
                     <PencilLine className="h-4 w-4" />
                   </Button>
@@ -2581,10 +2612,10 @@ export function MailPage() {
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder={
                         mailView === "external"
-                          ? "搜索远端邮件"
+                          ? uiText("搜索远端邮件")
                           : mailView === "scheduled"
-                            ? "搜索待发送"
-                            : "搜索邮件"
+                            ? uiText("搜索待发送")
+                            : uiText("搜索邮件")
                       }
                       className="h-10 pl-9"
                     />
@@ -2622,7 +2653,7 @@ export function MailPage() {
                         "transition-all",
                         (refreshing || autoRefreshing) && "bg-primary/5 text-primary"
                       )}
-                      title={autoRefreshing ? "自动刷新中" : "刷新邮件"}
+                      title={autoRefreshing ? uiText("自动刷新中") : uiText("刷新邮件")}
                     >
                       <RefreshCcw
                         className={cn("h-4 w-4", (refreshing || autoRefreshing) && "animate-spin")}
@@ -2631,10 +2662,15 @@ export function MailPage() {
                     {(publicSettings.data?.mailAutoRefresh || autoRefreshing) && (
                       <div className="hidden min-w-[118px] text-xs text-muted-foreground sm:block">
                         {autoRefreshing
-                          ? "自动刷新中..."
+                          ? uiText("自动刷新中...")
                           : lastAutoRefreshAt
-                            ? `已刷新 ${lastAutoRefreshAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-                            : "自动刷新已开启"}
+                            ? uiText("已刷新 {0}", [
+                                lastAutoRefreshAt.toLocaleTimeString(getInitialLanguage(), {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                }),
+                              ])
+                            : uiText("自动刷新已开启")}
                       </div>
                     )}
                     {mailView !== "scheduled" &&
@@ -2651,20 +2687,20 @@ export function MailPage() {
                               onClick={() => markAllRead.mutate(allMessages)}
                             >
                               <MailCheck className="h-4 w-4" />
-                              全部已读
+                              {uiText("全部已读")}
                             </Button>
                           )}
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="outline" size="sm">
                                 <SlidersHorizontal className="h-4 w-4" />
-                                {filterLabels[mailFilter]}
+                                {uiText(filterLabels[mailFilter])}
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="start">
                               {(Object.keys(filterLabels) as MailFilter[]).map((value) => (
                                 <DropdownMenuItem key={value} onSelect={() => setMailFilter(value)}>
-                                  {filterLabels[value]}
+                                  {uiText(filterLabels[value])}
                                 </DropdownMenuItem>
                               ))}
                             </DropdownMenuContent>
@@ -2680,10 +2716,10 @@ export function MailPage() {
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder={
                           mailView === "external"
-                            ? "搜索远端邮件"
+                            ? uiText("搜索远端邮件")
                             : mailView === "scheduled"
-                              ? "搜索待发送"
-                              : "搜索邮件"
+                              ? uiText("搜索待发送")
+                              : uiText("搜索邮件")
                         }
                         className="pl-9"
                       />
@@ -2785,7 +2821,7 @@ export function MailPage() {
         open={!!pendingConfirm}
         title={pendingConfirm?.title || ""}
         description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || "确认"}
+        confirmText={pendingConfirm?.confirmText || uiText("确认")}
         destructive
         pending={del.isPending || bulkPending}
         onOpenChange={(open) => {
@@ -2832,7 +2868,7 @@ function buildMailMenuItems(
     key: item.id,
     folderId: item.id,
     folderName: item.name,
-    label: folderLabels[item.name] || item.name,
+    label: folderLabels[item.name] ? uiText(folderLabels[item.name]) : item.name,
     icon: folderIcons[item.role] || <Inbox className="h-4 w-4" />,
     count: item.name === "Drafts" ? item.totalCount : item.unreadCount,
     custom: isCustomMailFolder(item),
@@ -2943,6 +2979,8 @@ function menuAnchorOrder(name: string) {
 }
 
 function FolderSkeleton() {
+  useUiLanguage()
+
   return (
     <div className="space-y-2 p-2">
       <Skeleton className="h-8 w-full" />
@@ -2952,6 +2990,8 @@ function FolderSkeleton() {
   )
 }
 function MessageSkeleton() {
+  useUiLanguage()
+
   return (
     <div className="space-y-0">
       {Array.from({ length: 6 }).map((_, i) => (
@@ -2982,30 +3022,32 @@ function getEmptyMessage(mailView: MailView, folder: string, total: number) {
 }
 
 function externalAccountLabel(account: ExternalImapAccount) {
-  return account.oauthEmail || account.username || account.name || "外部邮箱"
+  return account.oauthEmail || account.username || account.name || uiText("外部邮箱")
 }
 
 function externalAccountSubtitle(account: ExternalImapAccount) {
   const label = externalAccountLabel(account)
-  const mode = account.storageMode === "local" ? "同步" : "直连"
+  const mode = uiText(account.storageMode === "local" ? "同步" : "直连")
   const name = account.name && account.name !== label ? account.name : ""
   return [name, account.host, mode].filter(Boolean).join(" · ")
 }
 
 function NoMailboxState({ onOpenSettings }: { onOpenSettings: () => void }) {
+  useUiLanguage()
+
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-6">
       <div className="w-full max-w-md rounded-lg border border-dashed p-8 text-center">
         <div className="mx-auto mb-4 grid size-12 place-items-center rounded-full bg-muted">
           <Mail className="h-5 w-5 text-muted-foreground" />
         </div>
-        <div className="text-lg font-semibold">还没有可用邮箱</div>
+        <div className="text-lg font-semibold">{uiText("还没有可用邮箱")}</div>
         <div className="mt-2 text-sm text-muted-foreground">
-          请在个人中心申请邮箱，或联系管理员为当前账号分配邮箱。
+          {uiText("请在个人中心申请邮箱，或联系管理员为当前账号分配邮箱。")}
         </div>
         <Button className="mt-5" onClick={onOpenSettings}>
           <Settings className="h-4 w-4" />
-          前往个人中心
+          {uiText("前往个人中心")}
         </Button>
       </div>
     </div>
@@ -3021,17 +3063,19 @@ function PermissionEmptyState({
   description: string
   onOpenSettings: () => void
 }) {
+  useUiLanguage()
+
   return (
     <div className="grid min-h-0 flex-1 place-items-center p-6">
       <div className="w-full max-w-md rounded-lg border border-dashed p-8 text-center">
         <div className="mx-auto mb-4 grid size-12 place-items-center rounded-full bg-muted">
           <ShieldCheck className="h-5 w-5 text-muted-foreground" />
         </div>
-        <div className="text-lg font-semibold">{title}</div>
-        <div className="mt-2 text-sm text-muted-foreground">{description}</div>
+        <div className="text-lg font-semibold">{uiText(title)}</div>
+        <div className="mt-2 text-sm text-muted-foreground">{uiText(description)}</div>
         <Button className="mt-5" onClick={onOpenSettings}>
           <Settings className="h-4 w-4" />
-          前往个人中心
+          {uiText("前往个人中心")}
         </Button>
       </div>
     </div>
@@ -3055,6 +3099,8 @@ function ScheduledSendView({
   cancelingId: string
   onCancel: (item: ScheduledSend) => void
 }) {
+  useUiLanguage()
+
   const empty = query.trim() ? "当前搜索没有匹配的定时邮件" : "没有待发送邮件"
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -3067,10 +3113,10 @@ function ScheduledSendView({
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Clock3 className="h-4 w-4" />
-            待发送
+            {uiText("待发送")}
           </div>
           <div className="text-xs text-muted-foreground">
-            {items.length} / {total} 封定时邮件
+            {uiText("{0} / {1} 封定时邮件", [items.length, total])}
           </div>
         </div>
       </div>
@@ -3095,6 +3141,8 @@ function ScheduledSendView({
 }
 
 function ScheduledSendSkeleton() {
+  useUiLanguage()
+
   return (
     <div className="space-y-0">
       {Array.from({ length: 4 }).map((_, index) => (
@@ -3119,6 +3167,8 @@ function ScheduledSendRow({
   pending: boolean
   onCancel: () => void
 }) {
+  useUiLanguage()
+
   const recipients = item.to?.length ? item.to.join(", ") : "未填写收件人"
   const failed = item.status === "failed"
   return (
@@ -3133,19 +3183,23 @@ function ScheduledSendRow({
       >
         <div className="min-w-0">
           <div className="mb-1 flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-semibold">{item.subject || "(无主题)"}</span>
+            <span className="truncate text-sm font-semibold">
+              {item.subject || uiText("(无主题)")}
+            </span>
             <ScheduledStatusBadge status={item.status} />
           </div>
-          <div className="truncate text-xs text-muted-foreground">发给 {recipients}</div>
+          <div className="truncate text-xs text-muted-foreground">
+            {uiText("发给 {0}", [recipients])}
+          </div>
           {item.snippet && (
             <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{item.snippet}</div>
           )}
           {failed && item.error && (
-            <div className="mt-2 text-xs text-destructive">{item.error}</div>
+            <div className="mt-2 text-xs text-destructive">{uiText(errorMessage(item.error))}</div>
           )}
         </div>
         <div className="text-sm">
-          <div className="text-xs text-muted-foreground">发送时间</div>
+          <div className="text-xs text-muted-foreground">{uiText("发送时间")}</div>
           <div className="mt-1 font-medium">{formatDateTime(item.sendAt)}</div>
         </div>
         <div className={cn("flex", compact ? "justify-start" : "justify-end")}>
@@ -3156,7 +3210,7 @@ function ScheduledSendRow({
             disabled={pending || item.status === "sending"}
             onClick={onCancel}
           >
-            {pending ? "处理中..." : failed ? "移除记录" : "取消发送"}
+            {pending ? uiText("处理中...") : failed ? uiText("移除记录") : uiText("取消发送")}
           </Button>
         </div>
       </div>
@@ -3165,6 +3219,8 @@ function ScheduledSendRow({
 }
 
 function ScheduledStatusBadge({ status }: { status: ScheduledSend["status"] }) {
+  useUiLanguage()
+
   const label =
     status === "pending"
       ? "等待发送"
@@ -3180,7 +3236,7 @@ function ScheduledStatusBadge({ status }: { status: ScheduledSend["status"] }) {
       variant={status === "failed" ? "destructive" : status === "sending" ? "secondary" : "outline"}
       className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
     >
-      {label}
+      {uiText(label)}
     </Badge>
   )
 }
@@ -3246,6 +3302,8 @@ function SendQueueView({
   onAudit: (item: SendQueueItem) => void
   canMutate: boolean
 }) {
+  useUiLanguage()
+
   const [filtersOpen, setFiltersOpen] = React.useState(false)
   const hasFilters = status !== "all" || messageId.trim() || recipient.trim() || from || to
   const activeFilterCount = [
@@ -3263,10 +3321,10 @@ function SendQueueView({
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-base font-semibold">
               <History className="h-4 w-4" />
-              发送队列
+              {uiText("发送队列")}
             </div>
             <div className="mt-0.5 text-xs text-muted-foreground">
-              {items.length} / {total} 个发送任务
+              {uiText("{0} / {1} 个发送任务", [items.length, total])}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -3280,10 +3338,10 @@ function SendQueueView({
                 aria-expanded={filtersOpen}
               >
                 <SlidersHorizontal className="h-4 w-4" />
-                筛选
+                {uiText("筛选")}
                 {activeFilterCount > 0 && (
                   <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-foreground px-1 text-[11px] text-background">
-                    {activeFilterCount}
+                    {uiText("{0}", [activeFilterCount])}
                   </span>
                 )}
               </Button>
@@ -3298,7 +3356,7 @@ function SendQueueView({
               <SelectContent>
                 {sendQueueStatusOptions.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
-                    {item.label}
+                    {uiText(item.label)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -3319,7 +3377,7 @@ function SendQueueView({
               <Input
                 value={messageId}
                 onChange={(event) => onMessageIdChange(event.target.value)}
-                placeholder="搜索 Message-ID"
+                placeholder={uiText("搜索 Message-ID")}
                 className="h-9 bg-background pl-9"
               />
             </div>
@@ -3328,7 +3386,7 @@ function SendQueueView({
               <Input
                 value={recipient}
                 onChange={(event) => onRecipientChange(event.target.value)}
-                placeholder="搜索收件人"
+                placeholder={uiText("搜索收件人")}
                 className="h-9 bg-background pl-9"
               />
             </div>
@@ -3340,18 +3398,20 @@ function SendQueueView({
             >
               <div className="flex shrink-0 items-center gap-1.5 px-1 text-xs text-muted-foreground">
                 <Clock3 className="h-4 w-4" />
-                时间
+                {uiText("时间")}
               </div>
               <Input
-                aria-label="开始时间"
+                aria-label={uiText("开始时间")}
                 type="datetime-local"
                 value={from}
                 onChange={(event) => onFromChange(event.target.value)}
                 className="h-8 min-w-0 border-0 px-2 shadow-none focus-visible:ring-0"
               />
-              {!mobile && <span className="shrink-0 text-xs text-muted-foreground">至</span>}
+              {!mobile && (
+                <span className="shrink-0 text-xs text-muted-foreground">{uiText("至")}</span>
+              )}
               <Input
-                aria-label="结束时间"
+                aria-label={uiText("结束时间")}
                 type="datetime-local"
                 value={to}
                 onChange={(event) => onToChange(event.target.value)}
@@ -3365,8 +3425,8 @@ function SendQueueView({
               className={cn("h-9 w-9 text-muted-foreground", mobile && "justify-self-end")}
               disabled={!hasFilters}
               onClick={onClearFilters}
-              title="重置筛选"
-              aria-label="重置筛选"
+              title={uiText("重置筛选")}
+              aria-label={uiText("重置筛选")}
             >
               <X className="h-4 w-4" />
             </Button>
@@ -3389,18 +3449,18 @@ function SendQueueView({
                 className="mt-1 text-muted-foreground"
                 onClick={onClearFilters}
               >
-                重置筛选
+                {uiText("重置筛选")}
               </Button>
             )}
           </div>
         )}
         {!loading && !mobile && items.length > 0 && (
           <div className="sticky top-0 z-10 hidden grid-cols-[120px_minmax(260px,1.5fr)_minmax(180px,0.75fr)_190px_104px] items-center gap-4 border-b bg-background/95 px-5 py-2 text-[11px] font-medium text-muted-foreground backdrop-blur xl:grid">
-            <div>状态</div>
-            <div>邮件</div>
-            <div>投递信息</div>
-            <div>更新时间</div>
-            <div className="text-right">操作</div>
+            <div>{uiText("状态")}</div>
+            <div>{uiText("邮件")}</div>
+            <div>{uiText("投递信息")}</div>
+            <div>{uiText("更新时间")}</div>
+            <div className="text-right">{uiText("操作")}</div>
           </div>
         )}
         {!loading &&
@@ -3441,6 +3501,8 @@ function SendQueueRow({
   onAudit: () => void
   canMutate: boolean
 }) {
+  useUiLanguage()
+
   const recipients = item.recipients?.length ? item.recipients.join(", ") : "未记录收件人"
   const failure = item.lastError || item.error || item.failureReason || ""
   const canRetry = item.status === "failed"
@@ -3464,34 +3526,37 @@ function SendQueueRow({
           </span>
         </div>
         <div className="min-w-0">
-          <div className="truncate text-sm font-semibold" title={item.subject || "(无主题)"}>
-            {item.subject || "(无主题)"}
+          <div
+            className="truncate text-sm font-semibold"
+            title={item.subject || uiText("(无主题)")}
+          >
+            {item.subject || uiText("(无主题)")}
           </div>
           <div className="mt-1 truncate text-xs text-muted-foreground" title={recipients}>
-            发给 {recipients}
+            {uiText("发给 {0}", [recipients])}
           </div>
           {failure && (
             <div
               className="mt-2 line-clamp-2 rounded bg-destructive/[0.08] px-2 py-1 text-xs text-destructive"
-              title={failure}
+              title={uiText(errorMessage(failure))}
             >
-              {failure}
+              {uiText(errorMessage(failure))}
             </div>
           )}
         </div>
         <div className="min-w-0 text-xs">
-          <div className="truncate font-medium" title={sendQueueSourceLabel(item.source)}>
-            {sendQueueSourceLabel(item.source)}
+          <div className="truncate font-medium" title={uiText(sendQueueSourceLabel(item.source))}>
+            {uiText(sendQueueSourceLabel(item.source))}
           </div>
           <div className="mt-1 text-muted-foreground">
-            尝试 {item.attemptCount}/{item.maxAttempts}
+            {uiText("尝试 {0}/{1}", [item.attemptCount, item.maxAttempts])}
           </div>
           {item.nextAttemptAt && (
             <div
               className="mt-1 truncate text-muted-foreground"
               title={formatDateTime(item.nextAttemptAt)}
             >
-              下次 {formatDateTime(item.nextAttemptAt)}
+              {uiText("下次 {0}", [formatDateTime(item.nextAttemptAt)])}
             </div>
           )}
         </div>
@@ -3501,7 +3566,7 @@ function SendQueueRow({
           </div>
           {item.deliveredAt && (
             <div className="mt-1 truncate text-muted-foreground">
-              投递于 {formatDateTime(item.deliveredAt)}
+              {uiText("投递于 {0}", [formatDateTime(item.deliveredAt)])}
             </div>
           )}
         </div>
@@ -3512,8 +3577,8 @@ function SendQueueRow({
             size="icon"
             className="h-8 w-8 text-muted-foreground"
             onClick={onAudit}
-            title="查看时间线"
-            aria-label="查看时间线"
+            title={uiText("查看时间线")}
+            aria-label={uiText("查看时间线")}
           >
             <History className="h-4 w-4" />
           </Button>
@@ -3525,8 +3590,8 @@ function SendQueueRow({
               className="h-8 w-8 text-muted-foreground hover:text-foreground"
               disabled={pending}
               onClick={onRetry}
-              title={pending ? "处理中..." : "重试任务"}
-              aria-label={pending ? "处理中..." : "重试任务"}
+              title={pending ? uiText("处理中...") : uiText("重试任务")}
+              aria-label={pending ? uiText("处理中...") : uiText("重试任务")}
             >
               <RotateCcw className={cn("h-4 w-4", pending && "animate-spin")} />
             </Button>
@@ -3540,8 +3605,8 @@ function SendQueueRow({
                   size="icon"
                   className="h-8 w-8 text-muted-foreground"
                   disabled={pending}
-                  title="更多操作"
-                  aria-label="更多操作"
+                  title={uiText("更多操作")}
+                  aria-label={uiText("更多操作")}
                 >
                   <Ellipsis className="h-4 w-4" />
                 </Button>
@@ -3552,7 +3617,7 @@ function SendQueueRow({
                   onSelect={onCancel}
                 >
                   <X className="h-4 w-4" />
-                  取消任务
+                  {uiText("取消任务")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -3564,6 +3629,8 @@ function SendQueueRow({
 }
 
 function SendQueueStatusBadge({ status }: { status: SendQueueStatus }) {
+  useUiLanguage()
+
   const label =
     status === "queued"
       ? "排队中"
@@ -3590,7 +3657,7 @@ function SendQueueStatusBadge({ status }: { status: SendQueueStatus }) {
       className={cn("h-6 shrink-0 gap-1.5 rounded-md px-2 text-[11px] font-medium", styles)}
     >
       <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {label}
+      {uiText(label)}
     </Badge>
   )
 }
@@ -3606,11 +3673,13 @@ function SendQueueAuditDialog({
   events: SendQueueAuditEvent[]
   onOpenChange: (open: boolean) => void
 }) {
+  useUiLanguage()
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(92vw,42rem)] max-w-none">
         <DialogHeader>
-          <DialogTitle>投递时间线</DialogTitle>
+          <DialogTitle>{uiText("投递时间线")}</DialogTitle>
         </DialogHeader>
         <div className="max-h-[60vh] overflow-auto pr-1">
           {loading && (
@@ -3622,7 +3691,7 @@ function SendQueueAuditDialog({
           )}
           {!loading && events.length === 0 && (
             <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
-              暂无投递事件
+              {uiText("暂无投递事件")}
             </div>
           )}
           {!loading && events.length > 0 && (
@@ -3633,7 +3702,9 @@ function SendQueueAuditDialog({
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2 text-sm font-medium">
                       {event.status && <SendQueueStatusBadge status={event.status} />}
-                      <span>{event.message || event.event || event.eventType || "队列事件"}</span>
+                      <span>
+                        {event.message || event.event || event.eventType || uiText("队列事件")}
+                      </span>
                     </div>
                     <span className="text-xs text-muted-foreground">
                       {formatDateTime(event.createdAt)}
@@ -3641,11 +3712,11 @@ function SendQueueAuditDialog({
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {typeof event.attemptCount === "number" && (
-                      <span>尝试次数：{event.attemptCount}</span>
+                      <span>{uiText("尝试次数：{0}", [event.attemptCount])}</span>
                     )}
                     {event.error && (
                       <span className="w-full rounded bg-destructive/[0.08] px-2 py-1.5 text-destructive">
-                        {event.error}
+                        {uiText(errorMessage(event.error))}
                       </span>
                     )}
                   </div>
@@ -3656,7 +3727,7 @@ function SendQueueAuditDialog({
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            关闭
+            {uiText("关闭")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -3690,23 +3761,33 @@ function BulkActionMenu({
   pending: boolean
   onAction: (action: BulkAction) => void
 }) {
+  useUiLanguage()
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" disabled={pending}>
-          批量操作
+          {uiText("批量操作")}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onSelect={() => onAction("read")}>标为已读</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("unread")}>标为未读</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("star")}>添加星标</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("unstar")}>取消星标</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("archive")}>归档</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("trash")}>移入回收站</DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => onAction("spam")}>移入垃圾邮件</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("read")}>{uiText("标为已读")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("unread")}>
+          {uiText("标为未读")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("star")}>{uiText("添加星标")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("unstar")}>
+          {uiText("取消星标")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("archive")}>{uiText("归档")}</DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("trash")}>
+          {uiText("移入回收站")}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => onAction("spam")}>
+          {uiText("移入垃圾邮件")}
+        </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => onAction("delete")} className="text-destructive">
-          删除
+          {uiText("删除")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -3734,6 +3815,8 @@ function SidebarContextMenu({
   onMove: (item: MailMenuItem, action: "top" | "up" | "down" | "bottom") => void
   onDelete: (item: MailMenuItem) => void
 }) {
+  useUiLanguage()
+
   React.useEffect(() => {
     if (!state) return
     const close = () => onClose()
@@ -3767,16 +3850,16 @@ function SidebarContextMenu({
     >
       <Button type="button" variant="ghost" className={itemClass} onClick={() => onOpen(item)}>
         <Inbox className="h-4 w-4" />
-        打开
+        {uiText("打开")}
       </Button>
       <Button type="button" variant="ghost" className={itemClass} onClick={onRefresh}>
         <RefreshCcw className="h-4 w-4" />
-        刷新
+        {uiText("刷新")}
       </Button>
       {canOrganize && (
         <Button type="button" variant="ghost" className={itemClass} onClick={onCreateFolder}>
           <Plus className="h-4 w-4" />
-          新建文件夹
+          {uiText("新建文件夹")}
         </Button>
       )}
       {canOrganize && customFolder && (
@@ -3790,7 +3873,7 @@ function SidebarContextMenu({
             onClick={() => onMove(item, "top")}
           >
             <ArrowLeft className="h-4 w-4 rotate-90" />
-            移到最上
+            {uiText("移到最上")}
           </Button>
           <Button
             type="button"
@@ -3800,7 +3883,7 @@ function SidebarContextMenu({
             onClick={() => onMove(item, "up")}
           >
             <ChevronDown className="h-4 w-4 rotate-180" />
-            上移一位
+            {uiText("上移一位")}
           </Button>
           <Button
             type="button"
@@ -3810,7 +3893,7 @@ function SidebarContextMenu({
             onClick={() => onMove(item, "down")}
           >
             <ChevronDown className="h-4 w-4" />
-            下移一位
+            {uiText("下移一位")}
           </Button>
           <Button
             type="button"
@@ -3820,7 +3903,7 @@ function SidebarContextMenu({
             onClick={() => onMove(item, "bottom")}
           >
             <ArrowLeft className="h-4 w-4 -rotate-90" />
-            移到最下
+            {uiText("移到最下")}
           </Button>
           <div className="my-1 h-px bg-border" />
           <Button
@@ -3833,7 +3916,7 @@ function SidebarContextMenu({
             onClick={() => onDelete(item)}
           >
             <Trash2 className="h-4 w-4" />
-            删除文件夹
+            {uiText("删除文件夹")}
           </Button>
         </>
       )}
@@ -3870,6 +3953,8 @@ function MessageContextMenu({
   onMoveToFolder: (message: MailMessage, folderName: string) => void
   onToggleLabel: (message: MailMessage, label: MailLabel) => void
 }) {
+  useUiLanguage()
+
   React.useEffect(() => {
     if (!state) return
     const close = () => onClose()
@@ -3908,7 +3993,7 @@ function MessageContextMenu({
         onClick={() => onAction(action, message)}
       >
         {icon}
-        <span>{label}</span>
+        <span>{uiText(label)}</span>
       </Button>
     )
   }
@@ -3934,46 +4019,48 @@ function MessageContextMenu({
       role="menu"
     >
       {item(
-        draft ? "编辑草稿" : "打开邮件",
+        draft ? uiText("编辑草稿") : uiText("打开邮件"),
         draft ? <PencilLine className="h-4 w-4" /> : <Mail className="h-4 w-4" />,
         "open"
       )}
       {!draft && canSend && (
         <>
-          {item("回复", <Reply className="h-4 w-4" />, "reply")}
-          {item("转发", <Forward className="h-4 w-4" />, "forward")}
+          {item(uiText("回复"), <Reply className="h-4 w-4" />, "reply")}
+          {item(uiText("转发"), <Forward className="h-4 w-4" />, "forward")}
         </>
       )}
       {!draft && canOrganize && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
           {item(
-            message.isRead ? "标为未读" : "标为已读",
+            message.isRead ? uiText("标为未读") : uiText("标为已读"),
             <MailCheck className="h-4 w-4" />,
             "read"
           )}
           {item(
-            message.isStarred ? "取消星标" : "添加星标",
+            message.isStarred ? uiText("取消星标") : uiText("添加星标"),
             <Star
               className={cn("h-4 w-4", message.isStarred && "fill-yellow-400 text-yellow-500")}
             />,
             "star"
           )}
           {item(
-            message.folder === "Archive" ? "取消归档" : "归档",
+            message.folder === "Archive" ? uiText("取消归档") : uiText("归档"),
             <Archive className="h-4 w-4" />,
             "archive"
           )}
           {message.folder !== "Trash" &&
-            item("移入回收站", <Trash2 className="h-4 w-4" />, "trash")}
+            item(uiText("移入回收站"), <Trash2 className="h-4 w-4" />, "trash")}
           {message.folder !== "Spam" &&
-            item("移入垃圾邮件", <Trash2 className="h-4 w-4" />, "spam")}
+            item(uiText("移入垃圾邮件"), <Trash2 className="h-4 w-4" />, "spam")}
         </>
       )}
       {!draft && canOrganize && movableFolders.length > 0 && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">移动到</div>
+          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            {uiText("移动到")}
+          </div>
           <div className="max-h-44 overflow-y-auto">
             {movableFolders.map((folder) => (
               <Button
@@ -3985,10 +4072,12 @@ function MessageContextMenu({
               >
                 {folderIcons[folder.role] || <Inbox className="h-4 w-4" />}
                 <span className="min-w-0 flex-1 truncate text-left">
-                  {folderLabels[folder.name] || folder.name}
+                  {folderLabels[folder.name] ? uiText(folderLabels[folder.name]) : folder.name}
                 </span>
                 {folder.totalCount > 0 && (
-                  <span className="text-xs text-muted-foreground">{folder.totalCount}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {uiText("{0}", [folder.totalCount])}
+                  </span>
                 )}
               </Button>
             ))}
@@ -3998,7 +4087,9 @@ function MessageContextMenu({
       {canManageLabels && labels.length > 0 && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
-          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">标签</div>
+          <div className="px-3 py-1.5 text-xs font-medium text-muted-foreground">
+            {uiText("标签")}
+          </div>
           <div className="max-h-44 overflow-y-auto">
             {labels.map((label) => {
               const active = (message.labels || []).some((item) => item.id === label.id)
@@ -4018,7 +4109,7 @@ function MessageContextMenu({
                     style={{ backgroundColor: colors.backgroundColor }}
                   />
                   <span className="min-w-0 flex-1 truncate text-left">
-                    {active ? `移除 ${label.name}` : label.name}
+                    {active ? uiText("移除 {0}", [label.name]) : label.name}
                   </span>
                 </Button>
               )
@@ -4029,7 +4120,7 @@ function MessageContextMenu({
       {canOrganize && (
         <>
           <div className="-mx-1 my-1 h-px bg-border" />
-          {item("删除", <Trash2 className="h-4 w-4" />, "delete", true)}
+          {item(uiText("删除"), <Trash2 className="h-4 w-4" />, "delete", true)}
         </>
       )}
     </div>
@@ -4056,6 +4147,8 @@ function CreateFolderDialog({
   onOpenChange: (open: boolean) => void
   onCreate: (name: string) => void
 }) {
+  useUiLanguage()
+
   const [name, setName] = React.useState("")
   React.useEffect(() => {
     if (open) setName("")
@@ -4065,7 +4158,7 @@ function CreateFolderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(92vw,28rem)] max-w-none">
         <DialogHeader>
-          <DialogTitle>新建文件夹</DialogTitle>
+          <DialogTitle>{uiText("新建文件夹")}</DialogTitle>
         </DialogHeader>
         <form
           className="space-y-4"
@@ -4075,20 +4168,22 @@ function CreateFolderDialog({
           }}
         >
           <div className="space-y-2">
-            <Label htmlFor="new-folder-name">文件夹名称</Label>
+            <Label htmlFor="new-folder-name">{uiText("文件夹名称")}</Label>
             <Input
               id="new-folder-name"
               autoFocus
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="例如：客户、账单、项目归档"
+              placeholder={uiText("例如：客户、账单、项目归档")}
             />
           </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {uiText("取消")}
             </Button>
-            <Button disabled={!trimmed || pending}>{pending ? "创建中..." : "创建"}</Button>
+            <Button disabled={!trimmed || pending}>
+              {pending ? uiText("创建中...") : uiText("创建")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -4119,6 +4214,8 @@ function MailPagination({
   onPreviousPage: () => void
   onNextPage: () => void
 }) {
+  useUiLanguage()
+
   const pageNumber = pageIndex + 1
   const totalPages =
     typeof totalCount === "number" ? Math.max(1, Math.ceil(totalCount / pageSize)) : undefined
@@ -4130,16 +4227,19 @@ function MailPagination({
       <div className="min-w-0 truncate whitespace-nowrap">
         {typeof totalCount === "number"
           ? `${rangeStart}–${rangeEnd} / ${totalCount}`
-          : `第 ${pageNumber} 页`}
+          : uiText("第 {0} 页", [pageNumber])}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        <span className="hidden whitespace-nowrap min-[420px]:inline">每页</span>
+        <span className="hidden whitespace-nowrap min-[420px]:inline">{uiText("每页")}</span>
         <Select
           value={String(pageSize)}
           onValueChange={(value) => onPageSizeChange(Number(value) as MailPageSize)}
           disabled={loading}
         >
-          <SelectTrigger className="h-8 w-[68px] bg-background px-2" aria-label="每页邮件数">
+          <SelectTrigger
+            className="h-8 w-[68px] bg-background px-2"
+            aria-label={uiText("每页邮件数")}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent align="end">
@@ -4155,13 +4255,13 @@ function MailPagination({
           className="h-8 w-8"
           disabled={!hasPreviousPage || loading}
           onClick={onPreviousPage}
-          title="上一页"
-          aria-label="上一页"
+          title={uiText("上一页")}
+          aria-label={uiText("上一页")}
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <span className="min-w-10 whitespace-nowrap text-center text-foreground">
-          {pageNumber}
+          {uiText("{0}", [pageNumber])}
           {totalPages ? ` / ${totalPages}` : ""}
         </span>
         <Button
@@ -4171,8 +4271,8 @@ function MailPagination({
           className="h-8 w-8"
           disabled={!hasNextPage || loading}
           onClick={onNextPage}
-          title="下一页"
-          aria-label="下一页"
+          title={uiText("下一页")}
+          aria-label={uiText("下一页")}
         >
           <ChevronRight className="h-4 w-4" />
         </Button>
@@ -4276,6 +4376,8 @@ function CompactMailView({
   canDownloadAttachments: boolean
   language: Language
 }) {
+  useUiLanguage()
+
   const selectedIndex = selectedId ? messages.findIndex((message) => message.id === selectedId) : -1
   const previousMessage = selectedIndex > 0 ? messages[selectedIndex - 1] : undefined
   const nextMessage =
@@ -4319,7 +4421,7 @@ function CompactMailView({
         <div className="flex min-w-0 flex-1 items-center gap-3">
           {canOrganize && (
             <Checkbox
-              aria-label="选择当前页邮件"
+              aria-label={uiText("选择当前页邮件")}
               checked={allSelected ? true : someSelected ? "indeterminate" : false}
               onCheckedChange={(value) => onSelectAll(value === true)}
             />
@@ -4333,15 +4435,15 @@ function CompactMailView({
           {selectedIds.length > 0 ? (
             <>
               <span className="hidden text-sm text-muted-foreground min-[380px]:inline">
-                已选 {selectedIds.length} 封
+                {uiText("已选 {0} 封", [selectedIds.length])}
               </span>
               {canOrganize && <BulkActionMenu pending={bulkPending} onAction={onBulkAction} />}
             </>
           ) : (
             <div className="text-sm text-muted-foreground">
               {typeof total === "number"
-                ? `${messages.length} / ${total} 封`
-                : `${messages.length} 封`}
+                ? uiText("{0} / {1} 封", [messages.length, total])
+                : uiText("{0} 封", [messages.length])}
             </div>
           )}
         </div>
@@ -4363,7 +4465,9 @@ function CompactMailView({
           />
         ))}
         {!loading && messages.length === 0 && (
-          <div className="p-8 text-center text-sm text-muted-foreground">{emptyMessage}</div>
+          <div className="p-8 text-center text-sm text-muted-foreground">
+            {uiText(emptyMessage)}
+          </div>
         )}
       </ScrollArea>
       <MailPagination
@@ -4431,22 +4535,24 @@ function CompactMessageDetail({
   canDownloadAttachments: boolean
   language: Language
 }) {
+  useUiLanguage()
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <div className="shrink-0 border-b px-3 py-2 sm:px-4">
         <div className="flex min-h-10 items-center gap-2 sm:hidden">
-          <Button variant="ghost" size="icon" onClick={onBack} aria-label="返回">
+          <Button variant="ghost" size="icon" onClick={onBack} aria-label={uiText("返回")}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="min-w-0 flex-1 truncate text-sm font-semibold">
-            {selected?.subject || "邮件详情"}
+            {selected?.subject || uiText("邮件详情")}
           </div>
           <Button
             variant="ghost"
             size="icon"
             disabled={!previousMessage}
             onClick={() => previousMessage && onSelect(previousMessage.id)}
-            aria-label="上一封"
+            aria-label={uiText("上一封")}
           >
             <ArrowLeft className="h-4 w-4" />
           </Button>
@@ -4455,14 +4561,14 @@ function CompactMessageDetail({
             size="icon"
             disabled={!nextMessage}
             onClick={() => nextMessage && onSelect(nextMessage.id)}
-            aria-label="下一封"
+            aria-label={uiText("下一封")}
           >
             <ArrowLeft className="h-4 w-4 rotate-180" />
           </Button>
           {selected && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" aria-label="更多操作">
+                <Button variant="ghost" size="icon" aria-label={uiText("更多操作")}>
                   <Ellipsis className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>
@@ -4470,38 +4576,38 @@ function CompactMessageDetail({
                 {selected.folder === "Drafts" ? (
                   <DropdownMenuItem onSelect={() => onSelect(selected.id)}>
                     <PencilLine className="h-4 w-4" />
-                    编辑草稿
+                    {uiText("编辑草稿")}
                   </DropdownMenuItem>
                 ) : (
                   <>
                     {canSend && (
                       <DropdownMenuItem onSelect={() => onReply(selected)}>
                         <Reply className="h-4 w-4" />
-                        回复
+                        {uiText("回复")}
                       </DropdownMenuItem>
                     )}
                     {canSend && (
                       <DropdownMenuItem onSelect={() => onForward(selected)}>
                         <Forward className="h-4 w-4" />
-                        转发
+                        {uiText("转发")}
                       </DropdownMenuItem>
                     )}
                     {selected.sendQueueId && (
                       <DropdownMenuItem onSelect={() => onSendTimeline(selected)}>
                         <History className="h-4 w-4" />
-                        投递时间线
+                        {uiText("投递时间线")}
                       </DropdownMenuItem>
                     )}
                     {canOrganize && (
                       <DropdownMenuItem onSelect={() => onArchive(selected)}>
                         <Archive className="h-4 w-4" />
-                        {selected.folder === "Archive" ? "取消归档" : "归档"}
+                        {selected.folder === "Archive" ? uiText("取消归档") : uiText("归档")}
                       </DropdownMenuItem>
                     )}
                     {canOrganize && (
                       <DropdownMenuItem onSelect={() => onToggleRead(selected)}>
                         <MailCheck className="h-4 w-4" />
-                        {selected.isRead ? "标为未读" : "标为已读"}
+                        {selected.isRead ? uiText("标为未读") : uiText("标为已读")}
                       </DropdownMenuItem>
                     )}
                     {canOrganize && (
@@ -4512,7 +4618,7 @@ function CompactMessageDetail({
                             selected.isStarred && "fill-yellow-400 text-yellow-500"
                           )}
                         />
-                        {selected.isStarred ? "取消星标" : "添加星标"}
+                        {selected.isStarred ? uiText("取消星标") : uiText("添加星标")}
                       </DropdownMenuItem>
                     )}
                   </>
@@ -4523,7 +4629,7 @@ function CompactMessageDetail({
                     className="text-destructive"
                   >
                     <Trash2 className="h-4 w-4" />
-                    删除
+                    {uiText("删除")}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -4534,42 +4640,42 @@ function CompactMessageDetail({
           <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="sm" onClick={onBack}>
               <ArrowLeft className="h-4 w-4" />
-              返回
+              {uiText("返回")}
             </Button>
             {selected?.folder === "Drafts" ? (
               <Button variant="outline" size="sm" onClick={() => onSelect(selected.id)}>
                 <PencilLine className="h-4 w-4" />
-                编辑草稿
+                {uiText("编辑草稿")}
               </Button>
             ) : (
               <>
                 {selected && canSend && (
                   <Button variant="outline" size="sm" onClick={() => onReply(selected)}>
                     <Reply className="h-4 w-4" />
-                    回复
+                    {uiText("回复")}
                   </Button>
                 )}
                 {selected && canSend && (
                   <Button variant="outline" size="sm" onClick={() => onForward(selected)}>
                     <Forward className="h-4 w-4" />
-                    转发
+                    {uiText("转发")}
                   </Button>
                 )}
                 {selected?.sendQueueId && (
                   <Button variant="outline" size="sm" onClick={() => onSendTimeline(selected)}>
                     <History className="h-4 w-4" />
-                    投递时间线
+                    {uiText("投递时间线")}
                   </Button>
                 )}
                 {selected && canOrganize && (
                   <Button variant="outline" size="sm" onClick={() => onArchive(selected)}>
-                    {selected.folder === "Archive" ? "取消归档" : "归档"}
+                    {selected.folder === "Archive" ? uiText("取消归档") : uiText("归档")}
                   </Button>
                 )}
                 {selected && canOrganize && (
                   <Button variant="outline" size="sm" onClick={() => onToggleRead(selected)}>
                     <MailCheck className="h-4 w-4" />
-                    {selected.isRead ? "标为未读" : "标为已读"}
+                    {selected.isRead ? uiText("标为未读") : uiText("标为已读")}
                   </Button>
                 )}
                 {selected && canOrganize && (
@@ -4580,7 +4686,7 @@ function CompactMessageDetail({
                         selected.isStarred && "fill-yellow-400 text-yellow-500"
                       )}
                     />
-                    {selected.isStarred ? "取消星标" : "添加星标"}
+                    {selected.isStarred ? uiText("取消星标") : uiText("添加星标")}
                   </Button>
                 )}
               </>
@@ -4588,7 +4694,7 @@ function CompactMessageDetail({
             {selected && canOrganize && (
               <Button variant="outline" size="sm" onClick={() => onDelete(selected)}>
                 <Trash2 className="h-4 w-4" />
-                删除
+                {uiText("删除")}
               </Button>
             )}
           </div>
@@ -4599,7 +4705,7 @@ function CompactMessageDetail({
               disabled={!previousMessage}
               onClick={() => previousMessage && onSelect(previousMessage.id)}
             >
-              上一封
+              {uiText("上一封")}
             </Button>
             <Button
               variant="ghost"
@@ -4607,7 +4713,7 @@ function CompactMessageDetail({
               disabled={!nextMessage}
               onClick={() => nextMessage && onSelect(nextMessage.id)}
             >
-              下一封
+              {uiText("下一封")}
             </Button>
           </div>
         </div>
@@ -4622,7 +4728,7 @@ function CompactMessageDetail({
       )}
       {!loading && !selected && (
         <div className="grid flex-1 place-items-center text-sm text-muted-foreground">
-          邮件不存在
+          {uiText("邮件不存在")}
         </div>
       )}
       {selected && (
@@ -4638,7 +4744,7 @@ function CompactMessageDetail({
                     type="button"
                     variant="ghost"
                     size="icon"
-                    aria-label={selected.isStarred ? "取消星标" : "添加星标"}
+                    aria-label={selected.isStarred ? uiText("取消星标") : uiText("添加星标")}
                     className="text-muted-foreground hover:text-yellow-500"
                     onClick={() => onStar(selected)}
                   >
@@ -4667,7 +4773,7 @@ function CompactMessageDetail({
               {threadMessages.length > 1 && (
                 <div className="mb-5 rounded-lg border bg-muted/20 p-3">
                   <div className="mb-2 text-sm font-medium">
-                    同会话邮件 ({threadMessages.length})
+                    {uiText("同会话邮件 ({0})", [threadMessages.length])}
                   </div>
                   <div className="space-y-1">
                     {threadMessages
@@ -4680,7 +4786,7 @@ function CompactMessageDetail({
                           onClick={() => onSelect(item.id)}
                           className="h-auto w-full justify-start truncate px-2 py-1 text-left text-sm font-normal"
                         >
-                          {item.subject || "(无主题)"}{" "}
+                          {item.subject || uiText("(无主题)")}{" "}
                           <span className="ml-1 text-muted-foreground">
                             {formatDate(item.receivedAt)}
                           </span>
@@ -4692,7 +4798,7 @@ function CompactMessageDetail({
               <TranslatableMailBody message={selected} language={language} />
               {selected.attachments && selected.attachments.length > 0 && (
                 <div className="mt-8 rounded-lg border p-4">
-                  <div className="mb-3 font-medium">附件</div>
+                  <div className="mb-3 font-medium">{uiText("附件")}</div>
                   <div className="space-y-2">
                     {selected.attachments.map((a) => (
                       <MailAttachment
@@ -4715,6 +4821,8 @@ function CompactMessageDetail({
 }
 
 function TranslatableMailBody({ message, language }: { message: MailMessage; language: Language }) {
+  useUiLanguage()
+
   const [translatedText, setTranslatedText] = React.useState("")
   const [translatedHtml, setTranslatedHtml] = React.useState("")
   const [showTranslated, setShowTranslated] = React.useState(false)
@@ -4748,7 +4856,7 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
     onError: (error) =>
       toast({
         title: "翻译失败",
-        description: error instanceof Error ? error.message : "请稍后重试",
+        description: errorMessage(error),
       }),
   })
 
@@ -4767,9 +4875,14 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="text-muted-foreground">
               {translatedText
-                ? `已翻译为 ${translationTargetLabel(language)}，当前${showTranslated ? "显示译文" : "显示原文"}`
-                : `检测到邮件可能不是当前语言，可翻译为 ${translationTargetLabel(language)}`}
-              {truncated && <span className="ml-1">（内容较长，仅翻译前半部分）</span>}
+                ? uiText("已翻译为 {0}，当前{1}", [
+                    uiText(translationTargetLabel(language)),
+                    showTranslated ? "显示译文" : "显示原文",
+                  ])
+                : uiText("检测到邮件可能不是当前语言，可翻译为 {0}", [
+                    translationTargetLabel(language),
+                  ])}
+              {truncated && <span className="ml-1">{uiText("（内容较长，仅翻译前半部分）")}</span>}
             </div>
             <div className="flex items-center gap-2">
               {translatedText && (
@@ -4779,7 +4892,7 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
                   size="sm"
                   onClick={() => setShowTranslated((value) => !value)}
                 >
-                  {showTranslated ? "显示原文" : "显示译文"}
+                  {showTranslated ? uiText("显示原文") : uiText("显示译文")}
                 </Button>
               )}
               <Button
@@ -4789,7 +4902,11 @@ function TranslatableMailBody({ message, language }: { message: MailMessage; lan
                 disabled={translationPending}
                 onClick={() => translate()}
               >
-                {translationPending ? "翻译中..." : translatedText ? "重新翻译" : "翻译"}
+                {translationPending
+                  ? uiText("翻译中...")
+                  : translatedText
+                    ? uiText("重新翻译")
+                    : uiText("翻译")}
               </Button>
             </div>
           </div>
@@ -4851,6 +4968,8 @@ function CompactMessageRow({
   onStar: () => void
   canOrganize: boolean
 }) {
+  useUiLanguage()
+
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
@@ -4870,7 +4989,7 @@ function CompactMessageRow({
       <div className="flex gap-3 sm:contents">
         {canOrganize && (
           <Checkbox
-            aria-label="选择邮件"
+            aria-label={uiText("选择邮件")}
             checked={checked}
             onCheckedChange={(value) => onCheckedChange(value === true)}
             onClick={(event) => event.stopPropagation()}
@@ -4896,7 +5015,7 @@ function CompactMessageRow({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  aria-label={message.isStarred ? "取消星标" : "添加星标"}
+                  aria-label={message.isStarred ? uiText("取消星标") : uiText("添加星标")}
                   className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
                   onClick={(event) => {
                     event.stopPropagation()
@@ -4923,7 +5042,7 @@ function CompactMessageRow({
                 variant="secondary"
                 className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
               >
-                已定时
+                {uiText("已定时")}
               </Badge>
             )}
             {visibleLabels.map((label) => (
@@ -4934,7 +5053,7 @@ function CompactMessageRow({
                 variant="outline"
                 className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground"
               >
-                +{hiddenLabelCount}
+                +{uiText("{0}", [hiddenLabelCount])}
               </Badge>
             )}
             {message.hasAttachments && (
@@ -4954,7 +5073,7 @@ function CompactMessageRow({
           type="button"
           variant="ghost"
           size="icon"
-          aria-label={message.isStarred ? "取消星标" : "添加星标"}
+          aria-label={message.isStarred ? uiText("取消星标") : uiText("添加星标")}
           className="hidden h-7 w-7 text-muted-foreground hover:text-yellow-500 sm:inline-flex"
           onClick={(event) => {
             event.stopPropagation()
@@ -4981,6 +5100,8 @@ function NewLabelButton({
   editing?: boolean
   onEditingChange?: (v: boolean) => void
 }) {
+  useUiLanguage()
+
   const [internalEditing, setInternalEditing] = React.useState(false)
   const isEditing = editing ?? internalEditing
   const setEditingState = onEditingChange ?? setInternalEditing
@@ -5012,7 +5133,7 @@ function NewLabelButton({
           onBlur={() => {
             if (!value.trim()) setEditingState(false)
           }}
-          placeholder="新建标签"
+          placeholder={uiText("新建标签")}
           disabled={pending}
         />
       </form>
@@ -5021,7 +5142,7 @@ function NewLabelButton({
   return (
     <SidebarMenuButton className="text-muted-foreground" onClick={() => setEditingState(true)}>
       <Plus className="h-4 w-4" />
-      <span>新建标签</span>
+      <span>{uiText("新建标签")}</span>
     </SidebarMenuButton>
   )
 }
@@ -5031,23 +5152,19 @@ function AccountHeader({
   name,
   email,
   darkMode,
-  language,
   onToggleTheme,
-  onLanguageChange,
   onSettings,
 }: {
   collapsed: boolean
   name: string
   email?: string
   darkMode: boolean
-  language: Language
   onToggleTheme: () => void
-  onLanguageChange: (language: Language) => void
   onSettings: () => void
 }) {
+  useUiLanguage()
+
   const displayName = cleanAccountName(name, email)
-  const currentLanguage =
-    languageOptions.find((item) => item.value === language) || languageOptions[0]
   if (collapsed) {
     return (
       <div className="flex justify-center">
@@ -5081,37 +5198,7 @@ function AccountHeader({
         >
           {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-8 rounded-md text-muted-foreground"
-              aria-label="切换语言"
-              title="切换语言"
-            >
-              <span className="text-sm font-medium leading-none">{currentLanguage.shortLabel}</span>
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-40">
-            {languageOptions.map((item) => (
-              <DropdownMenuItem
-                key={item.value}
-                onSelect={() => onLanguageChange(item.value)}
-                className="gap-2"
-              >
-                <span className="min-w-0 flex-1">{item.label}</span>
-                <Check
-                  className={cn(
-                    "h-4 w-4 text-emerald-500",
-                    item.value === language ? "opacity-100" : "opacity-0"
-                  )}
-                />
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <LanguageSelector />
         <Button
           type="button"
           variant="ghost"
@@ -5137,6 +5224,8 @@ function MailboxSwitcher({
   selectedMailbox?: Mailbox
   onSelect: (mailboxId: string) => void
 }) {
+  useUiLanguage()
+
   const owned = mailboxes.filter((mailbox) => mailbox.access !== "read")
   const shared = mailboxes.filter((mailbox) => mailbox.access === "read")
   return (
@@ -5153,11 +5242,11 @@ function MailboxSwitcher({
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                {selectedMailbox?.address || "当前邮箱"}
+                {selectedMailbox?.address || uiText("当前邮箱")}
               </span>
               {selectedMailbox?.access === "read" && (
                 <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                  共享
+                  {uiText("共享")}
                 </Badge>
               )}
               <ChevronsUpDown className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -5166,9 +5255,13 @@ function MailboxSwitcher({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        {mailboxes.length === 0 && <DropdownMenuItem disabled>没有可用邮箱</DropdownMenuItem>}
+        {mailboxes.length === 0 && (
+          <DropdownMenuItem disabled>{uiText("没有可用邮箱")}</DropdownMenuItem>
+        )}
         {owned.length > 0 && (
-          <DropdownMenuLabel className="text-xs text-muted-foreground">我的邮箱</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            {uiText("我的邮箱")}
+          </DropdownMenuLabel>
         )}
         {owned.map((mailbox) => (
           <DropdownMenuItem
@@ -5187,7 +5280,9 @@ function MailboxSwitcher({
         ))}
         {owned.length > 0 && shared.length > 0 && <DropdownMenuSeparator />}
         {shared.length > 0 && (
-          <DropdownMenuLabel className="text-xs text-muted-foreground">共享给我</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-xs text-muted-foreground">
+            {uiText("共享给我")}
+          </DropdownMenuLabel>
         )}
         {shared.map((mailbox) => (
           <DropdownMenuItem
@@ -5204,11 +5299,11 @@ function MailboxSwitcher({
             <span className="min-w-0 flex-1">
               <span className="block truncate font-medium">{mailbox.address}</span>
               <span className="block truncate text-xs text-muted-foreground">
-                来自 {mailbox.sharedBy}
+                {uiText("来自 {0}", [mailbox.sharedBy])}
               </span>
             </span>
             <Badge variant="outline" className="shrink-0 text-[10px]">
-              只读
+              {uiText("只读")}
             </Badge>
           </DropdownMenuItem>
         ))}
@@ -5291,6 +5386,8 @@ function MessageMetaPanel({
   onRemoveLabel?: (labelId: string) => void
   labelPending?: boolean
 }) {
+  useUiLanguage()
+
   const fromName = senderDisplayName(message)
   const fromAddress = senderAddress(message)
   const to = cleanAddressList(message.to)
@@ -5309,42 +5406,42 @@ function MessageMetaPanel({
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1 space-y-2">
-          <MessageMetaRow label="发件人">
+          <MessageMetaRow label={uiText("发件人")}>
             <span className="break-words font-medium text-foreground" title={senderTitle(message)}>
               {fromName}
             </span>
           </MessageMetaRow>
-          <MessageMetaRow label="发件人地址">
+          <MessageMetaRow label={uiText("发件人地址")}>
             <span className="break-all">{fromAddress}</span>
           </MessageMetaRow>
-          <MessageMetaRow label="收件人">
-            <AddressList values={to} empty="未填写收件人" />
+          <MessageMetaRow label={uiText("收件人")}>
+            <AddressList values={to} empty={uiText("未填写收件人")} />
           </MessageMetaRow>
           {cc.length > 0 && (
-            <MessageMetaRow label="抄送">
+            <MessageMetaRow label={uiText("抄送")}>
               <AddressList values={cc} />
             </MessageMetaRow>
           )}
           {bcc.length > 0 && (
-            <MessageMetaRow label="密送">
+            <MessageMetaRow label={uiText("密送")}>
               <AddressList values={bcc} />
             </MessageMetaRow>
           )}
           {deliveredTo && (
-            <MessageMetaRow label="投递邮箱">
+            <MessageMetaRow label={uiText("投递邮箱")}>
               <span className="break-all">{deliveredTo}</span>
             </MessageMetaRow>
           )}
           {showSentAt && (
-            <MessageMetaRow label="发送时间">
+            <MessageMetaRow label={uiText("发送时间")}>
               <span>{formatDateTime(message.sentAt)}</span>
             </MessageMetaRow>
           )}
-          <MessageMetaRow label="接收时间">
+          <MessageMetaRow label={uiText("接收时间")}>
             <span>{formatDateTime(message.receivedAt)}</span>
           </MessageMetaRow>
           {availableLabels && onAddLabel && onRemoveLabel && (
-            <MessageMetaRow label="标签">
+            <MessageMetaRow label={uiText("标签")}>
               <div className="flex flex-wrap items-center gap-1.5">
                 {labels.map((label) => {
                   const colors = generateLabelColor(label.name)
@@ -5364,7 +5461,7 @@ function MessageMetaPanel({
                         className="label-badge-delete -mr-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full opacity-0 transition-opacity hover:bg-muted group-hover/badge:opacity-100"
                         onClick={() => onRemoveLabel(label.id)}
                         disabled={labelPending}
-                        aria-label={`移除标签 ${label.name}`}
+                        aria-label={uiText("移除标签 {0}", [label.name])}
                       >
                         <X className="h-2.5 w-2.5" />
                       </button>
@@ -5376,14 +5473,14 @@ function MessageMetaPanel({
                     <button
                       type="button"
                       className="inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-md border text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                      aria-label="添加标签"
+                      aria-label={uiText("添加标签")}
                     >
                       <Plus className="h-3 w-3" />
                     </button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start" className="w-48">
                     {availableLabels.length === 0 && (
-                      <DropdownMenuItem disabled>请先在侧栏新建标签</DropdownMenuItem>
+                      <DropdownMenuItem disabled>{uiText("请先在侧栏新建标签")}</DropdownMenuItem>
                     )}
                     {availableLabels.map((label) => {
                       const active = labels.some((l) => l.id === label.id)
@@ -5418,15 +5515,21 @@ function MessageMetaPanel({
 }
 
 function MessageMetaRow({ label, children }: { label: string; children: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="grid gap-1 sm:grid-cols-[5rem_minmax(0,1fr)]">
-      <div className="shrink-0 text-xs font-medium text-muted-foreground sm:pt-0.5">{label}</div>
+      <div className="shrink-0 text-xs font-medium text-muted-foreground sm:pt-0.5">
+        {uiText(label)}
+      </div>
       <div className="min-w-0 text-foreground">{children}</div>
     </div>
   )
 }
 
 function AddressList({ values, empty = "无" }: { values: string[]; empty?: string }) {
+  useUiLanguage()
+
   if (values.length === 0) return <span className="text-muted-foreground">{empty}</span>
   return (
     <div className="flex min-w-0 flex-wrap gap-1.5">
@@ -5465,6 +5568,8 @@ function MessageRow({
   onStar: () => void
   canOrganize: boolean
 }) {
+  useUiLanguage()
+
   const visibleLabels = (message.labels || []).slice(0, 2)
   const hiddenLabelCount = Math.max((message.labels?.length || 0) - visibleLabels.length, 0)
   const senderName = senderDisplayName(message)
@@ -5481,7 +5586,7 @@ function MessageRow({
       <div className="flex gap-3">
         {canOrganize && (
           <Checkbox
-            aria-label="选择邮件"
+            aria-label={uiText("选择邮件")}
             checked={checked}
             onCheckedChange={(value) => onCheckedChange(value === true)}
             onClick={(event) => event.stopPropagation()}
@@ -5499,7 +5604,7 @@ function MessageRow({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  aria-label={message.isStarred ? "取消星标" : "添加星标"}
+                  aria-label={message.isStarred ? uiText("取消星标") : uiText("添加星标")}
                   className="h-7 w-7 text-muted-foreground hover:text-yellow-500"
                   onClick={(e) => {
                     e.stopPropagation()
@@ -5524,7 +5629,7 @@ function MessageRow({
                 variant="secondary"
                 className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal"
               >
-                已定时
+                {uiText("已定时")}
               </Badge>
             )}
             {visibleLabels.map((label) => (
@@ -5535,7 +5640,7 @@ function MessageRow({
                 variant="outline"
                 className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground"
               >
-                +{hiddenLabelCount}
+                +{uiText("{0}", [hiddenLabelCount])}
               </Badge>
             )}
             {message.hasAttachments && (
@@ -5550,6 +5655,8 @@ function MessageRow({
 }
 
 function MailLabelBadge({ label }: { label: MailLabel }) {
+  useUiLanguage()
+
   const colors = generateLabelColor(label.name)
   return (
     <Badge variant="outline" className="shrink-0 gap-1.5 rounded-md font-normal">
@@ -5585,6 +5692,8 @@ function ComposeDialog({
   onOpenChange: (v: boolean) => void
   onSent: () => void
 }) {
+  useUiLanguage()
+
   const { toast } = useToast()
   const qc = useQueryClient()
   const [files, setFiles] = React.useState<File[]>([])
@@ -5668,19 +5777,22 @@ function ComposeDialog({
           // The draft may already have been removed by another client.
         }
       }
-      toast({ title: payloads.length > 1 ? `已分别发送 ${payloads.length} 封邮件` : "发送成功" })
+      toast({
+        title:
+          payloads.length > 1 ? uiMessage("已分别发送 {0} 封邮件", [payloads.length]) : "发送成功",
+      })
       setFiles([])
       setDraftId("")
       onSent()
     },
-    onError: (e) => toast({ title: "发送失败", description: e.message }),
+    onError: (e) => toast({ title: "发送失败", description: errorMessage(e) }),
   })
   const scheduleSend = useMutation({
     mutationFn: (payload: SendPayload & { draftId?: string; sendAt: string }) =>
       api.scheduleSend(payload),
     onSuccess: (scheduled) => {
       sendStartedRef.current = true
-      toast({ title: `已定时发送 ${formatDateTime(scheduled.sendAt)}` })
+      toast({ title: uiMessage("已定时发送 {0}", [{ date: scheduled.sendAt }]) })
       setScheduleDialogOpen(false)
       setFiles([])
       void Promise.all([
@@ -5691,7 +5803,7 @@ function ComposeDialog({
       ])
       onSent()
     },
-    onError: (e) => toast({ title: "定时发送失败", description: e.message }),
+    onError: (e) => toast({ title: "定时发送失败", description: errorMessage(e) }),
   })
 
   React.useEffect(() => {
@@ -5790,7 +5902,7 @@ function ComposeDialog({
   function confirmOrRun(
     intent: Omit<ComposeSendIntent, "description"> & {
       warnings: string[]
-      defaultDescription?: string
+      defaultDescription?: UiText
     }
   ) {
     if (intent.warnings.length === 0) {
@@ -5799,9 +5911,13 @@ function ComposeDialog({
     }
     setSendIntent({
       title: intent.title,
-      description: intent.defaultDescription
-        ? `${intent.defaultDescription}\n${intent.warnings.join("\n")}`
-        : intent.warnings.join("\n"),
+      description: {
+        key: "",
+        lines: [
+          ...(intent.defaultDescription ? [intent.defaultDescription] : []),
+          ...intent.warnings,
+        ],
+      },
       confirmText: intent.confirmText,
       onConfirm: intent.onConfirm,
     })
@@ -5815,7 +5931,10 @@ function ComposeDialog({
         : nextFiles
     const blockedCount = nextFiles.length - allowed.length
     if (blockedCount > 0) {
-      toast({ title: "附件超过权限组上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+      toast({
+        title: "附件超过权限组上限",
+        description: uiMessage("当前单个附件上限 {0}", [maxAttachmentText]),
+      })
     }
     if (allowed.length > 0) {
       setAttachmentsTouched(true)
@@ -5826,7 +5945,10 @@ function ComposeDialog({
   function attachmentsWithinLimit() {
     if (maxAttachmentBytes <= 0) return true
     if (files.every((file) => file.size <= maxAttachmentBytes)) return true
-    toast({ title: "附件超过权限组上限", description: `当前单个附件上限 ${maxAttachmentText}` })
+    toast({
+      title: "附件超过权限组上限",
+      description: uiMessage("当前单个附件上限 {0}", [maxAttachmentText]),
+    })
     return false
   }
 
@@ -5903,7 +6025,7 @@ function ComposeDialog({
     confirmOrRun({
       title: "确认定时发送？",
       confirmText: "继续定时发送",
-      defaultDescription: `发送时间：${formatDateTime(sendAt)}`,
+      defaultDescription: uiMessage("发送时间：{0}", [{ date: sendAt }]),
       warnings: buildSendWarnings(attachments.length),
       onConfirm: () => {
         sendStartedRef.current = true
@@ -5926,7 +6048,7 @@ function ComposeDialog({
         >
           <DialogHeader className="border-b px-4 py-3 text-left sm:px-6 sm:py-4">
             <DialogTitle className="flex min-w-0 flex-col gap-1 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pr-6">
-              <span>{draftId ? "编辑草稿" : "写信"}</span>
+              <span>{draftId ? uiText("编辑草稿") : uiText("写信")}</span>
               <span
                 className={cn(
                   "text-xs font-normal",
@@ -5934,25 +6056,30 @@ function ComposeDialog({
                 )}
               >
                 {draftStatus === "saving"
-                  ? "正在保存草稿..."
+                  ? uiText("正在保存草稿...")
                   : draftStatus === "saved" && lastSavedAt
-                    ? `草稿已保存 ${lastSavedAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+                    ? uiText("草稿已保存 {0}", [
+                        lastSavedAt.toLocaleTimeString(getInitialLanguage(), {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        }),
+                      ])
                     : draftStatus === "error"
-                      ? "草稿保存失败"
+                      ? uiText("草稿保存失败")
                       : ""}
               </span>
             </DialogTitle>
           </DialogHeader>
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-            <ComposeField label="发件邮箱">
+            <ComposeField label={uiText("发件邮箱")}>
               <Input
-                value={mailbox?.address || "未选择"}
+                value={mailbox?.address || uiText("未选择")}
                 readOnly
                 className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
               />
             </ComposeField>
             <ComposeField
-              label="收件人"
+              label={uiText("收件人")}
               action={
                 <div className="flex shrink-0 flex-wrap items-center justify-start gap-1 text-sm sm:justify-end sm:gap-2">
                   <Button
@@ -5962,7 +6089,7 @@ function ComposeDialog({
                     className="h-8 px-2 font-normal"
                     onClick={() => setShowCc((value) => !value)}
                   >
-                    抄送
+                    {uiText("抄送")}
                   </Button>
                   <Button
                     type="button"
@@ -5971,7 +6098,7 @@ function ComposeDialog({
                     className="h-8 px-2 font-normal"
                     onClick={() => setShowBcc((value) => !value)}
                   >
-                    密送
+                    {uiText("密送")}
                   </Button>
                   <div className="flex items-center gap-2 rounded-md px-2 py-1">
                     <Checkbox
@@ -5983,7 +6110,7 @@ function ComposeDialog({
                       htmlFor="compose-send-separately"
                       className="cursor-pointer text-sm font-normal"
                     >
-                      分别发送
+                      {uiText("分别发送")}
                     </Label>
                   </div>
                 </div>
@@ -5991,7 +6118,7 @@ function ComposeDialog({
             >
               <Input
                 name="to"
-                placeholder="name@example.com，多个地址用逗号或空格分隔"
+                placeholder={uiText("name@example.com，多个地址用逗号或空格分隔")}
                 value={toValue}
                 onChange={(event) => setToValue(event.target.value)}
                 required
@@ -5999,7 +6126,7 @@ function ComposeDialog({
               />
             </ComposeField>
             {showCc && (
-              <ComposeField label="抄送">
+              <ComposeField label={uiText("抄送")}>
                 <Input
                   name="cc"
                   placeholder="cc@example.com"
@@ -6010,7 +6137,7 @@ function ComposeDialog({
               </ComposeField>
             )}
             {showBcc && (
-              <ComposeField label="密送">
+              <ComposeField label={uiText("密送")}>
                 <Input
                   name="bcc"
                   placeholder="bcc@example.com"
@@ -6020,10 +6147,10 @@ function ComposeDialog({
                 />
               </ComposeField>
             )}
-            <ComposeField label="主　题">
+            <ComposeField label={uiText("主　题")}>
               <Input
                 name="subject"
-                placeholder="输入主题"
+                placeholder={uiText("输入主题")}
                 value={subjectValue}
                 onChange={(event) => setSubjectValue(event.target.value)}
                 className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
@@ -6050,7 +6177,7 @@ function ComposeDialog({
               className="min-h-10 px-3"
               onClick={() => onOpenChange(false)}
             >
-              取消
+              {uiText("取消")}
             </Button>
             {canSchedule && (
               <Button
@@ -6061,13 +6188,13 @@ function ComposeDialog({
                 onClick={() => setScheduleDialogOpen(true)}
               >
                 <Calendar className="h-4 w-4" />
-                定时
+                {uiText("定时")}
               </Button>
             )}
             {canSend && (
               <Button className="min-h-10 px-4" disabled={send.isPending || !mailbox}>
                 <Send className="h-4 w-4" />
-                {send.isPending ? "发送中..." : "发送"}
+                {send.isPending ? uiText("发送中...") : uiText("发送")}
               </Button>
             )}
           </DialogFooter>
@@ -6082,7 +6209,7 @@ function ComposeDialog({
           open={!!sendIntent}
           title={sendIntent?.title || ""}
           description={sendIntent?.description}
-          confirmText={sendIntent?.confirmText || "继续"}
+          confirmText={sendIntent?.confirmText || uiText("继续")}
           pending={send.isPending || scheduleSend.isPending}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) setSendIntent(null)
@@ -6103,9 +6230,13 @@ function ComposeField({
   children: React.ReactNode
   action?: React.ReactNode
 }) {
+  useUiLanguage()
+
   return (
     <div className="flex min-h-14 flex-col gap-2 border-b px-4 py-2 sm:flex-row sm:items-center sm:px-6">
-      <Label className="shrink-0 text-base font-normal text-foreground sm:w-20">{label}</Label>
+      <Label className="shrink-0 text-base font-normal text-foreground sm:w-20">
+        {uiText(label)}
+      </Label>
       <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
         {children}
         {action}
@@ -6125,6 +6256,8 @@ function ScheduleSendDialog({
   onOpenChange: (open: boolean) => void
   onConfirm: (sendAt: string) => void
 }) {
+  useUiLanguage()
+
   const [value, setValue] = React.useState("")
   const { toast } = useToast()
   const presets = React.useMemo(() => (open ? scheduledSendPresets() : []), [open])
@@ -6152,7 +6285,7 @@ function ScheduleSendDialog({
       <DialogContent className="sm:max-w-md">
         <form className="grid gap-4" onSubmit={submit}>
           <DialogHeader>
-            <DialogTitle>定时发送</DialogTitle>
+            <DialogTitle>{uiText("定时发送")}</DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-2">
             {presets.map((preset) => (
@@ -6164,12 +6297,12 @@ function ScheduleSendDialog({
                 onClick={() => setValue(preset.value)}
               >
                 <Clock3 className="h-4 w-4" />
-                {preset.label}
+                {uiText(preset.label)}
               </Button>
             ))}
           </div>
           <div className="grid gap-2">
-            <Label htmlFor="schedule-send-at">发送时间</Label>
+            <Label htmlFor="schedule-send-at">{uiText("发送时间")}</Label>
             <Input
               id="schedule-send-at"
               type="datetime-local"
@@ -6185,10 +6318,10 @@ function ScheduleSendDialog({
               onClick={() => onOpenChange(false)}
               disabled={pending}
             >
-              取消
+              {uiText("取消")}
             </Button>
             <Button type="submit" disabled={pending}>
-              {pending ? "正在设置..." : "确认定时"}
+              {pending ? uiText("正在设置...") : uiText("确认定时")}
             </Button>
           </DialogFooter>
         </form>
@@ -6400,8 +6533,8 @@ function scheduleToNodeAttributes(schedule: ScheduleDraft) {
   return {
     title: schedule.title,
     time: schedule.allDay
-      ? formatDate(start.toISOString())
-      : `${formatDateTime(start.toISOString())} - ${formatTimeOnly(end)}`,
+      ? formatDate(start.toISOString(), "zh-CN")
+      : `${formatDateTime(start.toISOString(), "zh-CN")} - ${formatTimeOnly(end)}`,
     duration: schedule.allDay ? "全天" : durationLabel(schedule.durationMinutes),
     reminder: reminderLabel(schedule.reminderMinutes),
     repeat: repeatLabel(schedule.repeat),
@@ -6429,6 +6562,8 @@ function MailBodyComposer({
   onPickFiles: (files: File[]) => void
   onRemoveFile: (index: number) => void
 }) {
+  const [composerLanguage] = useUiLanguage()
+
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const dirtyRef = React.useRef(false)
   const lastDefaultRef = React.useRef(`${defaultValue}\n${defaultHtml || ""}`)
@@ -6465,7 +6600,7 @@ function MailBodyComposer({
         HTMLAttributes: { style: "max-width:100%;height:auto;border-radius:8px;margin:12px 0;" },
       }),
       TextAlign.configure({ types: ["heading", "paragraph"] }),
-      Placeholder.configure({ placeholder: "输入正文" }),
+      Placeholder.configure({ placeholder: () => uiText("输入正文") }),
       ScheduleCardNode,
     ],
     content: composerInitialHtml(defaultValue, defaultHtml),
@@ -6473,7 +6608,7 @@ function MailBodyComposer({
       attributes: {
         class:
           "mail-html min-h-[240px] min-w-0 flex-1 overflow-y-auto px-4 py-4 text-base leading-7 outline-none sm:min-h-[280px] sm:px-6 sm:py-5",
-        "aria-label": "正文",
+        "aria-label": uiText("正文"),
       },
       handlePaste(view, event) {
         const clipboard = event.clipboardData
@@ -6508,6 +6643,20 @@ function MailBodyComposer({
       setSelectionVersion((value) => value + 1)
     },
   })
+
+  React.useEffect(() => {
+    if (!editor || editor.isDestroyed) return
+    editor.setOptions({
+      editorProps: {
+        ...editor.options.editorProps,
+        attributes: {
+          ...(editor.options.editorProps.attributes as Record<string, string>),
+          "aria-label": uiText("正文"),
+        },
+      },
+    })
+    editor.view.dispatch(editor.state.tr.setMeta("language", composerLanguage))
+  }, [editor, composerLanguage])
 
   React.useEffect(() => {
     if (!editor) return
@@ -6639,14 +6788,14 @@ function MailBodyComposer({
       />
       <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-6">
         <ToolbarButton
-          label="撤销"
+          label={uiText("撤销")}
           disabled={!editor?.can().undo()}
           onClick={() => editor?.chain().focus().undo().run()}
         >
           <Undo2 className="h-4 w-4" />
         </ToolbarButton>
         <ToolbarButton
-          label="重做"
+          label={uiText("重做")}
           disabled={!editor?.can().redo()}
           onClick={() => editor?.chain().focus().redo().run()}
         >
@@ -6663,7 +6812,7 @@ function MailBodyComposer({
               onMouseDown={(event) => event.preventDefault()}
             >
               <Plus className="h-4 w-4" />
-              插入
+              {uiText("插入")}
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
@@ -6673,36 +6822,36 @@ function MailBodyComposer({
               onSelect={() => fileInputRef.current?.click()}
             >
               <Paperclip className="h-4 w-4" />
-              附件
+              {uiText("附件")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className={composerMenuItemClass}
               onSelect={() => openInsertDialog("link")}
             >
               <Link className="h-4 w-4" />
-              链接
+              {uiText("链接")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className={composerMenuItemClass}
               onSelect={() => openInsertDialog("image")}
             >
               <Image className="h-4 w-4" />
-              图片链接
+              {uiText("图片链接")}
             </DropdownMenuItem>
             <DropdownMenuItem
               className={composerMenuItemClass}
               onSelect={() => editor?.chain().focus().setHorizontalRule().run()}
             >
               <span className="h-4 w-4 border-t border-current" aria-hidden />
-              分隔线
+              {uiText("分隔线")}
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
         <span className="rounded-md border px-2 py-1 text-xs text-muted-foreground">
-          附件 {maxAttachmentText}
+          {uiText("附件 {0}", [maxAttachmentText])}
         </span>
         <ToolbarTextButton
-          label="日程"
+          label={uiText("日程")}
           icon={<Calendar className="h-4 w-4" />}
           onClick={() => setScheduleOpen(true)}
         />
@@ -6719,7 +6868,7 @@ function MailBodyComposer({
               onMouseDown={(event) => event.preventDefault()}
             >
               <Smile className="h-4 w-4" />
-              表情
+              {uiText("表情")}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-64 p-2">
@@ -6740,20 +6889,20 @@ function MailBodyComposer({
           </DropdownMenuContent>
         </DropdownMenu>
         <ToolbarTextButton
-          label="格式"
+          label={uiText("格式")}
           icon={<Type className="h-4 w-4" />}
           active={formatOpen}
           onClick={() => setFormatOpen((value) => !value)}
         />
         <div className="flex items-center gap-1">
           <ToolbarTextButton
-            label="预览"
+            label={uiText("预览")}
             icon={<Eye className="h-4 w-4" />}
             active={previewOpen}
             onClick={() => setPreviewOpen(true)}
           />
           <ToolbarTextButton
-            label="签名"
+            label={uiText("签名")}
             icon={<Signature className="h-4 w-4" />}
             onClick={insertSignature}
             disabled={!signatureText.trim()}
@@ -6763,7 +6912,7 @@ function MailBodyComposer({
       {formatOpen && (
         <div className="flex min-h-14 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-6">
           <ToolbarButton
-            label="清除格式"
+            label={uiText("清除格式")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().unsetAllMarks().clearNodes().run()}
           >
@@ -6783,7 +6932,7 @@ function MailBodyComposer({
                 onMouseDown={(event) => event.preventDefault()}
                 disabled={!editor}
               >
-                <span className="truncate">{fontLabel(activeFont)}</span>
+                <span className="truncate">{uiText(fontLabel(activeFont))}</span>
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
@@ -6815,7 +6964,7 @@ function MailBodyComposer({
                 onMouseDown={(event) => event.preventDefault()}
                 disabled={!editor}
               >
-                {fontSizeLabel(activeFontSize)}
+                {uiText(fontSizeLabel(activeFontSize))}
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
             </DropdownMenuTrigger>
@@ -6829,14 +6978,14 @@ function MailBodyComposer({
                   <Check
                     className={cn("h-4 w-4", activeFontSize === size ? "opacity-100" : "opacity-0")}
                   />
-                  {label}
+                  {uiText(label)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <ToolbarButton
-            label="加粗"
+            label={uiText("加粗")}
             active={editor?.isActive("bold")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleBold().run()}
@@ -6844,7 +6993,7 @@ function MailBodyComposer({
             <Bold className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="斜体"
+            label={uiText("斜体")}
             active={editor?.isActive("italic")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleItalic().run()}
@@ -6852,7 +7001,7 @@ function MailBodyComposer({
             <Italic className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="下划线"
+            label={uiText("下划线")}
             active={editor?.isActive("underline")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleUnderline().run()}
@@ -6860,7 +7009,7 @@ function MailBodyComposer({
             <Underline className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="删除线"
+            label={uiText("删除线")}
             active={editor?.isActive("strike")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleStrike().run()}
@@ -6877,8 +7026,8 @@ function MailBodyComposer({
                   "h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
                   activeColor && "border-primary/35 bg-primary/10 text-primary shadow-sm"
                 )}
-                title="文字颜色"
-                aria-label="文字颜色"
+                title={uiText("文字颜色")}
+                aria-label={uiText("文字颜色")}
                 onMouseDown={(event) => event.preventDefault()}
                 disabled={!editor}
               >
@@ -6908,7 +7057,7 @@ function MailBodyComposer({
                     className="h-3 w-3 rounded-full border"
                     style={{ backgroundColor: color }}
                   />
-                  {label}
+                  {uiText(label)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
@@ -6923,8 +7072,8 @@ function MailBodyComposer({
                   "h-8 w-8 rounded-md border border-transparent text-muted-foreground hover:border-border hover:bg-accent hover:text-foreground hover:shadow-sm",
                   activeHighlight && "border-primary/35 bg-primary/10 text-primary shadow-sm"
                 )}
-                title="高亮"
-                aria-label="高亮"
+                title={uiText("高亮")}
+                aria-label={uiText("高亮")}
                 onMouseDown={(event) => event.preventDefault()}
                 disabled={!editor}
               >
@@ -6951,14 +7100,14 @@ function MailBodyComposer({
                     )}
                   />
                   <span className="h-3 w-3 rounded-sm border" style={{ backgroundColor: color }} />
-                  {label}
+                  {uiText(label)}
                 </DropdownMenuItem>
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <ToolbarButton
-            label="无序列表"
+            label={uiText("无序列表")}
             active={editor?.isActive("bulletList")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleBulletList().run()}
@@ -6966,7 +7115,7 @@ function MailBodyComposer({
             <List className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="有序列表"
+            label={uiText("有序列表")}
             active={editor?.isActive("orderedList")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleOrderedList().run()}
@@ -6974,14 +7123,14 @@ function MailBodyComposer({
             <ListOrdered className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="减少缩进"
+            label={uiText("减少缩进")}
             disabled={!editor?.can().liftListItem("listItem")}
             onClick={() => editor?.chain().focus().liftListItem("listItem").run()}
           >
             <IndentDecrease className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="增加缩进"
+            label={uiText("增加缩进")}
             disabled={!editor?.can().sinkListItem("listItem")}
             onClick={() => editor?.chain().focus().sinkListItem("listItem").run()}
           >
@@ -6989,7 +7138,7 @@ function MailBodyComposer({
           </ToolbarButton>
           <Separator orientation="vertical" className="mx-2 h-6" />
           <ToolbarButton
-            label="左对齐"
+            label={uiText("左对齐")}
             active={editor?.isActive({ textAlign: "left" })}
             disabled={!editor}
             onClick={() => editor?.chain().focus().setTextAlign("left").run()}
@@ -6997,7 +7146,7 @@ function MailBodyComposer({
             <AlignLeft className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="居中"
+            label={uiText("居中")}
             active={editor?.isActive({ textAlign: "center" })}
             disabled={!editor}
             onClick={() => editor?.chain().focus().setTextAlign("center").run()}
@@ -7005,7 +7154,7 @@ function MailBodyComposer({
             <AlignCenter className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="右对齐"
+            label={uiText("右对齐")}
             active={editor?.isActive({ textAlign: "right" })}
             disabled={!editor}
             onClick={() => editor?.chain().focus().setTextAlign("right").run()}
@@ -7013,7 +7162,7 @@ function MailBodyComposer({
             <AlignRight className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="引用"
+            label={uiText("引用")}
             active={editor?.isActive("blockquote")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleBlockquote().run()}
@@ -7021,7 +7170,7 @@ function MailBodyComposer({
             <Quote className="h-4 w-4" />
           </ToolbarButton>
           <ToolbarButton
-            label="代码块"
+            label={uiText("代码块")}
             active={editor?.isActive("codeBlock")}
             disabled={!editor}
             onClick={() => editor?.chain().focus().toggleCodeBlock().run()}
@@ -7085,7 +7234,7 @@ function MailBodyComposer({
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
         <DialogContent className="w-[min(92vw,44rem)] max-w-none">
           <DialogHeader>
-            <DialogTitle>邮件预览</DialogTitle>
+            <DialogTitle>{uiText("邮件预览")}</DialogTitle>
           </DialogHeader>
           <div
             className="mail-html max-h-[60vh] overflow-y-auto rounded-md border bg-background p-5 text-sm leading-7"
@@ -7112,6 +7261,8 @@ function ToolbarTextButton({
   disabled?: boolean
   onClick?: () => void
 }) {
+  useUiLanguage()
+
   return (
     <Button
       type="button"
@@ -7121,15 +7272,15 @@ function ToolbarTextButton({
         "h-8 gap-1.5 rounded-md px-2 font-normal transition-all hover:bg-accent hover:text-foreground hover:shadow-sm",
         active && "border border-primary/30 bg-primary/10 text-primary shadow-sm"
       )}
-      title={label}
-      aria-label={label}
+      title={uiText(label)}
+      aria-label={uiText(label)}
       aria-pressed={active || undefined}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
       disabled={disabled}
     >
       {icon}
-      {label}
+      {uiText(label)}
     </Button>
   )
 }
@@ -7143,6 +7294,8 @@ function InsertContentDialog({
   onOpenChange: (open: boolean) => void
   onConfirm: (value: InsertDialogValue) => void
 }) {
+  useUiLanguage()
+
   const kind = state?.kind || "link"
   const [url, setUrl] = React.useState("")
   const [text, setText] = React.useState("")
@@ -7170,15 +7323,17 @@ function InsertContentDialog({
             <DialogTitle>
               {kind === "link"
                 ? state?.editing
-                  ? "编辑链接"
-                  : "插入链接"
+                  ? uiText("编辑链接")
+                  : uiText("插入链接")
                 : state?.editing
-                  ? "编辑图片"
-                  : "插入图片"}
+                  ? uiText("编辑图片")
+                  : uiText("插入图片")}
             </DialogTitle>
           </DialogHeader>
           <div className="grid gap-2">
-            <Label htmlFor="composer-insert-url">{kind === "link" ? "链接地址" : "图片地址"}</Label>
+            <Label htmlFor="composer-insert-url">
+              {kind === "link" ? uiText("链接地址") : uiText("图片地址")}
+            </Label>
             <Input
               id="composer-insert-url"
               value={url}
@@ -7191,30 +7346,30 @@ function InsertContentDialog({
           </div>
           {kind === "link" ? (
             <div className="grid gap-2">
-              <Label htmlFor="composer-insert-text">显示文字</Label>
+              <Label htmlFor="composer-insert-text">{uiText("显示文字")}</Label>
               <Input
                 id="composer-insert-text"
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                placeholder="默认使用链接地址"
+                placeholder={uiText("默认使用链接地址")}
               />
             </div>
           ) : (
             <div className="grid gap-2">
-              <Label htmlFor="composer-insert-alt">替代文字</Label>
+              <Label htmlFor="composer-insert-alt">{uiText("替代文字")}</Label>
               <Input
                 id="composer-insert-alt"
                 value={alt}
                 onChange={(event) => setAlt(event.target.value)}
-                placeholder="图片说明"
+                placeholder={uiText("图片说明")}
               />
             </div>
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {uiText("取消")}
             </Button>
-            <Button type="submit">{state?.editing ? "更新" : "插入"}</Button>
+            <Button type="submit">{state?.editing ? uiText("更新") : uiText("插入")}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -7254,6 +7409,8 @@ function ScheduleDialog({
   onOpenChange: (open: boolean) => void
   onConfirm: (schedule: ScheduleDraft) => void
 }) {
+  useUiLanguage()
+
   const [duration, setDuration] = React.useState("60")
   const [reminder, setReminder] = React.useState("15")
   const [repeat, setRepeat] = React.useState<ScheduleDraft["repeat"]>("none")
@@ -7305,16 +7462,16 @@ function ScheduleDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[min(92vw,36rem)] max-w-none">
         <DialogHeader>
-          <DialogTitle>新建日程</DialogTitle>
+          <DialogTitle>{uiText("新建日程")}</DialogTitle>
         </DialogHeader>
         <form className="space-y-5" onSubmit={submit}>
           <Input
             name="title"
-            placeholder="输入日程主题"
+            placeholder={uiText("输入日程主题")}
             className="h-11 border-0 border-b px-0 text-lg shadow-none focus-visible:ring-0"
           />
           <div className="grid gap-4">
-            <ScheduleRow label="开始">
+            <ScheduleRow label={uiText("开始")}>
               <Input
                 name="start"
                 type={allDay ? "date" : "datetime-local"}
@@ -7323,12 +7480,12 @@ function ScheduleDialog({
               />
               <CheckLabel
                 id="schedule-all-day"
-                label="全天"
+                label={uiText("全天")}
                 checked={allDay}
                 onCheckedChange={setAllDay}
               />
             </ScheduleRow>
-            <ScheduleRow label="持续">
+            <ScheduleRow label={uiText("持续")}>
               {customDuration ? (
                 <Input
                   name="customDuration"
@@ -7345,7 +7502,7 @@ function ScheduleDialog({
                   <SelectContent>
                     {durationOptions.map((item) => (
                       <SelectItem key={item.value} value={item.value}>
-                        {item.label}
+                        {uiText(item.label)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -7353,12 +7510,12 @@ function ScheduleDialog({
               )}
               <CheckLabel
                 id="schedule-custom-duration"
-                label="自定义"
+                label={uiText("自定义")}
                 checked={customDuration}
                 onCheckedChange={setCustomDuration}
               />
             </ScheduleRow>
-            <ScheduleRow label="提醒">
+            <ScheduleRow label={uiText("提醒")}>
               {customReminder ? (
                 <Input
                   name="customReminder"
@@ -7375,7 +7532,7 @@ function ScheduleDialog({
                   <SelectContent>
                     {reminderOptions.map((item) => (
                       <SelectItem key={item.value} value={item.value}>
-                        {item.label}
+                        {uiText(item.label)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -7383,12 +7540,12 @@ function ScheduleDialog({
               )}
               <CheckLabel
                 id="schedule-custom-reminder"
-                label="自定义"
+                label={uiText("自定义")}
                 checked={customReminder}
                 onCheckedChange={setCustomReminder}
               />
             </ScheduleRow>
-            <ScheduleRow label="重复">
+            <ScheduleRow label={uiText("重复")}>
               <Select
                 value={repeat}
                 onValueChange={(value) => setRepeat(value as ScheduleDraft["repeat"])}
@@ -7399,29 +7556,29 @@ function ScheduleDialog({
                 <SelectContent>
                   {repeatOptions.map((item) => (
                     <SelectItem key={item.value} value={item.value}>
-                      {item.label}
+                      {uiText(item.label)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <CheckLabel
                 id="schedule-lunar"
-                label="农历"
+                label={uiText("农历")}
                 checked={lunar}
                 onCheckedChange={setLunar}
               />
             </ScheduleRow>
-            <ScheduleRow label="位置">
-              <Input name="location" placeholder="请输入位置" className="h-11" />
+            <ScheduleRow label={uiText("位置")}>
+              <Input name="location" placeholder={uiText("请输入位置")} className="h-11" />
             </ScheduleRow>
-            <ScheduleRow label="描述">
-              <Input name="description" placeholder="输入描述" className="h-11" />
+            <ScheduleRow label={uiText("描述")}>
+              <Input name="description" placeholder={uiText("输入描述")} className="h-11" />
             </ScheduleRow>
           </div>
           <DialogFooter>
-            <Button type="submit">确定</Button>
+            <Button type="submit">{uiText("确定")}</Button>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              取消
+              {uiText("取消")}
             </Button>
           </DialogFooter>
         </form>
@@ -7431,9 +7588,11 @@ function ScheduleDialog({
 }
 
 function ScheduleRow({ label, children }: { label: string; children: React.ReactNode }) {
+  useUiLanguage()
+
   return (
     <div className="grid gap-2 sm:grid-cols-[3rem_minmax(0,1fr)_5.5rem] sm:items-center">
-      <Label className="text-base font-normal">{label}</Label>
+      <Label className="text-base font-normal">{uiText(label)}</Label>
       {children}
     </div>
   )
@@ -7450,6 +7609,8 @@ function CheckLabel({
   checked: boolean
   onCheckedChange: (checked: boolean) => void
 }) {
+  useUiLanguage()
+
   return (
     <div className="flex items-center gap-2">
       <Checkbox
@@ -7458,7 +7619,7 @@ function CheckLabel({
         onCheckedChange={(value) => onCheckedChange(value === true)}
       />
       <Label htmlFor={id} className="cursor-pointer text-sm font-normal">
-        {label}
+        {uiText(label)}
       </Label>
     </div>
   )
@@ -7477,6 +7638,8 @@ function ToolbarButton({
   onClick?: () => void
   disabled?: boolean
 }) {
+  useUiLanguage()
+
   return (
     <Button
       type="button"
@@ -7487,8 +7650,8 @@ function ToolbarButton({
         active &&
           "border-primary/35 bg-primary/10 text-primary shadow-sm hover:bg-primary/15 hover:text-primary"
       )}
-      title={label}
-      aria-label={label}
+      title={uiText(label)}
+      aria-label={uiText(label)}
       aria-pressed={active || undefined}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onClick}
@@ -7531,7 +7694,7 @@ function playIncomingMailSound(ref: React.MutableRefObject<AudioContext | null>)
 }
 function quoteMessage(message: MailMessage) {
   const body = message.bodyText || htmlComposerValue(message.bodyHtml || message.snippet || "").text
-  const headers = `----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt)}\nSubject: ${message.subject}`
+  const headers = `----- 原始邮件 -----\nFrom: ${senderTitle(message)}\nTo: ${message.to.join(", ")}\nDate: ${formatDateTime(message.receivedAt, "zh-CN")}\nSubject: ${message.subject}`
   return quotedComposerValue(headers, body)
 }
 function stripHtml(html: string) {

@@ -1,3 +1,4 @@
+import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
 import { Eye, EyeOff } from "lucide-react"
 import { Input } from "@/components/ui/input"
@@ -8,6 +9,7 @@ export const PasswordInput = React.forwardRef<
   HTMLInputElement,
   React.InputHTMLAttributes<HTMLInputElement>
 >(({ className, ...props }, ref) => {
+  useUiLanguage()
   const [show, setShow] = React.useState(false)
   return (
     <div className="relative">
@@ -26,7 +28,7 @@ export const PasswordInput = React.forwardRef<
         tabIndex={-1}
       >
         {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-        <span className="sr-only">{show ? "隐藏密码" : "显示密码"}</span>
+        <span className="sr-only">{show ? uiText("隐藏密码") : uiText("显示密码")}</span>
       </Button>
     </div>
   )

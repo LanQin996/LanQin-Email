@@ -1,3 +1,6 @@
+import { errorMessage } from "@/lib/ui-errors"
+import { LanguageSelector } from "@/components/language-selector"
+import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
 import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -12,6 +15,8 @@ import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 
 export function LoginPage() {
+  useUiLanguage()
+
   const me = useMe()
   const qc = useQueryClient()
   const { toast } = useToast()
@@ -37,7 +42,7 @@ export function LoginPage() {
       }
       await qc.invalidateQueries({ queryKey: ["me"] })
     },
-    onError: (e) => toast({ title: "登录失败", description: e.message }),
+    onError: (e) => toast({ title: "登录失败", description: errorMessage(e) }),
   })
   const linuxDoTwoFactorRequired = params.get("linuxdo") === "2fa"
   const linuxDoTwoFactor = useMutation({
@@ -46,7 +51,7 @@ export function LoginPage() {
       setParams({}, { replace: true })
       await qc.invalidateQueries({ queryKey: ["me"] })
     },
-    onError: (e) => toast({ title: "验证失败", description: e.message }),
+    onError: (e) => toast({ title: "验证失败", description: errorMessage(e) }),
   })
   React.useEffect(() => {
     const result = params.get("linuxdo")
@@ -79,6 +84,9 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-10">
       <div className="w-full max-w-[420px]">
         <div className="mb-7 text-center">
+          <div className="flex justify-end">
+            <LanguageSelector />
+          </div>
           <h1 className="text-3xl font-semibold tracking-tight">LanQin Email</h1>
         </div>
         <div className="rounded-lg border bg-background p-6 shadow-sm sm:p-7">
@@ -88,7 +96,7 @@ export function LoginPage() {
             ) : (
               <LockKeyhole className="h-4 w-4" />
             )}
-            {challengeToken || linuxDoTwoFactorRequired ? "双因素验证" : "账号登录"}
+            {challengeToken || linuxDoTwoFactorRequired ? uiText("双因素验证") : uiText("账号登录")}
           </div>
           <form
             className="space-y-5"
@@ -109,7 +117,7 @@ export function LoginPage() {
               <>
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-sm font-medium">
-                    邮箱
+                    {uiText("邮箱")}
                   </Label>
                   <Input
                     id="email"
@@ -122,7 +130,7 @@ export function LoginPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="password" className="text-sm font-medium">
-                    密码
+                    {uiText("密码")}
                   </Label>
                   <PasswordInput
                     id="password"
@@ -136,7 +144,7 @@ export function LoginPage() {
             ) : (
               <div className="space-y-2">
                 <Label htmlFor="twoFactorCode" className="text-sm font-medium">
-                  双因素验证码
+                  {uiText("双因素验证码")}
                 </Label>
                 <Input
                   id="twoFactorCode"
@@ -161,10 +169,10 @@ export function LoginPage() {
               disabled={login.isPending || linuxDoTwoFactor.isPending}
             >
               {login.isPending || linuxDoTwoFactor.isPending
-                ? "登录中..."
+                ? uiText("登录中...")
                 : challengeToken || linuxDoTwoFactorRequired
-                  ? "验证登录"
-                  : "登录"}
+                  ? uiText("验证登录")
+                  : uiText("登录")}
               {!login.isPending && !linuxDoTwoFactor.isPending && (
                 <ArrowRight className="h-4 w-4" />
               )}
@@ -176,7 +184,7 @@ export function LoginPage() {
                 className="w-full"
                 onClick={() => setChallengeToken("")}
               >
-                返回登录
+                {uiText("返回登录")}
               </Button>
             )}
           </form>
@@ -186,7 +194,7 @@ export function LoginPage() {
               <>
                 <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
                   <div className="h-px flex-1 bg-border" />
-                  <span>或</span>
+                  <span>{uiText("或")}</span>
                   <div className="h-px flex-1 bg-border" />
                 </div>
                 <Button
@@ -196,16 +204,16 @@ export function LoginPage() {
                   onClick={() => window.location.assign("/api/auth/linuxdo/start")}
                 >
                   <Link2 className="h-4 w-4" />
-                  使用 Linux.do 登录
+                  {uiText("使用 Linux.do 登录")}
                 </Button>
               </>
             )}
         </div>
         {!challengeToken && !linuxDoTwoFactorRequired && (
           <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-            <span>没有账号？</span>
+            <span>{uiText("没有账号？")}</span>
             <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
-              <Link to="/register">注册账号</Link>
+              <Link to="/register">{uiText("注册账号")}</Link>
             </Button>
           </div>
         )}
