@@ -1381,7 +1381,7 @@ func externalRemoteMessageToMailMessage(account externalIMAPAccountRecord, msg e
 		MessageUID:        id,
 		IMAPUID:           int64(msg.UID),
 		MessageID:         messageID,
-		Subject:           msg.Subject,
+		Subject:           decodeMIMEHeader(msg.Subject),
 		From:              msg.From,
 		FromName:          msg.FromName,
 		To:                msg.To,

@@ -988,6 +988,12 @@ func charsetReader(charset string, input io.Reader) (io.Reader, error) {
 	if charset == "utf-8" || charset == "us-ascii" {
 		return input, nil
 	}
+	// IANA lists GB2312 but x/text has no decoder for that entry. GBK is
+	// compatible with GB2312 and also handles GBK bytes mislabeled as GB2312.
+	switch charset {
+	case "gb2312", "csgb2312", "euc-cn":
+		charset = "gbk"
+	}
 	enc, err := ianaindex.IANA.Encoding(charset)
 	if err != nil {
 		return nil, fmt.Errorf("unsupported charset %q: %w", charset, err)

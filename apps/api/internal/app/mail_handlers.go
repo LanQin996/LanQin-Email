@@ -2742,6 +2742,8 @@ func scanAdminMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	if err != nil {
 		return msg, err
 	}
+	// Decode legacy subjects at read time without rewriting stored mail.
+	msg.Subject = decodeMIMEHeader(msg.Subject)
 	msg.To, msg.CC, msg.BCC = jsonDecodeSlice(toJSON), jsonDecodeSlice(ccJSON), jsonDecodeSlice(bccJSON)
 	msg.SentAt, msg.ReceivedAt = parseTime(sent), parseTime(received)
 	msg.IsRead, msg.IsStarred, msg.HasAttachments = intBool(read), intBool(starred), intBool(hasAtt)
@@ -2756,6 +2758,7 @@ func scanMessageSummary(row messageSummaryScanner) (MailMessage, error) {
 	if err != nil {
 		return msg, err
 	}
+	msg.Subject = decodeMIMEHeader(msg.Subject)
 	msg.To, msg.CC, msg.BCC = jsonDecodeSlice(toJSON), jsonDecodeSlice(ccJSON), jsonDecodeSlice(bccJSON)
 	msg.SentAt, msg.ReceivedAt = parseTime(sent), parseTime(received)
 	msg.IsRead, msg.IsStarred, msg.HasAttachments = intBool(read), intBool(starred), intBool(hasAtt)
@@ -2772,6 +2775,7 @@ func scanMessageFull(row messageSummaryScanner, includeBody bool) (MailMessage, 
 	if err != nil {
 		return msg, err
 	}
+	msg.Subject = decodeMIMEHeader(msg.Subject)
 	msg.To, msg.CC, msg.BCC = jsonDecodeSlice(toJSON), jsonDecodeSlice(ccJSON), jsonDecodeSlice(bccJSON)
 	msg.SentAt, msg.ReceivedAt = parseTime(sent), parseTime(received)
 	msg.IsRead, msg.IsStarred, msg.HasAttachments = intBool(read), intBool(starred), intBool(hasAtt)
