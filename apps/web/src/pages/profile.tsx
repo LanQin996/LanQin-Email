@@ -7,6 +7,7 @@ import {
 } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
 import { LanguageSelector } from "@/components/language-selector"
+import { MailStatistics } from "@/components/mail-statistics"
 
 import * as React from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
@@ -1056,6 +1057,10 @@ export function ProfilePage() {
       return (
         <StatsSection
           stats={stats.data}
+          loading={stats.isPending}
+          failed={stats.isError}
+          mailboxes={mailboxes.data?.items || []}
+          onMailboxChange={setMailboxId}
           mailbox={selectedMailbox}
           onRefresh={() => stats.refetch()}
         />
@@ -4984,10 +4989,18 @@ function ScopeCheckbox({
 function StatsSection({
   stats,
   mailbox,
+  mailboxes,
+  onMailboxChange,
+  loading,
+  failed,
   onRefresh,
 }: {
   stats?: MailStats
   mailbox?: Mailbox
+  mailboxes: Mailbox[]
+  onMailboxChange: (id: string) => void
+  loading: boolean
+  failed: boolean
   onRefresh: () => Promise<unknown>
 }) {
   useUiLanguage()
@@ -5003,35 +5016,51 @@ function StatsSection({
     }
   }
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="text-sm text-muted-foreground">
-          {uiText("当前统计：{0}", [mailbox?.address || uiText("未选择邮箱")])}
-        </div>
-        <Button variant="outline" onClick={() => void refresh()} disabled={refreshing}>
+    <div className="space-y-4" data-lanqin-i18n-ignore>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Select
+          value={mailbox?.id || ""}
+          onValueChange={onMailboxChange}
+          disabled={mailboxes.length === 0}
+        >
+          <SelectTrigger className="w-full sm:w-72" aria-label={uiText("选择邮箱")}>
+            <SelectValue placeholder={uiText("未选择邮箱")} />
+          </SelectTrigger>
+          <SelectContent data-lanqin-i18n-ignore>
+            {mailboxes.map((item) => (
+              <SelectItem key={item.id} value={item.id}>
+                {item.address}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" onClick={() => void refresh()} disabled={refreshing || !mailbox}>
           <RefreshCcw className={cn("h-4 w-4", refreshing && "animate-spin")} />
           {refreshing ? uiText("刷新中...") : uiText("刷新")}
         </Button>
       </div>
-      <StatsSummary stats={stats} />
-      <Card>
-        <CardHeader>
-          <CardTitle>{uiText("文件夹分布")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(stats?.byFolder || []).map((f) => (
-            <div
-              key={f.folder}
-              className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3 rounded-lg border p-3 text-sm"
-            >
-              <div className="font-medium">{folderLabel(f.folder)}</div>
-              <Badge variant="secondary">{uiText("{0} 封", [f.count])}</Badge>
-              <span className="text-muted-foreground">{uiText("未读 {0}", [f.unread])}</span>
-              <span className="text-muted-foreground">{formatBytes(f.bytes)}</span>
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+      {!mailbox ? (
+        <EmptyState text={uiText("请先选择一个本地邮箱")} />
+      ) : failed ? (
+        <div
+          role="alert"
+          className="rounded-lg border border-destructive/30 p-6 text-sm text-destructive"
+        >
+          {uiText("统计加载失败，请刷新重试")}
+        </div>
+      ) : loading || !stats ? (
+        <div
+          role="status"
+          className="rounded-lg border p-12 text-center text-sm text-muted-foreground"
+        >
+          {uiText("正在加载统计数据...")}
+        </div>
+      ) : (
+        <>
+          <StatsSummary stats={stats} />
+          <MailStatistics stats={stats} folderLabel={folderLabel} />
+        </>
+      )}
     </div>
   )
 }

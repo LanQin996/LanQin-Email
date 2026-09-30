@@ -1,4 +1,23 @@
 {
+  "已读": { "zh-TW": "已讀", "en": "Read" },
+  "平均邮件大小": { "zh-TW": "平均郵件大小", "en": "Average message size" },
+  "统计指标": { "zh-TW": "統計指標", "en": "Statistics metric" },
+  "邮件数量": { "zh-TW": "郵件數量", "en": "Message count" },
+  "存储用量": { "zh-TW": "儲存用量", "en": "Storage usage" },
+  "暂无邮件数据": { "zh-TW": "暫無郵件資料", "en": "No message data" },
+  "阅读状态": { "zh-TW": "閱讀狀態", "en": "Reading status" },
+  "已读比例": { "zh-TW": "已讀比例", "en": "Read percentage" },
+  "未设置容量上限": { "zh-TW": "未設定容量上限", "en": "No storage limit set" },
+  "剩余容量：{0}": { "zh-TW": "剩餘容量：{0}", "en": "Available storage: {0}" },
+  "存储容量已用尽": { "zh-TW": "儲存容量已用盡", "en": "Storage limit reached" },
+  "存储容量即将用尽": { "zh-TW": "儲存容量即將用盡", "en": "Storage almost full" },
+  "存储容量使用正常": { "zh-TW": "儲存容量使用正常", "en": "Storage usage is healthy" },
+  "{0} 个附件 · {1}": { "zh-TW": "{0} 個附件 · {1}", "en": "{0} attachments · {1}" },
+  "统计加载失败，请刷新重试": {
+    "zh-TW": "統計載入失敗，請重新整理重試",
+    "en": "Could not load statistics. Refresh to retry."
+  },
+  "正在加载统计数据...": { "zh-TW": "正在載入統計資料...", "en": "Loading statistics..." },
   "概览": {
     "zh-TW": "概覽",
     "en": "Overview"
