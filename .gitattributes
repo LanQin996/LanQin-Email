@@ -1,3 +1,6 @@
 *.sh text eol=lf
 deploy/**/entrypoint.sh text eol=lf
 deploy/**/sync-dkim.sh text eol=lf
+
+# Keep frontend source line endings consistent with Prettier on every platform.
+apps/web/src/** text eol=lf
