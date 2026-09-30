@@ -5034,6 +5034,15 @@ function CompactMessageRow({
           </div>
           <div className="mt-1 flex min-w-0 items-center gap-2 sm:mt-0">
             <span className="truncate font-medium">{message.subject}</span>
+            {(message.threadCount || 0) > 1 && (
+              <Badge
+                variant="outline"
+                className="h-5 shrink-0 rounded-md px-1.5 text-[11px] font-normal text-muted-foreground"
+                title={uiText("会话邮件数")}
+              >
+                {uiText("会话 {0} 封", [message.threadCount || 0])}
+              </Badge>
+            )}
             <span className="hidden min-w-0 truncate text-muted-foreground sm:block">
               {message.snippet}
             </span>

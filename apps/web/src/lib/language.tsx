@@ -182,6 +182,8 @@ export const exactTranslations: Record<string, Translation> = {
   邮箱转移请求: { "zh-TW": "信箱轉移請求", en: "Mailbox transfer requests" },
   接受: { "zh-TW": "接受", en: "Accept" },
   拒绝: { "zh-TW": "拒絕", en: "Reject" },
+  "会话邮件数": { "zh-TW": "會話郵件數", en: "Messages in conversation" },
+  "会话 {0} 封": { "zh-TW": "會話 {0} 封", en: "{0} messages" },
   "{0} · {1} → {2}": { "zh-TW": "{0} · {1} → {2}", en: "{0} · {1} → {2}" },
   "搜索中...": { "zh-TW": "搜尋中...", en: "Searching..." },
   未找到可共享用户: { "zh-TW": "找不到可共享的使用者", en: "No eligible users found" },

@@ -513,13 +513,47 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 
 	if q != "" {
 		if a.canUseMessageFTS(q) {
-			where += ` AND m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)`
-			args = append(args, messageFTSLiteralQuery(q, webmailSearchColumns))
+			where += ` AND (m.rowid IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?) OR EXISTS (SELECT 1 FROM attachments sa WHERE sa.message_id=m.id AND LOWER(sa.filename) LIKE LOWER(?)))`
+			args = append(args, messageFTSLiteralQuery(q, webmailSearchColumns), "%"+q+"%")
 		} else {
-			where += ` AND (LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?))`
+			where += ` AND (LOWER(m.subject) LIKE LOWER(?) OR LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?) OR LOWER(m.to_addrs) LIKE LOWER(?) OR LOWER(m.cc_addrs) LIKE LOWER(?) OR LOWER(m.bcc_addrs) LIKE LOWER(?) OR LOWER(m.snippet) LIKE LOWER(?) OR LOWER(m.body_text) LIKE LOWER(?) OR EXISTS (SELECT 1 FROM attachments sa WHERE sa.message_id=m.id AND LOWER(sa.filename) LIKE LOWER(?)))`
 			like := "%" + q + "%"
-			args = append(args, like, like, like, like, like)
+			args = append(args, like, like, like, like, like, like, like, like, like)
 		}
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("from")); value != "" {
+		where += ` AND (LOWER(m.from_addr) LIKE LOWER(?) OR LOWER(m.from_name) LIKE LOWER(?))`
+		like := "%" + value + "%"
+		args = append(args, like, like)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("to")); value != "" {
+		where += ` AND (LOWER(m.to_addrs) LIKE LOWER(?) OR LOWER(m.cc_addrs) LIKE LOWER(?) OR LOWER(m.bcc_addrs) LIKE LOWER(?))`
+		like := "%" + value + "%"
+		args = append(args, like, like, like)
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("subject")); value != "" {
+		where += ` AND LOWER(m.subject) LIKE LOWER(?)`
+		args = append(args, "%"+value+"%")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("attachment")); value != "" {
+		where += ` AND EXISTS (SELECT 1 FROM attachments sa WHERE sa.message_id=m.id AND LOWER(sa.filename) LIKE LOWER(?))`
+		args = append(args, "%"+value+"%")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("after")); value != "" {
+		if _, err := time.Parse("2006-01-02", value); err != nil {
+			badRequest(w, fmt.Errorf("invalid after date"))
+			return
+		}
+		where += ` AND m.received_at>=?`
+		args = append(args, value+"T00:00:00Z")
+	}
+	if value := strings.TrimSpace(r.URL.Query().Get("before")); value != "" {
+		if _, err := time.Parse("2006-01-02", value); err != nil {
+			badRequest(w, fmt.Errorf("invalid before date"))
+			return
+		}
+		where += ` AND m.received_at<?`
+		args = append(args, value+"T00:00:00Z")
 	}
 	countWhere := where
 	countArgs := append([]any(nil), args...)
