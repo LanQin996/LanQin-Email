@@ -9,6 +9,7 @@ import type {
   MailboxSharePayload,
   MailboxShareUpdatePayload,
   MailboxShareAuditEvent,
+  MailboxPushRequest,
   UserNotification,
   ShareUser,
   Alias,
@@ -283,6 +284,19 @@ export const api = {
     request<{ ok: boolean }>(`/api/me/mailbox-shares/${id}/leave`, { method: "DELETE" }),
   mailboxShareAudit: (id: string) =>
     request<ListResponse<MailboxShareAuditEvent>>(`/api/me/mailbox-shares/${id}/audit`),
+  mailboxPushRequests: () =>
+    request<ListResponse<MailboxPushRequest>>("/api/me/mailbox-push-requests"),
+  createMailboxPush: (mailboxId: string, toUserId: string) =>
+    request<MailboxPushRequest>(`/api/me/mailboxes/${mailboxId}/push-requests`, {
+      method: "POST",
+      body: JSON.stringify({ mailboxId, toUserId }),
+    }),
+  acceptMailboxPush: (id: string) =>
+    request<{ status: string }>(`/api/me/mailbox-push-requests/${id}/accept`, { method: "POST" }),
+  rejectMailboxPush: (id: string) =>
+    request<{ status: string }>(`/api/me/mailbox-push-requests/${id}/reject`, { method: "POST" }),
+  cancelMailboxPush: (id: string) =>
+    request<{ status: string }>(`/api/me/mailbox-push-requests/${id}/cancel`, { method: "POST" }),
   notifications: () => request<ListResponse<UserNotification>>("/api/me/notifications"),
   readNotification: (id: string) =>
     request<{ ok: boolean }>(`/api/me/notifications/${id}/read`, { method: "POST" }),

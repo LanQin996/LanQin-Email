@@ -1561,6 +1561,19 @@ function MailboxManagement({
   onSyncExternalFolder: (id: string, folder: string) => void
 }) {
   useUiLanguage()
+  const queryClient = useQueryClient()
+
+  const push = useMutation({
+    mutationFn: async (mailbox: Mailbox) => {
+      const email = window.prompt(uiText("请输入接收方站内用户邮箱"))?.trim()
+      if (!email) return
+      const result = await api.shareUsers(email)
+      const target = result.items.find((item) => item.email.toLowerCase() === email.toLowerCase())
+      if (!target) throw new Error(uiText("未找到可用的站内用户"))
+      return api.createMailboxPush(mailbox.id, target.id)
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["mailbox-push-requests"] }),
+  })
 
   const canApply = !!applyOptions?.enabled && (applyOptions.domains || []).length > 0
   const selectedMailbox = mailboxes.find((item) => item.id === selectedMailboxId)
@@ -1581,6 +1594,7 @@ function MailboxManagement({
           <ApplyMailboxDialog options={applyOptions} pending={applyPending} onApply={onApply} />
         )}
       </div>
+      <MailboxPushRequests />
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {mailboxes.map((m) => (
           <Card key={m.id} className={cn(selectedMailboxId === m.id && "border-primary")}>
@@ -1602,6 +1616,15 @@ function MailboxManagement({
               </Button>
               <Button size="sm" onClick={() => onOpen(m.id)}>
                 {uiText("进入邮箱")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => push.mutate(m)}
+                disabled={push.isPending}
+              >
+                <UserPlus className="h-4 w-4" />
+                {uiText("PUSH")}
               </Button>
             </CardContent>
           </Card>
@@ -1776,6 +1799,60 @@ function MailboxManagement({
         </Card>
       )}
     </div>
+  )
+}
+
+function MailboxPushRequests() {
+  const qc = useQueryClient()
+  const query = useQuery({ queryKey: ["mailbox-push-requests"], queryFn: api.mailboxPushRequests })
+  const resolve = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: "accept" | "reject" | "cancel" }) =>
+      action === "accept"
+        ? api.acceptMailboxPush(id)
+        : action === "reject"
+          ? api.rejectMailboxPush(id)
+          : api.cancelMailboxPush(id),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["mailbox-push-requests"] }),
+  })
+  const pending = (query.data?.items || []).filter((item) => item.status === "pending")
+  if (!pending.length) return null
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{uiText("邮箱转移请求")}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {pending.map((item) => (
+          <div
+            key={item.id}
+            className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 last:border-0 last:pb-0"
+          >
+            <div className="text-sm">
+              {item.mailboxAddress} · {item.fromEmail} → {item.toEmail}
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => resolve.mutate({ id: item.id, action: "accept" })}>
+                {uiText("接受")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => resolve.mutate({ id: item.id, action: "reject" })}
+              >
+                {uiText("拒绝")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => resolve.mutate({ id: item.id, action: "cancel" })}
+              >
+                {uiText("取消")}
+              </Button>
+            </div>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   )
 }
 

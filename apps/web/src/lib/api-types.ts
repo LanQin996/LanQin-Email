@@ -139,6 +139,19 @@ export type Mailbox = {
   shareAllowsAttachments?: boolean
 }
 export type ShareUser = { id: string; email: string; displayName: string }
+export type MailboxPushRequest = {
+  id: string
+  mailboxId: string
+  mailboxAddress: string
+  fromUserId: string
+  fromEmail: string
+  toUserId: string
+  toEmail: string
+  status: "pending" | "accepted" | "rejected" | "cancelled" | "expired"
+  expiresAt: string
+  createdAt: string
+  version: number
+}
 export type MailboxShareStatus = "active" | "expiring" | "expired" | "revoked" | "left"
 export type MailboxShare = {
   id: string

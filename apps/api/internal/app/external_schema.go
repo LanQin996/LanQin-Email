@@ -64,6 +64,7 @@ var externalSchemaTables = []string{
 	"user_permission_groups",
 	"users",
 	"user_notifications",
+	"mailbox_push_requests",
 }
 
 // initializeExternalSchema initializes an empty PostgreSQL or MySQL database.
@@ -153,6 +154,36 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		}
 		if err := migrateExternalSchemaV12(ctx, conn, driver); err != nil {
 			return err
+		}
+		pushTable := `CREATE TABLE IF NOT EXISTS mailbox_push_requests (
+			id VARCHAR(64) PRIMARY KEY, mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			from_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE, to_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			status VARCHAR(16) NOT NULL, expires_at VARCHAR(35) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
+			created_at VARCHAR(35) NOT NULL, updated_at VARCHAR(35) NOT NULL, resolved_at VARCHAR(35), resolved_by VARCHAR(64))`
+		if driver == databaseDriverMySQL {
+			pushTable = postgresTableToMySQL(pushTable)
+		}
+		if _, err := conn.ExecContext(ctx, pushTable); err != nil {
+			return err
+		}
+		idx := `CREATE INDEX IF NOT EXISTS idx_mailbox_push_recipient ON mailbox_push_requests(to_user_id,status,created_at DESC)`
+		if driver == databaseDriverMySQL {
+			idx = `CREATE INDEX idx_mailbox_push_recipient ON mailbox_push_requests(to_user_id,status,created_at)`
+		}
+		if _, err := conn.ExecContext(ctx, idx); err != nil {
+			return err
+		}
+		if driver == databaseDriverPostgres {
+			if _, err := conn.ExecContext(ctx, `CREATE UNIQUE INDEX IF NOT EXISTS idx_mailbox_push_one_pending ON mailbox_push_requests(mailbox_id) WHERE status='pending'`); err != nil {
+				return err
+			}
+		} else {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE mailbox_push_requests ADD COLUMN pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, `CREATE UNIQUE INDEX idx_mailbox_push_one_pending ON mailbox_push_requests(pending_mailbox_id)`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate key name") {
+				return err
+			}
 		}
 		tables, err = listExternalSchemaTables(ctx, conn, driver)
 		if err != nil {
