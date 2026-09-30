@@ -1,4 +1,73 @@
 {
+  "投递失败": { "zh-TW": "投遞失敗", "en": "Delivery failed" },
+  "统一收件": {
+    "zh-TW": "統一收件",
+    "en": "Unified collection"
+  },
+  "统一收件：{0}": {
+    "zh-TW": "統一收件：{0}",
+    "en": "Unified collection: {0}"
+  },
+  "无法加载统一收件设置": {
+    "zh-TW": "無法載入統一收件設定",
+    "en": "Could not load collection settings"
+  },
+  "启用统一收件": {
+    "zh-TW": "啟用統一收件",
+    "en": "Enable unified collection"
+  },
+  "保留原邮箱邮件": {
+    "zh-TW": "保留原信箱郵件",
+    "en": "Keep mail in original mailboxes"
+  },
+  "搜索站内邮箱": {
+    "zh-TW": "搜尋站內信箱",
+    "en": "Search local mailboxes"
+  },
+  "统一收件目标": {
+    "zh-TW": "統一收件目標",
+    "en": "Collection destination"
+  },
+  "选择站内邮箱": {
+    "zh-TW": "選擇站內信箱",
+    "en": "Select a local mailbox"
+  },
+  "没有可用的站内邮箱": {
+    "zh-TW": "沒有可用的站內信箱",
+    "en": "No eligible local mailboxes"
+  },
+  "原目标不可用，请重新选择或关闭统一收件": {
+    "zh-TW": "原目標無法使用，請重新選擇或關閉統一收件",
+    "en": "Destination unavailable. Choose another mailbox or disable collection."
+  },
+  "无法加载本地投递状态": {
+    "zh-TW": "無法載入本機投遞狀態",
+    "en": "Could not load local delivery status"
+  },
+  "本地投递任务": {
+    "zh-TW": "本機投遞工作",
+    "en": "Local delivery jobs"
+  },
+  "等待投递重试": {
+    "zh-TW": "等待投遞重試",
+    "en": "Waiting for delivery retry"
+  },
+  "已尝试 {0} 次": {
+    "zh-TW": "已嘗試 {0} 次",
+    "en": "Attempted {0} times"
+  },
+  "请先更换或关闭引用此目标的统一收件设置": {
+    "zh-TW": "請先更換或關閉引用此目標的統一收件設定",
+    "en": "Change or disable the collection rules using this destination first"
+  },
+  "请选择启用的站内邮箱，目标不能配置别名转发": {
+    "zh-TW": "請選擇啟用的站內信箱，目標不能設定別名轉寄",
+    "en": "Choose an active local mailbox without a forwarding alias"
+  },
+  "统一收件目标不能设置别名转发": {
+    "zh-TW": "統一收件目標不能設定別名轉寄",
+    "en": "A collection destination cannot have a forwarding alias"
+  },
   "已读": { "zh-TW": "已讀", "en": "Read" },
   "平均邮件大小": { "zh-TW": "平均郵件大小", "en": "Average message size" },
   "统计指标": { "zh-TW": "統計指標", "en": "Statistics metric" },

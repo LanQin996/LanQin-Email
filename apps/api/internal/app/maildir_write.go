@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func (a *App) writeStoredMessageToMaildir(ctx context.Context, messageID string, msg storedMessage, attachments []AttachmentInput) error {
+func (a *App) writeStoredMessageToMaildir(ctx context.Context, messageID string, msg storedMessage, attachments []AttachmentInput, stableFilename ...string) error {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" || strings.TrimSpace(msg.MailboxID) == "" || strings.TrimSpace(msg.FolderID) == "" {
 		return nil
 	}
@@ -32,6 +32,9 @@ func (a *App) writeStoredMessageToMaildir(ctx context.Context, messageID string,
 	})
 	if err != nil {
 		return err
+	}
+	if len(stableFilename) > 0 {
+		return a.writeRawMessageToMaildirFolder(ctx, messageID, "", raw, false, false, stableFilename[0])
 	}
 	return a.writeRawMessageToMaildir(ctx, messageID, raw, false)
 }
@@ -75,7 +78,7 @@ func (a *App) writeRawMessageToMaildir(ctx context.Context, messageID string, ra
 	return a.writeRawMessageToMaildirFolder(ctx, messageID, state.FolderID, raw, replace, false)
 }
 
-func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, folderID string, raw []byte, replace bool, updateFolder bool) error {
+func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, folderID string, raw []byte, replace bool, updateFolder bool, stableFilename ...string) error {
 	if strings.TrimSpace(a.cfg.MaildirRoot) == "" {
 		return nil
 	}
@@ -124,6 +127,11 @@ func (a *App) writeRawMessageToMaildirFolder(ctx context.Context, messageID, fol
 		return err
 	}
 	filename := maildirFilename(messageID, state.MessageID)
+	if len(stableFilename) > 0 {
+		// A durable local job reuses its own ID even after a crash between rename
+		// and storing raw_path. Ordinary edits still get fresh filenames.
+		filename = safeMaildirName(stableFilename[0])
+	}
 	tmpPath := filepath.Join(folderBase, "tmp", filename)
 	finalPath := filepath.Join(folderBase, subdir, filename)
 	finalPath = maildirPathWithFlags(finalPath, state.IsRead, state.IsStarred)

@@ -387,6 +387,19 @@ export const api = {
     request<{ ok: boolean }>(`/api/admin/users/${id}/two-factor/reset`, { method: "POST" }),
   deleteUser: (id: string) =>
     request<{ ok: boolean }>(`/api/admin/users/${id}`, { method: "DELETE" }),
+  domainCollection: (id: string) =>
+    request<{ enabled: boolean; targetMailboxId: string }>(`/api/admin/domains/${id}/collection`),
+  domainCollectionTargets: () =>
+    request<{ items: { id: string; address: string }[] }>("/api/admin/domain-collection-targets"),
+  setDomainCollection: (id: string, payload: { enabled: boolean; targetMailboxId: string }) =>
+    request<{ enabled: boolean; targetMailboxId: string }>(`/api/admin/domains/${id}/collection`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  localDeliveryJobs: () =>
+    request<{ items: { id: string; targetMailboxId: string; status: string; attempts: number }[] }>(
+      "/api/admin/local-delivery-jobs"
+    ),
   domains: () => request<ListResponse<Domain>>("/api/admin/domains"),
   createDomain: (name: string) =>
     request<Domain>("/api/admin/domains", { method: "POST", body: JSON.stringify({ name }) }),

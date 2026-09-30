@@ -1,7 +1,7 @@
 package app
 
 func postgresFreshSchema() []string {
-	return []string{
+	return append([]string{
 		`CREATE TABLE schema_migrations (
 			version BIGINT PRIMARY KEY,
 			name VARCHAR(128) NOT NULL,
@@ -598,5 +598,5 @@ func postgresFreshSchema() []string {
 			PRIMARY KEY(message_id,label_id)
 		)`,
 		`CREATE INDEX idx_message_labels_label ON message_labels(label_id,message_id)`,
-	}
+	}, domainCollectionSchema()...)
 }

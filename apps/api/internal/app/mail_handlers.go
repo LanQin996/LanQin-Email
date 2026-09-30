@@ -937,54 +937,9 @@ func (a *App) sendMailWithSource(ctx context.Context, user *User, mb *Mailbox, r
 		return nil, fmt.Errorf("failed to enqueue delivery: %w", err)
 	}
 
-	// Development/local-domain delivery: known local recipients go to their Inbox.
-	// When catch-all is enabled, unknown local recipients are stored as unregistered
-	// messages visible only in the admin "全部邮件" view.
-	localRecipients := append(req.To, req.CC...)
-	localRecipients = append(localRecipients, req.BCC...)
-	for _, rcpt := range localRecipients {
-		rcptMailbox, err := a.mailboxByAddress(ctx, rcpt)
-		if err != nil {
-			if !a.cfg.CatchAllEnabled || !a.isLocalDomainAddress(ctx, rcpt) {
-				continue
-			}
-			copyMsg := base
-			copyMsg.MailboxID = ""
-			copyMsg.FolderID = ""
-			copyMsg.RecipientAddr = normalizeEmail(rcpt)
-			copyMsg.MessageUID = newID("uid")
-			copyMsg.IsRead = false
-			if copyID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
-				_ = a.writeStoredMessageToMaildir(ctx, copyID, copyMsg, req.Attachments)
-			}
-			continue
-		}
-		if rcptMailbox.Status != "active" {
-			if a.cfg.CatchAllEnabled && a.isLocalDomainAddress(ctx, rcpt) {
-				copyMsg := base
-				copyMsg.MailboxID = ""
-				copyMsg.FolderID = ""
-				copyMsg.RecipientAddr = normalizeEmail(rcpt)
-				copyMsg.MessageUID = newID("uid")
-				copyMsg.IsRead = false
-				if copyID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
-					_ = a.writeStoredMessageToMaildir(ctx, copyID, copyMsg, req.Attachments)
-				}
-			}
-			continue
-		}
-		inboxID, err := a.ensureFolder(ctx, rcptMailbox.ID, "Inbox")
-		if err != nil {
-			continue
-		}
-		copyMsg := base
-		copyMsg.MailboxID = rcptMailbox.ID
-		copyMsg.FolderID = inboxID
-		copyMsg.MessageUID = newID("uid")
-		copyMsg.IsRead = false
-		if inboxMsgID, err := a.insertMessage(ctx, copyMsg, req.Attachments); err == nil {
-			_ = a.writeStoredMessageToMaildir(ctx, inboxMsgID, copyMsg, req.Attachments)
-			a.applyInboundControls(ctx, inboxMsgID, rcptMailbox.ID, copyMsg.From, copyMsg.Subject)
+	if strings.TrimSpace(a.cfg.SMTPHost) == "" {
+		if err := a.deliverLocalRecipients(ctx, sentID, allRecipients, base, req.Attachments); err != nil {
+			return nil, fmt.Errorf("failed to persist local delivery: %w", err)
 		}
 	}
 
@@ -2475,7 +2430,7 @@ func (a *App) insertMessageWithDB(ctx context.Context, db dbExecutor, msg stored
 	auth := normalizeMailAuthentication(msg.Authentication)
 	threadID := msg.ThreadID
 	if threadID == "" {
-		threadID = a.resolveThreadID(ctx, msg.MailboxID, msg.MessageID, msg.InReplyTo, msg.References)
+		threadID = a.resolveThreadIDWithDB(ctx, db, msg.MailboxID, msg.MessageID, msg.InReplyTo, msg.References)
 	}
 	_, err := db.ExecContext(ctx, `INSERT INTO messages(id,mailbox_id,folder_id,recipient_addr,message_uid,message_id,thread_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,has_attachments,size_bytes,auth_results,auth_spf,auth_dkim,auth_dmarc,received_spf,raw_path,imap_uid,imap_modseq,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, mailboxID, folderID, recipientAddr, msg.MessageUID, msg.MessageID, threadID, msg.Subject, msg.From, msg.FromName, jsonEncode(msg.To), jsonEncode(msg.CC), jsonEncode(msg.BCC), msg.SentAt.Format(time.RFC3339Nano), msg.ReceivedAt.Format(time.RFC3339Nano), msg.Snippet, msg.BodyText, msg.BodyHTML, boolInt(msg.IsRead), boolInt(msg.IsStarred), boolInt(hasAttachments), size, auth.AuthenticationResults, auth.SPF, auth.DKIM, auth.DMARC, auth.ReceivedSPF, msg.RawPath, imapUID, imapModSeq, now, now)

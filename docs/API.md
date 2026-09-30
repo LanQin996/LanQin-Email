@@ -733,3 +733,7 @@ Administrators with `admin.settings.view` can inspect the unified delivery queue
 Retry and cancellation require `admin.settings.update`: `POST /api/admin/delivery-queue/{queueType}/{id}/retry` retries an eligible failed task, while `DELETE /api/admin/delivery-queue/{queueType}/{id}` cancels/cleans an undelivered task. Both operations use state and lease conditions, so delivered or concurrently claimed tasks are rejected.
 
 重试和取消需要 `admin.settings.update` 权限：`POST /api/admin/delivery-queue/{queueType}/{id}/retry` 重新投递符合条件的失败任务，`DELETE /api/admin/delivery-queue/{queueType}/{id}` 取消并清理未投递任务。操作均带状态和租约条件，已投递或已被其他 worker 占用的任务会被拒绝。
+
+## 域名统一收件
+
+新增 /domains/{id}/collection 读写、/domain-collection-targets 候选邮箱和 /local-delivery-jobs 本地投递诊断接口。仅管理员加域名权限及相应 domains:read / domains:write scope 可调用。目标允许站内跨域，固定保留原件；目标生命周期变更受 409 引用保护。请求、响应、生产投递语义和迁移步骤见 [统一收件说明](DOMAIN_COLLECTION.md)。

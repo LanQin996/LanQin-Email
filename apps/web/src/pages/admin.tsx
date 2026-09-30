@@ -1,3 +1,4 @@
+import { DomainCollectionDialog } from "@/components/domain-collection-dialog"
 import { localizePermissionInfo } from "@/lib/permission-translations"
 import { dnsCheckMessage, dnsStatusLabel } from "@/lib/diagnostic-messages"
 import {
@@ -1216,6 +1217,9 @@ function DomainsSection({ domains }: { domains: Domain[] }) {
                 {dnsStatusLabel(domain.dnsStatus)}
               </Badge>
               {canViewDNS && <DomainDNSDialog domain={domain} />}
+              {user?.role === "admin" && canUpdate && (
+                <DomainCollectionDialog domainId={domain.id} domainName={domain.name} />
+              )}
               {canUpdate && (
                 <Button
                   variant="outline"

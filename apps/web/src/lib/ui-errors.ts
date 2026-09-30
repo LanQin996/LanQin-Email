@@ -1,6 +1,11 @@
 import { exactTranslations } from "@/lib/language"
 
 const knownErrors: Record<string, string> = {
+  "resource is a unified collection target; change or disable collection first":
+    "请先更换或关闭引用此目标的统一收件设置",
+  "collection target must be an active local mailbox without a forwarding alias":
+    "请选择启用的站内邮箱，目标不能配置别名转发",
+  "collection target cannot be a forwarding alias": "统一收件目标不能设置别名转发",
   unauthorized: "登录会话已失效，请重新登录",
   forbidden: "无权执行此操作",
   "permission required": "无权执行此操作",

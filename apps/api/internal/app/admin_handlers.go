@@ -205,6 +205,12 @@ func (a *App) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 	if req.Disabled != nil {
 		disabled = *req.Disabled
 	}
+	if disabled {
+		if err := a.collectionTargetInUse(r.Context(), "user", id); err != nil {
+			respondCollectionGuardError(w, err)
+			return
+		}
+	}
 	if a.isDefaultAdminUser(existing) && (role != "admin" || disabled) {
 		badRequest(w, errors.New("default administrator must remain an active super administrator"))
 		return
@@ -341,6 +347,10 @@ func (a *App) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if err := a.collectionTargetInUse(r.Context(), "user", id); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	current := currentUser(r)
 	if current != nil && current.ID == id {
 		badRequest(w, errors.New("cannot delete your own user"))
@@ -431,6 +441,12 @@ func (a *App) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("invalid status"))
 		return
 	}
+	if status != "active" {
+		if err := a.collectionTargetInUse(r.Context(), "domain", id); err != nil {
+			respondCollectionGuardError(w, err)
+			return
+		}
+	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE domains SET status=?, updated_at=? WHERE id=?`,
 		status, a.now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
@@ -452,6 +468,10 @@ func (a *App) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if err := a.collectionTargetInUse(r.Context(), "domain", id); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	var count int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mailboxes WHERE domain_id=?`, id).Scan(&count); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to check domain")
@@ -671,6 +691,17 @@ func (a *App) handleUpdateMailbox(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("owner user is disabled"))
 		return
 	}
+	existingMailbox, checkErr := a.mailboxByID(r.Context(), id)
+	if checkErr != nil {
+		respondError(w, 404, "mailbox not found")
+		return
+	}
+	if status != "active" || userID != existingMailbox.UserID {
+		if err := a.collectionTargetInUse(r.Context(), "mailbox", id); err != nil {
+			respondCollectionGuardError(w, err)
+			return
+		}
+	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE mailboxes SET user_id=?,display_name=?,quota_mb=?,status=?,updated_at=? WHERE id=?`,
 		userID, displayName, req.QuotaMB, status, a.now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
@@ -692,6 +723,10 @@ func (a *App) handleUpdateMailbox(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDeleteMailbox(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if err := a.collectionTargetInUse(r.Context(), "mailbox", id); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	current := currentUser(r)
 	var owner string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT user_id FROM mailboxes WHERE id=?`, id).Scan(&owner); err != nil {
@@ -1016,6 +1051,10 @@ func (a *App) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
+	if err := a.collectionAliasAllowed(r.Context(), source, destination, enabled); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	id := newID("als")
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	_, err = a.db.ExecContext(r.Context(), `INSERT INTO aliases(id,domain_id,source,destination,enabled,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`,
@@ -1060,6 +1099,10 @@ func (a *App) handleUpdateAlias(w http.ResponseWriter, r *http.Request) {
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
+	}
+	if err := a.collectionAliasAllowed(r.Context(), source, destination, enabled); err != nil {
+		respondCollectionGuardError(w, err)
+		return
 	}
 	_, err = a.db.ExecContext(r.Context(), `UPDATE aliases SET source=?,destination=?,enabled=?,updated_at=? WHERE id=?`,
 		source, destination, boolInt(enabled), a.now().UTC().Format(time.RFC3339Nano), id)

@@ -9,9 +9,12 @@ import (
 	"time"
 )
 
-const externalSchemaVersion = 11
+const externalSchemaVersion = 12
 
 var externalSchemaTables = []string{
+	"domain_collections",
+	"domain_collection_audit",
+	"local_delivery_jobs",
 	"aliases",
 	"api_tokens",
 	"attachments",
@@ -148,6 +151,9 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if err := migrateExternalSchemaV11(ctx, conn, driver); err != nil {
 			return err
 		}
+		if err := migrateExternalSchemaV12(ctx, conn, driver); err != nil {
+			return err
+		}
 		tables, err = listExternalSchemaTables(ctx, conn, driver)
 		if err != nil {
 			return err
@@ -173,7 +179,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 	for _, migration := range []struct {
 		version int
 		name    string
-	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}, {4, "external_schema_v4_telegram_notifications"}, {5, "external_schema_v5_login_rate_limits"}, {6, "external_schema_v6_queue_leases"}, {7, "external_schema_v7_message_threads"}, {8, "external_schema_v8_mailbox_quota"}, {9, "external_schema_v9_invite_groups_mailbox_rate"}, {10, "external_schema_v10_session_indexes_totp_replay"}, {11, "external_schema_v11_smtp_rate_recipients"}} {
+	}{{1, migrationName}, {2, "external_schema_v2_linuxdo_sso"}, {3, "external_schema_v3_registration_invites"}, {4, "external_schema_v4_telegram_notifications"}, {5, "external_schema_v5_login_rate_limits"}, {6, "external_schema_v6_queue_leases"}, {7, "external_schema_v7_message_threads"}, {8, "external_schema_v8_mailbox_quota"}, {9, "external_schema_v9_invite_groups_mailbox_rate"}, {10, "external_schema_v10_session_indexes_totp_replay"}, {11, "external_schema_v11_smtp_rate_recipients"}, {12, "external_schema_v12_domain_collection"}} {
 		marker := fmt.Sprintf("INSERT INTO schema_migrations(version,name,applied_at) VALUES(%d,'%s',CURRENT_TIMESTAMP)", migration.version, migration.name)
 		if _, err := executor.ExecContext(ctx, marker); err != nil {
 			return fmt.Errorf("external schema: record v%d: %w", migration.version, err)
@@ -336,6 +342,9 @@ func validateExternalSchema(ctx context.Context, conn *sql.Conn, actual []string
 	if name != "external_schema_v11_smtp_rate_recipients" {
 		return fmt.Errorf("external schema: unexpected v11 migration %q", name)
 	}
+	if err := conn.QueryRowContext(ctx, "SELECT name FROM schema_migrations WHERE version=12").Scan(&name); err != nil || name != "external_schema_v12_domain_collection" {
+		return fmt.Errorf("external schema: invalid v12 migration marker")
+	}
 	return nil
 }
 
@@ -352,6 +361,9 @@ func migrateExternalSchemaV2(ctx context.Context, conn *sql.Conn, driver string,
 	}
 	legacy := make([]string, 0, len(externalSchemaTables)-7)
 	for _, table := range externalSchemaTables {
+		if table == "domain_collections" || table == "domain_collection_audit" || table == "local_delivery_jobs" {
+			continue
+		}
 		if table != "oauth_identities" && table != "oauth_login_states" && table != "oauth_registration_challenges" && table != "registration_invites" && table != "telegram_notification_settings" && table != "telegram_notification_outbox" && table != "login_rate_limits" {
 			legacy = append(legacy, table)
 		}
@@ -414,6 +426,9 @@ func migrateExternalSchemaV3(ctx context.Context, conn *sql.Conn, driver string,
 	}
 	legacy := make([]string, 0, len(externalSchemaTables)-4)
 	for _, table := range externalSchemaTables {
+		if table == "domain_collections" || table == "domain_collection_audit" || table == "local_delivery_jobs" {
+			continue
+		}
 		if table != "registration_invites" && table != "telegram_notification_settings" && table != "telegram_notification_outbox" && table != "login_rate_limits" {
 			legacy = append(legacy, table)
 		}
@@ -505,6 +520,9 @@ func migrateExternalSchemaV4(ctx context.Context, conn *sql.Conn, driver string,
 	}
 	legacy := make([]string, 0, len(externalSchemaTables)-3)
 	for _, table := range externalSchemaTables {
+		if table == "domain_collections" || table == "domain_collection_audit" || table == "local_delivery_jobs" {
+			continue
+		}
 		if table != "telegram_notification_settings" && table != "telegram_notification_outbox" && table != "login_rate_limits" {
 			legacy = append(legacy, table)
 		}
@@ -580,6 +598,9 @@ func migrateExternalSchemaV5(ctx context.Context, conn *sql.Conn, driver string,
 	}
 	legacy := make([]string, 0, len(externalSchemaTables)-1)
 	for _, table := range externalSchemaTables {
+		if table == "domain_collections" || table == "domain_collection_audit" || table == "local_delivery_jobs" {
+			continue
+		}
 		if table != "login_rate_limits" {
 			legacy = append(legacy, table)
 		}

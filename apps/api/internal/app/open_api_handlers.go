@@ -97,6 +97,12 @@ func (a *App) handleOpenAPIUpdateDomain(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	id := chi.URLParam(r, "id")
+	if status != "active" {
+		if err := a.collectionTargetInUse(r.Context(), "domain", id); err != nil {
+			respondCollectionGuardError(w, err)
+			return
+		}
+	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE domains SET status=?, updated_at=? WHERE id=?`, status, a.now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to update domain")
@@ -116,6 +122,10 @@ func (a *App) handleOpenAPIUpdateDomain(w http.ResponseWriter, r *http.Request) 
 
 func (a *App) handleOpenAPIDeleteDomain(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if err := a.collectionTargetInUse(r.Context(), "domain", id); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	var count int
 	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM mailboxes WHERE domain_id=?`, id).Scan(&count); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to check domain")
@@ -300,6 +310,17 @@ func (a *App) handleOpenAPIUpdateMailbox(w http.ResponseWriter, r *http.Request)
 		respondMailboxOwnerError(w, err)
 		return
 	}
+	existingMailbox, checkErr := a.mailboxByID(r.Context(), id)
+	if checkErr != nil {
+		respondError(w, 404, "mailbox not found")
+		return
+	}
+	if status != "active" || userID != existingMailbox.UserID {
+		if err := a.collectionTargetInUse(r.Context(), "mailbox", id); err != nil {
+			respondCollectionGuardError(w, err)
+			return
+		}
+	}
 	res, err := a.db.ExecContext(r.Context(), `UPDATE mailboxes SET user_id=?,display_name=?,quota_mb=?,status=?,updated_at=? WHERE id=?`,
 		userID, displayName, quotaMB, status, a.now().UTC().Format(time.RFC3339Nano), id)
 	if err != nil {
@@ -320,6 +341,10 @@ func (a *App) handleOpenAPIUpdateMailbox(w http.ResponseWriter, r *http.Request)
 
 func (a *App) handleOpenAPIDeleteMailbox(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
+	if err := a.collectionTargetInUse(r.Context(), "mailbox", id); err != nil {
+		respondCollectionGuardError(w, err)
+		return
+	}
 	var owner string
 	if err := a.db.QueryRowContext(r.Context(), `SELECT user_id FROM mailboxes WHERE id=?`, id).Scan(&owner); err != nil {
 		respondError(w, http.StatusNotFound, "mailbox not found")

@@ -136,6 +136,7 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	assertExternalDeliveryCascade(t, ctx, a, adminID, now)
 	assertOAuthIdentityContract(t, ctx, a)
 	assertRegistrationInviteContract(t, ctx, a, adminID)
+	assertDomainCollectionContract(t, a)
 
 	var migrationCount int
 	if err := a.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_migrations WHERE version=?`, externalSchemaVersion).Scan(&migrationCount); err != nil {
@@ -265,6 +266,9 @@ func prepareExternalSchemaV8Upgrade(t *testing.T, cfg Config) {
 		}
 	}
 	statements := []string{
+		"DROP TABLE domain_collections",
+		"DROP TABLE domain_collection_audit",
+		"DROP TABLE local_delivery_jobs",
 		"DROP TABLE mailbox_creation_events",
 		"ALTER TABLE registration_invites DROP COLUMN permission_group_ids_json",
 		"DROP INDEX idx_sessions_user" + indexSuffix,

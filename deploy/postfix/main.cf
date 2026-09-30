@@ -10,6 +10,10 @@ recipient_delimiter = +
 virtual_mailbox_domains = sqlite:/etc/postfix/sqlite-domains.cf
 virtual_mailbox_maps = sqlite:/etc/postfix/sqlite-mailboxes.cf
 virtual_alias_maps = sqlite:/etc/postfix/sqlite-aliases.cf
+# Added once for original envelope recipients; generated BCC recipients do not recurse.
+recipient_bcc_maps = sqlite:/etc/postfix/sqlite-collection-bcc.cf
+# Deduplicate direct, alias and BCC recipients by their final mailbox address.
+enable_original_recipient = no
 virtual_transport = lmtp:inet:dovecot:24
 virtual_mailbox_base = /var/mail/vhosts
 

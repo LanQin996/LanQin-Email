@@ -267,6 +267,9 @@ func (a *App) submitSMTPMessage(ctx context.Context, user *User, mb *Mailbox, ma
 			return err
 		}
 	}
+	if sentID != "" && strings.TrimSpace(a.cfg.SMTPHost) == "" {
+		return a.deliverLocalRecipients(ctx, sentID, recipients, msg, attachments)
+	}
 	return nil
 }
 

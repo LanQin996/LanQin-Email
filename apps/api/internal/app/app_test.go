@@ -1229,6 +1229,7 @@ func TestMailRulesConditionGroupsAndActions(t *testing.T) {
 
 func TestMailRuleAutomaticForwardQueuesOnceAndKeepsInboxCopy(t *testing.T) {
 	a := newTestApp(t)
+	stopTestWorkers(a)
 	a.cfg.SMTPHost = "127.0.0.1"
 	a.cfg.SMTPPort = "1"
 	ts := httptest.NewServer(a.Router())
@@ -1252,6 +1253,8 @@ func TestMailRuleAutomaticForwardQueuesOnceAndKeepsInboxCopy(t *testing.T) {
 	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "before forward rule", "text": "existing body"}, &existing); code != http.StatusCreated {
 		t.Fatalf("send existing code=%d body=%+v", code, existing)
 	}
+
+	importSyntheticSMTPMessage(t, a, recipient, existing.ID)
 
 	rcpt := &testClient{t: t, server: ts}
 	if code := rcpt.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {
@@ -1334,6 +1337,8 @@ func TestMailRuleAutomaticForwardQueuesOnceAndKeepsInboxCopy(t *testing.T) {
 	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "forward this", "text": "forwarded body"}, &sent); code != http.StatusCreated {
 		t.Fatalf("send forwarded code=%d body=%+v", code, sent)
 	}
+	importSyntheticSMTPMessage(t, a, recipient, sent.ID)
+
 	var source, mailFrom, headerFrom, recipientsJSON, mimeBase64 string
 	if err := a.db.QueryRow(`SELECT source,mail_from,header_from,recipients_json,mime_base64 FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&source, &mailFrom, &headerFrom, &recipientsJSON, &mimeBase64); err != nil {
 		t.Fatal(err)
@@ -1371,6 +1376,8 @@ func TestMailRuleAutomaticForwardQueuesOnceAndKeepsInboxCopy(t *testing.T) {
 	if code := senderClient.do("POST", "/api/mail/send", map[string]any{"to": []string{recipient.Address}, "subject": "do not forward", "text": "forwarding verification removed"}, &sentAfterDelete); code != http.StatusCreated {
 		t.Fatalf("send after deleting verification code=%d body=%+v", code, sentAfterDelete)
 	}
+	importSyntheticSMTPMessage(t, a, recipient, sentAfterDelete.ID)
+
 	if err := a.db.QueryRow(`SELECT COUNT(1) FROM send_queue WHERE source LIKE 'rule_forward:%'`).Scan(&forwardCount); err != nil || forwardCount != 1 {
 		t.Fatalf("forward queue count after deleting verification=%d err=%v", forwardCount, err)
 	}
@@ -2449,6 +2456,12 @@ func TestOpenAPISendStatusAndMailboxMessages(t *testing.T) {
 	if status.ID != sent.MessageID || status.QueueID != sent.QueueID || status.MessageID != sent.MessageID || status.Status != sendQueueStatusQueued {
 		t.Fatalf("status=%+v sent=%+v", status, sent)
 	}
+
+	var premature int
+	if err := a.db.QueryRow("SELECT COUNT(*) FROM messages WHERE mailbox_id=?", recipient.ID).Scan(&premature); err != nil || premature != 0 {
+		t.Fatalf("SMTP must not eagerly deliver: %d %v", premature, err)
+	}
+	importSyntheticSMTPMessage(t, a, recipient, sent.MessageID)
 
 	recipientClient := &testClient{t: t, server: ts}
 	if code := recipientClient.do("POST", "/api/auth/login", map[string]string{"email": recipient.Address, "password": "Password123!"}, &login); code != http.StatusOK {

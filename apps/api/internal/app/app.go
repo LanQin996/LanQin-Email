@@ -22,6 +22,7 @@ import (
 )
 
 type App struct {
+	collectionMu       sync.Mutex
 	cfg                Config
 	db                 *sql.DB
 	log                *slog.Logger
@@ -101,6 +102,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		a.startWorker(func() { a.maildirWorker(workerCtx) })
 	}
 	a.startWorker(func() { a.sendQueueWorker(workerCtx) })
+	a.startWorker(func() { a.localDeliveryWorker(workerCtx) })
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
 	a.startWorker(func() { a.sessionCleanupWorker(workerCtx) })
@@ -765,6 +767,11 @@ func (a *App) migrate(ctx context.Context) error {
 		`CREATE INDEX IF NOT EXISTS idx_blocked_senders_user_mailbox ON blocked_senders(user_id, mailbox_id, email)`,
 		`CREATE INDEX IF NOT EXISTS idx_mail_labels_mailbox ON mail_labels(mailbox_id, name)`,
 		`CREATE INDEX IF NOT EXISTS idx_message_labels_label ON message_labels(label_id, message_id)`,
+	}
+	for _, statement := range domainCollectionSchema() {
+		statement = strings.Replace(statement, "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
+		statement = strings.Replace(statement, "CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+		stmts = append(stmts, statement)
 	}
 	for _, stmt := range stmts {
 		if _, err := a.db.ExecContext(ctx, stmt); err != nil {
