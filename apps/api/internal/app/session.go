@@ -4,8 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
+
+// Use the administrator-configured public URL, not proxy/request headers: TLS
+// may terminate upstream, and clients must not be able to downgrade cookies.
+func (a *App) secureCookies() bool {
+	base, err := url.Parse(strings.TrimSpace(a.cfg.PublicBaseURL))
+	if err == nil && base.Hostname() != "" && base.User == nil {
+		switch base.Scheme {
+		case "https":
+			return true
+		case "http":
+			return false
+		}
+	}
+	return !a.cfg.AllowInsecureHTTP
+}
 
 func (a *App) issueSession(w http.ResponseWriter, r *http.Request, userID string) error {
 	token := randomToken()
@@ -23,7 +40,7 @@ func (a *App) issueSession(w http.ResponseWriter, r *http.Request, userID string
 		MaxAge:   int(time.Until(expires).Seconds()),
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   !a.cfg.AllowInsecureHTTP,
+		Secure:   a.secureCookies(),
 	})
 	return nil
 }

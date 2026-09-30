@@ -727,11 +727,11 @@ func (a *App) linuxDoCookieName(kind string) string {
 }
 
 func (a *App) setLinuxDoCookie(w http.ResponseWriter, kind, value, path string, ttl time.Duration) {
-	http.SetCookie(w, &http.Cookie{Name: a.linuxDoCookieName(kind), Value: value, Path: path, Expires: a.now().UTC().Add(ttl), MaxAge: int(ttl.Seconds()), HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: !a.cfg.AllowInsecureHTTP})
+	http.SetCookie(w, &http.Cookie{Name: a.linuxDoCookieName(kind), Value: value, Path: path, Expires: a.now().UTC().Add(ttl), MaxAge: int(ttl.Seconds()), HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: a.secureCookies()})
 }
 
 func (a *App) clearLinuxDoCookie(w http.ResponseWriter, kind, path string) {
-	http.SetCookie(w, &http.Cookie{Name: a.linuxDoCookieName(kind), Value: "", Path: path, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: !a.cfg.AllowInsecureHTTP})
+	http.SetCookie(w, &http.Cookie{Name: a.linuxDoCookieName(kind), Value: "", Path: path, MaxAge: -1, HttpOnly: true, SameSite: http.SameSiteLaxMode, Secure: a.secureCookies()})
 }
 
 func (a *App) redirectLinuxDoResult(w http.ResponseWriter, r *http.Request, path, result string) {
