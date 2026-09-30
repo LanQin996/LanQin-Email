@@ -288,7 +288,13 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 ## License
 
-[MIT](./LICENSE)
+Copyright (c) 2026 LanQin996.
+
+LanQin Email is licensed under the [GNU General Public License version 3 only](./LICENSE) (`GPL-3.0-only`).
+
+This license applies starting with the commit that introduces this license change. Earlier versions released under the MIT License remain available under their original MIT terms; this change does not revoke permissions already granted for those versions.
+
+Third-party components retain their respective licenses and copyright notices.
 
 ## Star History
 

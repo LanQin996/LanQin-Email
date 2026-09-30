@@ -296,7 +296,13 @@ docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/doc
 
 ## License
 
-[MIT](./LICENSE)
+Copyright (c) 2026 LanQin996.
+
+LanQin Email 采用 [GNU 通用公共许可证第 3 版（仅限此版本）](./LICENSE)（`GPL-3.0-only`）。
+
+本许可证自引入此次许可证变更的提交起适用。此前已按 MIT 许可证发布的版本仍适用其原有 MIT 条款；此次变更不撤销这些版本已经授予的许可。
+
+第三方组件保留各自的许可证和版权声明。
 
 
 ## Star 趋势
