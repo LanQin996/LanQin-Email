@@ -1828,7 +1828,7 @@ function MailboxPushRequests() {
             className="flex flex-wrap items-center justify-between gap-2 border-b pb-3 last:border-0 last:pb-0"
           >
             <div className="text-sm">
-              {item.mailboxAddress} · {item.fromEmail} → {item.toEmail}
+              {uiText("{0} · {1} → {2}", [item.mailboxAddress, item.fromEmail, item.toEmail])}
             </div>
             <div className="flex gap-2">
               <Button size="sm" onClick={() => resolve.mutate({ id: item.id, action: "accept" })}>

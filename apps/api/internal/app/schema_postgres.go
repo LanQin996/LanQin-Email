@@ -223,6 +223,7 @@ func postgresFreshSchema() []string {
 			to_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			status VARCHAR(16) NOT NULL, expires_at VARCHAR(35) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
 			created_at VARCHAR(35) NOT NULL, updated_at VARCHAR(35) NOT NULL, resolved_at VARCHAR(35), resolved_by VARCHAR(64),
+			pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED
 		)`,
 		`CREATE UNIQUE INDEX idx_mailbox_push_one_pending ON mailbox_push_requests(mailbox_id) WHERE status='pending'`,
 		`CREATE INDEX idx_mailbox_push_recipient ON mailbox_push_requests(to_user_id,status,created_at DESC)`,

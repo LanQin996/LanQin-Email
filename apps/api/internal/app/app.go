@@ -382,7 +382,7 @@ func (a *App) migrate(ctx context.Context) error {
 			to_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			status TEXT NOT NULL CHECK(status IN ('pending','accepted','rejected','cancelled','expired')),
 			expires_at TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-			created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL, resolved_at TEXT, resolved_by TEXT
 		)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_mailbox_push_one_pending ON mailbox_push_requests(mailbox_id) WHERE status='pending'`,
 		`CREATE INDEX IF NOT EXISTS idx_mailbox_push_recipient ON mailbox_push_requests(to_user_id,status,created_at DESC)`,

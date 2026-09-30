@@ -159,7 +159,11 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 			id VARCHAR(64) PRIMARY KEY, mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
 			from_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE, to_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			status VARCHAR(16) NOT NULL, expires_at VARCHAR(35) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-			created_at VARCHAR(35) NOT NULL, updated_at VARCHAR(35) NOT NULL, resolved_at VARCHAR(35), resolved_by VARCHAR(64))`
+			created_at VARCHAR(35) NOT NULL, updated_at VARCHAR(35) NOT NULL, resolved_at VARCHAR(35), resolved_by VARCHAR(64),
+			pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED)`
+		if driver == databaseDriverPostgres {
+			pushTable = strings.Replace(pushTable, ",\n\t\t\tpending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED", "", 1)
+		}
 		if driver == databaseDriverMySQL {
 			pushTable = postgresTableToMySQL(pushTable)
 		}
