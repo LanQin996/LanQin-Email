@@ -72,6 +72,7 @@ func TestExternalDatabaseContract(t *testing.T) {
 					}
 				}()
 				assertUpgradedInviteDefaults(t, upgraded)
+				assertExternalMailboxPushContract(t, upgraded)
 			})
 
 			// Reopening validates upgrade idempotency and persisted seed data.
@@ -85,6 +86,7 @@ func TestExternalDatabaseContract(t *testing.T) {
 			if err := reopened.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email=?`, cfg.AdminEmail).Scan(&count); err != nil || count != 1 {
 				t.Fatalf("persisted administrator count=%d err=%v", count, err)
 			}
+			assertExternalMailboxPushContract(t, reopened)
 		})
 	}
 }
@@ -134,6 +136,7 @@ func assertExternalDatabaseContract(t *testing.T, a *App) {
 	}
 
 	assertExternalDeliveryCascade(t, ctx, a, adminID, now)
+	assertExternalMailboxPushContract(t, a)
 	assertOAuthIdentityContract(t, ctx, a)
 	assertRegistrationInviteContract(t, ctx, a, adminID)
 	assertDomainCollectionContract(t, a)
@@ -246,7 +249,7 @@ func assertExternalDeliveryCascade(t *testing.T, ctx context.Context, a *App, ad
 }
 
 // The contract DSNs must point at dedicated test databases. Downgrade only the
-// V9-V11 additions after closing the app so its workers cannot race the fixture.
+// post-V8 additions after closing the app so its workers cannot race the fixture.
 func prepareExternalSchemaV8Upgrade(t *testing.T, cfg Config) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
@@ -266,6 +269,7 @@ func prepareExternalSchemaV8Upgrade(t *testing.T, cfg Config) {
 		}
 	}
 	statements := []string{
+		"DROP TABLE mailbox_push_requests",
 		"DROP TABLE domain_collections",
 		"DROP TABLE domain_collection_audit",
 		"DROP TABLE local_delivery_jobs",
@@ -281,6 +285,63 @@ func prepareExternalSchemaV8Upgrade(t *testing.T, cfg Config) {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			t.Fatalf("prepare V8: %s: %v", statement, err)
 		}
+	}
+}
+
+func assertExternalMailboxPushContract(t *testing.T, a *App) {
+	t.Helper()
+	ctx := t.Context()
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, "SELECT id FROM domains WHERE name=?", "contract.test").Scan(&domainID); err != nil {
+		t.Fatal(err)
+	}
+	for _, deleted := range []string{"mailbox", "sender", "recipient"} {
+		t.Run("mailbox push cascade "+deleted, func(t *testing.T) {
+			sender, recipient, mailbox := newID("usr"), newID("usr"), newID("mbx")
+			for _, id := range []string{sender, recipient} {
+				if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,created_at,updated_at) VALUES(?,?,?,'user','unused',?,?)`, id, id+"@contract.test", "Push Contract", now, now); err != nil {
+					t.Fatal(err)
+				}
+				defer a.db.ExecContext(ctx, "DELETE FROM users WHERE id=?", id)
+			}
+			if _, err := a.db.ExecContext(ctx, `INSERT INTO mailboxes(id,user_id,domain_id,local_part,address,display_name,password_hash,quota_mb,status,created_at,updated_at) VALUES(?,?,?,?,?,?,'unused',1,'active',?,?)`, mailbox, sender, domainID, mailbox, mailbox+"@contract.test", "Push Contract", now, now); err != nil {
+				t.Fatal(err)
+			}
+			insert := func(id, status string) error {
+				_, err := a.db.ExecContext(ctx, `INSERT INTO mailbox_push_requests(id,mailbox_id,from_user_id,to_user_id,status,expires_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)`, id, mailbox, sender, recipient, status, now, now, now)
+				return err
+			}
+			first := newID("push")
+			if err := insert(first, "pending"); err != nil {
+				t.Fatalf("insert mailbox push: %v", err)
+			}
+			if err := insert(newID("push"), "pending"); !isUniqueViolation(err) {
+				t.Fatalf("second pending push: %v, want unique violation", err)
+			}
+			if _, err := a.db.ExecContext(ctx, "UPDATE mailbox_push_requests SET status='accepted' WHERE id=?", first); err != nil {
+				t.Fatal(err)
+			}
+			if err := insert(newID("push"), "accepted"); err != nil {
+				t.Fatalf("multiple resolved pushes must be allowed: %v", err)
+			}
+			if err := insert(newID("push"), "pending"); err != nil {
+				t.Fatalf("resolved push must release pending slot: %v", err)
+			}
+			table, id := "users", sender
+			if deleted == "recipient" {
+				id = recipient
+			} else if deleted == "mailbox" {
+				table, id = "mailboxes", mailbox
+			}
+			if _, err := a.db.ExecContext(ctx, "DELETE FROM "+table+" WHERE id=?", id); err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := a.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM mailbox_push_requests WHERE mailbox_id=?", mailbox).Scan(&count); err != nil || count != 0 {
+				t.Fatalf("push cascade via %s: count=%d err=%v", deleted, count, err)
+			}
+		})
 	}
 }
 

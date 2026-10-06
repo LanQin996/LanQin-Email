@@ -22,6 +22,8 @@ func mysqlFreshSchema() []string {
 				converted = addMySQLTableDefinitions(converted, mysqlMessageGeneratedDefinitions)
 			case strings.HasPrefix(trimmed, "CREATE TABLE send_queue "):
 				converted = addMySQLTableDefinitions(converted, mysqlSendQueueGeneratedDefinitions)
+			case strings.HasPrefix(trimmed, "CREATE TABLE mailbox_push_requests "):
+				converted = mailboxPushExternalTable(databaseDriverMySQL)
 			}
 			statements = append(statements, converted)
 		default:
@@ -32,6 +34,7 @@ func mysqlFreshSchema() []string {
 	// MySQL has no partial indexes. Nullable generated keys preserve the
 	// uniqueness semantics without indexing LONGTEXT values directly.
 	statements = append(statements,
+		`CREATE UNIQUE INDEX idx_mailbox_push_one_pending ON mailbox_push_requests(pending_mailbox_id)`,
 		`CREATE INDEX idx_messages_mailbox_starred_received_id ON messages(mailbox_id,is_starred,received_at DESC,id DESC)`,
 		`CREATE INDEX idx_messages_mailbox_message_id ON messages(mailbox_id,message_id)`,
 		`CREATE INDEX idx_messages_maildir_backfill ON messages(created_at)`,

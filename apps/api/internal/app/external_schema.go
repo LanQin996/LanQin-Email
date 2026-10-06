@@ -155,18 +155,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if err := migrateExternalSchemaV12(ctx, conn, driver); err != nil {
 			return err
 		}
-		pushTable := `CREATE TABLE IF NOT EXISTS mailbox_push_requests (
-			id VARCHAR(64) PRIMARY KEY, mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
-			from_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE, to_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-			status VARCHAR(16) NOT NULL, expires_at VARCHAR(35) NOT NULL, version INTEGER NOT NULL DEFAULT 1,
-			created_at VARCHAR(35) NOT NULL, updated_at VARCHAR(35) NOT NULL, resolved_at VARCHAR(35), resolved_by VARCHAR(64),
-			pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED)`
-		if driver == databaseDriverPostgres {
-			pushTable = strings.Replace(pushTable, ",\n\t\t\tpending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED", "", 1)
-		}
-		if driver == databaseDriverMySQL {
-			pushTable = postgresTableToMySQL(pushTable)
-		}
+		pushTable := strings.Replace(mailboxPushExternalTable(driver), "CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
 		if _, err := conn.ExecContext(ctx, pushTable); err != nil {
 			return err
 		}
@@ -174,7 +163,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 		if driver == databaseDriverMySQL {
 			idx = `CREATE INDEX idx_mailbox_push_recipient ON mailbox_push_requests(to_user_id,status,created_at)`
 		}
-		if _, err := conn.ExecContext(ctx, idx); err != nil {
+		if _, err := conn.ExecContext(ctx, idx); err != nil && !(driver == databaseDriverMySQL && strings.Contains(strings.ToLower(err.Error()), "duplicate key name")) {
 			return err
 		}
 		if driver == databaseDriverPostgres {
@@ -182,7 +171,7 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 				return err
 			}
 		} else {
-			if _, err := conn.ExecContext(ctx, `ALTER TABLE mailbox_push_requests ADD COLUMN pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE mailbox_push_requests ADD COLUMN pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) VIRTUAL`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
 				return err
 			}
 			if _, err := conn.ExecContext(ctx, `CREATE UNIQUE INDEX idx_mailbox_push_one_pending ON mailbox_push_requests(pending_mailbox_id)`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate key name") {
@@ -230,6 +219,31 @@ func initializeExternalSchema(ctx context.Context, db *sql.DB, driver string) er
 
 type externalSchemaExecutor interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+// Keep one column per line and the closing parenthesis on its own line:
+// postgresTableToMySQL extracts inline references into table-level foreign keys.
+func mailboxPushExternalTable(driver string) string {
+	statement := `CREATE TABLE mailbox_push_requests (
+			id VARCHAR(64) PRIMARY KEY,
+			mailbox_id VARCHAR(64) NOT NULL REFERENCES mailboxes(id) ON DELETE CASCADE,
+			from_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			to_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+			status VARCHAR(16) NOT NULL,
+			expires_at VARCHAR(35) NOT NULL,
+			version INTEGER NOT NULL DEFAULT 1,
+			created_at VARCHAR(35) NOT NULL,
+			updated_at VARCHAR(35) NOT NULL,
+			resolved_at VARCHAR(35),
+			resolved_by VARCHAR(64),
+			pending_mailbox_id VARCHAR(64) GENERATED ALWAYS AS (CASE WHEN status='pending' THEN mailbox_id ELSE NULL END) STORED
+		)`
+	if driver == databaseDriverMySQL {
+		// The generated key depends on a column with an ON DELETE CASCADE FK.
+		statement = strings.Replace(statement, "END) STORED", "END) VIRTUAL", 1)
+		return postgresTableToMySQL(statement)
+	}
+	return statement
 }
 
 func lockExternalSchema(ctx context.Context, conn *sql.Conn, driver string) (func(), error) {
