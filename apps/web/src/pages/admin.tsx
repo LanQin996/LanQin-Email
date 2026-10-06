@@ -1,13 +1,7 @@
 import { DomainCollectionDialog } from "@/components/domain-collection-dialog"
-import { localizePermissionInfo } from "@/lib/permission-translations"
+import { localizePermissionInfo, permissionMessages } from "@/lib/permission-translations"
 import { dnsCheckMessage, dnsStatusLabel } from "@/lib/diagnostic-messages"
-import {
-  uiMessage,
-  type UiText,
-  getInitialLanguage,
-  uiText,
-  useLanguage as useUiLanguage,
-} from "@/lib/language"
+import { uiMessage, type UiText, uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
 
 import * as React from "react"
@@ -51,7 +45,7 @@ import {
   RegistrationInvite,
   SystemSettings,
 } from "@/lib/api"
-import { cn, decodeMimeHeader, formatBytes, formatDate } from "@/lib/utils"
+import { cn, decodeMimeHeader, formatBytes, formatDate, formatDateTime } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -252,8 +246,15 @@ export function AdminPage() {
             onSectionChange={(next) => setParams(next === "overview" ? {} : { section: next })}
           />
         )}
-        {section === "users" && (
-          <UsersSection users={userItems} permissionGroups={assignablePermissionGroups} />
+        {section === "users" && canUsersView && (
+          <UsersSection
+            users={userItems}
+            permissionGroups={assignablePermissionGroups}
+            loading={users.isPending}
+            failed={users.isError}
+            refreshing={users.isFetching}
+            onRefresh={() => void users.refetch()}
+          />
         )}
         {section === "permissionGroups" && (
           <PermissionGroupsSection
@@ -472,9 +473,17 @@ function InfoLine({ label, value }: { label: string; value: React.ReactNode }) {
 function UsersSection({
   users,
   permissionGroups,
+  loading,
+  failed,
+  refreshing,
+  onRefresh,
 }: {
   users: AdminUser[]
   permissionGroups: PermissionGroup[]
+  loading: boolean
+  failed: boolean
+  refreshing: boolean
+  onRefresh: () => void
 }) {
   useUiLanguage()
 
@@ -485,6 +494,10 @@ function UsersSection({
   const [query, setQuery] = React.useState("")
   const [roleFilter, setRoleFilter] = React.useState("all")
   const [statusFilter, setStatusFilter] = React.useState("all")
+  const [securityFilter, setSecurityFilter] = React.useState("all")
+  const [detailUserId, setDetailUserId] = React.useState<string | null>(null)
+  const detailTrigger = React.useRef<HTMLButtonElement | null>(null)
+  const detailUser = users.find((item) => item.id === detailUserId)
   const [pendingConfirm, setPendingConfirm] = React.useState<PendingConfirm | null>(null)
   const canCreate = hasPermission(user, "admin.users.create")
   const canDelete = hasPermission(user, "admin.users.delete")
@@ -492,13 +505,16 @@ function UsersSection({
     const keyword = query.trim().toLowerCase()
     const matchesKeyword =
       !keyword ||
-      [user.email, user.displayName, ...(user.mailboxes || [])].some((value) =>
+      [user.id, user.email, user.displayName, ...(user.mailboxes || [])].some((value) =>
         value.toLowerCase().includes(keyword)
       )
     const matchesRole = roleFilter === "all" || user.role === roleFilter
     const matchesStatus =
       statusFilter === "all" || (statusFilter === "active" ? !user.disabled : user.disabled)
-    return matchesKeyword && matchesRole && matchesStatus
+    const matchesSecurity =
+      securityFilter === "all" ||
+      (securityFilter === "enabled" ? user.twoFactorEnabled : !user.twoFactorEnabled)
+    return matchesKeyword && matchesRole && matchesStatus && matchesSecurity
   })
   const remove = useMutation({
     mutationFn: api.deleteUser,
@@ -510,161 +526,253 @@ function UsersSection({
     onError: (e) => toast({ title: "删除失败", description: errorMessage(e) }),
   })
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <CardTitle>{uiText("用户管理")}</CardTitle>
-          {canCreate && <CreateUserDialog permissionGroups={permissionGroups} />}
+    <div className="space-y-4" data-lanqin-i18n-ignore>
+      {!loading && !failed && (
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <Stat icon={<Users />} label={uiText("用户总数")} value={uiText("{0}", [users.length])} />
+          <Stat
+            icon={<CheckCircle2 />}
+            label={uiText("正常用户")}
+            value={uiText("{0}", [users.filter((item) => !item.disabled).length])}
+          />
+          <Stat
+            icon={<Circle />}
+            label={uiText("已停用用户")}
+            value={uiText("{0}", [users.filter((item) => item.disabled).length])}
+          />
+          <Stat
+            icon={<ShieldCheck />}
+            label={uiText("双因素认证已启用")}
+            value={uiText("{0}", [users.filter((item) => item.twoFactorEnabled).length])}
+          />
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex flex-col gap-3 lg:flex-row">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={uiText("搜索用户、邮箱、显示名称")}
-              className="pl-9"
-            />
-          </div>
-          <Select value={roleFilter} onValueChange={setRoleFilter}>
-            <SelectTrigger className="lg:w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{uiText("全部角色")}</SelectItem>
-              <SelectItem value="admin">{uiText("超级管理员")}</SelectItem>
-              <SelectItem value="user">{uiText("普通用户")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="lg:w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{uiText("全部状态")}</SelectItem>
-              <SelectItem value="active">{uiText("正常")}</SelectItem>
-              <SelectItem value="disabled">{uiText("停用")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-3 md:hidden">
-          {filteredUsers.map((user) => (
-            <div key={user.id} className="rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate font-medium">{user.displayName}</div>
-                  <div className="truncate text-xs text-muted-foreground">{user.email}</div>
-                </div>
-                <UserActions
-                  user={user}
-                  permissionGroups={permissionGroups}
-                  onDelete={
-                    canDelete
-                      ? () =>
-                          setPendingConfirm({
-                            title: "删除用户？",
-                            description: uiMessage("将删除 {0} 及其关联数据。", [user.email]),
-                            confirmText: "删除用户",
-                            onConfirm: () => remove.mutate(user.id),
-                          })
-                      : undefined
-                  }
-                />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <RoleBadge user={user} />
-                <Badge variant={user.disabled ? "secondary" : "default"}>
-                  {user.disabled ? uiText("停用") : uiText("正常")}
-                </Badge>
-                <Badge variant="outline">
-                  {new Date(user.createdAt).toLocaleDateString(getInitialLanguage())}
-                </Badge>
-              </div>
-              <div className="mt-3">
-                <UserPermissionGroupsCell user={user} />
-              </div>
-              <div className="mt-3">
-                <UserMailboxCell user={user} />
-              </div>
+      )}
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <CardTitle>{uiText("用户管理")}</CardTitle>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={onRefresh} disabled={refreshing}>
+                <RefreshCcw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} />
+                {refreshing ? uiText("刷新中...") : uiText("刷新")}
+              </Button>
+              {canCreate && <CreateUserDialog permissionGroups={permissionGroups} />}
             </div>
-          ))}
-        </div>
-        <div className="hidden md:block">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{uiText("用户")}</TableHead>
-                <TableHead>{uiText("身份")}</TableHead>
-                <TableHead>{uiText("权限组")}</TableHead>
-                <TableHead>{uiText("邮箱")}</TableHead>
-                <TableHead>{uiText("状态")}</TableHead>
-                <TableHead>{uiText("创建时间")}</TableHead>
-                <TableHead className="w-16"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredUsers.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell>
-                    <div className="font-medium">{user.displayName}</div>
-                    <div className="text-xs text-muted-foreground">{user.email}</div>
-                  </TableCell>
-                  <TableCell>
-                    <RoleBadge user={user} />
-                  </TableCell>
-                  <TableCell>
-                    <UserPermissionGroupsCell user={user} />
-                  </TableCell>
-                  <TableCell>
-                    <UserMailboxCell user={user} />
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={user.disabled ? "secondary" : "default"}>
-                      {user.disabled ? uiText("停用") : uiText("正常")}
-                    </Badge>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(user.createdAt).toLocaleDateString(getInitialLanguage())}
-                  </TableCell>
-                  <TableCell>
-                    <UserActions
-                      user={user}
-                      permissionGroups={permissionGroups}
-                      onDelete={
-                        canDelete
-                          ? () =>
-                              setPendingConfirm({
-                                title: "删除用户？",
-                                description: uiMessage("将删除 {0} 及其关联数据。", [user.email]),
-                                confirmText: "删除用户",
-                                onConfirm: () => remove.mutate(user.id),
-                              })
-                          : undefined
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        {filteredUsers.length === 0 && <Empty text={uiText("没有匹配的用户")} />}
-      </CardContent>
-      <ConfirmDialog
-        open={!!pendingConfirm}
-        title={pendingConfirm?.title || ""}
-        description={pendingConfirm?.description}
-        confirmText={pendingConfirm?.confirmText || uiText("删除")}
-        destructive
-        pending={remove.isPending}
-        onOpenChange={(open) => {
-          if (!open) setPendingConfirm(null)
-        }}
-        onConfirm={() => pendingConfirm?.onConfirm()}
-      />
-    </Card>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4" aria-busy={refreshing}>
+          {loading ? (
+            <div role="status">
+              <Empty text={uiText("正在加载用户...")} />
+            </div>
+          ) : failed ? (
+            <div role="alert">
+              <Empty text={uiText("无法加载用户列表，请刷新重试")} />
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col gap-3 xl:flex-row">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder={uiText("搜索用户、邮箱、显示名称或 ID")}
+                    aria-label={uiText("搜索用户、邮箱、显示名称或 ID")}
+                    className="pl-9"
+                  />
+                </div>
+                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                  <SelectTrigger className="xl:w-36" aria-label={uiText("身份")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{uiText("全部角色")}</SelectItem>
+                    <SelectItem value="admin">{uiText("超级管理员")}</SelectItem>
+                    <SelectItem value="user">{uiText("普通用户")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="xl:w-36" aria-label={uiText("状态")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{uiText("全部状态")}</SelectItem>
+                    <SelectItem value="active">{uiText("正常")}</SelectItem>
+                    <SelectItem value="disabled">{uiText("停用")}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={securityFilter} onValueChange={setSecurityFilter}>
+                  <SelectTrigger className="xl:w-48" aria-label={uiText("双因素认证")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{uiText("全部双因素认证状态")}</SelectItem>
+                    <SelectItem value="enabled">{uiText("已启用")}</SelectItem>
+                    <SelectItem value="disabled">{uiText("未启用")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="text-sm text-muted-foreground" role="status">
+                {uiText("显示 {0} / {1} 位用户", [filteredUsers.length, users.length])}
+              </div>
+              <div className="space-y-3 md:hidden">
+                {filteredUsers.map((user) => (
+                  <div key={user.id} className="rounded-lg border p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <Button
+                          variant="link"
+                          className="h-auto max-w-full justify-start p-0 text-left"
+                          onClick={(event) => {
+                            detailTrigger.current = event.currentTarget
+                            setDetailUserId(user.id)
+                          }}
+                          aria-label={uiText("查看用户详情：{0}", [user.displayName || user.email])}
+                        >
+                          <span className="truncate">{user.displayName || user.email}</span>
+                        </Button>
+                        <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+                      </div>
+                      <UserActions
+                        user={user}
+                        permissionGroups={permissionGroups}
+                        onDelete={
+                          canDelete
+                            ? () =>
+                                setPendingConfirm({
+                                  title: "删除用户？",
+                                  description: uiMessage("将删除 {0} 及其关联数据。", [user.email]),
+                                  confirmText: "删除用户",
+                                  onConfirm: () => remove.mutate(user.id),
+                                })
+                            : undefined
+                        }
+                      />
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <RoleBadge user={user} />
+                      <Badge variant={user.disabled ? "secondary" : "default"}>
+                        {user.disabled ? uiText("停用") : uiText("正常")}
+                      </Badge>
+                      <UserSecurityBadge user={user} />
+                    </div>
+                    <div className="mt-3">
+                      <UserPermissionGroupsCell user={user} />
+                    </div>
+                    <div className="mt-3">
+                      <UserMailboxCell user={user} />
+                    </div>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      {uiText("创建时间：{0}", [formatDateTime(user.createdAt)])}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="hidden w-0 min-w-full md:block">
+                <Table className="[&_td]:whitespace-nowrap [&_th]:whitespace-nowrap">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{uiText("用户")}</TableHead>
+                      <TableHead>{uiText("身份")}</TableHead>
+                      <TableHead>{uiText("权限组")}</TableHead>
+                      <TableHead>{uiText("邮箱")}</TableHead>
+                      <TableHead>{uiText("状态")}</TableHead>
+                      <TableHead>{uiText("双因素认证")}</TableHead>
+                      <TableHead>{uiText("创建时间")}</TableHead>
+                      <TableHead className="w-16"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredUsers.map((user) => (
+                      <TableRow key={user.id}>
+                        <TableCell>
+                          <Button
+                            variant="link"
+                            className="h-auto max-w-64 justify-start p-0 text-left"
+                            onClick={(event) => {
+                              detailTrigger.current = event.currentTarget
+                              setDetailUserId(user.id)
+                            }}
+                            aria-label={uiText("查看用户详情：{0}", [
+                              user.displayName || user.email,
+                            ])}
+                          >
+                            <span className="truncate">{user.displayName || user.email}</span>
+                          </Button>
+                          <div className="text-xs text-muted-foreground">{user.email}</div>
+                        </TableCell>
+                        <TableCell>
+                          <RoleBadge user={user} />
+                        </TableCell>
+                        <TableCell>
+                          <UserPermissionGroupsCell user={user} />
+                        </TableCell>
+                        <TableCell>
+                          <UserMailboxCell user={user} />
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={user.disabled ? "secondary" : "default"}>
+                            {user.disabled ? uiText("停用") : uiText("正常")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <UserSecurityBadge user={user} />
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-muted-foreground">
+                          {formatDateTime(user.createdAt)}
+                        </TableCell>
+                        <TableCell>
+                          <UserActions
+                            user={user}
+                            permissionGroups={permissionGroups}
+                            onDelete={
+                              canDelete
+                                ? () =>
+                                    setPendingConfirm({
+                                      title: "删除用户？",
+                                      description: uiMessage("将删除 {0} 及其关联数据。", [
+                                        user.email,
+                                      ]),
+                                      confirmText: "删除用户",
+                                      onConfirm: () => remove.mutate(user.id),
+                                    })
+                                : undefined
+                            }
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+              {filteredUsers.length === 0 && (
+                <Empty text={uiText(users.length === 0 ? "暂无用户" : "没有匹配的用户")} />
+              )}
+            </>
+          )}
+        </CardContent>
+        <ConfirmDialog
+          open={!!pendingConfirm}
+          title={pendingConfirm?.title || ""}
+          description={pendingConfirm?.description}
+          confirmText={pendingConfirm?.confirmText || uiText("删除")}
+          destructive
+          pending={remove.isPending}
+          onOpenChange={(open) => {
+            if (!open) setPendingConfirm(null)
+          }}
+          onConfirm={() => pendingConfirm?.onConfirm()}
+        />
+      </Card>
+      {detailUser && !loading && !failed && (
+        <UserDetailsDialog
+          user={detailUser}
+          onClose={() => setDetailUserId(null)}
+          onRestoreFocus={() => detailTrigger.current?.focus()}
+        />
+      )}
+    </div>
   )
 }
 
@@ -3921,16 +4029,161 @@ function UserMailboxCell({ user }: { user: AdminUser }) {
   if (mailboxes.length === 0)
     return <span className="text-muted-foreground">{uiText("未绑定")}</span>
   return (
-    <div className="flex max-w-md flex-wrap gap-1">
-      {mailboxes.slice(0, 2).map((mailbox) => (
-        <Badge key={mailbox} variant="outline" className="font-normal">
-          {mailbox}
-        </Badge>
-      ))}
-      {mailboxes.length > 2 && (
-        <Badge variant="secondary">+{uiText("{0}", [mailboxes.length - 2])}</Badge>
-      )}
+    <div className="space-y-1">
+      <div className="text-xs text-muted-foreground">
+        {uiText("邮箱数量 {0}", [user.mailboxCount])}
+      </div>
+      <div className="flex max-w-md flex-wrap gap-1">
+        {mailboxes.slice(0, 2).map((mailbox) => (
+          <Badge key={mailbox} variant="outline" className="break-all font-normal">
+            {mailbox}
+          </Badge>
+        ))}
+        {mailboxes.length > 2 && (
+          <Badge variant="secondary">+{uiText("{0}", [mailboxes.length - 2])}</Badge>
+        )}
+      </div>
     </div>
+  )
+}
+
+function UserSecurityBadge({ user }: { user: AdminUser }) {
+  useUiLanguage()
+  return (
+    <Badge variant="outline" className="whitespace-nowrap">
+      <ShieldCheck className="mr-1 h-3 w-3" aria-hidden="true" />
+      {uiText(user.twoFactorEnabled ? "双因素认证已启用" : "双因素认证未启用")}
+    </Badge>
+  )
+}
+
+function UserDetailsDialog({
+  user,
+  onClose,
+  onRestoreFocus,
+}: {
+  user: AdminUser
+  onClose: () => void
+  onRestoreFocus: () => void
+}) {
+  useUiLanguage()
+  const limits = user.limits
+  const mailboxLimit = limits.maxMailboxes > 0 ? limits.maxMailboxes + user.mailboxQuotaBonus : 0
+  const permissions = groupPermissionCatalog(
+    (user.permissions || [])
+      .filter((key) => Object.prototype.hasOwnProperty.call(permissionMessages, key))
+      .map((key) => localizePermissionInfo({ key, ...permissionMessages[key] }))
+  )
+  const fields: { label: string; value: React.ReactNode }[] = [
+    { label: "用户 ID", value: user.id },
+    { label: "显示名称", value: user.displayName || "—" },
+    { label: "登录邮箱", value: user.email },
+    { label: "创建时间", value: formatDateTime(user.createdAt) },
+    { label: "身份", value: <RoleBadge user={user} /> },
+    { label: "状态", value: uiText(user.disabled ? "停用" : "正常") },
+    { label: "双因素认证", value: uiText(user.twoFactorEnabled ? "已启用" : "未启用") },
+    { label: "权限组", value: <UserPermissionGroupsCell user={user} /> },
+  ]
+  const quotaFields = [
+    { label: "累计创建邮箱", value: uiText("{0}", [user.mailboxesCreatedTotal]) },
+    { label: "额外邮箱额度", value: uiText("{0}", [user.mailboxQuotaBonus]) },
+    { label: "邮箱数量上限", value: limitText(mailboxLimit, "").trim() },
+    { label: "每日新建邮箱上限", value: limitText(limits.maxMailboxesPerDay, "").trim() },
+    { label: "附件上限 MB", value: limitText(limits.maxAttachmentMb, "").trim() },
+    { label: "SMTP 每日收件人数", value: limitText(limits.smtpDailyLimit, "").trim() },
+    { label: "SMTP 每分钟封数", value: limitText(limits.smtpMinuteLimit, "").trim() },
+    { label: "IMAP 每分钟命令数", value: limitText(limits.imapMinuteLimit, "").trim() },
+    { label: "POP3 每分钟命令数", value: limitText(limits.pop3MinuteLimit, "").trim() },
+  ]
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose()
+      }}
+    >
+      <DialogContent
+        className="max-h-[90svh] overflow-y-auto sm:max-w-2xl"
+        aria-describedby={undefined}
+        data-lanqin-i18n-ignore
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          onRestoreFocus()
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>{uiText("用户详情")}</DialogTitle>
+        </DialogHeader>
+        <dl className="grid gap-4 sm:grid-cols-2">
+          {fields.map(({ label, value }) => (
+            <div key={label} className="min-w-0 space-y-1">
+              <dt className="text-sm text-muted-foreground">{uiText(label)}</dt>
+              <dd className="break-all text-sm font-medium">{value}</dd>
+            </div>
+          ))}
+        </dl>
+        <Separator />
+        <section className="space-y-3">
+          <h3 className="font-medium">{uiText("绑定邮箱（{0}）", [user.mailboxCount])}</h3>
+          {user.mailboxes?.length ? (
+            <div className="flex flex-wrap gap-2">
+              {user.mailboxes.map((mailbox) => (
+                <Badge key={mailbox} variant="outline" className="break-all font-normal">
+                  {mailbox}
+                </Badge>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">{uiText("未绑定")}</div>
+          )}
+        </section>
+        <Separator />
+        <section className="space-y-3">
+          <h3 className="font-medium">{uiText("配额与限制")}</h3>
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="outline">{uiText("按累计创建数计算")}</Badge>
+            <Badge variant="outline">{uiText("删除邮箱不会释放额度")}</Badge>
+          </div>
+          <dl className="grid gap-3 sm:grid-cols-2">
+            {quotaFields.map(({ label, value }) => (
+              <div
+                key={label}
+                className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm"
+              >
+                <dt className="text-muted-foreground">{uiText(label)}</dt>
+                <dd className="shrink-0 font-medium">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+        <Separator />
+        <section className="space-y-3">
+          <h3 className="font-medium">{uiText("已授予权限")}</h3>
+          {user.disabled && <Badge variant="secondary">{uiText("账号已停用，权限暂不可用")}</Badge>}
+          {permissions.length ? (
+            permissions.map(({ category, items }) => (
+              <div key={category} className="space-y-2">
+                <h4 className="text-sm text-muted-foreground">{category}</h4>
+                <div className="flex flex-wrap gap-1">
+                  {items.map((item) => (
+                    <Badge key={item.key} variant="secondary" className="font-normal">
+                      {item.label}
+                    </Badge>
+                  ))}
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className="text-sm text-muted-foreground">{uiText("未授予权限")}</div>
+          )}
+        </section>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {uiText("关闭")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -4080,7 +4333,7 @@ function UserActions({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon">
+          <Button variant="ghost" size="icon" aria-label={uiText("用户操作：{0}", [user.email])}>
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>

@@ -1,4 +1,38 @@
 {
+  "用户总数": { "zh-TW": "使用者總數", "en": "Total users" },
+  "正常用户": { "zh-TW": "正常使用者", "en": "Active users" },
+  "已停用用户": { "zh-TW": "已停用使用者", "en": "Disabled users" },
+  "正在加载用户...": { "zh-TW": "正在載入使用者...", "en": "Loading users..." },
+  "无法加载用户列表，请刷新重试": {
+    "zh-TW": "無法載入使用者清單，請重新整理後再試",
+    "en": "Unable to load users. Refresh to try again."
+  },
+  "搜索用户、邮箱、显示名称或 ID": {
+    "zh-TW": "搜尋使用者、信箱、顯示名稱或 ID",
+    "en": "Search users, emails, names or IDs"
+  },
+  "全部双因素认证状态": { "zh-TW": "全部雙因素認證狀態", "en": "All 2FA statuses" },
+  "显示 {0} / {1} 位用户": {
+    "zh-TW": "顯示 {0} / {1} 位使用者",
+    "en": "Showing {0} of {1} users"
+  },
+  "查看用户详情：{0}": { "zh-TW": "檢視使用者詳情：{0}", "en": "View user details: {0}" },
+  "用户操作：{0}": { "zh-TW": "使用者操作：{0}", "en": "User actions: {0}" },
+  "创建时间：{0}": { "zh-TW": "建立時間：{0}", "en": "Created: {0}" },
+  "暂无用户": { "zh-TW": "尚無使用者", "en": "No users yet" },
+  "双因素认证未启用": { "zh-TW": "雙因素認證未啟用", "en": "2FA not enabled" },
+  "用户详情": { "zh-TW": "使用者詳情", "en": "User details" },
+  "用户 ID": { "zh-TW": "使用者 ID", "en": "User ID" },
+  "累计创建邮箱": { "zh-TW": "累計建立信箱", "en": "Mailboxes created to date" },
+  "额外邮箱额度": { "zh-TW": "額外信箱額度", "en": "Additional mailbox allowance" },
+  "绑定邮箱（{0}）": { "zh-TW": "綁定信箱（{0}）", "en": "Linked mailboxes ({0})" },
+  "配额与限制": { "zh-TW": "配額與限制", "en": "Quotas and limits" },
+  "已授予权限": { "zh-TW": "已授予權限", "en": "Granted permissions" },
+  "未授予权限": { "zh-TW": "未授予權限", "en": "No permissions granted" },
+  "账号已停用，权限暂不可用": {
+    "zh-TW": "帳號已停用，權限暫不可用",
+    "en": "This account is disabled. Its permissions cannot be used."
+  },
   "投递失败": { "zh-TW": "投遞失敗", "en": "Delivery failed" },
   "统一收件": {
     "zh-TW": "統一收件",
