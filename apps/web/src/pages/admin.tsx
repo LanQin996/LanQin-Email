@@ -680,7 +680,9 @@ function UsersSection({
                       <TableHead>{uiText("状态")}</TableHead>
                       <TableHead>{uiText("双因素认证")}</TableHead>
                       <TableHead>{uiText("创建时间")}</TableHead>
-                      <TableHead className="w-16"></TableHead>
+                      <TableHead className="sticky right-0 z-10 w-40 bg-background text-right">
+                        {uiText("操作")}
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -722,7 +724,7 @@ function UsersSection({
                         <TableCell className="whitespace-nowrap text-muted-foreground">
                           {formatDateTime(user.createdAt)}
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="sticky right-0 bg-background">
                           <UserActions
                             user={user}
                             permissionGroups={permissionGroups}
@@ -4296,7 +4298,9 @@ function UserActions({
   const { toast } = useToast()
   const [editOpen, setEditOpen] = React.useState(false)
   const [passwordOpen, setPasswordOpen] = React.useState(false)
+  const [pendingStatus, setPendingStatus] = React.useState<boolean | null>(null)
   const canUpdate = hasPermission(currentUser, "admin.users.update")
+  const canChangeStatus = canUpdate && (user.role !== "admin" || currentUser?.role === "admin")
   const canResetPassword = hasPermission(currentUser, "admin.users.reset_password")
   const resetTwoFactor = useMutation({
     mutationFn: () => api.resetUserTwoFactor(user.id),
@@ -4314,6 +4318,7 @@ function UserActions({
       permissionGroupIds?: string[]
     }) => api.updateUser(user.id, payload),
     onSuccess: () => {
+      setPendingStatus(null)
       invalidateAdmin(qc)
       toast({ title: "用户已更新" })
     },
@@ -4330,10 +4335,27 @@ function UserActions({
   }
   if (!canUpdate && !canResetPassword && !onDelete) return null
   return (
-    <>
+    <div className="flex shrink-0 items-center justify-end gap-1">
+      {canChangeStatus && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={user.protected || update.isPending}
+          title={user.protected ? uiText("默认管理员不可停用") : undefined}
+          aria-label={uiText(user.disabled ? "启用用户：{0}" : "停用用户：{0}", [user.email])}
+          onClick={() => setPendingStatus(!user.disabled)}
+        >
+          {user.protected ? uiText("不可停用") : user.disabled ? uiText("启用") : uiText("停用")}
+        </Button>
+      )}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon" aria-label={uiText("用户操作：{0}", [user.email])}>
+          <Button
+            variant="ghost"
+            size="icon"
+            disabled={update.isPending}
+            aria-label={uiText("用户操作：{0}", [user.email])}
+          >
             <MoreHorizontal className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
@@ -4359,9 +4381,6 @@ function UserActions({
           {!user.protected && canUpdate && (
             <>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => quickPatch({ disabled: !user.disabled })}>
-                {user.disabled ? uiText("启用用户") : uiText("停用用户")}
-              </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => quickPatch({ role: user.role === "admin" ? "user" : "admin" })}
               >
@@ -4379,6 +4398,20 @@ function UserActions({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+      <ConfirmDialog
+        open={pendingStatus !== null}
+        title={uiMessage(pendingStatus ? "确认停用用户 {0}？" : "确认启用用户 {0}？", [user.email])}
+        confirmText={pendingStatus ? "停用用户" : "启用用户"}
+        destructive={pendingStatus === true}
+        pending={update.isPending}
+        onOpenChange={(open) => {
+          if (!open && !update.isPending) setPendingStatus(null)
+        }}
+        onConfirm={() => {
+          if (pendingStatus !== null && canChangeStatus && !user.protected && !update.isPending)
+            quickPatch({ disabled: pendingStatus })
+        }}
+      />
       {canUpdate && (
         <EditUserDialog
           user={user}
@@ -4390,7 +4423,7 @@ function UserActions({
       {canResetPassword && (
         <ResetPasswordDialog user={user} open={passwordOpen} onOpenChange={setPasswordOpen} />
       )}
-    </>
+    </div>
   )
 }
 

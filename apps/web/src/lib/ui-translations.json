@@ -1,4 +1,19 @@
 {
+  "不可停用": { "zh-TW": "不可停用", "en": "Protected" },
+  "默认管理员不可停用": {
+    "zh-TW": "預設管理員不可停用",
+    "en": "The default administrator cannot be disabled"
+  },
+  "停用用户：{0}": { "zh-TW": "停用使用者：{0}", "en": "Disable user: {0}" },
+  "启用用户：{0}": { "zh-TW": "啟用使用者：{0}", "en": "Enable user: {0}" },
+  "确认停用用户 {0}？": {
+    "zh-TW": "確認停用使用者 {0}？",
+    "en": "Disable user {0}?"
+  },
+  "确认启用用户 {0}？": {
+    "zh-TW": "確認啟用使用者 {0}？",
+    "en": "Enable user {0}?"
+  },
   "用户总数": { "zh-TW": "使用者總數", "en": "Total users" },
   "正常用户": { "zh-TW": "正常使用者", "en": "Active users" },
   "已停用用户": { "zh-TW": "已停用使用者", "en": "Disabled users" },
