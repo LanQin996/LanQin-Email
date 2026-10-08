@@ -1,5 +1,7 @@
 # LanQin Email Docker 部署说明
 
+不使用 Docker、需要完整自建邮件服务时，见[Debian 12 / SQLite 原生部署指南](../docs/native-deployment.md)，包含 API、Nginx、Postfix、Dovecot、Rspamd 和 systemd 配置及验收步骤。原生指南尚未完成真实 Linux 端到端验收。
+
 ## 最简单部署：单容器镜像版
 
 服务器上不需要源码构建，只要 `docker-compose.yml` 和 `.env` 即可。

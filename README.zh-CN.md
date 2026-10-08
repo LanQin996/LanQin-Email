@@ -128,6 +128,10 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 更多部署细节见 [`deploy/README.md`](./deploy/README.md)。
 
+### 非 Docker 部署（完整邮件服务）
+
+可在宿主机运行 API、Nginx、Postfix、Dovecot 和 Rspamd。Debian 12 / SQLite 的构建、systemd、权限、TLS 续期、DNS、收发验收和回滚步骤见[原生部署指南](./docs/native-deployment.md)。该指南尚未完成真实 Linux 端到端验收；仅启动 API 和前端不代表公网邮件服务已部署完成。
+
 ## 首次部署清单
 
 1. 编辑 `deploy/.env`：至少修改 `LANQIN_PUBLIC_HOSTNAME`、`LANQIN_PUBLIC_BASE_URL`、`LANQIN_ADMIN_EMAIL`、`LANQIN_ADMIN_PASSWORD`。

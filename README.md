@@ -128,6 +128,10 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
 
 See [`deploy/README.md`](./deploy/README.md) for more deployment details.
 
+### Deployment Without Docker (Full Mail Service)
+
+The API, Nginx, Postfix, Dovecot, and Rspamd can run on the host. The [native deployment guide](./docs/native-deployment.md) (Chinese) covers Debian 12 / SQLite, builds, systemd, permissions, TLS renewal, DNS, delivery checks, and rollback. It has not yet been validated end to end on a real Linux host; running only the API and frontend does not establish a public mail service.
+
 ## First Deployment Checklist
 
 1. Edit `deploy/.env`: at minimum, change `LANQIN_PUBLIC_HOSTNAME`, `LANQIN_PUBLIC_BASE_URL`, `LANQIN_ADMIN_EMAIL`, and `LANQIN_ADMIN_PASSWORD`.
