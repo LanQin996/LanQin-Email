@@ -6046,16 +6046,17 @@ function ComposeDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="flex h-svh w-screen max-w-none overflow-hidden p-0 sm:h-auto sm:max-h-[92vh] sm:w-[min(96vw,82rem)]"
+        className="flex h-dvh w-screen max-w-none overflow-hidden p-0 sm:h-auto sm:max-h-[92dvh] sm:w-[min(96vw,82rem)]"
+        aria-describedby={undefined}
         onInteractOutside={(event) => event.preventDefault()}
         onPointerDownOutside={(event) => event.preventDefault()}
       >
         <form
           key={draft?.key || "new"}
-          className="flex min-h-0 flex-1 flex-col sm:max-h-[90vh]"
+          className="flex min-h-0 min-w-0 flex-1 flex-col sm:max-h-[90dvh]"
           onSubmit={submit}
         >
-          <DialogHeader className="border-b px-4 py-3 text-left sm:px-6 sm:py-4">
+          <DialogHeader className="shrink-0 border-b px-4 py-3 text-left sm:px-6 sm:py-4">
             <DialogTitle className="flex min-w-0 flex-col gap-1 pr-8 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:pr-6">
               <span>{draftId ? uiText("编辑草稿") : uiText("写信")}</span>
               <span
@@ -6079,12 +6080,12 @@ function ComposeDialog({
               </span>
             </DialogTitle>
           </DialogHeader>
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
             <ComposeField label={uiText("发件邮箱")}>
               <Input
                 value={mailbox?.address || uiText("未选择")}
                 readOnly
-                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                className="h-10 min-w-0 flex-none rounded-none border-0 px-0 shadow-none focus-visible:ring-0 sm:flex-1"
               />
             </ComposeField>
             <ComposeField
@@ -6131,7 +6132,7 @@ function ComposeDialog({
                 value={toValue}
                 onChange={(event) => setToValue(event.target.value)}
                 required
-                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                className="h-10 min-w-0 flex-none rounded-none border-0 px-0 shadow-none focus-visible:ring-0 sm:flex-1"
               />
             </ComposeField>
             {showCc && (
@@ -6141,7 +6142,7 @@ function ComposeDialog({
                   placeholder="cc@example.com"
                   value={ccValue}
                   onChange={(event) => setCcValue(event.target.value)}
-                  className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                  className="h-10 min-w-0 flex-none rounded-none border-0 px-0 shadow-none focus-visible:ring-0 sm:flex-1"
                 />
               </ComposeField>
             )}
@@ -6152,7 +6153,7 @@ function ComposeDialog({
                   placeholder="bcc@example.com"
                   value={bccValue}
                   onChange={(event) => setBccValue(event.target.value)}
-                  className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                  className="h-10 min-w-0 flex-none rounded-none border-0 px-0 shadow-none focus-visible:ring-0 sm:flex-1"
                 />
               </ComposeField>
             )}
@@ -6162,7 +6163,7 @@ function ComposeDialog({
                 placeholder={uiText("输入主题")}
                 value={subjectValue}
                 onChange={(event) => setSubjectValue(event.target.value)}
-                className="h-10 flex-1 rounded-none border-0 px-0 shadow-none focus-visible:ring-0"
+                className="h-10 min-w-0 flex-none rounded-none border-0 px-0 shadow-none focus-visible:ring-0 sm:flex-1"
               />
             </ComposeField>
             <MailBodyComposer
@@ -6179,7 +6180,7 @@ function ComposeDialog({
               }}
             />
           </div>
-          <DialogFooter className="grid grid-cols-3 gap-2 border-t bg-background px-4 py-3 sm:flex sm:flex-row sm:justify-end sm:px-6 sm:py-4">
+          <DialogFooter className="flex shrink-0 flex-row flex-wrap justify-end gap-2 border-t bg-background px-4 py-3 sm:space-x-0 sm:px-6 sm:py-4">
             <Button
               type="button"
               variant="outline"
@@ -6242,11 +6243,11 @@ function ComposeField({
   useUiLanguage()
 
   return (
-    <div className="flex min-h-14 flex-col gap-2 border-b px-4 py-2 sm:flex-row sm:items-center sm:px-6">
+    <div className="flex min-h-14 min-w-0 shrink-0 flex-col gap-2 border-b px-4 py-2 sm:flex-row sm:items-center sm:px-6">
       <Label className="shrink-0 text-base font-normal text-foreground sm:w-20">
         {uiText(label)}
       </Label>
-      <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:items-center">
         {children}
         {action}
       </div>
@@ -6787,7 +6788,7 @@ function MailBodyComposer({
   }
 
   return (
-    <div className="flex min-h-[330px] flex-1 flex-col bg-background sm:min-h-[420px]">
+    <div className="flex min-h-[330px] min-w-0 flex-auto shrink-0 flex-col bg-background sm:min-h-[420px]">
       <Input
         ref={fileInputRef}
         type="file"
@@ -6795,7 +6796,7 @@ function MailBodyComposer({
         className="hidden"
         onChange={handlePickedFiles}
       />
-      <div className="flex min-h-11 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-6">
+      <div className="flex min-h-11 shrink-0 flex-wrap items-center gap-1 overflow-visible border-b px-3 py-2 sm:px-6">
         <ToolbarButton
           label={uiText("撤销")}
           disabled={!editor?.can().undo()}
@@ -6919,7 +6920,7 @@ function MailBodyComposer({
         </div>
       </div>
       {formatOpen && (
-        <div className="flex min-h-14 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-6">
+        <div className="flex min-h-14 shrink-0 flex-wrap items-center gap-1 overflow-visible border-b bg-muted/40 px-3 py-2 sm:px-6">
           <ToolbarButton
             label={uiText("清除格式")}
             disabled={!editor}
@@ -7190,14 +7191,14 @@ function MailBodyComposer({
       )}
       <div
         className={cn(
-          "composer-editor relative flex min-h-[240px] flex-1 border-b focus-within:bg-card/40 sm:min-h-[280px]",
+          "composer-editor relative flex min-h-[240px] min-w-0 flex-1 border-b focus-within:bg-card/40 sm:min-h-[280px]",
           "[&_.ProseMirror]:min-h-[240px] [&_.ProseMirror]:w-full [&_.ProseMirror]:flex-1 [&_.ProseMirror]:overflow-y-auto [&_.ProseMirror]:px-4 [&_.ProseMirror]:py-4 [&_.ProseMirror]:text-base [&_.ProseMirror]:leading-7 [&_.ProseMirror]:outline-none sm:[&_.ProseMirror]:min-h-[280px] sm:[&_.ProseMirror]:px-6 sm:[&_.ProseMirror]:py-5",
           "[&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0 [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-muted-foreground [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]",
           "[&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-border [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:text-muted-foreground [&_.ProseMirror_pre]:rounded-md [&_.ProseMirror_pre]:bg-muted [&_.ProseMirror_pre]:p-3",
           empty && "bg-background"
         )}
       >
-        <EditorContent editor={editor} className="flex min-h-0 flex-1" />
+        <EditorContent editor={editor} className="flex min-h-0 min-w-0 flex-1" />
       </div>
       {files.length > 0 && (
         <div className="border-t px-4 py-3 sm:px-6">
