@@ -57,30 +57,33 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 	writeHeader("Content-Type", `multipart/mixed; boundary="`+mixed.Boundary()+`"`)
 	buf.WriteString("\r\n")
 
-	var altBuf bytes.Buffer
-	alt := multipart.NewWriter(&altBuf)
+	altBoundary := multipart.NewWriter(io.Discard).Boundary()
+	altMixedHeader := textprotoMIMEHeader(map[string]string{"Content-Type": `multipart/alternative; boundary="` + altBoundary + `"`})
+	altMixedPart, err := mixed.CreatePart(altMixedHeader)
+	if err != nil {
+		return nil, err
+	}
+	alt := multipart.NewWriter(altMixedPart)
+	if err := alt.SetBoundary(altBoundary); err != nil {
+		return nil, err
+	}
 	textHeader := textprotoMIMEHeader(map[string]string{"Content-Type": `text/plain; charset="utf-8"`, "Content-Transfer-Encoding": "base64"})
 	textPart, err := alt.CreatePart(textHeader)
 	if err != nil {
 		return nil, err
 	}
-	writeBase64(textPart, []byte(m.Text))
+	if err := writeBase64(textPart, strings.NewReader(m.Text)); err != nil {
+		return nil, err
+	}
 	htmlHeader := textprotoMIMEHeader(map[string]string{"Content-Type": `text/html; charset="utf-8"`, "Content-Transfer-Encoding": "base64"})
 	htmlPart, err := alt.CreatePart(htmlHeader)
 	if err != nil {
 		return nil, err
 	}
-	writeBase64(htmlPart, []byte(m.HTML))
+	if err := writeBase64(htmlPart, strings.NewReader(m.HTML)); err != nil {
+		return nil, err
+	}
 	if err := alt.Close(); err != nil {
-		return nil, err
-	}
-
-	altMixedHeader := textprotoMIMEHeader(map[string]string{"Content-Type": `multipart/alternative; boundary="` + alt.Boundary() + `"`})
-	altMixedPart, err := mixed.CreatePart(altMixedHeader)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := altMixedPart.Write(altBuf.Bytes()); err != nil {
 		return nil, err
 	}
 
@@ -104,7 +107,9 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		writeBase64(part, data)
+		if err := writeBase64(part, bytes.NewReader(data)); err != nil {
+			return nil, err
+		}
 	}
 	if err := mixed.Close(); err != nil {
 		return nil, err
@@ -129,16 +134,55 @@ func textprotoMIMEHeader(values map[string]string) textproto.MIMEHeader {
 	return h
 }
 
-func writeBase64(w io.Writer, data []byte) {
-	encoded := make([]byte, base64.StdEncoding.EncodedLen(len(data)))
-	base64.StdEncoding.Encode(encoded, data)
-	for len(encoded) > 76 {
-		_, _ = w.Write(encoded[:76])
-		_, _ = w.Write([]byte("\r\n"))
-		encoded = encoded[76:]
+func writeBase64(w io.Writer, r io.Reader) error {
+	lineWriter := &base64LineWriter{w: w}
+	encoder := base64.NewEncoder(base64.StdEncoding, lineWriter)
+	if _, err := io.Copy(encoder, r); err != nil {
+		return err
 	}
-	_, _ = w.Write(encoded)
-	_, _ = w.Write([]byte("\r\n"))
+	if err := encoder.Close(); err != nil {
+		return err
+	}
+	return lineWriter.close()
+}
+
+type base64LineWriter struct {
+	w       io.Writer
+	lineLen int
+	wrote   bool
+}
+
+func (w *base64LineWriter) Write(p []byte) (int, error) {
+	written := 0
+	for len(p) > 0 {
+		if w.lineLen == 76 {
+			if _, err := io.WriteString(w.w, "\r\n"); err != nil {
+				return written, err
+			}
+			w.lineLen = 0
+		}
+		nextLineLen := min(len(p), 76-w.lineLen)
+		n, err := w.w.Write(p[:nextLineLen])
+		w.lineLen += n
+		written += n
+		p = p[n:]
+		w.wrote = w.wrote || n > 0
+		if err != nil {
+			return written, err
+		}
+		if n != nextLineLen {
+			return written, io.ErrShortWrite
+		}
+	}
+	return written, nil
+}
+
+func (w *base64LineWriter) close() error {
+	if w.lineLen == 0 && w.wrote {
+		return nil
+	}
+	_, err := io.WriteString(w.w, "\r\n")
+	return err
 }
 
 func (a *App) sendSMTP(from string, recipients []string, mimeBytes []byte) error {

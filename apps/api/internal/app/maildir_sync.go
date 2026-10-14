@@ -890,7 +890,12 @@ func parseMailPart(header textproto.MIMEHeader, body io.Reader, parsed *parsedMa
 		if filename == "" {
 			filename = "attachment.bin"
 		}
-		parsed.Attachments = append(parsed.Attachments, AttachmentInput{Filename: filename, ContentType: mediaType, ContentBase64: base64.StdEncoding.EncodeToString(decoded)})
+		parsed.Attachments = append(parsed.Attachments, AttachmentInput{
+			Filename:       filename,
+			ContentType:    mediaType,
+			decodedContent: decoded,
+			contentDecoded: true,
+		})
 		return nil
 	}
 	switch strings.ToLower(mediaType) {
