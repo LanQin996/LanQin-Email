@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-FROM --platform=$BUILDPLATFORM golang:1.25-bookworm AS api-build
+FROM --platform=$BUILDPLATFORM golang:1.26.9-bookworm AS api-build
 WORKDIR /src/apps/api
 COPY apps/api/go.mod apps/api/go.sum ./
 # Keep modules in the layer: registry cache does not persist cache mounts.

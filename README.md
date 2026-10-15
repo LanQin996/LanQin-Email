@@ -50,7 +50,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 
 ### Development
 
-- Go 1.25+
+- Go 1.26.9+
 - Node.js 20+
 - pnpm 10.28.2 (can be enabled through corepack)
 

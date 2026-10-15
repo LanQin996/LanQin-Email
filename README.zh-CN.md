@@ -50,7 +50,7 @@ LanQin Email 是一个自建邮箱 Webmail 全栈方案：前端使用 React + T
 
 ### 开发环境
 
-- Go 1.25+
+- Go 1.26.9+
 - Node.js 20+
 - pnpm 10.28.2（可通过 corepack 启用）
 

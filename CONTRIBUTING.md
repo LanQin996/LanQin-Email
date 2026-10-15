@@ -2,7 +2,7 @@
 
 ## 前置要求
 
-- Go 1.25+
+- Go 1.26.9+
 - Node.js 20+
 - pnpm 10.28.2 (通过 corepack 启用)
 - Docker 和 Docker Compose (用于部署测试)

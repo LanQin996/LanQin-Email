@@ -2,7 +2,7 @@
 # 优化的生产环境 Dockerfile - 更小的镜像体积
 
 # ============ 阶段 1: API 构建 ============
-FROM golang:1.25-alpine AS api-build
+FROM golang:1.26.9-alpine AS api-build
 
 # 安装构建依赖
 RUN apk add --no-cache git ca-certificates tzdata

@@ -8,7 +8,7 @@ services:
       context: .
       dockerfile: Dockerfile.dev
       cache_from:
-        - golang:1.25-bookworm
+        - golang:1.26.9-bookworm
     container_name: lanqin-api-dev
     working_dir: /workspace/apps/api
     volumes:
