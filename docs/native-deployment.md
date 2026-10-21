@@ -28,7 +28,7 @@ apt-get install -y ca-certificates curl git openssl sqlite3 nginx certbot \
 systemctl stop postfix dovecot rspamd
 ```
 
-构建工具版本以所检出的源码为准：当前 `apps/api/go.mod` 要求 Go **1.25.14**，`apps/web/package.json` 使用 pnpm **10.28.2**，锁文件中的 Vite 8 要求 Node **20.19+ 或 22.12+**，建议使用 Node 24 LTS。Debian 默认的 Go/Node 软件包版本可能不足，请通过官方发行渠道安装并核验下载。运行阶段不需要 Go、Node 或 pnpm。
+构建工具版本以所检出的源码为准：当前 `apps/api/go.mod` 要求 Go **1.27.3**，`apps/web/package.json` 使用 pnpm **10.28.2**，锁文件中的 Vite 8 要求 Node **20.19+ 或 22.12+**，建议使用 Node 24 LTS。Debian 默认的 Go/Node 软件包版本可能不足，请通过官方发行渠道安装并核验下载。运行阶段不需要 Go、Node 或 pnpm。
 
 ## 2. 构建同一版本的 API 与 Web
 

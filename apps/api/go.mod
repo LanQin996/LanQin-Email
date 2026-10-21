@@ -1,6 +1,6 @@
 module lanqin-email-api
 
-go 1.25.14
+go 1.27.3
 
 require (
 	github.com/emersion/go-imap/v2 v2.0.0-beta.8

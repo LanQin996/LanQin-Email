@@ -3,7 +3,7 @@
 [![English](https://img.shields.io/badge/English-README-blue)](./README.md)
 [![简体中文](https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-README-green)](./README.zh-CN.md)
 
-![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go)
+![Go](https://img.shields.io/badge/Go-1.27+-00ADD8?logo=go)
 ![React](https://img.shields.io/badge/React-18.3-61DAFB?logo=react)
 ![TypeScript](https://img.shields.io/badge/TypeScript-5.6-3178C6?logo=typescript)
 ![SQLite](https://img.shields.io/badge/SQLite-003B57?logo=sqlite)
@@ -50,7 +50,7 @@ Community: [Telegram group](https://t.me/+EhII7MSyi3QwNDQ5)
 
 ### Development
 
-- Go 1.25+
+- Go 1.27+
 - Node.js 20+
 - pnpm 10.28.2 (can be enabled through corepack)
 
