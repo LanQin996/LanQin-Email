@@ -374,6 +374,27 @@ func TestDomainCollectionGuardsAndAudit(t *testing.T) {
 	}
 }
 
+func TestDomainCollectionPostfixDomainClassification(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "deploy", "postfix", "main.cf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 域名分类不能继承地址映射，否则统一收件规则会将邮箱域误判为别名域。
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if ok && strings.TrimSpace(key) == "virtual_alias_domains" {
+			found = true
+			if strings.TrimSpace(value) != "" {
+				t.Fatalf("邮箱域不得配置为别名域：%s", line)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("必须显式清空 virtual_alias_domains，防止继承 virtual_alias_maps")
+	}
+}
+
 func TestDomainCollectionPostfixSQLiteMaps(t *testing.T) {
 	a, admin, aa, bb, cc := collectionFixture(t)
 	setCollection(t, admin, aa.DomainID, bb.ID)
@@ -404,6 +425,14 @@ func TestDomainCollectionPostfixSQLiteMaps(t *testing.T) {
 		}
 		return result
 	}
+	// Postfix 既查询完整地址，也使用纯域名判断地址类别；后者不得命中收件目标。
+	for _, file := range []string{"sqlite-aliases.cf", "sqlite-collection-bcc.cf"} {
+		for _, key := range []string{"a.test", "b.test", "A.TEST", "@a.test", "@b.test", "archive", ""} {
+			if got := queryMap(file, key); len(got) != 0 {
+				t.Errorf("%s 不应匹配非完整地址 %q：%v", file, key, got)
+			}
+		}
+	}
 	for _, tc := range []struct{ file, address, want string }{
 		{"sqlite-collection-bcc.cf", aa.Address, bb.Address},
 		{"sqlite-collection-bcc.cf", "archive+tag@a.test", bb.Address},
@@ -420,5 +449,59 @@ func TestDomainCollectionPostfixSQLiteMaps(t *testing.T) {
 	}
 	if got := queryMap("sqlite-aliases.cf", "archive+tag@a.test"); len(got) != 1 || got[0] != aa.Address {
 		t.Fatal("known plus address must normalize to its mailbox", got)
+	}
+
+	// 同域目标覆盖故障场景：真实邮箱保留原件，未知地址进入目标，目标自身终止展开。
+	other := createTestMailbox(t, admin, aa.DomainID, "other", "合成收件邮箱", "Password123!", nil)
+	setCollection(t, admin, aa.DomainID, aa.ID)
+	var alias Alias
+	if code := admin.do("POST", "/api/admin/aliases", map[string]any{"domainId": aa.DomainID, "source": "sales", "destination": other.Address}, &alias); code != 201 {
+		t.Fatalf("创建合成别名失败：%d", code)
+	}
+	for _, tc := range []struct{ file, address, want string }{
+		{"sqlite-aliases.cf", other.Address, other.Address},
+		{"sqlite-aliases.cf", "OTHER+tag@A.TEST", other.Address},
+		{"sqlite-aliases.cf", "ghost@a.test", aa.Address},
+		{"sqlite-aliases.cf", aa.Address, aa.Address},
+		{"sqlite-aliases.cf", "sales+tag@a.test", other.Address},
+		{"sqlite-collection-bcc.cf", other.Address, aa.Address},
+		{"sqlite-collection-bcc.cf", "ghost@a.test", aa.Address},
+		{"sqlite-collection-bcc.cf", "sales@a.test", aa.Address},
+	} {
+		if got := queryMap(tc.file, tc.address); fmt.Sprint(got) != fmt.Sprint([]string{tc.want}) {
+			t.Errorf("%s 查询 %s：得到 %v，期望 %s", tc.file, tc.address, got, tc.want)
+		}
+	}
+	for _, key := range []string{aa.Address, "archive+tag@a.test", "@a.test", "a.test"} {
+		if got := queryMap("sqlite-collection-bcc.cf", key); len(got) != 0 {
+			t.Errorf("目标自身或非完整地址不应生成副本 %q：%v", key, got)
+		}
+	}
+	for _, enabled := range []string{"false", "true"} {
+		if _, err := a.db.Exec("INSERT OR REPLACE INTO system_settings(key,value,updated_at) VALUES('catchAllEnabled',?,?)", enabled, a.now().UTC().Format(time.RFC3339Nano)); err != nil {
+			t.Fatal(err)
+		}
+		if got := queryMap("sqlite-aliases.cf", "ghost@a.test"); fmt.Sprint(got) != fmt.Sprint([]string{aa.Address}) {
+			t.Fatalf("统一收件应优先于无人收件（%s）：%v", enabled, got)
+		}
+		setCollection(t, admin, aa.DomainID, "")
+		if got := queryMap("sqlite-aliases.cf", "ghost@a.test"); len(got) != 0 {
+			t.Fatalf("关闭统一收件后未知地址应恢复原投递路径：%v", got)
+		}
+		if got := queryMap("sqlite-collection-bcc.cf", other.Address); len(got) != 0 {
+			t.Fatalf("关闭统一收件后不应生成副本：%v", got)
+		}
+		if got := queryMap("sqlite-mailboxes.cf", other.Address); fmt.Sprint(got) != fmt.Sprint([]string{"vhosts/a.test/other/Maildir/"}) {
+			t.Fatalf("真实邮箱投递路径被改变：%v", got)
+		}
+		got := queryMap("sqlite-mailboxes.cf", "ghost@a.test")
+		if enabled == "true" {
+			if fmt.Sprint(got) != fmt.Sprint([]string{"vhosts/a.test/__unregistered__/Maildir/"}) {
+				t.Fatalf("无人收件路径被改变：%v", got)
+			}
+		} else if len(got) != 0 {
+			t.Fatalf("无人收件关闭时不应接收未知地址：%v", got)
+		}
+		setCollection(t, admin, aa.DomainID, aa.ID)
 	}
 }

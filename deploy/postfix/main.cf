@@ -9,6 +9,8 @@ recipient_delimiter = +
 # SQLite maps read the same LanQin DB created by the Go API.
 virtual_mailbox_domains = sqlite:/etc/postfix/sqlite-domains.cf
 virtual_mailbox_maps = sqlite:/etc/postfix/sqlite-mailboxes.cf
+# 本服务使用邮箱域；显式清空，避免默认继承地址别名映射并误判统一收件域。
+virtual_alias_domains =
 virtual_alias_maps = sqlite:/etc/postfix/sqlite-aliases.cf
 # Added once for original envelope recipients; generated BCC recipients do not recurse.
 recipient_bcc_maps = sqlite:/etc/postfix/sqlite-collection-bcc.cf

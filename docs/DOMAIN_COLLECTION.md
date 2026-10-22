@@ -22,6 +22,7 @@
 ## 投递与故障
 
 - **生产 SMTP**：Postfix `recipient_bcc_maps` 对原始信封收件人添加隐藏副本，`virtual_alias_maps` 处理地址别名和未知地址兜底。BCC 和别名扩展不重新提交 SMTP，因此不级联。原来的 To/Cc 邮件头不增加可见目标。
+- `virtual_alias_domains` 显式留空，域名归属由 `virtual_mailbox_domains` 判断；地址别名和统一收件仍由 `virtual_alias_maps` 处理。统一收件 SQL 仅匹配具有非空本地部分的完整地址，纯域名及 `@域名` 查询不返回目标，避免 Postfix 将邮箱域误判为别名域。
 - `enable_original_recipient=no` 使 Postfix 按最终地址去重；SQL 全地址查询将加号地址归一到邮箱，避免同一邮箱被不同扩展重复投递。这也意味着不再依赖 Postfix 自动增加的 X-Original-To 头来区分别名，加号地址不再用于 Dovecot 的明细子文件夹投递。未配置域名的未知收件地址没有被重写，仍走原有无人收件路径。
 - SMTP 已配置时 Go 不提前本地入箱。邮件服务投递后由 Maildir 同步导入，导入不生成统一副本；各收件邮箱继续执行各自过滤规则。SMTP 阶段拒收不会留下 Go 提前生成的副本。
 - **没有 SMTP 的开发模式**：先解析原始收件人，按邮箱 ID 去重后创建持久化任务。每个目标独立处理，满额或临时故障不会阻止其他目标。租约 5 分钟；每 5 秒扫描；最多尝试 8 次，退避从 60 秒开始，最高 64 分钟。以内部发送记录和目标邮箱唯一约束防重，保存已创建邮件 ID，恢复时不重复插入，Maildir 文件名也固定。
@@ -36,3 +37,22 @@
 4. 功能回滚先关闭统一收件规则，检查并处理已有队列，再撤回邮件服务的映射配置；保留已升级 API、v12 表及已投递邮件。旧 API 的 schema 校验不支持直接降级到 v11，不应在运行中的新库上启动旧二进制或删除表。
 
 SQLite 路由/SQL 映射单元测试与浏览器模拟响应测试不能替代真实 SMTP、Dovecot、IMAP 和 PostgreSQL/MySQL 验证。上线前必须执行上述隔离验证。
+
+## 已部署实例的域名分类修复
+
+旧配置未显式设置 `virtual_alias_domains`，Postfix 默认继承 `virtual_alias_maps`；统一收件 SQL 又会对纯域名查询返回目标，导致开启规则的邮箱域被误判为别名域。同域原邮箱和统一目标均可能退信，日志可能包含 `User unknown in virtual alias table` 或域名同时出现在 `virtual_alias_domains` 和 `virtual_mailbox_domains` 的警告。
+
+一体化 Docker 实例应更新为包含本次修复的镜像，并按现有部署流程重建 `lanqin-email` 服务，使 `main.cf`、SQLite 映射及数据库配置脚本一起更新。仅重启旧镜像不会获得修复。更新前记录镜像版本并备份配置；沿用现有 `.env` 和数据挂载。
+
+需要先恢复旧实例的域名分类时，可在服务器的 `deploy` 目录执行以下命令；这只修正当前容器配置，后续仍需更新镜像以持久保留修复：
+
+```text
+docker compose exec lanqin-email postconf -e "virtual_alias_domains ="
+docker compose exec lanqin-email postfix check
+docker compose exec lanqin-email postfix reload
+docker compose exec lanqin-email postconf virtual_alias_domains virtual_mailbox_domains virtual_alias_maps
+```
+
+确认 `virtual_alias_domains` 为空，并保持原有 `virtual_mailbox_domains`、`virtual_alias_maps`。使用合成邮件验证真实邮箱和不存在地址均进入预期邮箱，检查原件、副本数量、别名及加号地址，再分别验证关闭统一收件后无人收件开启和关闭的行为。已经退信的邮件需要发送方重新发送；仍在队列中的邮件应先检查状态，不能假定配置修复会恢复所有历史邮件。
+
+若需回滚镜像，先关闭受影响域名的统一收件规则，再恢复记录的版本并核实正常收件；保留数据库、邮件目录和显式留空的域名分类设置，避免重新触发同一故障。
