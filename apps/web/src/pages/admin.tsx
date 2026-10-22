@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   Star,
   Trash2,
+  Upload,
   Users,
 } from "lucide-react"
 import {
@@ -2395,6 +2396,27 @@ function SystemSettingsSection({
   const [userMailboxDomainIds, setUserMailboxDomainIds] = React.useState<string[]>([])
   const [externalImapEnabled, setExternalImapEnabled] = React.useState(false)
   const [externalImapAllowPrivateHosts, setExternalImapAllowPrivateHosts] = React.useState(false)
+  const faviconInput = React.useRef<HTMLInputElement>(null)
+  const refreshFavicon = React.useCallback(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+    if (icon) icon.href = `/api/favicon.ico?v=${Date.now()}`
+  }, [])
+  const faviconUpload = useMutation({
+    mutationFn: api.uploadFavicon,
+    onSuccess: () => {
+      refreshFavicon()
+      toast({ title: "网站图标已更新" })
+    },
+    onError: (error) => toast({ title: "图标上传失败", description: errorMessage(error) }),
+  })
+  const faviconDelete = useMutation({
+    mutationFn: api.deleteFavicon,
+    onSuccess: () => {
+      refreshFavicon()
+      toast({ title: "网站图标已移除" })
+    },
+    onError: (error) => toast({ title: "移除图标失败", description: errorMessage(error) }),
+  })
   React.useEffect(() => {
     if (!settings) return
     setSmtpRequireTls(settings.smtpRequireTls)
@@ -2418,6 +2440,7 @@ function SystemSettingsSection({
       api.updateSystemSettings({
         publicHostname: fieldValue(form, "publicHostname", settings?.publicHostname || ""),
         publicBaseUrl: fieldValue(form, "publicBaseUrl", settings?.publicBaseUrl || ""),
+        siteTitle: fieldValue(form, "siteTitle", settings?.siteTitle || "LanQin Email"),
         smtpHost: fieldValue(form, "smtpHost", settings?.smtpHost || ""),
         smtpPort: fieldValue(form, "smtpPort", settings?.smtpPort || "25"),
         smtpUsername: fieldValue(form, "smtpUsername", settings?.smtpUsername || ""),
@@ -2490,6 +2513,7 @@ function SystemSettingsSection({
     ? [
         settings.publicHostname,
         settings.publicBaseUrl,
+        settings.siteTitle,
         settings.smtpHost,
         settings.smtpPort,
         settings.smtpUsername,
@@ -2578,6 +2602,12 @@ function SystemSettingsSection({
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
             <Field
+              name="siteTitle"
+              label={uiText("网站标题")}
+              defaultValue={settings?.siteTitle || "LanQin Email"}
+              maxLength={80}
+            />
+            <Field
               name="publicHostname"
               label={uiText("公网主机名")}
               defaultValue={settings?.publicHostname || ""}
@@ -2609,6 +2639,43 @@ function SystemSettingsSection({
               onCheckedChange={setAllowInsecureHttp}
               className="md:col-span-2"
             />
+            {canUpdateSettings && (
+              <div className="flex flex-wrap items-center gap-2 md:col-span-2">
+                <Label>{uiText("网站图标")}</Label>
+                <Input
+                  ref={faviconInput}
+                  type="file"
+                  accept=".ico,image/x-icon,image/vnd.microsoft.icon"
+                  className="hidden"
+                  aria-label={uiText("选择 ICO 文件")}
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0]
+                    if (file) faviconUpload.mutate(file)
+                    event.currentTarget.value = ""
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={faviconUpload.isPending || faviconDelete.isPending}
+                  onClick={() => faviconInput.current?.click()}
+                >
+                  <Upload className="h-4 w-4" />
+                  {uiText(faviconUpload.isPending ? "正在上传..." : "上传 ICO")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  aria-label={uiText("移除网站图标")}
+                  title={uiText("移除网站图标")}
+                  disabled={faviconUpload.isPending || faviconDelete.isPending}
+                  onClick={() => faviconDelete.mutate()}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

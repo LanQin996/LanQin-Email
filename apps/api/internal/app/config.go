@@ -26,6 +26,7 @@ type Config struct {
 	AdminPassword                   string
 	PublicHostname                  string
 	PublicBaseURL                   string
+	SiteTitle                       string
 	SMTPHost                        string
 	SMTPPort                        string
 	SMTPUsername                    string
@@ -95,6 +96,7 @@ func LoadConfig() Config {
 		AdminPassword:                   getenv("LANQIN_ADMIN_PASSWORD", ""),
 		PublicHostname:                  getenv("LANQIN_PUBLIC_HOSTNAME", "mail.lanqin.local"),
 		PublicBaseURL:                   getenv("LANQIN_PUBLIC_BASE_URL", "http://localhost:5173"),
+		SiteTitle:                       getenv("LANQIN_SITE_TITLE", "LanQin Email"),
 		SMTPHost:                        getenv("LANQIN_SMTP_HOST", ""),
 		SMTPPort:                        getenv("LANQIN_SMTP_PORT", "25"),
 		SMTPUsername:                    getenv("LANQIN_SMTP_USERNAME", ""),

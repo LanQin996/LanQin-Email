@@ -12,6 +12,7 @@ import (
 type SystemSettings struct {
 	PublicHostname                     string   `json:"publicHostname"`
 	PublicBaseURL                      string   `json:"publicBaseUrl"`
+	SiteTitle                          string   `json:"siteTitle"`
 	SMTPHost                           string   `json:"smtpHost"`
 	SMTPPort                           string   `json:"smtpPort"`
 	SMTPUsername                       string   `json:"smtpUsername"`
@@ -52,6 +53,7 @@ type SystemSettings struct {
 type systemSettingsUpdate struct {
 	PublicHostname                  string   `json:"publicHostname"`
 	PublicBaseURL                   string   `json:"publicBaseUrl"`
+	SiteTitle                       string   `json:"siteTitle"`
 	SMTPHost                        string   `json:"smtpHost"`
 	SMTPPort                        string   `json:"smtpPort"`
 	SMTPUsername                    string   `json:"smtpUsername"`
@@ -94,6 +96,7 @@ type PublicSettings struct {
 	TurnstileEnabled           bool           `json:"turnstileEnabled"`
 	TurnstileSiteKey           string         `json:"turnstileSiteKey"`
 	PublicHostname             string         `json:"publicHostname"`
+	SiteTitle                  string         `json:"siteTitle"`
 	MailAutoRefresh            bool           `json:"mailAutoRefresh"`
 	MailRefreshMs              int            `json:"mailRefreshMs"`
 	ExternalIMAPEnabled        bool           `json:"externalImapEnabled"`
@@ -122,7 +125,7 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 		refreshSeconds = 30
 	}
 	linuxDoEnabled := a.linuxDoEnabled()
-	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, SiteTitle: a.cfg.SiteTitle, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
 
 	// Include available domains for mailbox creation during registration
 	if a.cfg.OpenRegistration || a.cfg.InviteRegistrationEnabled || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {
@@ -155,6 +158,14 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	next.PublicBaseURL = strings.TrimSpace(req.PublicBaseURL)
+	next.SiteTitle = strings.TrimSpace(req.SiteTitle)
+	if next.SiteTitle == "" {
+		next.SiteTitle = "LanQin Email"
+	}
+	if len([]rune(next.SiteTitle)) > 80 {
+		badRequest(w, errors.New("siteTitle must be 80 characters or fewer"))
+		return
+	}
 	next.SMTPHost = strings.TrimSpace(req.SMTPHost)
 	next.SMTPPort = strings.TrimSpace(req.SMTPPort)
 	if next.SMTPPort == "" {
@@ -335,6 +346,7 @@ func (a *App) systemSettingsSnapshot() SystemSettings {
 	return SystemSettings{
 		PublicHostname:                     a.cfg.PublicHostname,
 		PublicBaseURL:                      a.cfg.PublicBaseURL,
+		SiteTitle:                          a.cfg.SiteTitle,
 		SMTPHost:                           a.cfg.SMTPHost,
 		SMTPPort:                           a.cfg.SMTPPort,
 		SMTPUsername:                       a.cfg.SMTPUsername,
@@ -390,6 +402,8 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			a.cfg.PublicHostname = value
 		case "publicBaseUrl":
 			a.cfg.PublicBaseURL = value
+		case "siteTitle":
+			a.cfg.SiteTitle = value
 		case "smtpHost":
 			a.cfg.SMTPHost = value
 		case "smtpPort":
@@ -475,6 +489,7 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 	values := map[string]string{
 		"publicHostname":                  cfg.PublicHostname,
 		"publicBaseUrl":                   cfg.PublicBaseURL,
+		"siteTitle":                       cfg.SiteTitle,
 		"smtpHost":                        cfg.SMTPHost,
 		"smtpPort":                        cfg.SMTPPort,
 		"smtpUsername":                    cfg.SMTPUsername,

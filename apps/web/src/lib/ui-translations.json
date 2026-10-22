@@ -1,4 +1,14 @@
 {
+  "网站标题": { "zh-TW": "網站標題", "en": "Website title" },
+  "网站图标": { "zh-TW": "網站圖示", "en": "Website icon" },
+  "选择 ICO 文件": { "zh-TW": "選擇 ICO 檔案", "en": "Choose ICO file" },
+  "正在上传...": { "zh-TW": "正在上傳...", "en": "Uploading..." },
+  "上传 ICO": { "zh-TW": "上傳 ICO", "en": "Upload ICO" },
+  "移除网站图标": { "zh-TW": "移除網站圖示", "en": "Remove website icon" },
+  "网站图标已更新": { "zh-TW": "網站圖示已更新", "en": "Website icon updated" },
+  "图标上传失败": { "zh-TW": "圖示上傳失敗", "en": "Icon upload failed" },
+  "网站图标已移除": { "zh-TW": "網站圖示已移除", "en": "Website icon removed" },
+  "移除图标失败": { "zh-TW": "移除圖示失敗", "en": "Icon removal failed" },
   "不可停用": { "zh-TW": "不可停用", "en": "Protected" },
   "默认管理员不可停用": {
     "zh-TW": "預設管理員不可停用",

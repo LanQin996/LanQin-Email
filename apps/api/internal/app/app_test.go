@@ -410,6 +410,7 @@ func systemSettingsPayload(settings SystemSettings) map[string]any {
 	return map[string]any{
 		"publicHostname":                  settings.PublicHostname,
 		"publicBaseUrl":                   settings.PublicBaseURL,
+		"siteTitle":                       settings.SiteTitle,
 		"smtpHost":                        settings.SMTPHost,
 		"smtpPort":                        settings.SMTPPort,
 		"smtpUsername":                    settings.SMTPUsername,

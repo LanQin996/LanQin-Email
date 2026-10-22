@@ -901,16 +901,31 @@ func parseMailPart(header textproto.MIMEHeader, body io.Reader, parsed *parsedMa
 	switch strings.ToLower(mediaType) {
 	case "text/html":
 		if parsed.HTML == "" {
-			parsed.HTML = string(decoded)
+			parsed.HTML = decodeMIMEBody(decoded, params["charset"])
 		}
 	case "text/plain":
 		if parsed.Text == "" {
-			parsed.Text = string(decoded)
+			parsed.Text = decodeMIMEBody(decoded, params["charset"])
 		}
 	default:
 		// Ignore unsupported inline parts for now.
 	}
 	return nil
+}
+
+func decodeMIMEBody(body []byte, charset string) string {
+	if strings.TrimSpace(charset) == "" || strings.EqualFold(strings.TrimSpace(charset), "utf-8") || strings.EqualFold(strings.TrimSpace(charset), "us-ascii") {
+		return string(body)
+	}
+	reader, err := charsetReader(charset, bytes.NewReader(body))
+	if err != nil {
+		return string(body)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil {
+		return string(body)
+	}
+	return string(decoded)
 }
 
 func transferReader(encoding string, r io.Reader) io.Reader {

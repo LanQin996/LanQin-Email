@@ -2,11 +2,13 @@ package app
 
 import (
 	"encoding/base64"
+	"fmt"
 	"mime"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
 	"net/url"
+	"strings"
 	"testing"
 
 	"golang.org/x/text/encoding"
@@ -94,6 +96,38 @@ func TestParseMaildirMessageGB2312Subject(t *testing.T) {
 	}
 	if message.Subject != "测试主题" {
 		t.Fatalf("parsed subject = %q, want 测试主题", message.Subject)
+	}
+}
+
+func TestParseMaildirMessageDecodesGBKBody(t *testing.T) {
+	const want = "中文邮件正文"
+	encoded, err := simplifiedchinese.GBK.NewEncoder().String(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, transfer := range []string{"base64", "quoted-printable"} {
+		t.Run(transfer, func(t *testing.T) {
+			var body string
+			switch transfer {
+			case "base64":
+				body = base64.StdEncoding.EncodeToString([]byte(encoded))
+			case "quoted-printable":
+				for _, b := range []byte(encoded) {
+					body += "=" + strings.ToUpper(fmt.Sprintf("%02x", b))
+				}
+			}
+			raw := []byte("From: sender@example.test\r\n" +
+				"To: receiver@example.test\r\n" +
+				"Content-Type: text/plain; charset=gbk\r\n" +
+				"Content-Transfer-Encoding: " + transfer + "\r\n\r\n" + body)
+			message, _, err := parseExternalIMAPRawForSnippet(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if message.BodyText != want {
+				t.Fatalf("BodyText = %q, want %q", message.BodyText, want)
+			}
+		})
 	}
 }
 

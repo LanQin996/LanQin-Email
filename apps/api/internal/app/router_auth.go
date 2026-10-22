@@ -32,6 +32,7 @@ func (a *App) Router() http.Handler {
 	r.Get("/healthz", a.handleReadiness)
 
 	r.Route("/api", func(r chi.Router) {
+		r.Get("/favicon.ico", a.handleGetFavicon)
 		r.Get("/public/settings", a.handlePublicSettings)
 		r.Post("/auth/register", a.handleRegister)
 		r.Post("/auth/login", a.handleLogin)
@@ -205,6 +206,8 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/delivery-queue/{queueType}/{id}/retry", a.handleAdminDeliveryQueueRetry)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/delivery-queue/{queueType}/{id}", a.handleAdminDeliveryQueueCancel)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings", a.handleUpdateSystemSettings)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/favicon", a.handleUploadFavicon)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/settings/favicon", a.handleDeleteFavicon)
 			r.With(a.requirePermission(PermissionSettingsTestSMTP)).Post("/admin/settings/test-smtp", a.handleTestSMTP)
 			r.With(a.requirePermission(PermissionTemplatesView)).Get("/admin/mail-templates", a.handleListMailTemplates)
 			r.With(a.requirePermission(PermissionTemplatesUpdate)).Post("/admin/mail-templates/{key}", a.handleUpdateMailTemplate)

@@ -82,7 +82,10 @@ async function request<T>(
   try {
     const res = await fetch(path, {
       credentials: "include",
-      headers: { "Content-Type": "application/json", ...(requestInit.headers || {}) },
+      headers: {
+        ...(requestInit.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...(requestInit.headers || {}),
+      },
       ...requestInit,
       signal: controller.signal,
     })
@@ -510,6 +513,16 @@ export const api = {
       method: "DELETE",
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
+  uploadFavicon: (file: File) => {
+    const form = new FormData()
+    form.append("file", file)
+    return request<{ ok: boolean }>("/api/admin/settings/favicon", {
+      method: "POST",
+      body: form,
+    })
+  },
+  deleteFavicon: () =>
+    request<{ ok: boolean }>("/api/admin/settings/favicon", { method: "DELETE" }),
   registrationInvites: () =>
     request<ListResponse<RegistrationInvite>>("/api/admin/registration-invites"),
   createRegistrationInvite: (payload: {

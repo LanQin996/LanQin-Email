@@ -574,6 +574,7 @@ export type MaildirSyncHealth = {
 export type SystemSettings = {
   publicHostname: string
   publicBaseUrl: string
+  siteTitle: string
   smtpHost: string
   smtpPort: string
   smtpUsername: string
@@ -634,6 +635,7 @@ export type PublicSettings = {
   turnstileEnabled: boolean
   turnstileSiteKey: string
   publicHostname: string
+  siteTitle: string
   mailAutoRefresh: boolean
   mailRefreshMs: number
   externalImapEnabled: boolean

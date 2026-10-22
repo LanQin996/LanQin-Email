@@ -15,6 +15,8 @@ import {
   Users,
 } from "lucide-react"
 import { useMe } from "@/hooks/use-me"
+import { api } from "@/lib/api"
+import { useQuery } from "@tanstack/react-query"
 import { useLogout } from "@/hooks/use-logout"
 import { AuthGuard } from "@/components/auth-guard"
 import { Button } from "@/components/ui/button"
@@ -84,6 +86,7 @@ function ProtectedContent() {
   useUiLanguage()
 
   const me = useMe()
+  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
   const location = useLocation()
   const logout = useLogout()
 
@@ -113,7 +116,9 @@ function ProtectedContent() {
                     <Mail className="size-4" />
                   </div>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">LanQin Email</span>
+                    <span className="truncate font-semibold">
+                      {publicSettings.data?.siteTitle || "LanQin Email"}
+                    </span>
                   </div>
                 </Link>
               </SidebarMenuButton>
@@ -177,7 +182,7 @@ function ProtectedContent() {
                     visibleAdminSections.find((item) => item.key === adminSection)?.label ||
                       "系统管理"
                   )
-                : "LanQin Email"}
+                : publicSettings.data?.siteTitle || "LanQin Email"}
             </div>
           </div>
           <Outlet />
