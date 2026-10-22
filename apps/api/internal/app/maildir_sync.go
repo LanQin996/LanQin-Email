@@ -898,19 +898,38 @@ func parseMailPart(header textproto.MIMEHeader, body io.Reader, parsed *parsedMa
 		})
 		return nil
 	}
+	textBody := decodeTextBody(decoded, params["charset"])
 	switch strings.ToLower(mediaType) {
 	case "text/html":
 		if parsed.HTML == "" {
-			parsed.HTML = string(decoded)
+			parsed.HTML = string(textBody)
 		}
 	case "text/plain":
 		if parsed.Text == "" {
-			parsed.Text = string(decoded)
+			parsed.Text = string(textBody)
 		}
 	default:
 		// Ignore unsupported inline parts for now.
 	}
 	return nil
+}
+
+// decodeTextBody converts an already transfer-decoded text part from its
+// declared charset to UTF-8. An unknown charset leaves the bytes untouched
+// rather than failing the whole import.
+func decodeTextBody(decoded []byte, charset string) []byte {
+	if strings.TrimSpace(charset) == "" {
+		return decoded
+	}
+	reader, err := charsetReader(charset, bytes.NewReader(decoded))
+	if err != nil {
+		return decoded
+	}
+	converted, err := io.ReadAll(reader)
+	if err != nil {
+		return decoded
+	}
+	return converted
 }
 
 func transferReader(encoding string, r io.Reader) io.Reader {
