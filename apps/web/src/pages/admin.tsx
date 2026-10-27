@@ -4952,7 +4952,8 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
   const [userId, setUserId] = React.useState("")
   React.useEffect(() => {
     if (!domainId && domains[0]) setDomainId(domains[0].id)
-    if (!userId && users[0]) setUserId(users[0].id)
+    const activeUser = users.find((user) => !user.disabled)
+    if (!userId && activeUser) setUserId(activeUser.id)
   }, [domains, domainId, users, userId])
   const mut = useMutation({
     mutationFn: (form: FormData) =>
@@ -4960,9 +4961,9 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
         domainId,
         localPart: String(form.get("localPart")),
         displayName: String(form.get("displayName")),
-        password: String(form.get("password")),
+        password: ownerMode === "existing" ? undefined : String(form.get("password")),
         quotaMb: Number(form.get("quotaMb") || 1024),
-        role: role as "admin" | "user",
+        role: ownerMode === "existing" ? undefined : (role as "admin" | "user"),
         ownerEmail: String(form.get("ownerEmail") || ""),
         userId: ownerMode === "existing" ? userId : "",
       }),
@@ -5021,26 +5022,32 @@ function CreateMailboxDialog({ domains, users }: { domains: Domain[]; users: Adm
               required={false}
             />
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <Field
-              name="password"
-              label={uiText("密码")}
-              type="password"
-              placeholder={uiText("至少 8 位")}
-            />
+          <div className={ownerMode === "existing" ? "" : "grid grid-cols-2 gap-3"}>
+            {ownerMode !== "existing" && (
+              <Field
+                name="password"
+                label={uiText("密码")}
+                type="password"
+                placeholder={uiText("至少 8 位")}
+              />
+            )}
             <Field name="quotaMb" label={uiText("配额 MB")} type="number" defaultValue="1024" />
           </div>
-          <SelectField
-            label={uiText("身份")}
-            value={role}
-            onValueChange={setRole}
-            items={[
-              ["user", "普通用户"],
-              ["admin", "超级管理员"],
-            ]}
-          />
+          {ownerMode !== "existing" && (
+            <SelectField
+              label={uiText("身份")}
+              value={role}
+              onValueChange={setRole}
+              items={[
+                ["user", "普通用户"],
+                ["admin", "超级管理员"],
+              ]}
+            />
+          )}
           <DialogFooter>
-            <Button disabled={mut.isPending || !domainId}>{uiText("创建")}</Button>
+            <Button disabled={mut.isPending || !domainId || (ownerMode === "existing" && !userId)}>
+              {uiText("创建")}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

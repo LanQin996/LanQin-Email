@@ -539,26 +539,6 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, err)
 		return
 	}
-	if err := validatePasswordLength(req.Password); err != nil {
-		badRequest(w, err)
-		return
-	}
-	role := req.Role
-	if role == "" {
-		role = "user"
-	}
-	if role != "user" && role != "admin" {
-		badRequest(w, errors.New("invalid role"))
-		return
-	}
-	if role == "admin" {
-		current := currentUser(r)
-		if current == nil || current.Role != "admin" {
-			respondError(w, http.StatusForbidden, "only administrators can create administrator users")
-			return
-		}
-	}
-
 	domain, err := a.domainByID(r.Context(), req.DomainID)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "domain not found")
@@ -575,13 +555,14 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback()
 	now := a.now().UTC().Format(time.RFC3339Nano)
 	userID := strings.TrimSpace(req.UserID)
+	var passwordHash string
 	displayName := req.DisplayName
 	if displayName == "" {
 		displayName = address
 	}
 	if userID != "" {
 		var disabled int
-		if err := tx.QueryRowContext(r.Context(), `SELECT disabled FROM users WHERE id=?`, userID).Scan(&disabled); err != nil {
+		if err := tx.QueryRowContext(r.Context(), `SELECT disabled,password_hash FROM users WHERE id=?`, userID).Scan(&disabled, &passwordHash); err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				respondError(w, http.StatusNotFound, "owner user not found")
 			} else {
@@ -602,20 +583,40 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 			badRequest(w, errors.New("invalid owner email"))
 			return
 		}
-		err = tx.QueryRowContext(r.Context(), `SELECT id FROM users WHERE email=? AND disabled=0`, ownerEmail).Scan(&userID)
+		err = tx.QueryRowContext(r.Context(), `SELECT id,password_hash FROM users WHERE email=? AND disabled=0`, ownerEmail).Scan(&userID, &passwordHash)
 		if errors.Is(err, sql.ErrNoRows) {
-			passwordHash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+			if err := validatePasswordLength(req.Password); err != nil {
+				badRequest(w, err)
+				return
+			}
+			role := req.Role
+			if role == "" {
+				role = "user"
+			}
+			if role != "user" && role != "admin" {
+				badRequest(w, errors.New("invalid role"))
+				return
+			}
+			if role == "admin" {
+				current := currentUser(r)
+				if current == nil || current.Role != "admin" {
+					respondError(w, http.StatusForbidden, "only administrators can create administrator users")
+					return
+				}
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 			if err != nil {
 				respondError(w, http.StatusInternalServerError, "failed to hash password")
 				return
 			}
+			passwordHash = string(hash)
 			userID = newID("usr")
 			ownerDisplayName := displayName
 			if !strings.EqualFold(ownerEmail, address) {
 				ownerDisplayName = ownerEmail
 			}
 			_, err = tx.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?,?)`, userID, ownerEmail, ownerDisplayName, role, string(passwordHash), 0, now, now)
+				VALUES(?,?,?,?,?,?,?,?)`, userID, ownerEmail, ownerDisplayName, role, passwordHash, 0, now, now)
 			if err != nil {
 				badRequest(w, err)
 				return
@@ -625,16 +626,16 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		respondError(w, http.StatusInternalServerError, "failed to prepare owner user")
-		return
-	}
-
 	// Administrators may deliberately exceed a user's mailbox quota, so no limit
 	// is enforced here. The creation is still counted against the user's total.
-	mailboxID, err := a.createMailbox(r.Context(), userID, req.DomainID, local, displayName, req.Password, req.QuotaMB, "active", nil)
+	// Existing owners keep their password and role; new mailboxes inherit the hash.
+	mailboxID, err := a.createMailboxWithPasswordHashTx(r.Context(), tx, userID, req.DomainID, local, displayName, passwordHash, req.QuotaMB, "active", nil)
 	if err != nil {
 		badRequest(w, err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		respondError(w, http.StatusInternalServerError, "failed to create mailbox")
 		return
 	}
 	m, err := a.mailboxByID(r.Context(), mailboxID)

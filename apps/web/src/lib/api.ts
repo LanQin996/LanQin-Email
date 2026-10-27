@@ -429,9 +429,9 @@ export const api = {
     domainId: string
     localPart: string
     displayName: string
-    password: string
+    password?: string
     quotaMb: number
-    role: "admin" | "user"
+    role?: "admin" | "user"
     ownerEmail?: string
     userId?: string
   }) => request<Mailbox>("/api/admin/mailboxes", { method: "POST", body: JSON.stringify(payload) }),
