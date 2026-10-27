@@ -521,11 +521,12 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		DomainID    string `json:"domainId"`
 		LocalPart   string `json:"localPart"`
 		DisplayName string `json:"displayName"`
-		Password    string `json:"password"`
-		QuotaMB     int    `json:"quotaMb"`
-		Role        string `json:"role"`
-		OwnerEmail  string `json:"ownerEmail"`
-		UserID      string `json:"userId"`
+		// Retained for older clients; credentials and role always come from userId.
+		Password   string `json:"password"`
+		QuotaMB    int    `json:"quotaMb"`
+		Role       string `json:"role"`
+		OwnerEmail string `json:"ownerEmail"`
+		UserID     string `json:"userId"`
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		badRequest(w, err)
@@ -537,6 +538,11 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := requireString("localPart", req.LocalPart); err != nil {
 		badRequest(w, err)
+		return
+	}
+	userID := strings.TrimSpace(req.UserID)
+	if userID == "" {
+		badRequest(w, errors.New("请选择已启用的所属用户"))
 		return
 	}
 	domain, err := a.domainByID(r.Context(), req.DomainID)
@@ -553,78 +559,23 @@ func (a *App) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	now := a.now().UTC().Format(time.RFC3339Nano)
-	userID := strings.TrimSpace(req.UserID)
 	var passwordHash string
 	displayName := req.DisplayName
 	if displayName == "" {
 		displayName = address
 	}
-	if userID != "" {
-		var disabled int
-		if err := tx.QueryRowContext(r.Context(), `SELECT disabled,password_hash FROM users WHERE id=?`, userID).Scan(&disabled, &passwordHash); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				respondError(w, http.StatusNotFound, "owner user not found")
-			} else {
-				respondError(w, http.StatusInternalServerError, "failed to load owner user")
-			}
-			return
-		}
-		if intBool(disabled) {
-			badRequest(w, errors.New("owner user is disabled"))
-			return
-		}
-	} else {
-		ownerEmail := normalizeEmail(req.OwnerEmail)
-		if ownerEmail == "" {
-			ownerEmail = address
-		}
-		if !strings.Contains(ownerEmail, "@") {
-			badRequest(w, errors.New("invalid owner email"))
-			return
-		}
-		err = tx.QueryRowContext(r.Context(), `SELECT id,password_hash FROM users WHERE email=? AND disabled=0`, ownerEmail).Scan(&userID, &passwordHash)
+	var disabled int
+	if err := tx.QueryRowContext(r.Context(), `SELECT disabled,password_hash FROM users WHERE id=?`, userID).Scan(&disabled, &passwordHash); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			if err := validatePasswordLength(req.Password); err != nil {
-				badRequest(w, err)
-				return
-			}
-			role := req.Role
-			if role == "" {
-				role = "user"
-			}
-			if role != "user" && role != "admin" {
-				badRequest(w, errors.New("invalid role"))
-				return
-			}
-			if role == "admin" {
-				current := currentUser(r)
-				if current == nil || current.Role != "admin" {
-					respondError(w, http.StatusForbidden, "only administrators can create administrator users")
-					return
-				}
-			}
-			hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-			if err != nil {
-				respondError(w, http.StatusInternalServerError, "failed to hash password")
-				return
-			}
-			passwordHash = string(hash)
-			userID = newID("usr")
-			ownerDisplayName := displayName
-			if !strings.EqualFold(ownerEmail, address) {
-				ownerDisplayName = ownerEmail
-			}
-			_, err = tx.ExecContext(r.Context(), `INSERT INTO users(id,email,display_name,role,password_hash,disabled,created_at,updated_at)
-				VALUES(?,?,?,?,?,?,?,?)`, userID, ownerEmail, ownerDisplayName, role, passwordHash, 0, now, now)
-			if err != nil {
-				badRequest(w, err)
-				return
-			}
-		} else if err != nil {
+			respondError(w, http.StatusNotFound, "owner user not found")
+		} else {
 			respondError(w, http.StatusInternalServerError, "failed to load owner user")
-			return
 		}
+		return
+	}
+	if intBool(disabled) {
+		badRequest(w, errors.New("owner user is disabled"))
+		return
 	}
 	// Administrators may deliberately exceed a user's mailbox quota, so no limit
 	// is enforced here. The creation is still counted against the user's total.

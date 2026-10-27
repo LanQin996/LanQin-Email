@@ -344,6 +344,10 @@ Authorization: Bearer lq_xxx
 
 ### Create mailbox
 
+The management UI's **Add mailbox** action (`POST /api/admin/mailboxes`) only attaches a mailbox to an active, existing `userId` and inherits that user's password. Create login users separately in **User Management** (`POST /api/admin/users`). It does not create users or change their password or role; legacy `password`, `role`, and `ownerEmail` fields are ignored. The public OpenAPI endpoint below retains its existing owner-resolution and password behavior.
+
+管理界面的**添加邮箱**（`POST /api/admin/mailboxes`）仅向已启用的已有 `userId` 追加邮箱，并沿用该用户的密码。登录用户应在**用户管理**（`POST /api/admin/users`）中单独创建；添加邮箱不会创建用户，也不会修改用户密码或身份，旧客户端传入的 `password`、`role` 和 `ownerEmail` 字段会被忽略。下方对外 OpenAPI 保持原有的拥有者解析和密码行为。
+
 ```http
 POST /api/open/v1/mailboxes
 Authorization: Bearer lq_xxx

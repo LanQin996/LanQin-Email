@@ -158,8 +158,8 @@ export const permissionMessages: Record<PermissionKey, Omit<PermissionInfo, "key
     category: "邮箱账号",
   },
   "admin.mailboxes.create": {
-    label: "创建邮箱账号",
-    description: "创建邮箱账号并准备归属用户。",
+    label: "添加邮箱",
+    description: "为已有用户添加邮箱。",
     category: "邮箱账号",
   },
   "admin.mailboxes.update": {

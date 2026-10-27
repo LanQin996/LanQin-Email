@@ -429,11 +429,8 @@ export const api = {
     domainId: string
     localPart: string
     displayName: string
-    password?: string
     quotaMb: number
-    role?: "admin" | "user"
-    ownerEmail?: string
-    userId?: string
+    userId: string
   }) => request<Mailbox>("/api/admin/mailboxes", { method: "POST", body: JSON.stringify(payload) }),
   updateMailbox: (
     id: string,

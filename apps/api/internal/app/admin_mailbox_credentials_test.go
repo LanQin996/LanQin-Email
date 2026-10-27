@@ -3,8 +3,6 @@ package app
 import (
 	"net/http"
 	"testing"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
 func TestAdminCreateMailboxInheritsExistingOwnerCredentials(t *testing.T) {
@@ -19,30 +17,22 @@ func TestAdminCreateMailboxInheritsExistingOwnerCredentials(t *testing.T) {
 
 	for _, tt := range []struct {
 		name     string
-		byID     bool
 		override bool
 	}{
-		{name: "id-omitted", byID: true},
-		{name: "id-override", byID: true, override: true},
-		{name: "email-omitted"},
-		{name: "email-override", override: true},
+		{name: "credentials-omitted"},
+		{name: "credentials-override", override: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			payload := map[string]any{
 				"domainId":    domain.ID,
 				"localPart":   tt.name,
 				"displayName": "Synthetic mailbox",
-			}
-			if tt.byID {
-				payload["userId"] = owner.ID
-				// An explicit user ID must take precedence over ownerEmail.
-				payload["ownerEmail"] = "ignored@example.test"
-			} else {
-				payload["ownerEmail"] = owner.Email
+				"userId":      owner.ID,
 			}
 			if tt.override {
 				payload["password"] = "DifferentPassword456!"
 				payload["role"] = "admin"
+				payload["ownerEmail"] = "ignored@example.test"
 			}
 			var mailbox Mailbox
 			if code := admin.do("POST", "/api/admin/mailboxes", payload, &mailbox); code != http.StatusCreated {
@@ -105,46 +95,56 @@ func TestAdminCreateMailboxInheritsExistingOwnerCredentials(t *testing.T) {
 	}
 }
 
-func TestAdminCreateMailboxNewOwnerValidationAndRollback(t *testing.T) {
-	a, admin, _, _, domain := setupQuotaTest(t)
+func TestAdminCreateMailboxRequiresExistingOwner(t *testing.T) {
+	a, admin, _, owner, domain := setupQuotaTest(t)
+	var originalUsers, originalMailboxes int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&originalUsers); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM mailboxes`).Scan(&originalMailboxes); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct {
-		name     string
-		password string
-		role     string
+		name       string
+		userID     string
+		ownerEmail string
 	}{
-		{name: "missing-password"},
-		{name: "short-password", password: "short"},
-		{name: "invalid-role", password: "Password123!", role: "invalid"},
+		{name: "missing-user"},
+		{name: "blank-user", userID: "  "},
+		{name: "new-owner-email", ownerEmail: "new-owner@example.test"},
+		{name: "existing-owner-email", ownerEmail: owner.Email},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{
-				"domainId": domain.ID, "localPart": tt.name, "password": tt.password, "role": tt.role,
+				"domainId": domain.ID, "localPart": tt.name, "userId": tt.userID,
+				"ownerEmail": tt.ownerEmail, "password": "Password123!", "role": "admin",
 			}, nil); code != http.StatusBadRequest {
-				t.Fatalf("invalid new user code=%d", code)
+				t.Fatalf("missing owner ID code=%d", code)
 			}
 		})
 	}
-	mailbox := createTestMailbox(t, admin, domain.ID, "new-owner", "New Owner", "Password123!", map[string]any{
-		"role": "admin",
-	})
-	var hash, role string
-	if err := a.db.QueryRow(`SELECT password_hash,role FROM users WHERE id=?`, mailbox.UserID).Scan(&hash, &role); err != nil {
+	var users, mailboxes int
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&users); err != nil {
 		t.Fatal(err)
 	}
-	if role != "admin" || bcrypt.CompareHashAndPassword([]byte(hash), []byte("Password123!")) != nil {
-		t.Fatal("new user's requested password or role was not applied")
+	if err := a.db.QueryRow(`SELECT COUNT(*) FROM mailboxes`).Scan(&mailboxes); err != nil {
+		t.Fatal(err)
 	}
+	if users != originalUsers || mailboxes != originalMailboxes {
+		t.Fatal("rejected mailbox creation changed users or mailboxes")
+	}
+	mailbox := createTestMailbox(t, admin, domain.ID, "attached", "Attached", "", map[string]any{"userId": owner.ID})
 	if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{
 		"domainId": domain.ID, "localPart": mailbox.LocalPart,
-		"ownerEmail": "rollback@example.test", "password": "Password123!",
+		"userId": owner.ID,
 	}, nil); code != http.StatusBadRequest {
 		t.Fatalf("duplicate mailbox code=%d", code)
 	}
 	var count int
-	if err := a.db.QueryRow(`SELECT COUNT(*) FROM users WHERE email=?`, "rollback@example.test").Scan(&count); err != nil {
+	if err := a.db.QueryRow(`SELECT mailboxes_created_total FROM users WHERE id=?`, owner.ID).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 0 {
-		t.Fatal("failed mailbox creation left an orphan owner")
+	if count != 1 {
+		t.Fatal("failed mailbox creation changed the owner's mailbox counter")
 	}
 }

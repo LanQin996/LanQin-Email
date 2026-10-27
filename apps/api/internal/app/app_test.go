@@ -345,7 +345,48 @@ func createTestDomain(t *testing.T, admin *testClient, name string) Domain {
 
 func createTestMailbox(t *testing.T, admin *testClient, domainID, localPart, displayName, password string, extra map[string]any) Mailbox {
 	t.Helper()
-	payload := map[string]any{"domainId": domainID, "localPart": localPart, "displayName": displayName, "password": password}
+	// Mirror the UI: create the login user separately, then attach the mailbox.
+	userID, _ := extra["userId"].(string)
+	if userID == "" {
+		ownerEmail, _ := extra["ownerEmail"].(string)
+		if ownerEmail == "" {
+			var domains struct {
+				Items []Domain `json:"items"`
+			}
+			if code := admin.do("GET", "/api/admin/domains", nil, &domains); code != http.StatusOK {
+				t.Fatalf("list fixture domains code=%d", code)
+			}
+			for _, domain := range domains.Items {
+				if domain.ID == domainID {
+					ownerEmail = normalizeLocalPart(localPart) + "@" + domain.Name
+					break
+				}
+			}
+		}
+		var users struct {
+			Items []AdminUser `json:"items"`
+		}
+		if code := admin.do("GET", "/api/admin/users", nil, &users); code != http.StatusOK {
+			t.Fatalf("list fixture users code=%d", code)
+		}
+		for _, user := range users.Items {
+			if user.Email == normalizeEmail(ownerEmail) && !user.Disabled {
+				userID = user.ID
+				break
+			}
+		}
+		if userID == "" {
+			role, _ := extra["role"].(string)
+			var owner AdminUser
+			if code := admin.do("POST", "/api/admin/users", map[string]any{
+				"email": ownerEmail, "displayName": displayName, "password": password, "role": role,
+			}, &owner); code != http.StatusCreated {
+				t.Fatalf("create fixture owner code=%d", code)
+			}
+			userID = owner.ID
+		}
+	}
+	payload := map[string]any{"domainId": domainID, "localPart": localPart, "displayName": displayName, "userId": userID}
 	for key, value := range extra {
 		payload[key] = value
 	}

@@ -359,7 +359,7 @@ var permissionCatalogItems = []PermissionInfo{
 	{Key: PermissionDNSCheck, Label: "执行 DNS 检测", Description: "触发 MX、SPF、DKIM、DMARC 检测。", Category: "DNS"},
 
 	{Key: PermissionMailboxesView, Label: "查看邮箱账号", Description: "查看邮箱账号列表和归属用户。", Category: "邮箱账号"},
-	{Key: PermissionMailboxesCreate, Label: "创建邮箱账号", Description: "创建邮箱账号并准备归属用户。", Category: "邮箱账号"},
+	{Key: PermissionMailboxesCreate, Label: "添加邮箱", Description: "为已有用户添加邮箱。", Category: "邮箱账号"},
 	{Key: PermissionMailboxesUpdate, Label: "编辑邮箱账号", Description: "修改邮箱归属、显示名、配额和状态。", Category: "邮箱账号"},
 	{Key: PermissionMailboxesDelete, Label: "删除邮箱账号", Description: "删除邮箱账号及关联邮件文件。", Category: "邮箱账号"},
 

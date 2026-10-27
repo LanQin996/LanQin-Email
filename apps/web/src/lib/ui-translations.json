@@ -518,6 +518,22 @@
     "zh-TW": "建立信箱帳號",
     "en": "Create a mailbox account"
   },
+  "添加邮箱": {
+    "zh-TW": "新增信箱",
+    "en": "Add mailbox"
+  },
+  "为已有用户添加邮箱。": {
+    "zh-TW": "為已有使用者新增信箱。",
+    "en": "Add mailboxes for existing users."
+  },
+  "请选择已启用的所属用户": {
+    "zh-TW": "請選擇已啟用的所屬使用者",
+    "en": "Select an active owner user"
+  },
+  "请先在用户管理中创建并启用用户": {
+    "zh-TW": "請先在使用者管理中建立並啟用使用者",
+    "en": "Create and enable a user in User Management first"
+  },
   "给超级管理员或普通用户创建第一个邮箱": {
     "zh-TW": "給超級管理員或普通使用者建立第一個信箱",
     "en": "Create the first mailbox for an administrator or a standard user"
