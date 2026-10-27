@@ -35,6 +35,7 @@ func (a *App) handleLiveness(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) handleReadiness(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	ctx, cancel := context.WithTimeout(r.Context(), healthCheckTimeout)
 	defer cancel()
 
@@ -67,6 +68,7 @@ func (a *App) handleReadiness(w http.ResponseWriter, r *http.Request) {
 	if !ready {
 		statusCode = http.StatusServiceUnavailable
 		status = "not_ready"
+		a.log.Warn("readiness check failed", "checks", checks, "duration", time.Since(started))
 	}
 	respondJSON(w, statusCode, healthCheckResponse{
 		OK:     ready,

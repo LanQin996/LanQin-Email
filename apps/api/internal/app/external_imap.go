@@ -39,6 +39,8 @@ const (
 	externalIMAPAuthOAuth2    = "oauth2"
 	externalIMAPOAuthGmail    = "gmail"
 	externalIMAPOAuthOutlook  = "outlook"
+	externalIMAPSyncBatchSize = 10
+	externalIMAPSyncMaxPerRun = 100
 )
 
 type externalIMAPClientFactory interface {
@@ -1163,50 +1165,76 @@ func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAc
 		return 0, 0, 0, err
 	}
 	state := a.loadExternalIMAPFolderState(ctx, account.ID, folder.Name)
-	remote, err := client.FetchNew(ctx, folder.Name, state.LastUID, 100)
-	if err != nil {
-		return 0, 0, 0, err
-	}
 	imported, skipped, failed := 0, 0, 0
-	maxUID := state.LastUID
+	lastUID := state.LastUID
+	processed := 0
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	for _, item := range remote {
-		if item.UID > maxUID {
-			maxUID = item.UID
-		}
-		if a.externalIMAPRemoteMessageExists(ctx, account.ID, folder.Name, item.UIDValidity, item.UID) {
-			skipped++
-			continue
-		}
-		raw, item, err := client.FetchRaw(ctx, folder.Name, item.UID)
+	for processed < externalIMAPSyncMaxPerRun {
+		batchLimit := min(externalIMAPSyncBatchSize, externalIMAPSyncMaxPerRun-processed)
+		remote, err := client.FetchNew(ctx, folder.Name, lastUID, batchLimit)
 		if err != nil {
-			failed++
-			continue
-		}
-		stored, attachments, err := a.parseMaildirMessage(raw, account.Username)
-		if err != nil {
-			failed++
-			continue
-		}
-		stored.MailboxID = account.MailboxID
-		stored.FolderID = localFolderID
-		stored.RecipientAddr = account.Username
-		stored.IsRead = item.IsRead
-		msgID, err := a.insertExternalIMAPMessageOnce(ctx, account, folder.Name, item, stored, attachments)
-		if err != nil {
-			failed++
-			continue
-		}
-		if msgID != "" {
-			if err := a.writeStoredMessageToMaildir(ctx, msgID, stored, attachments); err != nil {
-				a.log.Warn("failed to write external imap message to maildir", "message", msgID, "error", err)
+			if processed == 0 {
+				return 0, 0, 0, err
 			}
-			if strings.EqualFold(folder.Name, "INBOX") {
-				a.applyInboundControls(ctx, msgID, account.MailboxID, stored.From, stored.Subject)
+			failed++
+			break
+		}
+		if len(remote) == 0 {
+			break
+		}
+		stop := false
+		for _, item := range remote {
+			if a.externalIMAPRemoteMessageExists(ctx, account.ID, folder.Name, item.UIDValidity, item.UID) {
+				skipped++
+				lastUID = item.UID
+				processed++
+				continue
 			}
-			imported++
-		} else {
-			skipped++
+			raw := item.Raw
+			if len(raw) == 0 {
+				var fetched externalIMAPRemoteMessage
+				raw, fetched, err = client.FetchRaw(ctx, folder.Name, item.UID)
+				if err == nil {
+					item = fetched
+				}
+			}
+			if err != nil {
+				failed++
+				stop = true
+				break
+			}
+			stored, attachments, err := a.parseMaildirMessage(raw, account.Username)
+			if err != nil {
+				failed++
+				stop = true
+				break
+			}
+			stored.MailboxID = account.MailboxID
+			stored.FolderID = localFolderID
+			stored.RecipientAddr = account.Username
+			stored.IsRead = item.IsRead
+			msgID, err := a.insertExternalIMAPMessageOnce(ctx, account, folder.Name, item, stored, attachments)
+			if err != nil {
+				failed++
+				stop = true
+				break
+			}
+			if msgID != "" {
+				if err := a.writeStoredMessageToMaildir(ctx, msgID, stored, attachments); err != nil {
+					a.log.Warn("failed to write external imap message to maildir", "message", msgID, "error", err)
+				}
+				if strings.EqualFold(folder.Name, "INBOX") {
+					a.applyInboundControls(ctx, msgID, account.MailboxID, stored.From, stored.Subject)
+				}
+				imported++
+			} else {
+				skipped++
+			}
+			lastUID = item.UID
+			processed++
+		}
+		if stop || len(remote) < batchLimit {
+			break
 		}
 	}
 	query := upsertSQL(a.cfg.DBDriver, `INSERT INTO external_imap_folder_states(account_id,remote_folder,local_folder_id,uid_validity,last_uid,last_sync_at,created_at,updated_at)
@@ -1214,8 +1242,8 @@ func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAc
 		`local_folder_id=excluded.local_folder_id,uid_validity=excluded.uid_validity,last_uid=`+scalarMaxSQL(a.cfg.DBDriver, "last_uid", "excluded.last_uid")+`,last_sync_at=excluded.last_sync_at,updated_at=excluded.updated_at`,
 		`local_folder_id=VALUES(local_folder_id),uid_validity=VALUES(uid_validity),last_uid=GREATEST(last_uid,VALUES(last_uid)),last_sync_at=VALUES(last_sync_at),updated_at=VALUES(updated_at)`)
 	_, _ = a.db.ExecContext(ctx, query,
-		account.ID, folder.Name, localFolderID, folder.UIDValidity, maxUID, now, now, now)
-	return imported, skipped, failed, nil
+		account.ID, folder.Name, localFolderID, folder.UIDValidity, lastUID, now, now, now)
+	return imported, skipped, failed, ctx.Err()
 }
 
 type externalIMAPFolderState struct {
@@ -1810,14 +1838,15 @@ func (c *goExternalIMAPClient) FetchNew(ctx context.Context, folder string, afte
 	}
 	var set imap.UIDSet
 	set.AddNum(uids...)
-	bodySection := &imap.FetchItemBodySection{Specifier: imap.PartSpecifierHeader, Peek: true}
+	bodySection := &imap.FetchItemBodySection{Peek: true}
 	messages, err := c.client.Fetch(set, &imap.FetchOptions{UID: true, Flags: true, Envelope: true, InternalDate: true, RFC822Size: true, BodySection: []*imap.FetchItemBodySection{bodySection}}).Collect()
 	if err != nil {
 		return nil, err
 	}
 	out := []externalIMAPRemoteMessage{}
 	for _, message := range messages {
-		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, message, nil))
+		raw := message.FindBodySection(bodySection)
+		out = append(out, fetchBufferToExternalMessage(folder, selected.UIDValidity, message, raw))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].UID < out[j].UID })
 	return out, nil
