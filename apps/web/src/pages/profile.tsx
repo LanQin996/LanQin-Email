@@ -589,7 +589,7 @@ export function ProfilePage() {
   const applyMailbox = useMutation({
     mutationFn: api.applyMailbox,
     onSuccess: (mailbox) => {
-      qc.invalidateQueries({ queryKey: ["mailboxes", "mine"] })
+      qc.invalidateQueries({ queryKey: ["mailboxes", "owned"] })
       qc.invalidateQueries({ queryKey: ["mailbox-apply-options"] })
       setMailboxId(mailbox.id)
       toast({ title: "邮箱已申请" })
