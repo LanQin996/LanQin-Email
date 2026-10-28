@@ -86,6 +86,7 @@ export type User = {
   permissionGroupIds: string[]
   permissionGroups: PermissionGroupSummary[]
   mailboxesCreatedTotal: number
+  mailboxCount: number
   mailboxQuotaBonus: number
   createdAt: string
 }
@@ -99,7 +100,7 @@ export type APIToken = {
   createdAt: string
   updatedAt: string
 }
-export type AdminUser = User & { mailboxCount: number; mailboxes?: string[] }
+export type AdminUser = User & { mailboxes?: string[] }
 export type AdminOverview = {
   users: number
   activeUsers: number

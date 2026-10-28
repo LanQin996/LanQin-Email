@@ -1,6 +1,8 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -47,11 +49,11 @@ func setupQuotaTest(t *testing.T) (*App, *testClient, *testClient, AdminUser, Do
 // setRegularGroupMailboxLimit updates the limit inherited by every regular user.
 func setRegularGroupMailboxLimit(t *testing.T, admin *testClient, limit int) {
 	t.Helper()
-	// A per-day limit of 0 keeps the lifetime limit the only constraint under test.
+	// A per-day limit of 0 keeps the owned-mailbox limit the only constraint under test.
 	setRegularGroupMailboxLimits(t, admin, limit, 0)
 }
 
-// setRegularGroupMailboxLimits sets both the lifetime and the per-day allowance.
+// setRegularGroupMailboxLimits sets both the owned-mailbox and per-day allowance.
 func setRegularGroupMailboxLimits(t *testing.T, admin *testClient, limit, perDay int) {
 	t.Helper()
 	var groups struct {
@@ -119,45 +121,161 @@ func TestMailboxQuotaZeroMeansUnlimited(t *testing.T) {
 	}
 }
 
-// TestMailboxQuotaCountsDeletedMailboxes pins the decision that the quota is a
-// lifetime counter: deleting a mailbox must not hand the allowance back, which
-// is what stops a user from cycling create/delete to exceed the limit.
-func TestMailboxQuotaCountsDeletedMailboxes(t *testing.T) {
-	a, admin, user, created, domain := setupQuotaTest(t)
-	setRegularGroupMailboxLimit(t, admin, 2)
+// Deletion releases the total allowance without erasing creation history.
+func TestMailboxQuotaReleasesDeletedMailboxes(t *testing.T) {
+	for _, path := range []string{"/api/admin/mailboxes/", "/api/open/mailboxes/", "/api/open/v1/mailboxes/"} {
+		t.Run(path, func(t *testing.T) {
+			a, admin, user, created, domain := setupQuotaTest(t)
+			setRegularGroupMailboxLimit(t, admin, 2)
+			var first Mailbox
+			if code := admin.do("POST", "/api/admin/mailboxes", map[string]any{
+				"domainId": domain.ID, "localPart": "one", "userId": created.ID,
+				"displayName": "Synthetic", "password": "Password123!",
+			}, &first); code != http.StatusCreated {
+				t.Fatalf("admin create code=%d", code)
+			}
+			if code := applyMailbox(t, user, domain.ID, "two"); code != http.StatusCreated {
+				t.Fatalf("second apply code=%d", code)
+			}
 
-	if code := applyMailbox(t, user, domain.ID, "one"); code != http.StatusCreated {
-		t.Fatalf("first apply code=%d", code)
-	}
-	if code := applyMailbox(t, user, domain.ID, "two"); code != http.StatusCreated {
-		t.Fatalf("second apply code=%d", code)
-	}
+			assertMailboxQuotaUsage(t, admin, user, created.ID, 2, 2)
+			if code := applyMailbox(t, user, domain.ID, "blocked"); code != http.StatusConflict {
+				t.Fatalf("apply at limit code=%d want 409", code)
+			}
+			deleter := admin
+			if path != "/api/admin/mailboxes/" {
+				deleter = &testClient{t: t, server: admin.server, bearer: createTestAPIToken(t, admin, "quota-delete")}
+			}
+			var ok map[string]any
+			if code := deleter.do("DELETE", path+first.ID, nil, &ok); code != http.StatusOK {
+				t.Fatalf("delete mailbox code=%d", code)
+			}
 
-	var mailboxID string
-	if err := a.db.QueryRow(`SELECT id FROM mailboxes WHERE user_id=? AND local_part=?`, created.ID, "one").Scan(&mailboxID); err != nil {
+			var live int
+			if err := a.db.QueryRow(`SELECT COUNT(*) FROM mailboxes WHERE user_id=?`, created.ID).Scan(&live); err != nil {
+				t.Fatal(err)
+			}
+			if live != 1 {
+				t.Fatalf("live mailbox count=%d want 1", live)
+			}
+			var total int
+			if err := a.db.QueryRow(`SELECT mailboxes_created_total FROM users WHERE id=?`, created.ID).Scan(&total); err != nil {
+				t.Fatal(err)
+			}
+			if total != 2 {
+				t.Fatalf("mailboxes_created_total=%d want 2 (counter must not decrease)", total)
+			}
+			assertMailboxQuotaUsage(t, admin, user, created.ID, 1, 2)
+			if code := applyMailbox(t, user, domain.ID, "three"); code != http.StatusCreated {
+				t.Fatalf("apply after delete code=%d want 201", code)
+			}
+			assertMailboxQuotaUsage(t, admin, user, created.ID, 2, 3)
+			if code := applyMailbox(t, user, domain.ID, "four"); code != http.StatusConflict {
+				t.Fatalf("apply after refilling slot code=%d want 409", code)
+			}
+		})
+	}
+}
+
+func assertMailboxQuotaUsage(t *testing.T, admin, user *testClient, userID string, count, total int) {
+	t.Helper()
+	var response struct {
+		User User `json:"user"`
+	}
+	if code := user.do("GET", "/api/me", nil, &response); code != http.StatusOK {
+		t.Fatalf("get current user code=%d", code)
+	}
+	me := response.User
+	if me.MailboxCount != count || me.MailboxesCreatedTotal != total {
+		t.Fatalf("current user usage=%d total=%d want %d/%d", me.MailboxCount, me.MailboxesCreatedTotal, count, total)
+	}
+	var users struct {
+		Items []AdminUser `json:"items"`
+	}
+	if code := admin.do("GET", "/api/admin/users", nil, &users); code != http.StatusOK {
+		t.Fatalf("list users code=%d", code)
+	}
+	for _, item := range users.Items {
+		if item.ID == userID {
+			if item.MailboxCount != count || len(item.Mailboxes) != count || item.MailboxesCreatedTotal != total {
+				t.Fatalf("admin user count=%d addresses=%d total=%d want %d/%d", item.MailboxCount, len(item.Mailboxes), item.MailboxesCreatedTotal, count, total)
+			}
+			return
+		}
+	}
+	t.Fatal("quota user missing from admin list")
+}
+
+func TestMailboxQuotaCountsDisabledAndReassignedMailboxes(t *testing.T) {
+	_, admin, user, created, domain := setupQuotaTest(t)
+	setRegularGroupMailboxLimit(t, admin, 1)
+	first := createTestMailbox(t, admin, domain.ID, "disabled", "Synthetic", "Password123!", map[string]any{"userId": created.ID})
+	var updated Mailbox
+	if code := admin.do("POST", "/api/admin/mailboxes/"+first.ID, map[string]any{
+		"userId": created.ID, "displayName": first.DisplayName, "quotaMb": first.QuotaMB, "status": "disabled",
+	}, &updated); code != http.StatusOK {
+		t.Fatalf("disable mailbox code=%d", code)
+	}
+	assertMailboxQuotaUsage(t, admin, user, created.ID, 1, 1)
+	if code := applyMailbox(t, user, domain.ID, "blocked"); code != http.StatusConflict {
+		t.Fatalf("disabled mailbox must consume allowance: code=%d", code)
+	}
+	var recipient AdminUser
+	if code := admin.do("POST", "/api/admin/users", map[string]any{
+		"email": "recipient@example.test", "role": "user", "password": "Password123!",
+	}, &recipient); code != http.StatusCreated {
+		t.Fatalf("create recipient code=%d", code)
+	}
+	if code := admin.do("POST", "/api/admin/mailboxes/"+first.ID, map[string]any{
+		"userId": recipient.ID, "displayName": first.DisplayName, "quotaMb": first.QuotaMB, "status": "active",
+	}, &updated); code != http.StatusOK {
+		t.Fatalf("reassign mailbox code=%d", code)
+	}
+	assertMailboxQuotaUsage(t, admin, user, created.ID, 0, 1)
+	recipientClient := &testClient{t: t, server: admin.server}
+	if code := recipientClient.do("POST", "/api/auth/login", map[string]string{
+		"email": recipient.Email, "password": "Password123!",
+	}, nil); code != http.StatusOK {
+		t.Fatalf("recipient login code=%d", code)
+	}
+	assertMailboxQuotaUsage(t, admin, recipientClient, recipient.ID, 1, 0)
+	if code := applyMailbox(t, recipientClient, domain.ID, "blocked-recipient"); code != http.StatusConflict {
+		t.Fatalf("transferred mailbox must consume recipient allowance: code=%d", code)
+	}
+	if code := applyMailbox(t, user, domain.ID, "replacement"); code != http.StatusCreated {
+		t.Fatalf("reassignment must release previous owner's allowance: code=%d", code)
+	}
+}
+
+func TestMailboxQuotaSerializesConcurrentCreations(t *testing.T) {
+	a, admin, _, created, domain := setupQuotaTest(t)
+	setRegularGroupMailboxLimit(t, admin, 1)
+	user, err := a.userByID(t.Context(), created.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	var ok map[string]any
-	if code := admin.do("DELETE", "/api/admin/mailboxes/"+mailboxID, nil, &ok); code != http.StatusOK {
-		t.Fatalf("delete mailbox code=%d", code)
+	const attempts = 4
+	results := make(chan error, attempts)
+	start := make(chan struct{})
+	for i := range attempts {
+		go func(n int) {
+			<-start
+			_, err := a.createMailboxWithPasswordHash(t.Context(), created.ID, domain.ID,
+				fmt.Sprintf("race%d", n), "Synthetic", "unused", 1024, "active", user)
+			results <- err
+		}(i)
 	}
-
-	var live int
-	if err := a.db.QueryRow(`SELECT COUNT(*) FROM mailboxes WHERE user_id=?`, created.ID).Scan(&live); err != nil {
-		t.Fatal(err)
+	close(start)
+	succeeded := 0
+	for range attempts {
+		if err := <-results; err == nil {
+			succeeded++
+		} else if !errors.Is(err, errMailboxCountLimitReached) {
+			t.Errorf("concurrent creation failed unexpectedly: %v", err)
+		}
 	}
-	if live != 1 {
-		t.Fatalf("live mailbox count=%d want 1", live)
-	}
-	var total int
-	if err := a.db.QueryRow(`SELECT mailboxes_created_total FROM users WHERE id=?`, created.ID).Scan(&total); err != nil {
-		t.Fatal(err)
-	}
-	if total != 2 {
-		t.Fatalf("mailboxes_created_total=%d want 2 (counter must not decrease)", total)
-	}
-	if code := applyMailbox(t, user, domain.ID, "three"); code != http.StatusConflict {
-		t.Fatalf("apply after delete code=%d want 409", code)
+	if succeeded != 1 {
+		t.Fatalf("%d concurrent creations succeeded, want 1", succeeded)
 	}
 }
 

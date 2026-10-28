@@ -716,15 +716,23 @@
   },
   "邮箱数量上限": {
     "zh-TW": "信箱數量上限",
-    "en": "Mailbox creation limit"
+    "en": "Mailbox count limit"
   },
-  "按累计创建数计算": {
-    "zh-TW": "按累計建立數計算",
-    "en": "Based on the total number created"
+  "按当前拥有邮箱数计算": {
+    "zh-TW": "按目前擁有的信箱數計算",
+    "en": "Counted by currently owned mailboxes"
   },
-  "删除邮箱不会释放额度": {
-    "zh-TW": "刪除信箱不會釋放額度",
-    "en": "Deleting a mailbox does not restore the quota"
+  "删除邮箱会释放总额度": {
+    "zh-TW": "刪除信箱會釋放總額度",
+    "en": "Deleting a mailbox restores the total allowance"
+  },
+  "已用邮箱额度": {
+    "zh-TW": "已用信箱額度",
+    "en": "Mailbox allowance used"
+  },
+  "邮箱数量已达上限，请先删除不再使用的邮箱或联系管理员": {
+    "zh-TW": "信箱數量已達上限，請先刪除不再使用的信箱或聯絡管理員",
+    "en": "Mailbox limit reached. Delete unused mailboxes or contact an administrator."
   },
   "每日新建邮箱上限": {
     "zh-TW": "每日新建信箱上限",

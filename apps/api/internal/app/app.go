@@ -1768,7 +1768,7 @@ func (a *App) createMailboxWithPasswordHashTx(ctx context.Context, tx *sql.Tx, u
 	if status == "" {
 		status = "active"
 	}
-	if enforceQuotaFor != nil && enforceQuotaFor.Limits.MaxMailboxesPerDay > 0 {
+	if enforceQuotaFor != nil && (effectiveMailboxLimit(enforceQuotaFor) > 0 || enforceQuotaFor.Limits.MaxMailboxesPerDay > 0) {
 		// Lock before the first table read. PostgreSQL needs a fresh statement
 		// snapshot after waiting, and MySQL REPEATABLE READ must not establish
 		// its read view before the preceding creation commits.
@@ -1827,19 +1827,20 @@ var errMailboxCountLimitReached = errors.New("mailbox count limit reached")
 var errMailboxDailyLimitReached = errors.New("mailbox daily creation limit reached")
 
 // consumeMailboxQuotaTx increments the user's lifetime mailbox counter and, when
-// enforceQuotaFor is set, refuses to do so once either the lifetime or the
+// enforceQuotaFor is set, refuses to do so once either the owned-mailbox or the
 // per-day allowance is reached.
 //
-// The lifetime counter is guarded by the UPDATE itself. The daily event count
-// additionally relies on createMailboxWithPasswordHashTx locking the user row
+// Both the owned-mailbox and daily event counts rely on
+// createMailboxWithPasswordHashTx locking the user row
 // before its first table read. An UPDATE alone is insufficient: after waiting
 // PostgreSQL rechecks the user row but its subquery can still see an old snapshot
-// of mailbox_creation_events. Keep the lock and the count in separate statements.
+// of mailboxes or mailbox_creation_events. Keep the lock and the counts in
+// separate statements. The lifetime counter remains historical data only.
 func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now string, enforceQuotaFor *User) error {
-	lifetimeLimit := 0
+	countLimit := 0
 	dailyLimit := 0
 	if enforceQuotaFor != nil {
-		lifetimeLimit = effectiveMailboxLimit(enforceQuotaFor)
+		countLimit = effectiveMailboxLimit(enforceQuotaFor)
 		dailyLimit = enforceQuotaFor.Limits.MaxMailboxesPerDay
 	}
 
@@ -1851,8 +1852,9 @@ func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now
 	// interpolated rather than bound as parameters: they are ints from our own
 	// config, and PostgreSQL cannot infer a type for a bare placeholder compared
 	// against COUNT(*).
-	if lifetimeLimit > 0 {
-		query += fmt.Sprintf(` AND mailboxes_created_total<%d`, lifetimeLimit)
+	if countLimit > 0 {
+		query += fmt.Sprintf(` AND (SELECT COUNT(*) FROM mailboxes WHERE user_id=?)<%d`, countLimit)
+		args = append(args, userID)
 	}
 	if dailyLimit > 0 {
 		// The event for this creation is inserted after this statement, so the
@@ -1872,17 +1874,17 @@ func (a *App) consumeMailboxQuotaTx(ctx context.Context, tx *sql.Tx, userID, now
 	if affected == 1 {
 		return nil
 	}
-	if lifetimeLimit == 0 && dailyLimit == 0 {
+	if countLimit == 0 && dailyLimit == 0 {
 		// No guard was applied, so the only way to match zero rows is a missing user.
 		return errNotFound
 	}
-	return a.classifyMailboxQuotaFailureTx(ctx, tx, userID, windowStart, lifetimeLimit, dailyLimit)
+	return a.classifyMailboxQuotaFailureTx(ctx, tx, userID, windowStart, countLimit, dailyLimit)
 }
 
 // classifyMailboxQuotaFailureTx works out which guard rejected the UPDATE so the
 // caller can return a meaningful message. It only runs on the failure path, where
 // an extra pair of reads costs nothing.
-func (a *App) classifyMailboxQuotaFailureTx(ctx context.Context, tx *sql.Tx, userID, windowStart string, lifetimeLimit, dailyLimit int) error {
+func (a *App) classifyMailboxQuotaFailureTx(ctx context.Context, tx *sql.Tx, userID, windowStart string, countLimit, dailyLimit int) error {
 	if dailyLimit > 0 {
 		var used int
 		if err := tx.QueryRowContext(ctx,
@@ -1894,15 +1896,12 @@ func (a *App) classifyMailboxQuotaFailureTx(ctx context.Context, tx *sql.Tx, use
 			return errMailboxDailyLimitReached
 		}
 	}
-	if lifetimeLimit > 0 {
+	if countLimit > 0 {
 		var total int
-		if err := tx.QueryRowContext(ctx, `SELECT mailboxes_created_total FROM users WHERE id=?`, userID).Scan(&total); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return errNotFound
-			}
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM mailboxes WHERE user_id=?`, userID).Scan(&total); err != nil {
 			return err
 		}
-		if total >= lifetimeLimit {
+		if total >= countLimit {
 			return errMailboxCountLimitReached
 		}
 	}
@@ -1922,15 +1921,9 @@ func (a *App) recordMailboxCreationTx(ctx context.Context, tx *sql.Tx, userID, m
 	return err
 }
 
-// mailboxCountLimitMessage explains the limit in the user's own terms. The
-// cumulative wording matters: deleting a mailbox does not free up an allowance,
-// which is otherwise counter-intuitive.
-func mailboxCountLimitMessage(u *User) string {
-	limit := effectiveMailboxLimit(u)
-	if limit <= 0 {
-		return "邮箱数量已达上限"
-	}
-	return fmt.Sprintf("邮箱数量已达上限（%d 个，按累计创建数计算，删除邮箱不会释放额度）", limit)
+// mailboxCountLimitMessage is a stable translation key for the owned-mailbox limit.
+func mailboxCountLimitMessage() string {
+	return "邮箱数量已达上限，请先删除不再使用的邮箱或联系管理员"
 }
 
 // mailboxDailyLimitMessage states the per-day allowance. The rolling window is

@@ -43,6 +43,9 @@ func TestExternalDatabaseContract(t *testing.T) {
 				t.Fatal("external database must use the portable search fallback")
 			}
 			assertExternalDatabaseContract(t, a)
+			t.Run("mailbox count quota releases deleted mailboxes", func(t *testing.T) {
+				assertMailboxCountQuotaContract(t, a)
+			})
 			t.Run("concurrent mailbox daily quota", func(t *testing.T) {
 				if tt.driver != databaseDriverPostgres {
 					t.Skip("PostgreSQL statement-snapshot regression")
@@ -52,6 +55,12 @@ func TestExternalDatabaseContract(t *testing.T) {
 				})
 				t.Run("rollback preserves the slot", func(t *testing.T) {
 					assertPostgresConcurrentMailboxDailyQuota(t, a, false)
+				})
+				t.Run("owned count without daily limit", func(t *testing.T) {
+					assertPostgresConcurrentMailboxQuota(t, a, true, false)
+				})
+				t.Run("owned count after rollback", func(t *testing.T) {
+					assertPostgresConcurrentMailboxQuota(t, a, false, false)
 				})
 			})
 			if err := a.Close(); err != nil {
@@ -372,6 +381,11 @@ func assertUpgradedInviteDefaults(t *testing.T, a *App) {
 
 func assertPostgresConcurrentMailboxDailyQuota(t *testing.T, a *App, commitFirst bool) {
 	t.Helper()
+	assertPostgresConcurrentMailboxQuota(t, a, commitFirst, true)
+}
+
+func assertPostgresConcurrentMailboxQuota(t *testing.T, a *App, commitFirst, daily bool) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 	defer cancel()
 	userID := newID("usr")
@@ -385,6 +399,11 @@ func assertPostgresConcurrentMailboxDailyQuota(t *testing.T, a *App, commitFirst
 		t.Fatal(err)
 	}
 	user := &User{ID: userID, Limits: PermissionLimits{MaxMailboxes: 10, MaxMailboxesPerDay: 1}}
+	limitError := errMailboxDailyLimitReached
+	if !daily {
+		user.Limits = PermissionLimits{MaxMailboxes: 1}
+		limitError = errMailboxCountLimitReached
+	}
 	first, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -439,8 +458,8 @@ func assertPostgresConcurrentMailboxDailyQuota(t *testing.T, a *App, commitFirst
 	}
 	select {
 	case err := <-done:
-		if commitFirst && !errors.Is(err, errMailboxDailyLimitReached) {
-			t.Errorf("second creation error=%v, want daily quota rejection", err)
+		if commitFirst && !errors.Is(err, limitError) {
+			t.Errorf("second creation error=%v, want %v", err, limitError)
 		} else if !commitFirst && err != nil {
 			t.Errorf("second creation after rollback: %v", err)
 		}
@@ -458,6 +477,42 @@ func assertPostgresConcurrentMailboxDailyQuota(t *testing.T, a *App, commitFirst
 		t.Fatal(err)
 	}
 	if total != 1 || events != 1 || mailboxes != 1 {
-		t.Errorf("daily limit=1: total=%d events=%d mailboxes=%d", total, events, mailboxes)
+		t.Errorf("limit=1: total=%d events=%d mailboxes=%d", total, events, mailboxes)
+	}
+}
+
+func assertMailboxCountQuotaContract(t *testing.T, a *App) {
+	t.Helper()
+	ctx := t.Context()
+	userID := newID("usr")
+	now := a.now().UTC().Format(time.RFC3339Nano)
+	if _, err := a.db.ExecContext(ctx, `INSERT INTO users(id,email,display_name,role,password_hash,mailboxes_created_total,created_at,updated_at)
+		VALUES(?,?,?,'user','unused',50,?,?)`, userID, userID+"@contract.test", "Synthetic Quota", now, now); err != nil {
+		t.Fatal(err)
+	}
+	defer a.db.ExecContext(ctx, `DELETE FROM users WHERE id=?`, userID)
+	var domainID string
+	if err := a.db.QueryRowContext(ctx, `SELECT id FROM domains WHERE name=?`, "contract.test").Scan(&domainID); err != nil {
+		t.Fatal(err)
+	}
+	user := &User{ID: userID, Limits: PermissionLimits{MaxMailboxes: 1}}
+	id, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, userID+"-one", "Synthetic", "unused", 1024, "disabled", user)
+	if err != nil {
+		t.Fatalf("historical counter must not consume current allowance: %v", err)
+	}
+	if _, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, userID+"-blocked", "Synthetic", "unused", 1024, "active", user); !errors.Is(err, errMailboxCountLimitReached) {
+		t.Fatalf("disabled mailbox must consume allowance: %v", err)
+	}
+	if _, err := a.db.ExecContext(ctx, `DELETE FROM mailboxes WHERE id=?`, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.createMailboxWithPasswordHash(ctx, userID, domainID, userID+"-replacement", "Synthetic", "unused", 1024, "active", user); err != nil {
+		t.Fatalf("deletion must release allowance: %v", err)
+	}
+	if err := a.attachMailboxQuotaCounters(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	if user.MailboxCount != 1 || user.MailboxesCreatedTotal != 52 {
+		t.Fatalf("current=%d total=%d, want 1/52", user.MailboxCount, user.MailboxesCreatedTotal)
 	}
 }
