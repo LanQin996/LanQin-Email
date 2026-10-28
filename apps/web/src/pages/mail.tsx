@@ -423,6 +423,7 @@ export function MailPage() {
     queryFn: () => api.externalFolders(selectedExternalAccountId),
     enabled: !!selectedExternalAccountId && canReadMail && externalImapEnabled,
   })
+  const externalMessagesStoredLocally = selectedExternalAccount?.storageMode === "local"
   const selectedMailbox = React.useMemo(() => {
     const items = mailboxList.data?.items || []
     return items.find((item) => item.id === selectedMailboxId) || items[0]
@@ -698,12 +699,14 @@ export function MailPage() {
   })
   const markExternalRead = useMutation({
     mutationFn: ({ id, remoteId, read }: { id: string; remoteId: string; read: boolean }) =>
-      api.markExternalRead(id, remoteId, read),
+      externalMessagesStoredLocally ? api.markRead(remoteId, read) : api.markExternalRead(id, remoteId, read),
     onMutate: ({ remoteId, read }) => updateCachedMessage(remoteId, { isRead: read }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["external-messages"] })
       await qc.invalidateQueries({ queryKey: ["message"] })
       await qc.invalidateQueries({ queryKey: ["mail-external-folders"] })
+      await qc.invalidateQueries({ queryKey: ["folders"] })
+      await qc.invalidateQueries({ queryKey: ["mail-stats"] })
     },
     onError: (error) => toast({ title: "操作失败", description: errorMessage(error) }),
   })
@@ -1745,25 +1748,32 @@ export function MailPage() {
       return
     }
     if (action === "read") {
-      markRead.mutate({ id: message.id, read: !message.isRead })
+      if (mailView === "external" && selectedExternalAccountId)
+        markExternalRead.mutate({ id: selectedExternalAccountId, remoteId: message.id, read: !message.isRead })
+      else markRead.mutate({ id: message.id, read: !message.isRead })
       return
     }
     if (action === "star") {
+      if (mailView === "external" && !externalMessagesStoredLocally) return
       star.mutate({ id: message.id, starred: !message.isStarred })
       return
     }
     if (action === "archive") {
+      if (mailView === "external" && !externalMessagesStoredLocally) return
       move.mutate({ id: message.id, folder: message.folder === "Archive" ? "Inbox" : "Archive" })
       return
     }
     if (action === "trash") {
+      if (mailView === "external" && !externalMessagesStoredLocally) return
       move.mutate({ id: message.id, folder: "Trash" })
       return
     }
     if (action === "spam") {
+      if (mailView === "external" && !externalMessagesStoredLocally) return
       move.mutate({ id: message.id, folder: "Spam" })
       return
     }
+    if (mailView === "external" && !externalMessagesStoredLocally) return
     confirmDeleteMessage(message)
   }
   function openSendQueue() {
@@ -2306,20 +2316,21 @@ export function MailPage() {
       scheduledDraftIds={scheduledDraftIds}
       onCloseReader={() => setSelectedId(null)}
       onStar={(message) => {
-        if (mailView !== "external") star.mutate({ id: message.id, starred: !message.isStarred })
+        if (mailView !== "external" || externalMessagesStoredLocally)
+          star.mutate({ id: message.id, starred: !message.isStarred })
       }}
       onReply={openReply}
       onForward={openForward}
       onSendTimeline={openMessageSendTimeline}
       onArchive={(message) => {
-        if (mailView !== "external")
+        if (mailView !== "external" || externalMessagesStoredLocally)
           move.mutate({
             id: message.id,
             folder: message.folder === "Archive" ? "Inbox" : "Archive",
           })
       }}
       onDelete={(message) => {
-        if (mailView !== "external") confirmDeleteMessage(message)
+        if (mailView !== "external" || externalMessagesStoredLocally) confirmDeleteMessage(message)
       }}
       onToggleRead={(message) =>
         mailView === "external" && selectedExternalAccountId
@@ -2336,7 +2347,7 @@ export function MailPage() {
       onBulkAction={runBulkAction}
       onContextMenu={openMessageContextMenu}
       canSend={canSendSelectedMailbox}
-      canOrganize={canOrganizeSelectedMailbox && mailView !== "external"}
+      canOrganize={canOrganizeSelectedMailbox && (mailView !== "external" || externalMessagesStoredLocally)}
       canManageLabels={canManageSelectedLabels && mailView !== "external"}
       canDownloadAttachments={canDownloadAttachments}
       language={language}
@@ -2399,8 +2410,11 @@ export function MailPage() {
                 onCheckedChange={(checked) => toggleCompactSelect(m.id, checked)}
                 onClick={() => openMessage(m.id)}
                 onContextMenu={(event) => openMessageContextMenu(event, m)}
-                onStar={() => star.mutate({ id: m.id, starred: !m.isStarred })}
-                canOrganize={canOrganizeSelectedMailbox}
+                onStar={() => {
+                  if (mailView !== "external" || externalMessagesStoredLocally)
+                    star.mutate({ id: m.id, starred: !m.isStarred })
+                }}
+                canOrganize={canOrganizeSelectedMailbox && (mailView !== "external" || externalMessagesStoredLocally)}
               />
             ))}
             {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) &&
@@ -2469,7 +2483,7 @@ export function MailPage() {
                         {uiText("投递时间线")}
                       </Button>
                     )}
-                    {mailView !== "external" &&
+                    {(mailView !== "external" || externalMessagesStoredLocally) &&
                       canOrganizeSelectedMailbox &&
                       (selected.folder === "Archive" ? (
                         <Button
@@ -2488,7 +2502,7 @@ export function MailPage() {
                           {uiText("归档")}
                         </Button>
                       ))}
-                    {mailView !== "external" && canOrganizeSelectedMailbox && (
+                    {(mailView !== "external" || externalMessagesStoredLocally) && canOrganizeSelectedMailbox && (
                       <Button
                         variant="destructive"
                         size="sm"
@@ -2675,7 +2689,7 @@ export function MailPage() {
                     )}
                     {mailView !== "scheduled" &&
                       mailView !== "sendQueue" &&
-                      mailView !== "external" && (
+                      (mailView !== "external" || externalMessagesStoredLocally) && (
                         <>
                           {canOrganizeSelectedMailbox && (
                             <Button

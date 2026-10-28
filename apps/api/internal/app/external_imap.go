@@ -16,6 +16,7 @@ import (
 	"mime/quotedprintable"
 	"net"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -581,6 +582,14 @@ func (a *App) handleExternalIMAPFolders(w http.ResponseWriter, r *http.Request) 
 	}
 	items := make([]ExternalIMAPFolder, 0, len(folders))
 	for _, folder := range folders {
+		if account.StorageMode == externalIMAPStorageLocal {
+			var total, unread int
+			_ = a.db.QueryRowContext(r.Context(), `SELECT COUNT(m.id),COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0)
+				FROM external_imap_messages em JOIN messages m ON m.id=em.local_message_id
+				WHERE em.account_id=? AND em.remote_folder=? AND m.mailbox_id=?`, account.ID, folder.Name, account.MailboxID).Scan(&total, &unread)
+			folder.TotalCount = total
+			folder.UnreadCount = unread
+		}
 		items = append(items, ExternalIMAPFolder{Name: folder.Name, Role: folder.Role, UnreadCount: folder.UnreadCount, TotalCount: folder.TotalCount})
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"items": items})
@@ -600,6 +609,13 @@ func (a *App) handleExternalIMAPMessages(w http.ResponseWriter, r *http.Request)
 	limit, err := mailMessagePageLimit(r)
 	if err != nil {
 		badRequest(w, err)
+		return
+	}
+	if account.StorageMode == externalIMAPStorageLocal {
+		access := &mailboxReadAccess{Mailbox: &Mailbox{ID: account.MailboxID, UserID: account.UserID}, Owner: true}
+		a.respondMailMessageListInternal(w, r, access,
+			`m.mailbox_id=? AND EXISTS (SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id AND em.account_id=? AND em.remote_folder=?)`,
+			[]any{account.MailboxID, account.ID, folder}, true, account.ID)
 		return
 	}
 	client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
@@ -623,6 +639,32 @@ func (a *App) handleExternalIMAPMessages(w http.ResponseWriter, r *http.Request)
 func (a *App) handleExternalIMAPMessage(w http.ResponseWriter, r *http.Request) {
 	account, ok := a.externalIMAPAccountForMailRequest(w, r)
 	if !ok {
+		return
+	}
+	if account.StorageMode == externalIMAPStorageLocal {
+		messageID := chi.URLParam(r, "remoteId")
+		var mappedID string
+		if err := a.db.QueryRowContext(r.Context(), `SELECT em.local_message_id FROM external_imap_messages em JOIN messages m ON m.id=em.local_message_id
+			WHERE em.account_id=? AND em.local_message_id=? AND m.mailbox_id=? LIMIT 1`, account.ID, messageID, account.MailboxID).Scan(&mappedID); err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		msg, err := a.messageByID(r.Context(), mappedID, true)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		msg.ExternalAccountID = account.ID
+		if len(msg.Attachments) == 0 {
+			var rawPath string
+			if err := a.db.QueryRowContext(r.Context(), `SELECT raw_path FROM messages WHERE id=? AND mailbox_id=?`, mappedID, account.MailboxID).Scan(&rawPath); err == nil {
+				if info, err := os.Stat(rawPath); err == nil {
+					msg.Attachments = []Attachment{{ID: "raw", MessageID: msg.ID, Filename: safeExternalEMLFilename(msg.Subject), ContentType: "message/rfc822", SizeBytes: info.Size(), CreatedAt: a.now().UTC()}}
+					msg.HasAttachments = true
+				}
+			}
+		}
+		respondJSON(w, http.StatusOK, msg)
 		return
 	}
 	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
@@ -669,6 +711,48 @@ func (a *App) handleExternalIMAPAttachment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	partID := chi.URLParam(r, "partId")
+	if account.StorageMode == externalIMAPStorageLocal {
+		messageID := chi.URLParam(r, "remoteId")
+		var exists int
+		if err := a.db.QueryRowContext(r.Context(), `SELECT 1 FROM external_imap_messages em JOIN messages m ON m.id=em.local_message_id
+			WHERE em.account_id=? AND em.local_message_id=? AND m.mailbox_id=? LIMIT 1`, account.ID, messageID, account.MailboxID).Scan(&exists); err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		if partID != "raw" {
+			var filename, contentType, path string
+			var size int64
+			if err := a.db.QueryRowContext(r.Context(), `SELECT att.filename,att.content_type,att.storage_path,att.size_bytes
+				FROM attachments att JOIN external_imap_messages em ON em.local_message_id=att.message_id
+				WHERE att.id=? AND em.account_id=? AND em.local_message_id=?`, partID, account.ID, messageID).Scan(&filename, &contentType, &path, &size); err != nil {
+				respondError(w, http.StatusNotFound, "attachment not found")
+				return
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				respondError(w, http.StatusNotFound, "attachment file missing")
+				return
+			}
+			writeAttachmentHeaders(w, contentType, filename, size)
+			_, _ = w.Write(data)
+			return
+		}
+		var rawPath, subject string
+		if err := a.db.QueryRowContext(r.Context(), `SELECT m.raw_path,m.subject FROM messages m
+			JOIN external_imap_messages em ON em.local_message_id=m.id
+			WHERE m.id=? AND m.mailbox_id=? AND em.account_id=?`, messageID, account.MailboxID, account.ID).Scan(&rawPath, &subject); err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		raw, err := os.ReadFile(rawPath)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		writeAttachmentHeaders(w, "message/rfc822", safeExternalEMLFilename(subject), int64(len(raw)))
+		_, _ = w.Write(raw)
+		return
+	}
 	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
 	if !ok {
 		return
@@ -703,12 +787,8 @@ func (a *App) handleExternalIMAPMarkRead(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	if !account.SyncReadState {
+	if account.StorageMode != externalIMAPStorageLocal && !account.SyncReadState {
 		badRequest(w, errors.New("read state sync is disabled"))
-		return
-	}
-	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
-	if !ok {
 		return
 	}
 	var req struct {
@@ -718,6 +798,53 @@ func (a *App) handleExternalIMAPMarkRead(w http.ResponseWriter, r *http.Request)
 	read := true
 	if req.Read != nil {
 		read = *req.Read
+	}
+	if account.StorageMode == externalIMAPStorageLocal {
+		messageID := chi.URLParam(r, "remoteId")
+		var folder string
+		var uid uint32
+		if err := a.db.QueryRowContext(r.Context(), `SELECT em.remote_folder,em.uid FROM external_imap_messages em JOIN messages m ON m.id=em.local_message_id
+			WHERE em.account_id=? AND em.local_message_id=? AND m.mailbox_id=? LIMIT 1`, account.ID, messageID, account.MailboxID).Scan(&folder, &uid); err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		msg, err := a.loadMessageForRequest(r, messageID, false)
+		if err != nil || msg.MailboxID != account.MailboxID {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		if err := a.updateMessageMaildirFlags(r.Context(), msg.ID, &read, nil); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update message")
+			return
+		}
+		modSeq, err := a.updateMessageModSeq(r.Context(), msg.ID, msg.FolderID)
+		if err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update message")
+			return
+		}
+		if _, err := a.db.ExecContext(r.Context(), `UPDATE messages SET is_read=?, imap_modseq=CASE WHEN ? > 0 THEN ? ELSE imap_modseq END,updated_at=? WHERE id=?`, boolInt(read), modSeq, modSeq, a.now().UTC().Format(time.RFC3339Nano), msg.ID); err != nil {
+			respondError(w, http.StatusInternalServerError, "failed to update message")
+			return
+		}
+		remoteSynced := false
+		if account.SyncReadState {
+			client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
+			if err == nil {
+				if err = client.SetRead(r.Context(), folder, uid, read); err == nil {
+					remoteSynced = true
+				}
+				_ = client.Close()
+			}
+			if err != nil {
+				a.log.Warn("failed to sync external imap read state", "account", account.ID, "error", err)
+			}
+		}
+		respondJSON(w, http.StatusOK, map[string]any{"ok": true, "read": read, "remoteSynced": remoteSynced})
+		return
+	}
+	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
+	if !ok {
+		return
 	}
 	client, err := a.externalIMAP.openExternalIMAPClient(r.Context(), account)
 	if err != nil {
@@ -1157,12 +1284,17 @@ func (a *App) externalIMAPAccountByID(ctx context.Context, id string) (externalI
 }
 
 func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAccountRecord, client externalIMAPClient, folder externalIMAPRemoteFolder) (int, int, int, error) {
-	localFolderName := normalizeExternalIMAPFolderName(folder.Name)
+	localFolderName := externalIMAPLocalFolderName(account.ID, folder.Name)
 	localFolderID, err := a.ensureFolder(ctx, account.MailboxID, localFolderName)
 	if err != nil {
 		return 0, 0, 0, err
 	}
 	state := a.loadExternalIMAPFolderState(ctx, account.ID, folder.Name)
+	if state.LocalFolderID != "" && state.LocalFolderID != localFolderID {
+		if err := a.moveExternalIMAPMessagesToFolder(ctx, account.ID, account.MailboxID, folder.Name, localFolderID); err != nil {
+			return 0, 0, 0, err
+		}
+	}
 	remote, err := client.FetchNew(ctx, folder.Name, state.LastUID, 100)
 	if err != nil {
 		return 0, 0, 0, err
@@ -1219,13 +1351,53 @@ func (a *App) syncExternalIMAPFolder(ctx context.Context, account externalIMAPAc
 }
 
 type externalIMAPFolderState struct {
-	LastUID uint32
+	LocalFolderID string
+	LastUID       uint32
 }
 
 func (a *App) loadExternalIMAPFolderState(ctx context.Context, accountID, folder string) externalIMAPFolderState {
 	var state externalIMAPFolderState
-	_ = a.db.QueryRowContext(ctx, `SELECT last_uid FROM external_imap_folder_states WHERE account_id=? AND remote_folder=?`, accountID, folder).Scan(&state.LastUID)
+	_ = a.db.QueryRowContext(ctx, `SELECT local_folder_id,last_uid FROM external_imap_folder_states WHERE account_id=? AND remote_folder=?`, accountID, folder).Scan(&state.LocalFolderID, &state.LastUID)
 	return state
+}
+
+func externalIMAPLocalFolderName(accountID, remoteFolder string) string {
+	key := strings.TrimPrefix(accountID, "ximap_")
+	if len(key) > 12 {
+		key = key[:12]
+	}
+	hash := sha256.Sum256([]byte(remoteFolder))
+	return fmt.Sprintf("External %s %x", key, hash[:6])
+}
+
+func (a *App) moveExternalIMAPMessagesToFolder(ctx context.Context, accountID, mailboxID, remoteFolder, targetFolderID string) error {
+	rows, err := a.db.QueryContext(ctx, `SELECT m.id FROM messages m JOIN external_imap_messages em ON em.local_message_id=m.id
+		WHERE em.account_id=? AND em.remote_folder=? AND m.mailbox_id=? AND m.folder_id<>?`, accountID, remoteFolder, mailboxID, targetFolderID)
+	if err != nil {
+		return err
+	}
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := a.moveMessageMaildir(ctx, id, targetFolderID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (a *App) externalIMAPRemoteMessageExists(ctx context.Context, accountID, folder string, uidValidity, uid uint32) bool {
@@ -1248,13 +1420,6 @@ func (a *App) insertExternalIMAPMessageOnce(ctx context.Context, account externa
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return "", tx.Commit()
-	}
-	if strings.TrimSpace(msg.MessageID) != "" {
-		var existing string
-		if err := tx.QueryRowContext(ctx, `SELECT id FROM messages WHERE mailbox_id=? AND folder_id=? AND message_id=? LIMIT 1`, msg.MailboxID, msg.FolderID, msg.MessageID).Scan(&existing); err == nil {
-			_, _ = tx.ExecContext(ctx, `UPDATE external_imap_messages SET local_message_id=?,updated_at=? WHERE account_id=? AND remote_folder=? AND uid_validity=? AND uid=?`, existing, now, account.ID, folder, item.UIDValidity, item.UID)
-			return "", tx.Commit()
-		}
 	}
 	id, err := a.insertMessageWithDB(ctx, tx, msg, attachments)
 	if err != nil {
