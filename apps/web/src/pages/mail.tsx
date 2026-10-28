@@ -699,7 +699,9 @@ export function MailPage() {
   })
   const markExternalRead = useMutation({
     mutationFn: ({ id, remoteId, read }: { id: string; remoteId: string; read: boolean }) =>
-      externalMessagesStoredLocally ? api.markRead(remoteId, read) : api.markExternalRead(id, remoteId, read),
+      externalMessagesStoredLocally
+        ? api.markRead(remoteId, read)
+        : api.markExternalRead(id, remoteId, read),
     onMutate: ({ remoteId, read }) => updateCachedMessage(remoteId, { isRead: read }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["external-messages"] })
@@ -1749,7 +1751,11 @@ export function MailPage() {
     }
     if (action === "read") {
       if (mailView === "external" && selectedExternalAccountId)
-        markExternalRead.mutate({ id: selectedExternalAccountId, remoteId: message.id, read: !message.isRead })
+        markExternalRead.mutate({
+          id: selectedExternalAccountId,
+          remoteId: message.id,
+          read: !message.isRead,
+        })
       else markRead.mutate({ id: message.id, read: !message.isRead })
       return
     }
@@ -2347,7 +2353,9 @@ export function MailPage() {
       onBulkAction={runBulkAction}
       onContextMenu={openMessageContextMenu}
       canSend={canSendSelectedMailbox}
-      canOrganize={canOrganizeSelectedMailbox && (mailView !== "external" || externalMessagesStoredLocally)}
+      canOrganize={
+        canOrganizeSelectedMailbox && (mailView !== "external" || externalMessagesStoredLocally)
+      }
       canManageLabels={canManageSelectedLabels && mailView !== "external"}
       canDownloadAttachments={canDownloadAttachments}
       language={language}
@@ -2414,7 +2422,10 @@ export function MailPage() {
                   if (mailView !== "external" || externalMessagesStoredLocally)
                     star.mutate({ id: m.id, starred: !m.isStarred })
                 }}
-                canOrganize={canOrganizeSelectedMailbox && (mailView !== "external" || externalMessagesStoredLocally)}
+                canOrganize={
+                  canOrganizeSelectedMailbox &&
+                  (mailView !== "external" || externalMessagesStoredLocally)
+                }
               />
             ))}
             {!(mailView === "external" ? externalMessages.isLoading : messages.isLoading) &&
@@ -2502,15 +2513,16 @@ export function MailPage() {
                           {uiText("归档")}
                         </Button>
                       ))}
-                    {(mailView !== "external" || externalMessagesStoredLocally) && canOrganizeSelectedMailbox && (
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => confirmDeleteMessage(selected)}
-                      >
-                        {uiText("删除")}
-                      </Button>
-                    )}
+                    {(mailView !== "external" || externalMessagesStoredLocally) &&
+                      canOrganizeSelectedMailbox && (
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => confirmDeleteMessage(selected)}
+                        >
+                          {uiText("删除")}
+                        </Button>
+                      )}
                   </div>
                 </div>
                 <MessageMetaPanel
