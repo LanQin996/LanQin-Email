@@ -160,10 +160,28 @@ func (a *App) syncDueExternalIMAPAccounts(ctx context.Context) {
 		return
 	}
 	defer rows.Close()
+	var accountIDs []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			continue
+			a.log.Warn("failed to scan external imap account", "error", err)
+			return
+		}
+		accountIDs = append(accountIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		a.log.Warn("failed to list external imap accounts", "error", err)
+		return
+	}
+	// Release the result set before synchronization queries the database again.
+	// SQLite uses a single connection, so retaining rows would block all DB access.
+	if err := rows.Close(); err != nil {
+		a.log.Warn("failed to close external imap accounts", "error", err)
+		return
+	}
+	for _, id := range accountIDs {
+		if ctx.Err() != nil {
+			return
 		}
 		runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		_, _ = a.syncExternalIMAPAccount(runCtx, id)
