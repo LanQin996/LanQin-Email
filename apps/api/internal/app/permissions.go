@@ -142,10 +142,9 @@ type PermissionLimits struct {
 	SMTPMinuteLimit int `json:"smtpMinuteLimit"`
 	IMAPMinuteLimit int `json:"imapMinuteLimit"`
 	POP3MinuteLimit int `json:"pop3MinuteLimit"`
-	// MaxMailboxes limits how many mailboxes a user may create over their
-	// lifetime. Like every other field here, 0 means unlimited. The count is
-	// cumulative and includes deleted mailboxes, so deleting a mailbox does not
-	// free up quota; see users.mailboxes_created_total.
+	// MaxMailboxes limits currently owned mailboxes, including disabled ones.
+	// Like every other field here, 0 means unlimited. Deletion or reassignment
+	// frees up allowance; the lifetime creation counter is not quota usage.
 	MaxMailboxes int `json:"maxMailboxes"`
 	// MaxMailboxesPerDay caps creations within a rolling 24 hour window and
 	// applies on top of MaxMailboxes, so both must pass. Unused allowance does
@@ -287,8 +286,8 @@ func attachmentLimitBytes(limits PermissionLimits) int64 {
 	return int64(limits.MaxAttachmentMB) * 1024 * 1024
 }
 
-// effectiveMailboxLimit returns how many mailboxes the user may create in
-// total, or 0 when unlimited. The per-user bonus earned through quota
+// effectiveMailboxLimit returns how many mailboxes the user may own at once,
+// or 0 when unlimited. The per-user bonus earned through quota
 // redemption codes is added on top of the group limit, but only when the group
 // limit is finite: 0 already means unlimited, so adding a bonus to it would
 // turn "unlimited" into a finite number.
@@ -655,9 +654,8 @@ func (a *App) attachUserAuthorization(ctx context.Context, u *User) error {
 	u.Limits = authorization.Limits
 	u.PermissionGroupIDs = authorization.GroupIDs
 	u.PermissionGroups = authorization.Groups
-	// The mailbox counters live on users rather than in limits_json because
-	// they are per-user, not per-group. Loading them here keeps every
-	// authentication path (session cookie, API token, SSO) in sync without
+	// Mailbox usage and counters are per-user, not per-group. Loading them here
+	// keeps every authentication path (session cookie, API token, SSO) in sync without
 	// touching each individual users SELECT.
 	if err := a.attachMailboxQuotaCounters(ctx, u); err != nil {
 		return err
@@ -677,10 +675,11 @@ type userAuthorization struct {
 // are tolerated so that callers holding a user struct for an already-deleted
 // account do not fail authorization with a confusing error.
 func (a *App) attachMailboxQuotaCounters(ctx context.Context, u *User) error {
-	var createdTotal, bonus int
+	var createdTotal, bonus, count int
 	err := a.db.QueryRowContext(ctx,
-		`SELECT mailboxes_created_total, mailbox_quota_bonus FROM users WHERE id=?`, u.ID).
-		Scan(&createdTotal, &bonus)
+		`SELECT mailboxes_created_total, mailbox_quota_bonus,
+		(SELECT COUNT(*) FROM mailboxes WHERE user_id=users.id) FROM users WHERE id=?`, u.ID).
+		Scan(&createdTotal, &bonus, &count)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
@@ -688,6 +687,7 @@ func (a *App) attachMailboxQuotaCounters(ctx context.Context, u *User) error {
 		return err
 	}
 	u.MailboxesCreatedTotal = createdTotal
+	u.MailboxCount = count
 	u.MailboxQuotaBonus = bonus
 	return nil
 }

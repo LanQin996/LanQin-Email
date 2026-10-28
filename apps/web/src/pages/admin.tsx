@@ -1176,7 +1176,7 @@ function PermissionLimitEditor({
         <div className="space-y-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
             <Label>{uiText("邮箱数量上限")}</Label>
-            <span className="text-xs text-muted-foreground">{uiText("按累计创建数计算")}</span>
+            <Badge variant="outline">{uiText("按当前拥有邮箱数计算")}</Badge>
           </div>
           <Input
             type="number"
@@ -1184,9 +1184,7 @@ function PermissionLimitEditor({
             value={value.maxMailboxes}
             onChange={(event) => update("maxMailboxes", event.target.value)}
           />
-          <span className="block text-xs text-muted-foreground">
-            {uiText("删除邮箱不会释放额度")}
-          </span>
+          <Badge variant="outline">{uiText("删除邮箱会释放总额度")}</Badge>
         </div>
         <div className="space-y-2">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -4154,6 +4152,7 @@ function UserDetailsDialog({
     { label: "权限组", value: <UserPermissionGroupsCell user={user} /> },
   ]
   const quotaFields = [
+    { label: "已用邮箱额度", value: uiText("{0}", [user.mailboxCount]) },
     { label: "累计创建邮箱", value: uiText("{0}", [user.mailboxesCreatedTotal]) },
     { label: "额外邮箱额度", value: uiText("{0}", [user.mailboxQuotaBonus]) },
     { label: "邮箱数量上限", value: limitText(mailboxLimit, "").trim() },
@@ -4210,8 +4209,8 @@ function UserDetailsDialog({
         <section className="space-y-3">
           <h3 className="font-medium">{uiText("配额与限制")}</h3>
           <div className="flex flex-wrap gap-2">
-            <Badge variant="outline">{uiText("按累计创建数计算")}</Badge>
-            <Badge variant="outline">{uiText("删除邮箱不会释放额度")}</Badge>
+            <Badge variant="outline">{uiText("按当前拥有邮箱数计算")}</Badge>
+            <Badge variant="outline">{uiText("删除邮箱会释放总额度")}</Badge>
           </div>
           <dl className="grid gap-3 sm:grid-cols-2">
             {quotaFields.map(({ label, value }) => (

@@ -15,18 +15,18 @@ type User struct {
 	PermissionGroupIDs []string                 `json:"permissionGroupIds"`
 	PermissionGroups   []PermissionGroupSummary `json:"permissionGroups"`
 	// MailboxesCreatedTotal counts every mailbox ever created for this user,
-	// including ones that have since been deleted, so deleting a mailbox does
-	// not free up quota. MailboxQuotaBonus is the extra allowance earned
-	// through quota redemption codes.
+	// including deleted or reassigned mailboxes. It is historical data, not quota
+	// usage. MailboxCount counts currently owned mailboxes, including disabled
+	// ones. MailboxQuotaBonus is the extra allowance from quota redemption codes.
 	MailboxesCreatedTotal int       `json:"mailboxesCreatedTotal"`
+	MailboxCount          int       `json:"mailboxCount"`
 	MailboxQuotaBonus     int       `json:"mailboxQuotaBonus"`
 	CreatedAt             time.Time `json:"createdAt"`
 }
 
 type AdminUser struct {
 	User
-	MailboxCount int      `json:"mailboxCount"`
-	Mailboxes    []string `json:"mailboxes"`
+	Mailboxes []string `json:"mailboxes"`
 }
 
 type APIToken struct {
