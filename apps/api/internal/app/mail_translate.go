@@ -51,9 +51,13 @@ func (a *App) handleTranslateMailMessage(w http.ResponseWriter, r *http.Request)
 		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
-	text := strings.TrimSpace(msg.BodyText)
+	a.translateMailContent(w, r, msg.BodyText, msg.BodyHTML, msg.Snippet, target)
+}
+
+func (a *App) translateMailContent(w http.ResponseWriter, r *http.Request, bodyText, bodyHTML, snippet, target string) {
+	text := strings.TrimSpace(bodyText)
 	if text == "" {
-		text = strings.TrimSpace(msg.Snippet)
+		text = strings.TrimSpace(snippet)
 	}
 	if text == "" {
 		respondError(w, http.StatusBadRequest, "message has no translatable text")
@@ -66,13 +70,13 @@ func (a *App) handleTranslateMailMessage(w http.ResponseWriter, r *http.Request)
 	text, truncated := truncateRunes(text, maxChars)
 	translated, source, err := googleFreeTranslate(r.Context(), text, target)
 	if err != nil {
-		a.log.Warn("mail translation failed", "message_id", msg.ID, "target", target, "error", err)
+		a.log.Warn("mail translation failed", "target", target, "error", err)
 		respondError(w, http.StatusBadGateway, "translation failed")
 		return
 	}
 	translatedHTML := ""
-	if strings.TrimSpace(msg.BodyHTML) != "" {
-		translatedHTML, _ = translateHTMLTextNodes(r.Context(), a.policy, msg.BodyHTML, target, maxChars)
+	if strings.TrimSpace(bodyHTML) != "" {
+		translatedHTML, _ = translateHTMLTextNodes(r.Context(), a.policy, bodyHTML, target, maxChars)
 	}
 	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, TranslatedHTML: translatedHTML, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
 }
@@ -94,6 +98,22 @@ func (a *App) handleTranslateExternalIMAPMessage(w http.ResponseWriter, r *http.
 	}
 	account, ok := a.externalIMAPAccountForMailRequest(w, r)
 	if !ok {
+		return
+	}
+	if account.StorageMode == externalIMAPStorageLocal {
+		messageID := chi.URLParam(r, "remoteId")
+		var mappedID string
+		if err := a.db.QueryRowContext(r.Context(), `SELECT em.local_message_id FROM external_imap_messages em JOIN messages m ON m.id=em.local_message_id
+			WHERE em.account_id=? AND em.local_message_id=? AND m.mailbox_id=? LIMIT 1`, account.ID, messageID, account.MailboxID).Scan(&mappedID); err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		msg, err := a.messageByID(r.Context(), mappedID, true)
+		if err != nil {
+			respondError(w, http.StatusNotFound, "message not found")
+			return
+		}
+		a.translateMailContent(w, r, msg.BodyText, msg.BodyHTML, msg.Snippet, target)
 		return
 	}
 	folder, uid, ok := decodeExternalRemoteID(w, chi.URLParam(r, "remoteId"))
@@ -122,26 +142,7 @@ func (a *App) handleTranslateExternalIMAPMessage(w http.ResponseWriter, r *http.
 	if text == "" {
 		text = strings.TrimSpace(remote.Snippet)
 	}
-	if text == "" {
-		respondError(w, http.StatusBadRequest, "message has no translatable text")
-		return
-	}
-	maxChars := a.cfg.MailTranslateMaxChars
-	if maxChars <= 0 {
-		maxChars = 8000
-	}
-	text, truncated := truncateRunes(text, maxChars)
-	translated, source, err := googleFreeTranslate(r.Context(), text, target)
-	if err != nil {
-		a.log.Warn("external mail translation failed", "account_id", account.ID, "remote_id", chi.URLParam(r, "remoteId"), "target", target, "error", err)
-		respondError(w, http.StatusBadGateway, "translation failed")
-		return
-	}
-	translatedHTML := ""
-	if err == nil && strings.TrimSpace(stored.BodyHTML) != "" {
-		translatedHTML, _ = translateHTMLTextNodes(r.Context(), a.policy, stored.BodyHTML, target, maxChars)
-	}
-	respondJSON(w, http.StatusOK, translateMailMessageResponse{TranslatedText: translated, TranslatedHTML: translatedHTML, SourceLanguage: source, TargetLanguage: target, Truncated: truncated})
+	a.translateMailContent(w, r, text, stored.BodyHTML, remote.Snippet, target)
 }
 
 func translateHTMLTextNodes(ctx context.Context, policy *HTMLPolicy, bodyHTML, target string, maxChars int) (string, error) {
