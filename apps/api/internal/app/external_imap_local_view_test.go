@@ -71,10 +71,14 @@ func TestLocalExternalIMAPMessagesAreHiddenFromMailboxAndVisibleInAccount(t *tes
 		VALUES(?,?,?,?,?,?,?,?,?)`, accountID, "INBOX", 7, 1, external.MessageID, messageID, 1, now, now); err != nil {
 		t.Fatal(err)
 	}
-	account := externalIMAPAccountRecord{ExternalIMAPAccount: ExternalIMAPAccount{
-		ID: accountID, UserID: user.ID, MailboxID: mailbox.ID, Username: "remote@example.test", StorageMode: externalIMAPStorageLocal,
-	}}
-	if _, _, _, err := a.syncExternalIMAPFolder(t.Context(), account, &externalIMAPSyncTestClient{}, externalIMAPRemoteFolder{Name: "INBOX", UIDValidity: 7}); err != nil {
+	externalFolderID, err := a.ensureFolder(t.Context(), mailbox.ID, externalIMAPLocalFolderName(accountID, "INBOX"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.moveExternalIMAPMessagesToFolder(t.Context(), accountID, mailbox.ID, "INBOX", externalFolderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.db.Exec(`UPDATE external_imap_folder_states SET local_folder_id=? WHERE account_id=? AND remote_folder=?`, externalFolderID, accountID, "INBOX"); err != nil {
 		t.Fatal(err)
 	}
 	if messageID == "" {
