@@ -124,13 +124,14 @@ func (a *App) handleMailFolders(w http.ResponseWriter, r *http.Request) {
 	mb := access.Mailbox
 	where := `f.mailbox_id=?`
 	args := []any{mb.ID}
+	where += ` AND NOT EXISTS (SELECT 1 FROM external_imap_folder_states efs WHERE efs.local_folder_id=f.id)`
 	if !access.Owner && access.Scope == "custom" {
 		where += ` AND EXISTS (SELECT 1 FROM mailbox_share_folders msf WHERE msf.share_id=? AND msf.folder_id=f.id)`
 		args = append(args, access.ShareID)
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT f.id,f.name,f.role,
-		COALESCE(SUM(CASE WHEN m.is_read=0 THEN 1 ELSE 0 END),0) AS unread,
-		COUNT(m.id) AS total,
+		COALESCE(SUM(CASE WHEN m.is_read=0 AND NOT EXISTS (SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id) THEN 1 ELSE 0 END),0) AS unread,
+		COUNT(CASE WHEN NOT EXISTS (SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id) THEN m.id END) AS total,
 		f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
 		FROM folders f LEFT JOIN messages m ON m.folder_id=f.id
 		WHERE `+where+` GROUP BY f.id,f.name,f.role,f.sort_order,f.uid_validity,f.uid_next,f.highest_modseq
@@ -199,7 +200,7 @@ func (a *App) handleReorderMailFolders(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("folderIds is required"))
 		return
 	}
-	rows, err := a.db.QueryContext(r.Context(), `SELECT id,name FROM folders WHERE mailbox_id=?`, mb.ID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT f.id,f.name FROM folders f WHERE f.mailbox_id=? AND NOT EXISTS (SELECT 1 FROM external_imap_folder_states efs WHERE efs.local_folder_id=f.id)`, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load folders")
 		return
@@ -278,6 +279,11 @@ func (a *App) handleCreateMailFolder(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, errors.New("system folder already exists"))
 		return
 	}
+	var externalFolder int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM external_imap_folder_states efs JOIN folders f ON f.id=efs.local_folder_id WHERE f.mailbox_id=? AND lower(f.name)=lower(?)`, mb.ID, name).Scan(&externalFolder); err != nil || externalFolder > 0 {
+		badRequest(w, errors.New("folder name is reserved"))
+		return
+	}
 	folderID, err := a.ensureCustomFolder(r.Context(), mb.ID, name)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to create folder")
@@ -313,6 +319,11 @@ func (a *App) handleDeleteMailFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	if isSystemFolderName(folderName) {
 		badRequest(w, errors.New("system folders cannot be deleted"))
+		return
+	}
+	var externalFolder int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM external_imap_folder_states WHERE local_folder_id=?`, folderID).Scan(&externalFolder); err != nil || externalFolder > 0 {
+		respondError(w, http.StatusNotFound, "folder not found")
 		return
 	}
 	inboxID, err := a.ensureFolder(r.Context(), mb.ID, "Inbox")
@@ -435,7 +446,7 @@ func (a *App) handleMailThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	mb := access.Mailbox
-	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id) FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND m.id=(SELECT m2.id FROM messages m2 WHERE m2.mailbox_id=m.mailbox_id AND m2.thread_id=m.thread_id ORDER BY m2.received_at DESC,m2.id DESC LIMIT 1) ORDER BY m.received_at DESC,m.id DESC`, mb.ID)
+	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id AND NOT EXISTS (SELECT 1 FROM external_imap_messages emt WHERE emt.local_message_id=mt.id)) FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND NOT EXISTS (SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id) AND m.id=(SELECT m2.id FROM messages m2 WHERE m2.mailbox_id=m.mailbox_id AND m2.thread_id=m.thread_id AND NOT EXISTS (SELECT 1 FROM external_imap_messages em2 WHERE em2.local_message_id=m2.id) ORDER BY m2.received_at DESC,m2.id DESC LIMIT 1) ORDER BY m.received_at DESC,m.id DESC`, mb.ID)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to load threads")
 		return
@@ -461,6 +472,11 @@ func (a *App) handleMailMessageThread(w http.ResponseWriter, r *http.Request) {
 	msg, err := a.loadMessageForReadRequest(r, chi.URLParam(r, "id"), false)
 	if err != nil {
 		respondError(w, 404, "message not found")
+		return
+	}
+	var external int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM external_imap_messages WHERE local_message_id=?`, msg.ID).Scan(&external); err != nil || external > 0 {
+		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
 	rows, err := a.db.QueryContext(r.Context(), `SELECT m.id,m.mailbox_id,m.folder_id,COALESCE(f.name,''),m.message_uid,m.imap_uid,m.imap_modseq,m.message_id,COALESCE(m.thread_id,''),m.subject,m.from_addr,COALESCE(m.from_name,''),m.to_addrs,m.cc_addrs,m.bcc_addrs,m.sent_at,m.received_at,m.snippet,m.is_read,m.is_starred,m.has_attachments,m.size_bytes,(SELECT COUNT(*) FROM messages mt WHERE mt.mailbox_id=m.mailbox_id AND mt.thread_id=m.thread_id) FROM messages m LEFT JOIN folders f ON f.id=m.folder_id WHERE m.mailbox_id=? AND m.thread_id=? ORDER BY m.received_at,m.id`, msg.MailboxID, msg.ThreadID)
@@ -499,6 +515,13 @@ func (a *App) handleStarredMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, access *mailboxReadAccess, where string, args []any) {
+	a.respondMailMessageListInternal(w, r, access, where, args, false, "")
+}
+
+func (a *App) respondMailMessageListInternal(w http.ResponseWriter, r *http.Request, access *mailboxReadAccess, where string, args []any, includeExternal bool, externalAccountID string) {
+	if !includeExternal {
+		where += ` AND NOT EXISTS (SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id)`
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	cursorReceivedAt, cursorID, offset, err := parseMessageListCursor(r.URL.Query().Get("cursor"))
 	if err != nil {
@@ -586,6 +609,7 @@ func (a *App) respondMailMessageList(w http.ResponseWriter, r *http.Request, acc
 			respondError(w, http.StatusInternalServerError, "failed to scan messages")
 			return
 		}
+		msg.ExternalAccountID = externalAccountID
 		items = append(items, msg)
 	}
 	if err := rows.Err(); err != nil {
@@ -767,6 +791,11 @@ func (a *App) handleRemoveMessageLabel(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	msg, err := a.loadMessageForReadRequest(r, chi.URLParam(r, "id"), true)
 	if err != nil {
+		respondError(w, http.StatusNotFound, "message not found")
+		return
+	}
+	var external int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM external_imap_messages WHERE local_message_id=?`, msg.ID).Scan(&external); err != nil || external > 0 {
 		respondError(w, http.StatusNotFound, "message not found")
 		return
 	}
@@ -2121,6 +2150,11 @@ func (a *App) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	message, err := a.loadMessageForReadRequest(r, messageID, false)
 	if err != nil {
+		respondError(w, http.StatusNotFound, "attachment not found")
+		return
+	}
+	var external int
+	if err := a.db.QueryRowContext(r.Context(), `SELECT COUNT(*) FROM external_imap_messages WHERE local_message_id=?`, messageID).Scan(&external); err != nil || external > 0 {
 		respondError(w, http.StatusNotFound, "attachment not found")
 		return
 	}
