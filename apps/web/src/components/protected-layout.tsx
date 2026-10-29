@@ -5,6 +5,7 @@ import { Outlet, Link, useLocation } from "react-router-dom"
 import {
   BarChart3,
   Copy,
+  DatabaseBackup,
   Globe2,
   Inbox,
   LogOut,
@@ -46,6 +47,7 @@ const adminSections: {
   label: string
   icon: React.ReactNode
   permissions: PermissionKey[]
+  superAdminOnly?: boolean
 }[] = [
   { key: "overview", label: "概览", icon: <BarChart3 />, permissions: ["admin.overview.view"] },
   { key: "users", label: "用户", icon: <Users />, permissions: ["admin.users.view"] },
@@ -64,6 +66,13 @@ const adminSections: {
   { key: "mailboxes", label: "邮箱账号", icon: <Mailbox />, permissions: ["admin.mailboxes.view"] },
   { key: "aliases", label: "别名转发", icon: <Copy />, permissions: ["admin.aliases.view"] },
   { key: "messages", label: "全部邮件", icon: <Inbox />, permissions: ["admin.messages.view"] },
+  {
+    key: "backups",
+    label: "备份地点",
+    icon: <DatabaseBackup />,
+    permissions: [],
+    superAdminOnly: true,
+  },
   {
     key: "settings",
     label: "系统设置",
@@ -97,7 +106,7 @@ function ProtectedContent() {
   const isAdminRoute = pathname.startsWith("/admin")
   const adminSection = new URLSearchParams(location.search).get("section") || "overview"
   const visibleAdminSections = adminSections.filter((item) =>
-    hasAnyPermission(user, item.permissions)
+    item.superAdminOnly ? user.role === "admin" : hasAnyPermission(user, item.permissions)
   )
 
   if (isMailRoute || isProfileRoute) {

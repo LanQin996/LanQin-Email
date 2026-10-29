@@ -1,4 +1,73 @@
 {
+  "备份地点": { "zh-TW": "備份地點", "en": "Backup destinations" },
+  "新增地点": { "zh-TW": "新增地點", "en": "Add destination" },
+  "编辑备份地点": { "zh-TW": "編輯備份地點", "en": "Edit backup destination" },
+  "编辑备份地点 {0}": { "zh-TW": "編輯備份地點 {0}", "en": "Edit backup destination {0}" },
+  "删除备份地点 {0}": { "zh-TW": "刪除備份地點 {0}", "en": "Delete backup destination {0}" },
+  "仅删除地点配置，不会删除远端备份": {
+    "zh-TW": "僅刪除地點設定，不會刪除遠端備份",
+    "en": "Only the destination configuration will be deleted, not remote backups"
+  },
+  "存储类型": { "zh-TW": "儲存類型", "en": "Storage type" },
+  "S3 端点": { "zh-TW": "S3 端點", "en": "S3 endpoint" },
+  "区域": { "zh-TW": "區域", "en": "Region" },
+  "存储桶": { "zh-TW": "儲存桶", "en": "Bucket" },
+  "对象前缀": { "zh-TW": "物件前綴", "en": "Object prefix" },
+  "路径式寻址": { "zh-TW": "路徑式定址", "en": "Path-style addressing" },
+  "访问密钥 ID": { "zh-TW": "存取金鑰 ID", "en": "Access Key ID" },
+  "访问密钥 Secret": { "zh-TW": "存取金鑰 Secret", "en": "Secret Access Key" },
+  "会话令牌（可选）": { "zh-TW": "工作階段權杖（選填）", "en": "Session token (optional)" },
+  "清除已保存的会话令牌": {
+    "zh-TW": "清除已儲存的工作階段權杖",
+    "en": "Clear saved session token"
+  },
+  "WebDAV 目录地址": { "zh-TW": "WebDAV 目錄網址", "en": "WebDAV collection URL" },
+  "凭据已加密保存": { "zh-TW": "憑證已加密儲存", "en": "Credentials stored encrypted" },
+  "凭据留空以保留；更换地址需重新填写，更新密钥对会清除旧会话令牌": {
+    "zh-TW": "憑證留空以保留；變更網址需重新填寫，更新金鑰對會清除舊工作階段權杖",
+    "en": "Leave credentials blank to keep them. A new URL requires credentials again; replacing the key pair clears the old session token"
+  },
+  "当前仅管理备份地点，后台备份任务和定时计划尚未接入": {
+    "zh-TW": "目前僅管理備份地點，後台備份任務及排程尚未接入",
+    "en": "Destination configuration only; background backup jobs and schedules are not connected yet"
+  },
+  "暂无备份地点": { "zh-TW": "暫無備份地點", "en": "No backup destinations" },
+  "只有超级管理员可以管理备份地点": {
+    "zh-TW": "只有超級管理員可以管理備份地點",
+    "en": "Only super administrators can manage backup destinations"
+  },
+  "请在服务器设置 LANQIN_BACKUP_SECRET_KEY：Base64 编码的 32 字节随机密钥": {
+    "zh-TW": "請在伺服器設定 LANQIN_BACKUP_SECRET_KEY：Base64 編碼的 32 位元組隨機金鑰",
+    "en": "Set LANQIN_BACKUP_SECRET_KEY on the server to a Base64-encoded 32-byte random key"
+  },
+  "备份加密密钥缺失或不匹配，请检查服务器配置": {
+    "zh-TW": "備份加密金鑰缺失或不符，請檢查伺服器設定",
+    "en": "Backup encryption key is missing or does not match; check the server configuration"
+  },
+  "备份地点配置无效，请检查名称、HTTPS 地址和存储参数": {
+    "zh-TW": "備份地點設定無效，請檢查名稱、HTTPS 網址和儲存參數",
+    "en": "Invalid backup destination; check its name, HTTPS URL and storage settings"
+  },
+  "请完整填写凭据；更换地址或密钥对时需重新填写": {
+    "zh-TW": "請完整填寫憑證；變更網址或金鑰對時需重新填寫",
+    "en": "Enter the complete credentials; changing the URL or key pair requires re-entry"
+  },
+  "备份配置已变化，请关闭弹窗并刷新后重试": {
+    "zh-TW": "備份設定已變更，請關閉視窗並重新整理後重試",
+    "en": "Backup configuration changed; close the dialog and refresh before retrying"
+  },
+  "备份地点数量或配置总大小已达到上限": {
+    "zh-TW": "備份地點數量或設定總大小已達上限",
+    "en": "Backup destination count or total configuration size limit reached"
+  },
+  "备份地点已不存在，请刷新后重试": {
+    "zh-TW": "備份地點已不存在，請重新整理後重試",
+    "en": "Backup destination no longer exists; refresh and retry"
+  },
+  "无法读取或保存备份配置，请稍后重试": {
+    "zh-TW": "無法讀取或儲存備份設定，請稍後重試",
+    "en": "Cannot load or save backup configuration; try again later"
+  },
   "网站标题": { "zh-TW": "網站標題", "en": "Website title" },
   "网站图标": { "zh-TW": "網站圖示", "en": "Website icon" },
   "选择 ICO 文件": { "zh-TW": "選擇 ICO 檔案", "en": "Choose ICO file" },

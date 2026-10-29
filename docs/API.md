@@ -51,6 +51,21 @@ Validation failures — including a duplicate domain name — return `400 Bad Re
 
 现有自定义组用户升级后不再继承普通组的功能权限或较高配额。升级前应核对并在自定义组中显式补齐所需权限与配额；该权限收紧不会删除已有邮箱或邮件。
 
+## Backup Destination Administration / 备份地点管理
+
+These session-authenticated routes require an actual super administrator (`user.role=admin`), not a permission group with `admin.settings.*`. They are not part of the bearer-token `/api/open/v1` API described by `openapi.json`.
+
+以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。当前只保存配置，尚未接通后台备份执行或定时计划。
+
+| Endpoint | Semantics / 语义 |
+|------|---------|
+| `GET /api/admin/backups/destinations` | `{encryptionConfigured, revision, items}`，仅返回配置元数据和凭据存在标志 |
+| `POST /api/admin/backups/destinations` | 新增独立地点；传入当前 `revision` 及完整初始凭据，成功 `201` |
+| `POST /api/admin/backups/destinations/{id}` | 更新地点；传入当前 `revision`，同地址下凭据留空保留，类型不可变 |
+| `DELETE /api/admin/backups/destinations/{id}` | JSON body 为 `{revision}`；仅删除配置，不删除远端备份 |
+
+并发修改返回 `409`，错误/缺失加密密钥返回 `503`，无效配置返回 `400`，数量或配置体积达到上限返回 `413`。改变远端地址须重新填写完整凭据；更新 S3 密钥对时不会保留旧会话令牌。
+
 ## Health Endpoints / 健康检查
 
 Health endpoints do not require authentication and never include database DSNs, storage paths, or underlying errors in their responses.

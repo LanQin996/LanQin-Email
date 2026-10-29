@@ -673,6 +673,41 @@ export type RegistrationInvite = {
   createdAt: string
 }
 export type LinuxDoIdentity = { linked: boolean; username?: string }
+export type BackupS3Settings = {
+  endpoint: string
+  region: string
+  bucket: string
+  prefix: string
+  pathStyle: boolean
+}
+export type BackupDestination = {
+  id: string
+  name: string
+  type: "s3" | "webdav"
+  disabled: boolean
+  credentialsSet: boolean
+  sessionTokenSet: boolean
+  s3?: BackupS3Settings
+  webdav?: { url: string }
+}
+export type BackupDestinationList = {
+  encryptionConfigured: boolean
+  revision: string
+  items: BackupDestination[]
+}
+export type BackupDestinationPayload = {
+  revision: string
+  name: string
+  type: "s3" | "webdav"
+  disabled: boolean
+  s3?: BackupS3Settings & {
+    accessKeyId?: string
+    secretAccessKey?: string
+    sessionToken?: string
+    clearSessionToken?: boolean
+  }
+  webdav?: { url: string; username?: string; password?: string }
+}
 export type LinuxDoPendingRegistration = {
   username: string
   displayName: string

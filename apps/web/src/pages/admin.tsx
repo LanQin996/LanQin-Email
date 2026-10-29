@@ -1,4 +1,5 @@
 import { DomainCollectionDialog } from "@/components/domain-collection-dialog"
+import { BackupDestinationsSection } from "@/components/backup-destinations-section"
 import { localizePermissionInfo, permissionMessages } from "@/lib/permission-translations"
 import { dnsCheckMessage, dnsStatusLabel } from "@/lib/diagnostic-messages"
 import { uiMessage, type UiText, uiText, useLanguage as useUiLanguage } from "@/lib/language"
@@ -134,7 +135,7 @@ export function AdminPage() {
   const canSettingsUpdate = hasPermission(user, "admin.settings.update")
   const canTemplatesView = hasPermission(user, "admin.templates.view")
   const visibleSections = sectionKeys.filter((key) =>
-    hasAnyPermission(user, sectionPermissions[key])
+    key === "backups" ? user?.role === "admin" : hasAnyPermission(user, sectionPermissions[key])
   )
   const rawSection = params.get("section") as Section | null
   const section: Section =
@@ -279,6 +280,7 @@ export function AdminPage() {
         {section === "settings" && (
           <SystemSettingsSection settings={settings.data} domains={domainItems} />
         )}
+        {section === "backups" && user?.role === "admin" && <BackupDestinationsSection />}
       </main>
     </ScrollArea>
   )

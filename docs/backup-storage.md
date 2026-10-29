@@ -1,12 +1,12 @@
 # 多地点上传（Issue #34，M2 首批）
 
-在 [离线快照 CLI](backup.md) 的基础上，`upload` 将**已经完成的同一份密文**上传到多个 S3 / WebDAV 实例。它不会访问应用数据库、生成在线快照、停止服务、使用恢复私钥或删除远端内容。尚未提供 Web 管理 API、定时计划、Google Drive OAuth、远端列表/下载或自动保留策略。
+在 [离线快照 CLI](backup.md) 的基础上，`upload` 将**已经完成的同一份密文**上传到多个 S3 / WebDAV 实例。它不会访问应用数据库、生成在线快照、停止服务、使用恢复私钥或删除远端内容。[管理端已有独立的地点配置 API / 界面](backup-admin.md)，但没有接通上传任务。定时计划、Google Drive OAuth、远端列表/下载及自动保留策略尚未实现。
 
 ## 配置
 
 参考 [多地点配置样例](backup-destinations.example.json)。样例包含 3 个 S3、2 个 WebDAV，各自拥有独立 ID、名称、连接配置和环境变量引用；`.invalid` 地址必须替换为实际地址。相同类型、endpoint、bucket 都可以重复，只有 `id` 必须唯一。当前单次配置上限为 64 个地点，不是 S3 只能添加一个。
 
-- 配置只保存 `access_key_id_env`、`secret_access_key_env`、可选的 `session_token_env` 或 `username_env` / `password_env`，这些字段的值是环境变量名称，**不是凭据本身**。通过受保护的运行环境提供对应变量，不能把真实凭据写入此样例、命令行或仓库。未来管理界面的加密凭据库尚未实现；本 CLI 不替操作者加密外部环境配置。
+- CLI 配置只保存 `access_key_id_env`、`secret_access_key_env`、可选的 `session_token_env` 或 `username_env` / `password_env`，这些字段的值是环境变量名称，**不是凭据本身**。通过受保护的运行环境提供对应变量，不能把真实凭据写入此样例、命令行或仓库。管理端加密凭据库与此 CLI 配置目前独立，尚未互相导出或自动对接；本 CLI 不读取应用凭据库，也不替操作者加密外部环境配置。
 - S3 使用官方 AWS SDK for Go v2，逐地点显式提供凭据；不使用默认 AWS 凭据链、共享配置文件或实例元数据凭据。分别设置 HTTPS `endpoint`、`region`、`bucket`、可选 `prefix` 和 `path_style`。只支持普通桶，不支持 ARN / Access Point / S3 Express 特殊端点。
 - `prefix` 不带开头/结尾的 `/`，只允许 ASCII 字母、数字、`_`、`-`、`.` 及目录分隔符，禁止 `.` / `..` 段。桶必须预先存在。
 - WebDAV 的 `url` 是**已存在的集合目录**，支持 Basic Authentication，通过 HTTPS 传输。不会自动创建目录、协商其他认证方式或跟随重定向。需要应用密码的供应商应由操作者提供应用密码。

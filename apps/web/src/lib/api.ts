@@ -61,6 +61,8 @@ import type {
   PermissionKey,
   PermissionLimits,
   APIToken,
+  BackupDestinationList,
+  BackupDestinationPayload,
 } from "./api-types"
 export * from "./api-types"
 
@@ -510,6 +512,22 @@ export const api = {
       method: "DELETE",
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
+  backupDestinations: () => request<BackupDestinationList>("/api/admin/backups/destinations"),
+  createBackupDestination: (payload: BackupDestinationPayload) =>
+    request<{ ok: boolean }>("/api/admin/backups/destinations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateBackupDestination: (id: string, payload: BackupDestinationPayload) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteBackupDestination: (id: string, revision: string) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ revision }),
+    }),
   uploadFavicon: (file: File) => {
     const form = new FormData()
     form.append("file", file)

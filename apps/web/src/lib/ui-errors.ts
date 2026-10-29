@@ -1,6 +1,13 @@
 import { exactTranslations } from "@/lib/language"
 
 const knownErrors: Record<string, string> = {
+  backup_key_unavailable: "备份加密密钥缺失或不匹配，请检查服务器配置",
+  backup_destination_invalid: "备份地点配置无效，请检查名称、HTTPS 地址和存储参数",
+  backup_credentials_required: "请完整填写凭据；更换地址或密钥对时需重新填写",
+  backup_revision_conflict: "备份配置已变化，请关闭弹窗并刷新后重试",
+  backup_destination_limit: "备份地点数量或配置总大小已达到上限",
+  backup_destination_not_found: "备份地点已不存在，请刷新后重试",
+  backup_store_unavailable: "无法读取或保存备份配置，请稍后重试",
   "resource is a unified collection target; change or disable collection first":
     "请先更换或关闭引用此目标的统一收件设置",
   "collection target must be an active local mailbox without a forwarding alias":
