@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "destinations": [
+    {
+      "id": "r2",
+      "name": "Cloudflare R2",
+      "type": "s3",
+      "s3": {
+        "endpoint": "https://r2.example.invalid",
+        "region": "auto",
+        "bucket": "mail-backups",
+        "prefix": "lanqin",
+        "path_style": true,
+        "access_key_id_env": "BACKUP_R2_ACCESS_KEY_ID",
+        "secret_access_key_env": "BACKUP_R2_SECRET_ACCESS_KEY"
+      }
+    },
+    {
+      "id": "b2",
+      "name": "Backblaze B2",
+      "type": "s3",
+      "s3": {
+        "endpoint": "https://b2.example.invalid",
+        "region": "replace-with-region",
+        "bucket": "mail-backups",
+        "prefix": "lanqin",
+        "path_style": true,
+        "access_key_id_env": "BACKUP_B2_ACCESS_KEY_ID",
+        "secret_access_key_env": "BACKUP_B2_SECRET_ACCESS_KEY"
+      }
+    },
+    {
+      "id": "s3_3",
+      "name": "S3 3",
+      "type": "s3",
+      "s3": {
+        "endpoint": "https://s3.example.invalid",
+        "region": "replace-with-region",
+        "bucket": "mail-backups",
+        "prefix": "lanqin",
+        "path_style": true,
+        "access_key_id_env": "BACKUP_S3_3_ACCESS_KEY_ID",
+        "secret_access_key_env": "BACKUP_S3_3_SECRET_ACCESS_KEY",
+        "session_token_env": "BACKUP_S3_3_SESSION_TOKEN"
+      }
+    },
+    {
+      "id": "dav1",
+      "name": "WebDAV 1",
+      "type": "webdav",
+      "webdav": {
+        "url": "https://dav1.example.invalid/existing-backups/",
+        "username_env": "BACKUP_DAV1_USERNAME",
+        "password_env": "BACKUP_DAV1_PASSWORD"
+      }
+    },
+    {
+      "id": "dav2",
+      "name": "WebDAV 2",
+      "type": "webdav",
+      "webdav": {
+        "url": "https://dav2.example.invalid/existing-backups/",
+        "username_env": "BACKUP_DAV2_USERNAME",
+        "password_env": "BACKUP_DAV2_PASSWORD"
+      }
+    }
+  ]
+}
