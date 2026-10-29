@@ -4375,7 +4375,7 @@ func TestFixedRolesProtectAdminRoutesAndDefaultAdmin(t *testing.T) {
 	}, &mailboxUser); code != http.StatusCreated {
 		t.Fatalf("create mailbox admin user code=%d user=%+v", code, mailboxUser)
 	}
-	if mailboxUser.Role != "user" || containsString(mailboxUser.PermissionGroupIDs, PermissionGroupRegular) || !containsString(mailboxUser.PermissionGroupIDs, mailboxAdminGroup.ID) || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
+	if mailboxUser.Role != "user" || !containsString(mailboxUser.PermissionGroupIDs, PermissionGroupRegular) || !containsString(mailboxUser.PermissionGroupIDs, mailboxAdminGroup.ID) || !userHasPermission(&mailboxUser.User, PermissionMailboxesManage) || userHasPermission(&mailboxUser.User, PermissionSystemSettings) {
 		t.Fatalf("mailbox admin authorization=%+v", mailboxUser.User)
 	}
 

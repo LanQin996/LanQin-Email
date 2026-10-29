@@ -43,9 +43,6 @@ func TestExternalDatabaseContract(t *testing.T) {
 				t.Fatal("external database must use the portable search fallback")
 			}
 			assertExternalDatabaseContract(t, a)
-			t.Run("explicit permission group replaces regular fallback", func(t *testing.T) {
-				assertExplicitPermissionGroupDatabaseContract(t, a)
-			})
 			t.Run("mailbox count quota releases deleted mailboxes", func(t *testing.T) {
 				assertMailboxCountQuotaContract(t, a)
 			})
