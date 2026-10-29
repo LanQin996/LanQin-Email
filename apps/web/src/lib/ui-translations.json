@@ -1,5 +1,25 @@
 {
   "备份地点": { "zh-TW": "備份地點", "en": "Backup destinations" },
+  "存储地点": { "zh-TW": "儲存地點", "en": "Destinations" },
+  "共 {0} 个地点": {
+    "zh-TW": "共 {0} 個地點",
+    "en": "{0} destinations",
+    "enOne": "{0} destination",
+    "pluralIndex": 0
+  },
+  "选择备份地点": { "zh-TW": "選擇備份地點", "en": "Select backup destination" },
+  "备份地点 {0} 的操作": {
+    "zh-TW": "備份地點 {0} 的操作",
+    "en": "Actions for backup destination {0}"
+  },
+  "启用地点": { "zh-TW": "啟用地點", "en": "Enable destination" },
+  "连接参数": { "zh-TW": "連線參數", "en": "Connection settings" },
+  "寻址方式": { "zh-TW": "定址方式", "en": "Addressing style" },
+  "虚拟主机式寻址": { "zh-TW": "虛擬主機式定址", "en": "Virtual-hosted addressing" },
+  "请选择或新增备份地点": {
+    "zh-TW": "請選擇或新增備份地點",
+    "en": "Select or add a backup destination"
+  },
   "新增地点": { "zh-TW": "新增地點", "en": "Add destination" },
   "编辑备份地点": { "zh-TW": "編輯備份地點", "en": "Edit backup destination" },
   "编辑备份地点 {0}": { "zh-TW": "編輯備份地點 {0}", "en": "Edit backup destination {0}" },
