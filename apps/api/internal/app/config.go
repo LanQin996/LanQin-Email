@@ -71,6 +71,7 @@ type Config struct {
 	MailTranslateMaxChars           int
 	NotificationSecretKey           string
 	BackupSecretKey                 string
+	BackupArtifactDir               string
 	DeliveryWebhookSecret           string
 	StatusWebhookURL                string
 	StatusWebhookSecret             string
@@ -142,6 +143,7 @@ func LoadConfig() Config {
 		MailTranslateMaxChars:           getenvInt("LANQIN_MAIL_TRANSLATE_MAX_CHARS", 8000),
 		NotificationSecretKey:           getenv("LANQIN_NOTIFICATION_SECRET_KEY", ""),
 		BackupSecretKey:                 getenv("LANQIN_BACKUP_SECRET_KEY", ""),
+		BackupArtifactDir:               getenv("LANQIN_BACKUP_ARTIFACT_DIR", ""),
 		DeliveryWebhookSecret:           getenv("LANQIN_DELIVERY_WEBHOOK_SECRET", ""),
 		StatusWebhookURL:                getenv("LANQIN_STATUS_WEBHOOK_URL", ""),
 		StatusWebhookSecret:             getenv("LANQIN_STATUS_WEBHOOK_SECRET", ""),

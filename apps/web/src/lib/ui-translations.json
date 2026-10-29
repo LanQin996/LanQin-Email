@@ -1,5 +1,88 @@
 {
   "备份地点": { "zh-TW": "備份地點", "en": "Backup destinations" },
+  "最近成功上传": { "zh-TW": "最近成功上傳", "en": "Last successful upload" },
+  "暂无成功记录": { "zh-TW": "暫無成功紀錄", "en": "No successful uploads yet" },
+  "后台可上传已发布的加密归档；不停服快照生成与恢复尚未接入": {
+    "zh-TW": "後台可上傳已發布的加密封存檔；不停機快照產生與還原尚未接入",
+    "en": "Published encrypted artifacts can be uploaded; zero-downtime snapshot creation and recovery are not connected yet"
+  },
+  "上传中": { "zh-TW": "上傳中", "en": "Uploading" },
+  "上传完成": { "zh-TW": "上傳完成", "en": "Upload completed" },
+  "上传失败": { "zh-TW": "上傳失敗", "en": "Upload failed" },
+  "任务中断，远端结果可能不确定": {
+    "zh-TW": "任務中斷，遠端結果可能不確定",
+    "en": "Task interrupted; remote outcome may be uncertain"
+  },
+  "地点配置已变化，需重新提交任务": {
+    "zh-TW": "地點設定已變更，需重新提交任務",
+    "en": "Destination configuration changed; submit a new task"
+  },
+  "远端拒绝访问": { "zh-TW": "遠端拒絕存取", "en": "Remote access denied" },
+  "存储地址被安全策略拒绝": {
+    "zh-TW": "儲存位址遭安全政策拒絕",
+    "en": "Storage address blocked by security policy"
+  },
+  "存储服务器证书校验失败": {
+    "zh-TW": "儲存伺服器憑證驗證失敗",
+    "en": "Storage server certificate verification failed"
+  },
+  "上传超时": { "zh-TW": "上傳逾時", "en": "Upload timed out" },
+  "加密归档不可用或校验失败": {
+    "zh-TW": "加密封存檔無法使用或驗證失敗",
+    "en": "Encrypted artifact unavailable or verification failed"
+  },
+  "上传未完成，请检查地点配置后重试": {
+    "zh-TW": "上傳未完成，請檢查地點設定後重試",
+    "en": "Upload did not complete; check destination settings and retry"
+  },
+  "请选择归档及 1 到 16 个地点": {
+    "zh-TW": "請選擇封存檔及 1 到 16 個地點",
+    "en": "Select an artifact and 1 to 16 destinations"
+  },
+  "归档上传任务": { "zh-TW": "封存檔上傳任務", "en": "Artifact upload tasks" },
+  "刷新上传任务": { "zh-TW": "重新整理上傳任務", "en": "Refresh upload tasks" },
+  "上传归档": { "zh-TW": "上傳封存檔", "en": "Upload artifact" },
+  "请先配置 LANQIN_BACKUP_ARTIFACT_DIR 并由宿主机发布加密归档": {
+    "zh-TW": "請先設定 LANQIN_BACKUP_ARTIFACT_DIR 並由主機發布加密封存檔",
+    "en": "Configure LANQIN_BACKUP_ARTIFACT_DIR and publish an encrypted artifact from the host first"
+  },
+  "暂无已发布的加密归档": {
+    "zh-TW": "暫無已發布的加密封存檔",
+    "en": "No published encrypted artifacts"
+  },
+  "暂无上传任务": { "zh-TW": "暫無上傳任務", "en": "No upload tasks" },
+  "查看上传任务 {0}": { "zh-TW": "檢視上傳任務 {0}", "en": "View upload task {0}" },
+  "最新任务": { "zh-TW": "最新任務", "en": "Latest tasks" },
+  "更早任务": { "zh-TW": "更早任務", "en": "Older tasks" },
+  "上传加密归档": { "zh-TW": "上傳加密封存檔", "en": "Upload encrypted artifact" },
+  "仅上传已发布的归档，不会生成新的整站快照": {
+    "zh-TW": "僅上傳已發布的封存檔，不會產生新的全站快照",
+    "en": "Only uploads an existing published artifact; no new full-site snapshot is created"
+  },
+  "选择加密归档": { "zh-TW": "選擇加密封存檔", "en": "Select encrypted artifact" },
+  "选择上传地点（最多 16 个）": {
+    "zh-TW": "選擇上傳地點（最多 16 個）",
+    "en": "Select upload destinations (up to 16)"
+  },
+  "加入上传队列": { "zh-TW": "加入上傳佇列", "en": "Queue upload" },
+  "上传任务": { "zh-TW": "上傳任務", "en": "Upload task" },
+  "归档 SHA-256": { "zh-TW": "封存檔 SHA-256", "en": "Artifact SHA-256" },
+  "归档发布时间": { "zh-TW": "封存檔發布時間", "en": "Artifact publication time" },
+  "上传完成表示远端已接受文件，尚未进行下载解密验证；请独立保存报告": {
+    "zh-TW": "上傳完成表示遠端已接受檔案，尚未進行下載解密驗證；請獨立保存報告",
+    "en": "Completion means the remote accepted the file, not that download and decryption were verified; keep the report independently"
+  },
+  "保存上传报告": { "zh-TW": "儲存上傳報告", "en": "Save upload report" },
+  "正在取消...": { "zh-TW": "正在取消...", "en": "Cancelling..." },
+  "取消上传": { "zh-TW": "取消上傳", "en": "Cancel upload" },
+  "服务端尚未配置可验证的加密归档目录": {
+    "zh-TW": "伺服器尚未設定可驗證的加密封存檔目錄",
+    "en": "A verifiable encrypted artifact directory is not configured or is unavailable"
+  },
+  "上传队列已满，请稍后重试": {
+    "zh-TW": "上傳佇列已滿，請稍後重試",
+    "en": "Upload queue is full; try again later"
+  },
   "存储地点": { "zh-TW": "儲存地點", "en": "Destinations" },
   "共 {0} 个地点": {
     "zh-TW": "共 {0} 個地點",

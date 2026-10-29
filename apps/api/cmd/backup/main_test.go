@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"database/sql"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,6 +12,7 @@ import (
 	"testing"
 
 	"filippo.io/age"
+	"lanqin-email-api/internal/backup/catalog"
 )
 
 func TestKeygenDoesNotPrintPrivateKeyOrOverwrite(t *testing.T) {
@@ -108,6 +111,25 @@ func TestCLIEncryptedSnapshotRoundTrip(t *testing.T) {
 	_, receipt, ok := strings.Cut(strings.TrimSpace(stdout.String()), "sha256=")
 	if !ok || len(receipt) != 64 {
 		t.Fatal("create did not return a ciphertext receipt")
+	}
+	catalogDir := t.TempDir()
+	key := bytes.Repeat([]byte{42}, 32) // Synthetic catalog key, not recovery material.
+	t.Setenv("LANQIN_BACKUP_SECRET_KEY", base64.StdEncoding.EncodeToString(key))
+	var published bytes.Buffer
+	if err := run(t.Context(), []string{"publish", "--catalog", catalogDir, "--in", archive, "--expected-sha256", receipt}, &published, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var entry catalog.Entry
+	if err := json.Unmarshal(published.Bytes(), &entry); err != nil || entry.SHA256 != receipt {
+		t.Fatal("publish did not return authenticated artifact receipt", err)
+	}
+	file, metadata, err := catalog.Open(catalogDir, entry.ID, key, 1<<30)
+	if err != nil || metadata.SHA256 != receipt {
+		t.Fatal("API catalog cannot open CLI-published real encrypted snapshot", err)
+	}
+	file.Close()
+	if strings.Contains(published.String()+stderr.String(), base64.StdEncoding.EncodeToString(key)) {
+		t.Fatal("publish exposed catalog key")
 	}
 	output := filepath.Join(directory, "recovered")
 	if err := run(t.Context(), []string{"restore", "--in", archive, "--identity-file", keyFile, "--expected-sha256", receipt, "--out", output}, &stdout, &stderr); err != nil {

@@ -63,6 +63,8 @@ import type {
   APIToken,
   BackupDestinationList,
   BackupDestinationPayload,
+  BackupArtifact,
+  BackupUploadJob,
 } from "./api-types"
 export * from "./api-types"
 
@@ -513,6 +515,30 @@ export const api = {
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   backupDestinations: () => request<BackupDestinationList>("/api/admin/backups/destinations"),
+  backupArtifacts: () =>
+    request<{ available: boolean; items: BackupArtifact[]; maxBytes: number }>(
+      "/api/admin/backups/artifacts"
+    ),
+  backupUploadJobs: (cursor = "") =>
+    request<{ items: BackupUploadJob[]; nextCursor: string }>(
+      `/api/admin/backups/jobs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  backupUploadJob: (id: string) =>
+    request<BackupUploadJob>(`/api/admin/backups/jobs/${encodeURIComponent(id)}`),
+  createBackupUpload: (payload: {
+    artifactId: string
+    destinationIds: string[]
+    requestId: string
+    destinationsRevision: string
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/jobs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cancelBackupUpload: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/backups/jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }),
   createBackupDestination: (payload: BackupDestinationPayload) =>
     request<{ ok: boolean }>("/api/admin/backups/destinations", {
       method: "POST",

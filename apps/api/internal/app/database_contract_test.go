@@ -46,6 +46,9 @@ func TestExternalDatabaseContract(t *testing.T) {
 			t.Run("encrypted backup destinations", func(t *testing.T) {
 				assertBackupDestinationDatabaseContract(t, a)
 			})
+			t.Run("encrypted backup upload queue", func(t *testing.T) {
+				assertBackupUploadDatabaseContract(t, a)
+			})
 			t.Run("explicit permission group replaces regular fallback", func(t *testing.T) {
 				assertExplicitPermissionGroupDatabaseContract(t, a)
 			})

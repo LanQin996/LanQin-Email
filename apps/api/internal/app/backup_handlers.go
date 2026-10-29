@@ -11,6 +11,10 @@ import (
 
 func backupError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errBackupExecution):
+		respondError(w, http.StatusServiceUnavailable, errBackupExecution.Error())
+	case errors.Is(err, errBackupQueue):
+		respondError(w, http.StatusTooManyRequests, errBackupQueue.Error())
 	case errors.Is(err, errBackupKey):
 		respondError(w, http.StatusServiceUnavailable, errBackupKey.Error())
 	case errors.Is(err, errBackupConflict):
@@ -47,7 +51,17 @@ func (a *App) handleBackupDestinations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, keyErr := a.backupCipher()
-	respondJSON(w, http.StatusOK, backupDestinationResponse(state, raw, keyErr == nil))
+	response := backupDestinationResponse(state, raw, keyErr == nil)
+	registry, _, registryErr := a.backupRegistry(r.Context())
+	if registryErr == nil {
+		for i, record := range state.Items {
+			if success, ok := registry.Success[record.Config.ID]; ok && success.Fingerprint == backupTargetFingerprint(record) {
+				stamp := success.At
+				response.Items[i].LastSuccessAt = &stamp
+			}
+		}
+	}
+	respondJSON(w, http.StatusOK, response)
 }
 
 func (a *App) handleCreateBackupDestination(w http.ResponseWriter, r *http.Request) {

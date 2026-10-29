@@ -23,7 +23,8 @@ import {
 import { api, type BackupDestination, type BackupDestinationPayload } from "@/lib/api"
 import { uiMessage, uiText, useLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
-import { cn } from "@/lib/utils"
+import { cn, formatDateTime } from "@/lib/utils"
+import { BackupUploadPanel } from "@/components/backup-upload-panel"
 import { useMe } from "@/hooks/use-me"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -465,6 +466,17 @@ export function BackupDestinationsSection() {
                       />
                     )}
                   </dl>
+                  <dl>
+                    <DestinationField
+                      icon={CircleCheck}
+                      label={uiText("最近成功上传")}
+                      value={
+                        selected.lastSuccessAt
+                          ? formatDateTime(selected.lastSuccessAt)
+                          : uiText("暂无成功记录")
+                      }
+                    />
+                  </dl>
                   <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-3 py-3 text-sm">
                     <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
                     {uiText(selected.credentialsSet ? "凭据已加密保存" : "未配置")}
@@ -474,7 +486,7 @@ export function BackupDestinationsSection() {
                     className="flex items-start gap-2.5 border-t pt-5 text-sm text-muted-foreground"
                   >
                     <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                    {uiText("当前仅管理备份地点，后台备份任务和定时计划尚未接入")}
+                    {uiText("后台可上传已发布的加密归档；不停服快照生成与恢复尚未接入")}
                   </div>
                 </div>
               ) : (
@@ -487,6 +499,16 @@ export function BackupDestinationsSection() {
           </div>
         )}
       </section>
+
+      {data && !destinations.isError && (
+        <BackupUploadPanel
+          userId={me.data?.user.id || ""}
+          destinations={data.items}
+          revision={data.revision}
+          preferredId={selected?.id}
+          canUpload={editable}
+        />
+      )}
 
       <Dialog
         open={!!editor}

@@ -59,6 +59,7 @@ type backupDestinationView struct {
 	WebDAV          *backupDAVSettings `json:"webdav,omitempty"`
 	CredentialsSet  bool               `json:"credentialsSet"`
 	SessionTokenSet bool               `json:"sessionTokenSet"`
+	LastSuccessAt   *time.Time         `json:"lastSuccessAt,omitempty"`
 }
 
 type backupS3Settings struct {

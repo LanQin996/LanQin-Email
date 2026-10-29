@@ -687,8 +687,44 @@ export type BackupDestination = {
   disabled: boolean
   credentialsSet: boolean
   sessionTokenSet: boolean
+  lastSuccessAt?: string
   s3?: BackupS3Settings
   webdav?: { url: string }
+}
+export type BackupArtifact = {
+  version: number
+  id: string
+  sha256: string
+  bytes: number
+  publishedAt: string
+}
+export type BackupUploadJob = {
+  id: string
+  artifact: BackupArtifact
+  status: "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled" | "interrupted"
+  createdAt: string
+  startedAt?: string
+  completedAt?: string
+  destinationNames: string[]
+  locations: {
+    id: string
+    name: string
+    type: string
+    endpoint: string
+    bucket?: string
+    prefix?: string
+    region?: string
+  }[]
+  results: {
+    destination_id: string
+    state: string
+    attempts: number
+    object_key?: string
+    error_code?: string
+    completed_at?: string
+  }[]
+  cancelRequested: boolean
+  errorCode?: string
 }
 export type BackupDestinationList = {
   encryptionConfigured: boolean

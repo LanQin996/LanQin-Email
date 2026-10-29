@@ -67,6 +67,38 @@ func (e *uploadError) Error() string { return e.code }
 
 type uploaderFactory func(Destination) (uploader, error)
 
+// Credentials are resolved per destination and invocation. Never put these in
+// process environment variables, API responses, job records or error logs.
+type Credentials struct {
+	AccessKeyID, SecretAccessKey, SessionToken string
+	Username, Password                         string
+}
+
+// UploadFile pins the caller's artifact handle and scopes in-memory credentials
+// to each destination. It does not close the original file or change its offset.
+func UploadFile(ctx context.Context, source *os.File, expected string, cfg Config, opts Options, resolve func(string) (Credentials, error)) (Report, error) {
+	if source == nil || resolve == nil {
+		return Report{}, errors.New("artifact and credential resolver are required")
+	}
+	return uploadSource(ctx, func() (*artifact, error) { return stageFile(ctx, source, expected, opts) }, cfg, opts, func(d Destination) (uploader, error) {
+		credentials, err := resolve(d.ID)
+		if err != nil {
+			return nil, errors.New("destination credentials unavailable")
+		}
+		values := make(map[string]string)
+		if d.S3 != nil {
+			values[d.S3.AccessKeyIDEnv], values[d.S3.SecretAccessKeyEnv] = credentials.AccessKeyID, credentials.SecretAccessKey
+			if d.S3.SessionTokenEnv != "" {
+				values[d.S3.SessionTokenEnv] = credentials.SessionToken
+			}
+		}
+		if d.WebDAV != nil {
+			values[d.WebDAV.UsernameEnv], values[d.WebDAV.PasswordEnv] = credentials.Username, credentials.Password
+		}
+		return buildUploader(d, func(name string) (string, bool) { v, ok := values[name]; return v, ok }, nil)
+	})
+}
+
 // Upload stages and hashes the source once, then gives each upload an independent
 // reader over the private immutable copy. Credentials and provider errors are
 // never included in the report. A successful result means remote PUT acceptance,
@@ -76,6 +108,10 @@ func Upload(ctx context.Context, source, expectedSHA256 string, cfg Config, opts
 }
 
 func upload(ctx context.Context, source, expectedSHA256 string, cfg Config, opts Options, factory uploaderFactory) (Report, error) {
+	return uploadSource(ctx, func() (*artifact, error) { return stage(ctx, source, expectedSHA256, opts) }, cfg, opts, factory)
+}
+
+func uploadSource(ctx context.Context, prepare func() (*artifact, error), cfg Config, opts Options, factory uploaderFactory) (Report, error) {
 	var report Report
 	if err := cfg.Validate(); err != nil {
 		return report, err
@@ -92,7 +128,7 @@ func upload(ctx context.Context, source, expectedSHA256 string, cfg Config, opts
 	if active == 0 {
 		return report, errors.New("no enabled backup destinations")
 	}
-	data, err := stage(ctx, source, expectedSHA256, opts)
+	data, err := prepare()
 	if err != nil {
 		return report, err
 	}
@@ -206,10 +242,6 @@ func (r contextReader) Read(p []byte) (int, error) {
 }
 
 func stage(ctx context.Context, source, expected string, opts Options) (*artifact, error) {
-	want, err := hex.DecodeString(expected)
-	if err != nil || len(want) != sha256.Size {
-		return nil, errors.New("upload requires a trusted ciphertext SHA-256 receipt")
-	}
 	info, err := os.Lstat(source)
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("upload input must be a regular ciphertext file")
@@ -223,6 +255,18 @@ func stage(ctx context.Context, source, expected string, opts Options) (*artifac
 	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Size() > opts.MaxBytes {
 		return nil, errors.New("encrypted backup changed or exceeds upload size limit")
 	}
+	return stageFile(ctx, in, expected, opts)
+}
+
+func stageFile(ctx context.Context, in *os.File, expected string, opts Options) (*artifact, error) {
+	want, err := hex.DecodeString(expected)
+	if err != nil || len(want) != sha256.Size {
+		return nil, errors.New("upload requires a trusted ciphertext SHA-256 receipt")
+	}
+	opened, err := in.Stat()
+	if err != nil || !opened.Mode().IsRegular() || opened.Size() > opts.MaxBytes {
+		return nil, errors.New("invalid artifact handle or size limit")
+	}
 	file, err := os.CreateTemp(opts.SpoolDir, ".lanqin-upload-*")
 	if err != nil {
 		return nil, errors.New("cannot create private ciphertext spool")
@@ -235,7 +279,7 @@ func stage(ctx context.Context, source, expected string, opts Options) (*artifac
 		}
 	}()
 	sha, md := sha256.New(), md5.New()
-	n, err := io.Copy(io.MultiWriter(file, sha, md), io.LimitReader(contextReader{ctx, in}, opts.MaxBytes+1))
+	n, err := io.Copy(io.MultiWriter(file, sha, md), io.LimitReader(contextReader{ctx, io.NewSectionReader(in, 0, opened.Size())}, opts.MaxBytes+1))
 	if err != nil || n > opts.MaxBytes || n != opened.Size() || ctx.Err() != nil {
 		return nil, errors.New("cannot stage encrypted backup within limits")
 	}

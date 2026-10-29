@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"lanqin-email-api/internal/backup/storage"
 )
 
 type App struct {
@@ -43,6 +44,8 @@ type App struct {
 	telegramAPIBaseURL string
 	messageSearchFTS   bool
 	workerID           string
+	backupWake         chan struct{}
+	backupUploadFile   func(context.Context, *os.File, string, storage.Config, storage.Options, func(string) (storage.Credentials, error)) (storage.Report, error)
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -74,6 +77,8 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 
 	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), health: &appHealthState{}, maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL, workerID: newID("worker")}
 	a.externalIMAP = a
+	a.backupWake = make(chan struct{}, 1)
+	a.backupUploadFile = storage.UploadFile
 	a.linuxDoOAuth = newLinuxDoHTTPClient()
 	if cfg.DBDriver == databaseDriverSQLite {
 		if err := a.configureSQLite(context.Background()); err != nil {
@@ -109,6 +114,11 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.startWorker(func() { a.externalIMAPWorker(workerCtx) })
 	a.startWorker(func() { a.smtpEventsCleanupWorker(workerCtx) })
 	a.startWorker(func() { a.sessionCleanupWorker(workerCtx) })
+	if a.cfg.BackupArtifactDir != "" {
+		if _, err := a.backupCipher(); err == nil {
+			a.startWorker(func() { a.backupUploadWorker(workerCtx) })
+		}
+	}
 	if strings.TrimSpace(a.cfg.StatusWebhookURL) != "" {
 		a.startWorker(func() { a.statusWebhookWorker(workerCtx) })
 	}

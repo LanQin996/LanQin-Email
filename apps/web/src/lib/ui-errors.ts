@@ -8,6 +8,8 @@ const knownErrors: Record<string, string> = {
   backup_destination_limit: "备份地点数量或配置总大小已达到上限",
   backup_destination_not_found: "备份地点已不存在，请刷新后重试",
   backup_store_unavailable: "无法读取或保存备份配置，请稍后重试",
+  backup_execution_unavailable: "服务端尚未配置可验证的加密归档目录",
+  backup_queue_full: "上传队列已满，请稍后重试",
   "resource is a unified collection target; change or disable collection first":
     "请先更换或关闭引用此目标的统一收件设置",
   "collection target must be an active local mailbox without a forwarding alias":
