@@ -703,15 +703,20 @@ func (a *App) authorizationForUser(ctx context.Context, userID, role string) (us
 	}
 
 	seen := map[string]bool{}
-	limits := defaultPermissionLimits()
-	groups := []PermissionGroupSummary{{ID: PermissionGroupRegular, Name: "普通用户"}}
+	limits := minimalLimits()
+	groups := []PermissionGroupSummary{}
 	rows, err := a.db.QueryContext(ctx, `SELECT pg.id,pg.name,pg.permissions_json,pg.limits_json
 		FROM permission_groups pg WHERE pg.id=?
+		AND NOT EXISTS (
+			SELECT 1 FROM user_permission_groups upg
+			JOIN permission_groups assigned ON assigned.id=upg.group_id
+			WHERE upg.user_id=? AND assigned.id NOT IN (?,?)
+		)
 		UNION ALL
 		SELECT pg.id,pg.name,pg.permissions_json,pg.limits_json
 		FROM permission_groups pg
 		JOIN user_permission_groups upg ON upg.group_id=pg.id
-		WHERE upg.user_id=? AND pg.id<>?`, PermissionGroupRegular, userID, PermissionGroupRegular)
+		WHERE upg.user_id=? AND pg.id<>?`, PermissionGroupRegular, userID, PermissionGroupSuperAdmin, PermissionGroupRegular, userID, PermissionGroupRegular)
 	if err != nil {
 		return userAuthorization{}, err
 	}
@@ -722,20 +727,24 @@ func (a *App) authorizationForUser(ctx context.Context, userID, role string) (us
 			return userAuthorization{}, err
 		}
 		if groupID == PermissionGroupRegular {
-			groups[0].Name = name
 			limits = decodeStoredLimits(limitsJSON)
 		} else if isAssignablePermissionGroupID(groupID) {
-			groups = append(groups, PermissionGroupSummary{ID: groupID, Name: name})
 			limits = mergePermissionLimits(limits, decodeStoredLimits(limitsJSON))
 		} else {
 			continue
 		}
+		groups = append(groups, PermissionGroupSummary{ID: groupID, Name: name})
 		for _, permission := range decodeStoredPermissions(permissionsJSON) {
 			seen[permission] = true
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return userAuthorization{}, err
+	}
+	if len(groups) == 0 {
+		// A missing default group must not manufacture permissions or unlimited quotas.
+		groups = append(groups, PermissionGroupSummary{ID: PermissionGroupRegular, Name: "普通用户"})
+		limits = defaultPermissionLimits()
 	}
 
 	permissions := make([]string, 0, len(seen))
@@ -821,16 +830,13 @@ func (a *App) addRegularGroupPermissions(ctx context.Context, tx *sql.Tx, seen m
 }
 
 func (a *App) effectivePermissionsForUserGroups(ctx context.Context, tx *sql.Tx, groupIDs []string) ([]string, error) {
+	groupIDs = cleanIDList(groupIDs)
+	if len(groupIDs) > 0 {
+		return a.permissionsForGroupIDs(ctx, tx, groupIDs)
+	}
 	seen := map[string]bool{}
 	if err := a.addRegularGroupPermissions(ctx, tx, seen); err != nil {
 		return nil, err
-	}
-	groupPermissions, err := a.permissionsForGroupIDs(ctx, tx, groupIDs)
-	if err != nil {
-		return nil, err
-	}
-	for _, permission := range groupPermissions {
-		seen[permission] = true
 	}
 	out := make([]string, 0, len(seen))
 	for _, permission := range allPermissionKeys() {
@@ -842,6 +848,10 @@ func (a *App) effectivePermissionsForUserGroups(ctx context.Context, tx *sql.Tx,
 }
 
 func (a *App) effectiveLimitsForUserGroups(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
+	groupIDs = cleanIDList(groupIDs)
+	if len(groupIDs) > 0 {
+		return a.limitsForGroupIDs(ctx, tx, groupIDs)
+	}
 	limits, ok, err := a.regularGroupLimits(ctx, tx)
 	if err != nil {
 		return PermissionLimits{}, err
@@ -849,11 +859,7 @@ func (a *App) effectiveLimitsForUserGroups(ctx context.Context, tx *sql.Tx, grou
 	if !ok {
 		limits = defaultPermissionLimits()
 	}
-	groupLimits, err := a.limitsForGroupIDs(ctx, tx, groupIDs)
-	if err != nil {
-		return PermissionLimits{}, err
-	}
-	return mergePermissionLimits(limits, groupLimits), nil
+	return limits, nil
 }
 
 func userHasPermission(user *User, permission string) bool {
@@ -1045,33 +1051,10 @@ func (a *App) setUserPermissionGroups(ctx context.Context, tx *sql.Tx, userID st
 // therefore cannot see uncommitted membership. The group IDs are known at that point,
 // so the limits are merged straight from permission_groups, which is committed data.
 //
-// Precedence mirrors authorizationForUser: the regular-user group replaces the
-// built-in defaults, and every other assignable group is merged on top.
+// Precedence mirrors authorizationForUser: explicit groups replace the regular
+// group; only users without explicit groups receive regular-user defaults.
 func (a *App) permissionLimitsForGroupsTx(ctx context.Context, tx *sql.Tx, groupIDs []string) (PermissionLimits, error) {
-	limits := defaultPermissionLimits()
-	var regularJSON string
-	err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, PermissionGroupRegular).Scan(&regularJSON)
-	switch {
-	case err == nil:
-		limits = decodeStoredLimits(regularJSON)
-	case errors.Is(err, sql.ErrNoRows):
-	default:
-		return PermissionLimits{}, err
-	}
-	for _, groupID := range cleanIDList(groupIDs) {
-		if groupID == PermissionGroupRegular || !isAssignablePermissionGroupID(groupID) {
-			continue
-		}
-		var limitsJSON string
-		if err := tx.QueryRowContext(ctx, `SELECT limits_json FROM permission_groups WHERE id=?`, groupID).Scan(&limitsJSON); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			return PermissionLimits{}, err
-		}
-		limits = mergePermissionLimits(limits, decodeStoredLimits(limitsJSON))
-	}
-	return limits, nil
+	return a.effectiveLimitsForUserGroups(ctx, tx, groupIDs)
 }
 
 // writeUserPermissionGroups replaces a user's group membership without checking

@@ -87,6 +87,9 @@ func TestInviteBindsPermissionGroupOnRegistration(t *testing.T) {
 	if !userHasPermission(&me.User, PermissionMailStats) {
 		t.Error("registered user did not inherit the group's permission")
 	}
+	if containsString(me.User.PermissionGroupIDs, PermissionGroupRegular) || userHasPermission(&me.User, PermissionMailAccess) {
+		t.Fatal("invite-bound user inherited unassigned regular-user permissions")
+	}
 }
 
 // TestInviteRejectsSuperAdminGroup pins the rule that an invite can never hand out
