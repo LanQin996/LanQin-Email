@@ -124,6 +124,7 @@ func TestBackupDestinationRoutesRequireActualSuperAdmin(t *testing.T) {
 	for _, route := range []struct{ method, path string }{
 		{"GET", "/api/admin/backups/destinations"}, {"POST", "/api/admin/backups/destinations"}, {"POST", "/api/admin/backups/destinations/bkd_missing"}, {"DELETE", "/api/admin/backups/destinations/bkd_missing"},
 		{"GET", "/api/admin/backups/artifacts"}, {"GET", "/api/admin/backups/jobs"}, {"POST", "/api/admin/backups/jobs"}, {"GET", "/api/admin/backups/jobs/bkj_missing"}, {"GET", "/api/admin/backups/jobs/bkj_missing?download=1"}, {"POST", "/api/admin/backups/jobs/bkj_missing/cancel"},
+		{"GET", "/api/admin/backups/capabilities"}, {"POST", "/api/admin/backups/snapshots"},
 	} {
 		if code := ops.do(route.method, route.path, map[string]string{"revision": "0"}, &body); code != http.StatusForbidden {
 			t.Errorf("settings operator reached %s %s: %d", route.method, route.path, code)

@@ -700,6 +700,21 @@ export type BackupArtifact = {
 }
 export type BackupUploadJob = {
   id: string
+  kind?: "upload" | "snapshot"
+  phase?: "queued" | "collecting" | "encrypting" | "uploading" | "completed"
+  recipient?: string
+  summary?: {
+    snapshotStarted: string
+    snapshotFinished: string
+    attempts: number
+    messages: number
+    drafts: number
+    attachments: number
+    unindexed: number
+    dkimKeys: number
+    externalCachedMessagesOnly: number
+    bytesBeforeReport: number
+  }
   artifact: BackupArtifact
   status: "queued" | "running" | "succeeded" | "partial" | "failed" | "cancelled" | "interrupted"
   createdAt: string

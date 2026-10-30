@@ -18,8 +18,10 @@ import (
 // SnapshotSQLite uses its own read-only connection, not the application's
 // connection pool. The online backup API copies small page batches, releasing
 // source read locks between steps. WAL writers remain enabled. Heavy concurrent
-// changes may restart copying; the deadline bounds retries instead of stopping
-// mail delivery. The existing source's journal mode is never changed.
+// WAL read snapshot stays pinned across batches so mail writes and the backup's
+// own lease heartbeat cannot perpetually restart copying. Writers continue, but
+// WAL checkpoint truncation may be delayed for up to the bounded export deadline.
+// The existing source's journal mode is never changed.
 //
 // destination must be absent, with an existing private parent directory. Only a
 // completed, integrity-checked, closed database is published. Callers must still
@@ -90,6 +92,17 @@ func snapshotSQLite(ctx context.Context, source, destination string, maxBytes in
 	var mode string
 	if err := conn.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&mode); err != nil || !strings.EqualFold(mode, "wal") {
 		return errors.New("online SQLite export requires an existing WAL source; no source settings were changed")
+	}
+	// Pin a read generation BEFORE copying. Without this, a write on another
+	// connection (including the lease heartbeat) restarts incremental backup,
+	// potentially starving large databases forever under normal mail traffic.
+	if _, err := conn.ExecContext(ctx, "BEGIN"); err != nil {
+		return errors.New("cannot begin SQLite read snapshot")
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+	var schemas int64
+	if err := conn.QueryRowContext(ctx, "SELECT count(*) FROM sqlite_schema").Scan(&schemas); err != nil {
+		return errors.New("cannot pin SQLite read snapshot")
 	}
 	var pages, pageSize int64
 	if err := conn.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages); err != nil {

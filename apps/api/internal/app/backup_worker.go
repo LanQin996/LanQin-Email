@@ -109,7 +109,14 @@ func (a *App) runBackupUpload(parent context.Context, lease backupLease) {
 	reason := make(chan string, 1)
 	done := make(chan struct{})
 	go a.monitorBackupUpload(ctx, lease, cancel, reason, done)
-	results, code := a.executeBackupUpload(ctx, job)
+	var results []storage.Result
+	code := ""
+	if backupJobKind(job) == "snapshot" {
+		job, code = a.createBackupArtifact(ctx, lease, job)
+	}
+	if code == "" {
+		results, code = a.executeBackupUpload(ctx, job)
+	}
 	deadline := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	cancel()
 	<-done
@@ -222,6 +229,7 @@ func (a *App) finishBackupUpload(ctx context.Context, lease backupLease, results
 		}
 		now := a.now().UTC()
 		job.CompletedAt = &now
+		job.Phase = "completed"
 		job.Results = results
 		job.ErrorCode = code
 		if job.Results == nil {

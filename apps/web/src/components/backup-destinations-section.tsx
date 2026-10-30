@@ -486,7 +486,7 @@ export function BackupDestinationsSection() {
                     className="flex items-start gap-2.5 border-t pt-5 text-sm text-muted-foreground"
                   >
                     <Info className="mt-0.5 h-4 w-4 shrink-0" />
-                    {uiText("后台可上传已发布的加密归档；不停服快照生成与恢复尚未接入")}
+                    {uiText("可新建不停服在线备份或上传已有归档；生产覆盖恢复尚未接入")}
                   </div>
                 </div>
               ) : (

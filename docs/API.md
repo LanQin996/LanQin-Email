@@ -55,7 +55,7 @@ Validation failures — including a duplicate domain name — return `400 Bad Re
 
 These session-authenticated routes require an actual super administrator (`user.role=admin`), not a permission group with `admin.settings.*`. They are not part of the bearer-token `/api/open/v1` API described by `openapi.json`.
 
-以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通既有密文归档的异步上传及历史，不等于生成新的整站备份；定时计划尚未接通。
+以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通 SQLite 新建在线备份、既有密文异步上传及历史；不是生产覆盖恢复，定时计划尚未接通。
 
 | Endpoint | Semantics / 语义 |
 |------|---------|
@@ -64,6 +64,8 @@ These session-authenticated routes require an actual super administrator (`user.
 | `POST /api/admin/backups/destinations/{id}` | 更新地点；传入当前 `revision`，同地址下凭据留空保留，类型不可变 |
 | `DELETE /api/admin/backups/destinations/{id}` | JSON body 为 `{revision}`；仅删除配置，不删除远端备份 |
 | `GET /api/admin/backups/artifacts` | `{available, items, maxBytes}`，仅列出宿主机发布的认证密文目录；不接收文件路径 |
+| `GET /api/admin/backups/capabilities` | `{onlineBackupAvailable, recipient?, reason?}`；只有有效 X25519 公钥才返回 `recipient`，不返回本地路径或配置原字符串 |
+| `POST /api/admin/backups/snapshots` | `{destinationIds, requestId, destinationsRevision, expectedRecipient}`；绑定当前公钥并入队，立即返回 `202` 及任务，不接受本地路径或私钥 |
 | `GET /api/admin/backups/jobs?cursor=...` | `{items, nextCursor}`，每页最多 20 条；游标由服务端返回 |
 | `POST /api/admin/backups/jobs` | `{artifactId, destinationIds, requestId, destinationsRevision}`，校验后入队并立即返回 `202` 及任务，不在 HTTP 请求中上传 |
 | `GET /api/admin/backups/jobs/{id}` | 查询任务及逐地点结果；`?download=1` 下载同一脱敏 JSON 报告 |
@@ -72,6 +74,8 @@ These session-authenticated routes require an actual super administrator (`user.
 并发修改返回 `409`，错误/缺失加密密钥返回 `503`，无效配置返回 `400`，数量或配置体积达到上限返回 `413`。改变远端地址须重新填写完整凭据；更新 S3 密钥对时不会保留旧会话令牌。
 
 上传任务最多选择 16 个已启用地点，`requestId` 为 16–80 个字母、数字、`_` 或 `-`，同一用户、同一 ID 和同一请求重试不重复建任务；更换请求内容返回 `409`。地点版本必须来自当前列表；最多 16 个待执行任务，队列满返回 `429`。逐地点失败不是 HTTP 入队失败，需查询任务结果。取消/进程中断时远端可能已接收数据，不能把取消当作回滚。地点列表的 `lastSuccessAt` 仅代表同一配置下最近被远端接受的上传，不代表恢复演练通过。
+
+新建备份复用同一队列与资源限额，不另开无限并发 worker。任务 `kind` 为 `upload` 或 `snapshot`，`status` 沿用排队/运行/终态；`phase` 为 `queued/collecting/encrypting/uploading/completed`，是阶段而非百分比。snapshot 未生成归档时 `artifact.id` 为空，不应展示虚假的 SHA 或时间；生成后才附入经过认证发布的 artifact。`summary` 只包含日期、计数、字节及备份运行态清理标志，不含原始清单、来源路径、邮件 ID 或凭据。所有运行阶段可请求取消；配置换钥后排队任务不会悄悄更改收件公钥，而会失败要求重新确认。
 
 ## Health Endpoints / 健康检查
 

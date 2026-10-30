@@ -55,6 +55,30 @@ func (a *App) handleCreateBackupUpload(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusAccepted, backupJobResponse(job))
 }
 
+func (a *App) handleCreateBackupSnapshot(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	var req struct {
+		DestinationIDs       []string `json:"destinationIds"`
+		RequestID            string   `json:"requestId"`
+		DestinationsRevision string   `json:"destinationsRevision"`
+		ExpectedRecipient    string   `json:"expectedRecipient"`
+	}
+	if err := decodeBackupRequest(r, &req); err != nil {
+		backupError(w, err)
+		return
+	}
+	if req.DestinationsRevision == "" || req.ExpectedRecipient == "" {
+		backupError(w, errBackupInvalid)
+		return
+	}
+	job, err := a.enqueueBackupSnapshot(r.Context(), currentUser(r).ID, req.RequestID, req.DestinationIDs, req.DestinationsRevision, req.ExpectedRecipient)
+	if err != nil {
+		backupError(w, err)
+		return
+	}
+	respondJSON(w, http.StatusAccepted, backupJobResponse(job))
+}
+
 func (a *App) handleGetBackupUpload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	job, _, err := a.backupReadJob(r.Context(), chi.URLParam(r, "id"))
@@ -143,7 +167,7 @@ func (a *App) handleListBackupUploads(w http.ResponseWriter, r *http.Request) {
 			backupError(w, err)
 			return
 		}
-		if job.Version != 1 || v.key != backupJobPrefix+job.ID || !backupJobIDPattern.MatchString(job.ID) {
+		if v.key != backupJobPrefix+job.ID || !validBackupJob(job) {
 			backupError(w, errBackupInvalid)
 			return
 		}

@@ -136,3 +136,40 @@ func TestDKIMCollectionRefusesActiveWALDatabase(t *testing.T) {
 		t.Fatal("collector inspected an active WAL as immutable")
 	}
 }
+
+func TestDKIMCollectionWholeSnapshotByteBudget(t *testing.T) {
+	public, private, key := syntheticDKIM(t)
+	name := filepath.Join(t.TempDir(), "snapshot.db")
+	db, err := sql.Open("sqlite", name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dkimSchema(t, db)
+	if _, err := db.Exec(`INSERT INTO domains VALUES('a.example.test','active','lanqin',?,?),('b.example.test','active','lanqin',?,?)`, public, private, public, private); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int64{0, int64(len(key)), int64(2*len(key) - 1), int64(2 * len(key))} {
+		dir := t.TempDir()
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		count, collectErr := CollectDKIMLimited(t.Context(), name, root, 2, limit)
+		root.Close()
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if limit < int64(2*len(key)) {
+			if collectErr == nil || len(entries) != 0 {
+				t.Fatal("over-budget keys left a partial successful collection", limit)
+			}
+		} else if collectErr != nil || count != 2 || len(entries) != 2 {
+			t.Fatal("exact DKIM byte budget rejected", collectErr)
+		}
+	}
+}

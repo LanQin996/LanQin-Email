@@ -1,6 +1,6 @@
 import * as React from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { Clock3, Download, RefreshCcw, Upload } from "lucide-react"
+import { Clock3, Download, Plus, RefreshCcw, Upload } from "lucide-react"
 import { api, type BackupDestination, type BackupUploadJob } from "@/lib/api"
 import { uiText, useLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
@@ -28,6 +28,29 @@ function active(job?: BackupUploadJob) {
   return job?.status === "queued" || job?.status === "running"
 }
 
+function jobStatusText(job: BackupUploadJob) {
+  if (job.status === "running") {
+    if (job.phase === "collecting") return uiText("正在采集数据")
+    if (job.phase === "encrypting") return uiText("正在加密归档")
+    if (job.phase === "uploading") return uiText("上传中")
+    if (job.kind === "snapshot") return uiText("正在执行备份")
+  }
+  if (job.kind === "snapshot") {
+    if (job.status === "succeeded") return uiText("备份完成")
+    if (job.status === "failed") return uiText("备份失败")
+  }
+  return statusText(job.status)
+}
+
+function capabilityText(reason?: string) {
+  if (reason === "sqlite_required") return uiText("在线备份目前仅支持 SQLite")
+  if (reason === "workspace_unavailable")
+    return uiText("私有备份工作区不可用，请联系管理员检查配置")
+  if (reason === "configuration_required")
+    return uiText("请先在服务器配置备份公钥、私有工作区和归档目录")
+  return uiText("在线备份暂不可用，请检查服务器配置")
+}
+
 function statusText(status: string) {
   switch (status) {
     case "queued":
@@ -51,6 +74,21 @@ function statusText(status: string) {
 
 function resultError(code?: string) {
   switch (code) {
+    case "snapshot_failed":
+    case "collection_failed":
+      return uiText("数据采集未完成，未生成可上传归档")
+    case "encryption_failed":
+      return uiText("归档加密未完成，请检查服务器备份配置")
+    case "configuration_changed":
+    case "recipient_changed":
+    case "capture_configuration_changed":
+      return uiText("备份配置已变化，请重新创建任务")
+    case "snapshot_cleanup_failed":
+      return uiText("私有暂存清理失败，请联系管理员检查")
+    case "artifact_publication_failed":
+      return uiText("加密归档发布失败，未开始上传")
+    case "capture_interrupted":
+      return uiText("任务中断，远端结果可能不确定")
     case "destination_changed":
       return uiText("地点配置已变化，需重新提交任务")
     case "access_denied":
@@ -91,6 +129,12 @@ export function BackupUploadPanel({
 }) {
   useLanguage()
   const client = useQueryClient()
+  const capabilities = useQuery({
+    queryKey: ["admin", "backup-capabilities", userId],
+    queryFn: api.backupCapabilities,
+    enabled: !!userId,
+    retry: false,
+  })
   const [cursor, setCursor] = React.useState("")
   const artifacts = useQuery({
     queryKey: ["admin", "backup-artifacts", userId],
@@ -113,7 +157,12 @@ export function BackupUploadPanel({
     retry: false,
     refetchInterval: (q) => (active(q.state.data) ? 2000 : false),
   })
-  const [upload, setUpload] = React.useState<{ requestId: string; revision: string } | null>(null)
+  const [upload, setUpload] = React.useState<{
+    requestId: string
+    revision: string
+    kind: "upload" | "snapshot"
+    recipient: string
+  } | null>(null)
   const [artifactId, setArtifactId] = React.useState("")
   const [targetIds, setTargetIds] = React.useState<string[]>([])
   const [pending, setPending] = React.useState(false)
@@ -125,13 +174,16 @@ export function BackupUploadPanel({
     .join(",")}`
   React.useEffect(() => {
     void client.invalidateQueries({ queryKey: ["admin", "backup-destinations", userId] })
+    void client.invalidateQueries({ queryKey: ["admin", "backup-artifacts", userId] })
   }, [client, userId, completion])
 
-  function openUpload() {
+  function openUpload(kind: "upload" | "snapshot" = "upload") {
     const nonce = crypto.getRandomValues(new Uint8Array(16))
     setUpload({
       requestId: Array.from(nonce, (b) => b.toString(16).padStart(2, "0")).join(""),
       revision,
+      kind,
+      recipient: capabilities.data?.recipient || "",
     })
     setArtifactId(artifacts.data?.items[0]?.id || "")
     const preferred =
@@ -144,20 +196,29 @@ export function BackupUploadPanel({
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!upload || busy.current) return
-    if (!artifactId || targetIds.length < 1 || targetIds.length > 16) {
-      setError("请选择归档及 1 到 16 个地点")
+    if (
+      (upload.kind === "upload" && !artifactId) ||
+      targetIds.length < 1 ||
+      targetIds.length > 16
+    ) {
+      setError(
+        upload.kind === "snapshot" ? "请选择 1 到 16 个备份地点" : "请选择归档及 1 到 16 个地点"
+      )
       return
     }
     busy.current = true
     setPending(true)
     setError("")
     try {
-      const job = await api.createBackupUpload({
-        artifactId,
+      const payload = {
         destinationIds: targetIds,
         requestId: upload.requestId,
         destinationsRevision: upload.revision,
-      })
+      }
+      const job =
+        upload.kind === "snapshot"
+          ? await api.createBackupSnapshot({ ...payload, expectedRecipient: upload.recipient })
+          : await api.createBackupUpload({ ...payload, artifactId })
       setUpload(null)
       setCursor("")
       setDetailId(job.id)
@@ -192,7 +253,7 @@ export function BackupUploadPanel({
       <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Clock3 className="h-4 w-4" aria-hidden="true" />
-          {uiText("归档上传任务")}
+          {uiText("备份与上传任务")}
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -204,13 +265,15 @@ export function BackupUploadPanel({
               setError("")
               void jobs.refetch()
               void artifacts.refetch()
+              void capabilities.refetch()
             }}
           >
             <RefreshCcw className="h-4 w-4" />
           </Button>
           <Button
             size="sm"
-            onClick={openUpload}
+            variant="outline"
+            onClick={() => openUpload("upload")}
             disabled={
               !canUpload ||
               pending ||
@@ -222,9 +285,43 @@ export function BackupUploadPanel({
             <Upload className="h-4 w-4" />
             {uiText("上传归档")}
           </Button>
+          <Button
+            size="sm"
+            onClick={() => openUpload("snapshot")}
+            disabled={
+              !canUpload ||
+              pending ||
+              !capabilities.data?.onlineBackupAvailable ||
+              !capabilities.data.recipient ||
+              !destinations.some((d) => !d.disabled)
+            }
+          >
+            <Plus className="h-4 w-4" />
+            {uiText("新建备份")}
+          </Button>
         </div>
       </header>
       <div className="space-y-3 p-4 sm:p-5">
+        {capabilities.isPending && (
+          <div role="status" className="text-sm text-muted-foreground">
+            {uiText("加载中...")}
+          </div>
+        )}
+        {capabilities.isError && (
+          <div role="alert" className="text-sm text-destructive">
+            {uiText(errorMessage(capabilities.error))}
+          </div>
+        )}
+        {capabilities.data && !capabilities.data.onlineBackupAvailable && (
+          <div role="status" className="text-sm text-muted-foreground">
+            {capabilityText(capabilities.data.reason)}
+          </div>
+        )}
+        {!destinations.some((d) => !d.disabled) && (
+          <div role="status" className="text-sm text-muted-foreground">
+            {uiText("请先启用至少一个备份地点")}
+          </div>
+        )}
         {artifacts.isPending && (
           <div role="status" className="text-sm text-muted-foreground">
             {uiText("加载中...")}
@@ -273,6 +370,9 @@ export function BackupUploadPanel({
             <span className="min-w-0 space-y-1">
               <span className="block truncate text-sm">{job.destinationNames.join(" / ")}</span>
               <span className="block text-xs font-normal text-muted-foreground">
+                {uiText(job.kind === "snapshot" ? "在线备份" : "归档上传")}
+              </span>
+              <span className="block text-xs font-normal text-muted-foreground">
                 {formatDateTime(job.createdAt)}
               </span>
             </span>
@@ -284,7 +384,7 @@ export function BackupUploadPanel({
               }
               className="max-w-48 shrink-0 whitespace-normal"
             >
-              {statusText(job.status)}
+              {jobStatusText(job)}
             </Badge>
           </Button>
         ))}
@@ -323,27 +423,43 @@ export function BackupUploadPanel({
         >
           <form onSubmit={submit} className="space-y-4">
             <DialogHeader>
-              <DialogTitle>{uiText("上传加密归档")}</DialogTitle>
+              <DialogTitle>
+                {uiText(upload?.kind === "snapshot" ? "新建在线备份" : "上传加密归档")}
+              </DialogTitle>
             </DialogHeader>
             <div role="status" className="rounded-md border p-3 text-sm">
-              {uiText("仅上传已发布的归档，不会生成新的整站快照")}
+              {uiText(
+                upload?.kind === "snapshot"
+                  ? "后台不停服采集 SQLite、邮件、附件与 DKIM，加密后上传；未索引邮件隔离保存，不是生产覆盖恢复"
+                  : "仅上传已发布的归档，不会生成新的整站快照"
+              )}
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="backup-artifact">{uiText("选择加密归档")}</Label>
-              <Select value={artifactId} onValueChange={setArtifactId} disabled={pending}>
-                <SelectTrigger id="backup-artifact">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent data-lanqin-i18n-ignore>
-                  {artifacts.data?.items.map((item) => (
-                    <SelectItem key={item.id} value={item.id}>
-                      {formatDateTime(item.publishedAt)} · {formatBytes(item.bytes)} ·{" "}
-                      {item.id.slice(-8)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {upload?.kind === "snapshot" && (
+              <div className="space-y-2">
+                <Label>{uiText("加密公钥")}</Label>
+                <div className="break-all rounded-md border p-3 font-mono text-xs">
+                  {upload.recipient}
+                </div>
+              </div>
+            )}
+            {upload?.kind === "upload" && (
+              <div className="space-y-2">
+                <Label htmlFor="backup-artifact">{uiText("选择加密归档")}</Label>
+                <Select value={artifactId} onValueChange={setArtifactId} disabled={pending}>
+                  <SelectTrigger id="backup-artifact">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent data-lanqin-i18n-ignore>
+                    {artifacts.data?.items.map((item) => (
+                      <SelectItem key={item.id} value={item.id}>
+                        {formatDateTime(item.publishedAt)} · {formatBytes(item.bytes)} ·{" "}
+                        {item.id.slice(-8)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-3">
               <div className="text-sm font-medium">{uiText("选择上传地点（最多 16 个）")}</div>
               {destinations
@@ -383,8 +499,22 @@ export function BackupUploadPanel({
               >
                 {uiText("取消")}
               </Button>
-              <Button type="submit" disabled={pending || !artifactId || !targetIds.length}>
-                {uiText(pending ? "处理中..." : "加入上传队列")}
+              <Button
+                type="submit"
+                disabled={
+                  pending ||
+                  (upload?.kind === "upload" && !artifactId) ||
+                  !targetIds.length ||
+                  (upload?.kind === "snapshot" && !capabilities.data?.onlineBackupAvailable)
+                }
+              >
+                {uiText(
+                  pending
+                    ? "处理中..."
+                    : upload?.kind === "snapshot"
+                      ? "创建备份任务"
+                      : "加入上传队列"
+                )}
               </Button>
             </DialogFooter>
           </form>
@@ -405,7 +535,9 @@ export function BackupUploadPanel({
           data-lanqin-i18n-ignore
         >
           <DialogHeader>
-            <DialogTitle>{uiText("上传任务")}</DialogTitle>
+            <DialogTitle>
+              {uiText(detail.data?.kind === "snapshot" ? "备份任务" : "上传任务")}
+            </DialogTitle>
           </DialogHeader>
           {detail.isPending && <div role="status">{uiText("加载中...")}</div>}
           {detail.isError && (
@@ -415,19 +547,46 @@ export function BackupUploadPanel({
           )}
           {detail.data && (
             <div className="min-w-0 space-y-4">
-              <Badge variant="secondary">{statusText(detail.data.status)}</Badge>
+              <Badge variant="secondary">{jobStatusText(detail.data)}</Badge>
               <div className="space-y-1">
                 <Label>{uiText("任务 ID")}</Label>
                 <div className="break-all font-mono text-xs">{detail.data.id}</div>
               </div>
-              <div className="space-y-1">
-                <Label>{uiText("归档 SHA-256")}</Label>
-                <div className="break-all font-mono text-xs">{detail.data.artifact.sha256}</div>
-              </div>
-              <div className="space-y-1">
-                <Label>{uiText("归档发布时间")}</Label>
-                <div className="text-sm">{formatDateTime(detail.data.artifact.publishedAt)}</div>
-              </div>
+              {detail.data.artifact.sha256 && (
+                <div className="space-y-1">
+                  <Label>{uiText("归档 SHA-256")}</Label>
+                  <div className="break-all font-mono text-xs">{detail.data.artifact.sha256}</div>
+                </div>
+              )}
+              {detail.data.artifact.id && (
+                <div className="space-y-1">
+                  <Label>{uiText("归档发布时间")}</Label>
+                  <div className="text-sm">{formatDateTime(detail.data.artifact.publishedAt)}</div>
+                </div>
+              )}
+              {detail.data.recipient && (
+                <div className="space-y-1">
+                  <Label>{uiText("加密公钥")}</Label>
+                  <div className="break-all font-mono text-xs">{detail.data.recipient}</div>
+                </div>
+              )}
+              {detail.data.summary && (
+                <div className="space-y-2 rounded-md border p-3 text-sm">
+                  <div>
+                    {uiText("已采集邮件 {0} 封、草稿 {1} 封、附件 {2} 个", [
+                      detail.data.summary.messages,
+                      detail.data.summary.drafts,
+                      detail.data.summary.attachments,
+                    ])}
+                  </div>
+                  <div>
+                    {uiText("未索引候选 {0} 封（隔离保存）；外部缓存记录 {1} 条", [
+                      detail.data.summary.unindexed,
+                      detail.data.summary.externalCachedMessagesOnly,
+                    ])}
+                  </div>
+                </div>
+              )}
               {detail.data.errorCode && (
                 <div role="status" className="text-sm text-muted-foreground">
                   {resultError(detail.data.errorCode)}
@@ -440,7 +599,7 @@ export function BackupUploadPanel({
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="break-words font-medium">{location.name}</span>
                       <Badge variant="outline">
-                        {result ? statusText(result.state) : statusText(detail.data?.status || "")}
+                        {result ? statusText(result.state) : jobStatusText(detail.data!)}
                       </Badge>
                     </div>
                     <div className="break-all text-xs text-muted-foreground">
@@ -498,7 +657,13 @@ export function BackupUploadPanel({
                   if (detail.data) void cancelJob(detail.data)
                 }}
               >
-                {uiText(detail.data.cancelRequested ? "正在取消..." : "取消上传")}
+                {uiText(
+                  detail.data.cancelRequested
+                    ? "正在取消..."
+                    : detail.data.kind === "snapshot"
+                      ? "取消备份"
+                      : "取消上传"
+                )}
               </Button>
             )}
           </DialogFooter>

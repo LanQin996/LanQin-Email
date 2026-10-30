@@ -515,6 +515,20 @@ export const api = {
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   backupDestinations: () => request<BackupDestinationList>("/api/admin/backups/destinations"),
+  backupCapabilities: () =>
+    request<{ onlineBackupAvailable: boolean; recipient?: string; reason?: string }>(
+      "/api/admin/backups/capabilities"
+    ),
+  createBackupSnapshot: (payload: {
+    destinationIds: string[]
+    requestId: string
+    destinationsRevision: string
+    expectedRecipient: string
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/snapshots", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   backupArtifacts: () =>
     request<{ available: boolean; items: BackupArtifact[]; maxBytes: number }>(
       "/api/admin/backups/artifacts"

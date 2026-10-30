@@ -1,4 +1,78 @@
 {
+  "私有暂存清理失败，请联系管理员检查": {
+    "en": "Private staging cleanup failed; ask the administrator to investigate",
+    "zh-TW": "私有暫存清理失敗，請聯絡管理員檢查"
+  },
+  "加密归档发布失败，未开始上传": {
+    "en": "Encrypted archive publication failed; upload did not start",
+    "zh-TW": "加密封存檔發布失敗，未開始上傳"
+  },
+  "请先启用至少一个备份地点": {
+    "en": "Enable at least one backup destination first",
+    "zh-TW": "請先啟用至少一個備份地點"
+  },
+  "在线备份暂不可用，请检查服务器配置": {
+    "en": "Online backup is unavailable; check server configuration",
+    "zh-TW": "線上備份暫時無法使用，請檢查伺服器設定"
+  },
+  "正在采集数据": { "en": "Collecting data", "zh-TW": "正在採集資料" },
+  "正在加密归档": { "en": "Encrypting archive", "zh-TW": "正在加密封存檔" },
+  "正在执行备份": { "en": "Running backup", "zh-TW": "正在執行備份" },
+  "备份完成": { "en": "Backup completed", "zh-TW": "備份完成" },
+  "备份失败": { "en": "Backup failed", "zh-TW": "備份失敗" },
+  "在线备份目前仅支持 SQLite": {
+    "en": "Online backup currently supports SQLite only",
+    "zh-TW": "線上備份目前僅支援 SQLite"
+  },
+  "私有备份工作区不可用，请联系管理员检查配置": {
+    "en": "The private backup workspace is unavailable; ask the administrator to check configuration",
+    "zh-TW": "私有備份工作區無法使用，請聯絡管理員檢查設定"
+  },
+  "请先在服务器配置备份公钥、私有工作区和归档目录": {
+    "en": "Configure the backup public key, private workspace and artifact directory on the server first",
+    "zh-TW": "請先在伺服器設定備份公鑰、私有工作區與封存檔目錄"
+  },
+  "数据采集未完成，未生成可上传归档": {
+    "en": "Data collection did not complete; no uploadable archive was created",
+    "zh-TW": "資料採集未完成，未產生可上傳封存檔"
+  },
+  "归档加密未完成，请检查服务器备份配置": {
+    "en": "Archive encryption did not complete; check server backup configuration",
+    "zh-TW": "封存檔加密未完成，請檢查伺服器備份設定"
+  },
+  "备份配置已变化，请重新创建任务": {
+    "en": "Backup configuration changed; create a new task",
+    "zh-TW": "備份設定已變更，請重新建立任務"
+  },
+  "请选择 1 到 16 个备份地点": {
+    "en": "Select 1 to 16 backup destinations",
+    "zh-TW": "請選擇 1 到 16 個備份地點"
+  },
+  "备份与上传任务": { "en": "Backup and upload tasks", "zh-TW": "備份與上傳任務" },
+  "新建备份": { "en": "New backup", "zh-TW": "新增備份" },
+  "在线备份": { "en": "Online backup", "zh-TW": "線上備份" },
+  "归档上传": { "en": "Archive upload", "zh-TW": "封存檔上傳" },
+  "新建在线备份": { "en": "Create online backup", "zh-TW": "新增線上備份" },
+  "后台不停服采集 SQLite、邮件、附件与 DKIM，加密后上传；未索引邮件隔离保存，不是生产覆盖恢复": {
+    "en": "Collect SQLite, mail, attachments and DKIM without stopping services, then encrypt and upload; unindexed mail stays quarantined. This is not an in-place production restore",
+    "zh-TW": "後台不停服採集 SQLite、郵件、附件與 DKIM，加密後上傳；未索引郵件隔離儲存，不是生產覆蓋還原"
+  },
+  "加密公钥": { "en": "Encryption public key", "zh-TW": "加密公鑰" },
+  "创建备份任务": { "en": "Create backup task", "zh-TW": "建立備份任務" },
+  "备份任务": { "en": "Backup task", "zh-TW": "備份任務" },
+  "已采集邮件 {0} 封、草稿 {1} 封、附件 {2} 个": {
+    "en": "Collected mail: {0}; drafts: {1}; attachments: {2}",
+    "zh-TW": "已採集郵件 {0} 封、草稿 {1} 封、附件 {2} 個"
+  },
+  "未索引候选 {0} 封（隔离保存）；外部缓存记录 {1} 条": {
+    "en": "Unindexed candidates: {0} (quarantined); external cached records: {1}",
+    "zh-TW": "未索引候選 {0} 封（隔離儲存）；外部快取記錄 {1} 筆"
+  },
+  "取消备份": { "en": "Cancel backup", "zh-TW": "取消備份" },
+  "可新建不停服在线备份或上传已有归档；生产覆盖恢复尚未接入": {
+    "en": "Create online backups without stopping services or upload existing archives; production overwrite recovery is not connected",
+    "zh-TW": "可新增不停服線上備份或上傳既有封存檔；生產覆蓋還原尚未接入"
+  },
   "备份地点": { "zh-TW": "備份地點", "en": "Backup destinations" },
   "最近成功上传": { "zh-TW": "最近成功上傳", "en": "Last successful upload" },
   "暂无成功记录": { "zh-TW": "暫無成功紀錄", "en": "No successful uploads yet" },

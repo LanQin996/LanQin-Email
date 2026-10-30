@@ -20,7 +20,16 @@ import (
 // this call are removed; callers must never publish an incomplete staging tree.
 // The private keys are never returned or included in errors.
 func CollectDKIM(ctx context.Context, snapshot string, output *os.Root, maxKeys int) (int, error) {
-	if output == nil || maxKeys < 1 || maxKeys > 100000 {
+	if maxKeys < 1 || maxKeys > 100000 {
+		return 0, errors.New("invalid DKIM collection limits")
+	}
+	return CollectDKIMLimited(ctx, snapshot, output, maxKeys, int64(maxKeys)*32768)
+}
+
+// CollectDKIMLimited also bounds plaintext key bytes as part of a whole-snapshot
+// budget. Callers may pass zero keys/bytes only when there are no active keys.
+func CollectDKIMLimited(ctx context.Context, snapshot string, output *os.Root, maxKeys int, maxBytes int64) (int, error) {
+	if output == nil || maxKeys < 0 || maxKeys > 100000 || maxBytes < 0 {
 		return 0, errors.New("invalid DKIM collection limits")
 	}
 	info, err := os.Lstat(snapshot)
@@ -83,6 +92,10 @@ func CollectDKIM(ctx context.Context, snapshot string, output *os.Root, maxKeys 
 		if err != nil {
 			return 0, err
 		}
+		if int64(len(key)) > maxBytes {
+			return 0, errors.New("DKIM snapshot exceeds byte limit")
+		}
+		maxBytes -= int64(len(key))
 		file, err := output.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
 			return 0, errors.New("cannot create DKIM snapshot without replacement")

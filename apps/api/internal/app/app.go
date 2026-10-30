@@ -23,29 +23,30 @@ import (
 )
 
 type App struct {
-	collectionMu       sync.Mutex
-	cfg                Config
-	db                 *sql.DB
-	log                *slog.Logger
-	now                func() time.Time
-	policy             *HTMLPolicy
-	workerCancel       context.CancelFunc
-	workerWG           sync.WaitGroup
-	health             *appHealthState
-	maildirHealth      *maildirSyncHealthTracker
-	maildirSyncMu      sync.Mutex
-	maildirDirs        map[string]maildirDirectorySignature
-	maildirRuns        uint64
-	syncEventsMu       sync.Mutex
-	syncEventClients   map[chan struct{}]string
-	sseConnections     map[string]int
-	externalIMAP       externalIMAPClientFactory
-	linuxDoOAuth       linuxDoOAuthClient
-	telegramAPIBaseURL string
-	messageSearchFTS   bool
-	workerID           string
-	backupWake         chan struct{}
-	backupUploadFile   func(context.Context, *os.File, string, storage.Config, storage.Options, func(string) (storage.Credentials, error)) (storage.Report, error)
+	collectionMu          sync.Mutex
+	cfg                   Config
+	db                    *sql.DB
+	log                   *slog.Logger
+	now                   func() time.Time
+	policy                *HTMLPolicy
+	workerCancel          context.CancelFunc
+	workerWG              sync.WaitGroup
+	health                *appHealthState
+	maildirHealth         *maildirSyncHealthTracker
+	maildirSyncMu         sync.Mutex
+	maildirDirs           map[string]maildirDirectorySignature
+	maildirRuns           uint64
+	syncEventsMu          sync.Mutex
+	syncEventClients      map[chan struct{}]string
+	sseConnections        map[string]int
+	externalIMAP          externalIMAPClientFactory
+	linuxDoOAuth          linuxDoOAuthClient
+	telegramAPIBaseURL    string
+	messageSearchFTS      bool
+	workerID              string
+	backupWake            chan struct{}
+	backupPrepareSnapshot func(context.Context, Config, string, OnlineBackupOptions) (*PreparedOnlineBackup, error)
+	backupUploadFile      func(context.Context, *os.File, string, storage.Config, storage.Options, func(string) (storage.Credentials, error)) (storage.Report, error)
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -79,6 +80,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	a.externalIMAP = a
 	a.backupWake = make(chan struct{}, 1)
 	a.backupUploadFile = storage.UploadFile
+	a.backupPrepareSnapshot = PrepareOnlineBackup
 	a.linuxDoOAuth = newLinuxDoHTTPClient()
 	if cfg.DBDriver == databaseDriverSQLite {
 		if err := a.configureSQLite(context.Background()); err != nil {

@@ -37,19 +37,23 @@ type backupTarget struct {
 }
 
 type backupJob struct {
-	Version            int              `json:"version"`
-	ID                 string           `json:"id"`
-	Artifact           catalog.Entry    `json:"artifact"`
-	Status             string           `json:"status"`
-	CreatedAt          time.Time        `json:"createdAt"`
-	StartedAt          *time.Time       `json:"startedAt,omitempty"`
-	CompletedAt        *time.Time       `json:"completedAt,omitempty"`
-	Targets            []backupTarget   `json:"targets"`
-	Results            []storage.Result `json:"results"`
-	CancelRequested    bool             `json:"cancelRequested"`
-	ErrorCode          string           `json:"errorCode,omitempty"`
-	RequestFingerprint string           `json:"requestFingerprint,omitempty"`
-	WorkerToken        string           `json:"workerToken,omitempty"`
+	Kind               string               `json:"kind,omitempty"`
+	Phase              string               `json:"phase,omitempty"`
+	Recipient          string               `json:"recipient,omitempty"`
+	Summary            *OnlineBackupSummary `json:"summary,omitempty"`
+	Version            int                  `json:"version"`
+	ID                 string               `json:"id"`
+	Artifact           catalog.Entry        `json:"artifact"`
+	Status             string               `json:"status"`
+	CreatedAt          time.Time            `json:"createdAt"`
+	StartedAt          *time.Time           `json:"startedAt,omitempty"`
+	CompletedAt        *time.Time           `json:"completedAt,omitempty"`
+	Targets            []backupTarget       `json:"targets"`
+	Results            []storage.Result     `json:"results"`
+	CancelRequested    bool                 `json:"cancelRequested"`
+	ErrorCode          string               `json:"errorCode,omitempty"`
+	RequestFingerprint string               `json:"requestFingerprint,omitempty"`
+	WorkerToken        string               `json:"workerToken,omitempty"`
 }
 
 type backupLease struct {
@@ -69,17 +73,21 @@ type backupRegistry struct {
 
 // Explicit DTOs ensure private fingerprints and fencing tokens never escape.
 type backupJobView struct {
-	ID               string              `json:"id"`
-	Artifact         catalog.Entry       `json:"artifact"`
-	Status           string              `json:"status"`
-	CreatedAt        time.Time           `json:"createdAt"`
-	StartedAt        *time.Time          `json:"startedAt,omitempty"`
-	CompletedAt      *time.Time          `json:"completedAt,omitempty"`
-	DestinationNames []string            `json:"destinationNames"`
-	Locations        []backupJobLocation `json:"locations"`
-	Results          []storage.Result    `json:"results"`
-	CancelRequested  bool                `json:"cancelRequested"`
-	ErrorCode        string              `json:"errorCode,omitempty"`
+	Kind             string               `json:"kind"`
+	Phase            string               `json:"phase"`
+	Recipient        string               `json:"recipient,omitempty"`
+	Summary          *OnlineBackupSummary `json:"summary,omitempty"`
+	ID               string               `json:"id"`
+	Artifact         catalog.Entry        `json:"artifact"`
+	Status           string               `json:"status"`
+	CreatedAt        time.Time            `json:"createdAt"`
+	StartedAt        *time.Time           `json:"startedAt,omitempty"`
+	CompletedAt      *time.Time           `json:"completedAt,omitempty"`
+	DestinationNames []string             `json:"destinationNames"`
+	Locations        []backupJobLocation  `json:"locations"`
+	Results          []storage.Result     `json:"results"`
+	CancelRequested  bool                 `json:"cancelRequested"`
+	ErrorCode        string               `json:"errorCode,omitempty"`
 }
 
 type backupJobLocation struct {
@@ -109,7 +117,43 @@ func backupJobResponse(job backupJob) backupJobView {
 		}
 		locations = append(locations, location)
 	}
-	return backupJobView{ID: job.ID, Artifact: job.Artifact, Status: job.Status, CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, DestinationNames: names, Locations: locations, Results: job.Results, CancelRequested: job.CancelRequested, ErrorCode: job.ErrorCode}
+	kind, phase := backupJobKind(job), job.Phase
+	if phase == "" {
+		phase = "completed"
+		if job.Status == "queued" {
+			phase = "queued"
+		}
+		if job.Status == "running" {
+			phase = "uploading"
+		}
+	}
+	return backupJobView{Kind: kind, Phase: phase, Recipient: job.Recipient, Summary: job.Summary, ID: job.ID, Artifact: job.Artifact, Status: job.Status, CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, DestinationNames: names, Locations: locations, Results: job.Results, CancelRequested: job.CancelRequested, ErrorCode: job.ErrorCode}
+}
+
+func backupJobKind(job backupJob) string {
+	if job.Kind == "" {
+		return "upload"
+	}
+	return job.Kind
+}
+
+func validBackupJob(job backupJob) bool {
+	if job.Version != 1 || !backupJobIDPattern.MatchString(job.ID) || len(job.Targets) > 16 {
+		return false
+	}
+	switch job.Phase {
+	case "", "queued", "collecting", "encrypting", "uploading", "completed":
+	default:
+		return false
+	}
+	switch backupJobKind(job) {
+	case "upload":
+		return catalog.ValidID(job.Artifact.ID) && (job.Phase == "" || job.Phase == "queued" || job.Phase == "uploading" || job.Phase == "completed")
+	case "snapshot":
+		return job.Recipient != "" && (catalog.ValidID(job.Artifact.ID) || job.Artifact.ID == "" && job.Phase != "uploading")
+	default:
+		return false
+	}
 }
 
 func (a *App) backupMasterKey() ([]byte, error) {
@@ -203,7 +247,7 @@ func (a *App) backupReadJob(ctx context.Context, id string) (backupJob, string, 
 	if err != nil {
 		return job, "", err
 	}
-	if job.Version != 1 || job.ID != id || len(job.Targets) > 16 || !catalog.ValidID(job.Artifact.ID) {
+	if job.ID != id || !validBackupJob(job) {
 		return job, "", errBackupInvalid
 	}
 	return job, raw, nil
@@ -245,11 +289,19 @@ func backupTargetFingerprint(record backupDestinationRecord) string {
 }
 
 func (a *App) enqueueBackupUpload(ctx context.Context, actorID, requestID, artifactID string, ids []string, expectedRevision ...string) (backupJob, error) {
+	return a.enqueueBackupJob(ctx, actorID, requestID, artifactID, ids, "upload", "", expectedRevision...)
+}
+
+func (a *App) enqueueBackupSnapshot(ctx context.Context, actorID, requestID string, ids []string, revision, expectedRecipient string) (backupJob, error) {
+	return a.enqueueBackupJob(ctx, actorID, requestID, "", ids, "snapshot", expectedRecipient, revision)
+}
+
+func (a *App) enqueueBackupJob(ctx context.Context, actorID, requestID, artifactID string, ids []string, kind, expectedRecipient string, expectedRevision ...string) (backupJob, error) {
 	var empty backupJob
 	if a.cfg.BackupArtifactDir == "" {
 		return empty, errBackupExecution
 	}
-	if !backupRequestPattern.MatchString(requestID) || !catalog.ValidID(artifactID) || len(ids) < 1 || len(ids) > 16 {
+	if (kind != "upload" && kind != "snapshot") || !backupRequestPattern.MatchString(requestID) || kind == "upload" && !catalog.ValidID(artifactID) || kind == "snapshot" && expectedRecipient == "" || len(ids) < 1 || len(ids) > 16 {
 		return empty, errBackupInvalid
 	}
 	ids = append([]string(nil), ids...)
@@ -261,7 +313,11 @@ func (a *App) enqueueBackupUpload(ctx context.Context, actorID, requestID, artif
 	}
 	identity := sha256.Sum256([]byte(actorID + "\x00" + requestID))
 	id := "bkj_" + hex.EncodeToString(identity[:16])
-	fingerprint := sha256.Sum256([]byte(artifactID + "\x00" + strings.Join(ids, "\x00")))
+	fingerprintInput := artifactID + "\x00" + strings.Join(ids, "\x00")
+	if kind == "snapshot" {
+		fingerprintInput = "snapshot\x00" + expectedRecipient + "\x00" + fingerprintInput
+	}
+	fingerprint := sha256.Sum256([]byte(fingerprintInput))
 	requestFingerprint := hex.EncodeToString(fingerprint[:])
 	if existing, _, err := a.backupReadJob(ctx, id); err == nil {
 		if existing.RequestFingerprint != requestFingerprint {
@@ -278,15 +334,28 @@ func (a *App) enqueueBackupUpload(ctx context.Context, actorID, requestID, artif
 	if len(registry.Pending) >= 16 {
 		return empty, errBackupQueue
 	}
-	key, err := a.backupMasterKey()
-	if err != nil {
-		return empty, err
+	var entry catalog.Entry
+	recipient := ""
+	if kind == "snapshot" {
+		recipient, err = a.backupCaptureConfiguration()
+		if err != nil {
+			return empty, err
+		}
+		if recipient != expectedRecipient {
+			return empty, errBackupConflict
+		}
+	} else {
+		key, err := a.backupMasterKey()
+		if err != nil {
+			return empty, err
+		}
+		file, opened, err := catalog.Open(a.cfg.BackupArtifactDir, artifactID, key, backupMaxBytes)
+		if err != nil {
+			return empty, errBackupExecution
+		}
+		file.Close()
+		entry = opened
 	}
-	file, entry, err := catalog.Open(a.cfg.BackupArtifactDir, artifactID, key, backupMaxBytes)
-	if err != nil {
-		return empty, errBackupExecution
-	}
-	file.Close()
 	vault, vaultRaw, err := a.loadBackupDestinationState(ctx)
 	if err != nil {
 		return empty, err
@@ -298,7 +367,7 @@ func (a *App) enqueueBackupUpload(ctx context.Context, actorID, requestID, artif
 	for _, record := range vault.Items {
 		byID[record.Config.ID] = record
 	}
-	job := backupJob{Version: 1, ID: id, Artifact: entry, Status: "queued", CreatedAt: a.now().UTC(), Targets: []backupTarget{}, Results: []storage.Result{}, RequestFingerprint: requestFingerprint}
+	job := backupJob{Kind: kind, Phase: "queued", Recipient: recipient, Version: 1, ID: id, Artifact: entry, Status: "queued", CreatedAt: a.now().UTC(), Targets: []backupTarget{}, Results: []storage.Result{}, RequestFingerprint: requestFingerprint}
 	for _, id := range ids {
 		record, ok := byID[id]
 		if !ok || record.Config.Disabled {
@@ -354,6 +423,7 @@ func (a *App) claimBackupUpload(ctx context.Context) (*backupLease, error) {
 		}
 		now := a.now().UTC()
 		job.Status, job.ErrorCode, job.CompletedAt, job.WorkerToken = "interrupted", "lease_expired", &now, ""
+		job.Phase = "completed"
 		registry.Active = nil
 		tx, err := a.db.BeginTx(ctx, nil)
 		if err != nil {
@@ -381,6 +451,10 @@ func (a *App) claimBackupUpload(ctx context.Context) (*backupLease, error) {
 	now := a.now().UTC()
 	lease := &backupLease{ID: job.ID, Token: newID("bkl"), Until: now.Add(backupLeaseTTL)}
 	job.Status, job.StartedAt, job.WorkerToken = "running", &now, lease.Token
+	job.Phase = "uploading"
+	if backupJobKind(job) == "snapshot" {
+		job.Phase = "collecting"
+	}
 	registry.Pending, registry.Active = registry.Pending[1:], lease
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -421,6 +495,7 @@ func (a *App) cancelBackupUpload(ctx context.Context, id string) error {
 		if job.Status == "queued" {
 			now := a.now().UTC()
 			job.Status, job.CompletedAt = "cancelled", &now
+			job.Phase = "completed"
 			pending := []string{}
 			for _, v := range registry.Pending {
 				if v != id {

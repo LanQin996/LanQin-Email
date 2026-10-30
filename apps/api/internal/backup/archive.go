@@ -1,15 +1,17 @@
-// Package backup implements an offline data-snapshot format, not live-service
+// Package backup implements prepared data-snapshot formats, not live-service
 // orchestration or in-place disaster recovery. Never point it at running services.
 package backup
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"hash"
 	"io"
 	"io/fs"
 	"net/url"
@@ -24,7 +26,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const manifestName = "lanqin-backup.json"
+const (
+	manifestName         = "lanqin-backup.json"
+	onlineMarkerName     = "data/backup-online.json"
+	maxOnlineMarkerBytes = 64 << 20
+)
 
 type Limits struct {
 	MaxBytes   int64
@@ -83,7 +89,7 @@ func checkSnapshot(ctx context.Context, root *os.Root) error {
 	if err != nil || !info.Mode().IsRegular() {
 		return errors.New("snapshot requires a regular SQLite data/lanqin.db")
 	}
-	// Read-only immutable mode is appropriate only for a prepared offline copy.
+	// Read-only immutable mode is appropriate only for a prepared closed copy.
 	// Its use here is NOT evidence that the operator stopped the original writers.
 	databasePath, err := filepath.Abs(filepath.Join(root.Name(), "data", "lanqin.db"))
 	if err != nil {
@@ -115,6 +121,19 @@ func checkSnapshot(ctx context.Context, root *os.Root) error {
 // Write encrypts a caller-prepared offline SQLite data snapshot. The recipient
 // must be an age X25519 public key. Callers must discard incomplete output.
 func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits) (Manifest, error) {
+	return writeSnapshot(ctx, snapshot, dst, recipient, limits, "offline-data")
+}
+
+// WriteOnline encrypts a caller-prepared online SQLite reference-closure copy.
+// The completion marker is a collector contract, NOT proof of stopped writers,
+// an atomic whole-site snapshot or the sender's identity. Unindexed mail stays
+// under data/backup-unindexed; neither this function nor Restore promotes it.
+// Older readers that only understand offline-data correctly reject this scope.
+func WriteOnline(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits) (Manifest, error) {
+	return writeSnapshot(ctx, snapshot, dst, recipient, limits, "online-data")
+}
+
+func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits, scope string) (Manifest, error) {
 	var empty Manifest
 	if !limits.valid() {
 		return empty, errors.New("backup limits must be positive")
@@ -131,12 +150,19 @@ func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string
 	if err := checkSnapshot(ctx, root); err != nil {
 		return empty, err
 	}
+	var markerDigest [sha256.Size]byte
+	if scope == "online-data" {
+		markerDigest, err = checkOnlineMarker(ctx, root, limits.MaxBytes)
+		if err != nil {
+			return empty, err
+		}
+	}
 	encrypted, err := age.Encrypt(dst, key)
 	if err != nil {
 		return empty, errors.New("cannot initialize backup encryption")
 	}
 	archive := tar.NewWriter(encrypted)
-	manifest := Manifest{Version: 1, Scope: "offline-data", Driver: "sqlite", Created: time.Now().UTC()}
+	manifest := Manifest{Version: 1, Scope: scope, Driver: "sqlite", Created: time.Now().UTC()}
 	metadata, err := json.Marshal(manifest)
 	if err != nil {
 		return empty, err
@@ -148,6 +174,7 @@ func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string
 		return empty, err
 	}
 	remaining, entries := limits.MaxBytes, 0
+	markerArchived := scope != "online-data"
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return errors.New("cannot enumerate snapshot")
@@ -169,6 +196,9 @@ func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string
 		if info.Size() < 0 || (!info.IsDir() && info.Size() > remaining) {
 			return errors.New("snapshot exceeds size limit")
 		}
+		if scope == "online-data" && name == onlineMarkerName && info.Size() > maxOnlineMarkerBytes {
+			return errors.New("online completion marker exceeds limit")
+		}
 		header, err := tar.FileInfoHeader(info, "")
 		if err != nil {
 			return err
@@ -189,8 +219,22 @@ func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string
 		if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) {
 			return errors.New("snapshot changed during export")
 		}
-		if _, err := io.CopyN(archive, contextReader{ctx, file}, info.Size()); err != nil {
+		var actualMarker hash.Hash
+		var target io.Writer = archive
+		if scope == "online-data" && name == onlineMarkerName {
+			// Bind the preflight check to the marker bytes actually archived,
+			// rather than rechecking a potentially different file afterward.
+			actualMarker = sha256.New()
+			target = io.MultiWriter(archive, actualMarker)
+		}
+		if _, err := io.CopyN(target, contextReader{ctx, file}, info.Size()); err != nil {
 			return err
+		}
+		if actualMarker != nil {
+			if !bytes.Equal(actualMarker.Sum(nil), markerDigest[:]) {
+				return errors.New("online completion marker changed during export")
+			}
+			markerArchived = true
 		}
 		final, err := file.Stat()
 		if err != nil || final.Size() != info.Size() || !final.ModTime().Equal(info.ModTime()) {
@@ -201,6 +245,9 @@ func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string
 	})
 	if err != nil {
 		return empty, err
+	}
+	if !markerArchived {
+		return empty, errors.New("online completion marker disappeared during export")
 	}
 	if err := archive.Close(); err != nil {
 		return empty, err
@@ -246,7 +293,7 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	}
 	decoder := json.NewDecoder(archive)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil || manifest.Version != 1 || manifest.Scope != "offline-data" || manifest.Driver != "sqlite" || manifest.Created.IsZero() {
+	if err := decoder.Decode(&manifest); err != nil || manifest.Version != 1 || (manifest.Scope != "offline-data" && manifest.Scope != "online-data") || manifest.Driver != "sqlite" || manifest.Created.IsZero() {
 		return manifest, errors.New("unsupported backup manifest")
 	}
 	var extra any
@@ -282,6 +329,9 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 		name := strings.TrimSuffix(header.Name, "/")
 		if entries >= limits.MaxEntries || !allowed(name) || seen[name] || header.Size < 0 || header.Size > remaining {
 			return manifest, errors.New("invalid backup path, duplicate entry, or resource limit exceeded")
+		}
+		if manifest.Scope == "online-data" && name == onlineMarkerName && header.Size > maxOnlineMarkerBytes {
+			return manifest, errors.New("online completion marker exceeds limit")
 		}
 		seen[name] = true
 		switch header.Typeflag {
@@ -326,6 +376,11 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	if err := checkSnapshot(ctx, stage); err != nil {
 		return manifest, err
 	}
+	if manifest.Scope == "online-data" {
+		if _, err := checkOnlineMarker(ctx, stage, limits.MaxBytes); err != nil {
+			return manifest, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return manifest, err
 	}
@@ -335,8 +390,70 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	if err := root.Rename(".partial", "snapshot"); err != nil {
 		return manifest, err
 	}
-	if err := root.WriteFile("READY", []byte("Verified offline data snapshot; NOT an in-place service restore.\n"), 0o600); err != nil {
+	ready := "Verified offline data snapshot; NOT an in-place service restore.\n"
+	if manifest.Scope == "online-data" {
+		ready = "Verified online-data archive staged; collector completion marker validated, NOT an in-place service restore. Unindexed mail remains quarantined; no automatic promotion.\n"
+	}
+	if err := root.WriteFile("READY", []byte(ready), 0o600); err != nil {
 		return manifest, err
 	}
 	return manifest, nil
+}
+
+// checkOnlineMarker only validates the versioned collector completion contract.
+// Its private source/summary fields are neither interpreted as trusted authority
+// nor returned in Manifest or errors. A separately trusted ciphertext receipt is
+// still required, and READY still means staging, never production activation.
+func checkOnlineMarker(ctx context.Context, root *os.Root, maxBytes int64) ([sha256.Size]byte, error) {
+	var empty [sha256.Size]byte
+	invalid := errors.New("online completion marker is missing or invalid")
+	parent, err := root.Lstat("data")
+	if err != nil || !parent.IsDir() || parent.Mode()&os.ModeSymlink != 0 {
+		return empty, invalid
+	}
+	info, err := root.Lstat(onlineMarkerName)
+	limit := min(maxBytes, int64(maxOnlineMarkerBytes))
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > limit {
+		return empty, invalid
+	}
+	file, err := root.Open(onlineMarkerName)
+	if err != nil {
+		return empty, invalid
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !opened.Mode().IsRegular() || !os.SameFile(info, opened) || opened.Size() != info.Size() {
+		return empty, invalid
+	}
+	data, err := io.ReadAll(io.LimitReader(contextReader{ctx, file}, limit+1))
+	if err != nil || int64(len(data)) != info.Size() || ctx.Err() != nil {
+		return empty, invalid
+	}
+	var marker struct {
+		Version  int             `json:"version"`
+		Scope    string          `json:"scope"`
+		Complete bool            `json:"complete"`
+		Summary  json.RawMessage `json:"summary"`
+		Sources  json.RawMessage `json:"sources"`
+		Files    json.RawMessage `json:"files"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	if decoder.Decode(&marker) != nil || marker.Version != 1 || marker.Scope != "sqlite-reference-closure" || !marker.Complete {
+		return empty, invalid
+	}
+	object := func(raw json.RawMessage, start byte) bool {
+		raw = bytes.TrimSpace(raw)
+		return len(raw) > 0 && raw[0] == start
+	}
+	if !object(marker.Summary, '{') || !object(marker.Sources, '{') || !object(marker.Files, '[') {
+		return empty, invalid
+	}
+	if decoder.Decode(new(any)) != io.EOF {
+		return empty, invalid
+	}
+	final, err := file.Stat()
+	if err != nil || final.Size() != info.Size() || !final.ModTime().Equal(info.ModTime()) {
+		return empty, invalid
+	}
+	return sha256.Sum256(data), nil
 }

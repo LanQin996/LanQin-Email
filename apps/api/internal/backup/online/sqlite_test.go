@@ -69,7 +69,7 @@ func TestSQLiteOnlineSnapshotAllowsConcurrentAtomicWriter(t *testing.T) {
 	}
 	defer copy.Close()
 	var lo, hi int
-	if err := copy.QueryRow("SELECT min(generation),max(generation) FROM state").Scan(&lo, &hi); err != nil || lo != hi || lo != 3 {
+	if err := copy.QueryRow("SELECT min(generation),max(generation) FROM state").Scan(&lo, &hi); err != nil || lo != hi || lo != 0 {
 		t.Fatalf("export tore an atomic transaction: %d %d %v", lo, hi, err)
 	}
 	for _, suffix := range []string{"-wal", "-shm", "-journal"} {
@@ -80,6 +80,34 @@ func TestSQLiteOnlineSnapshotAllowsConcurrentAtomicWriter(t *testing.T) {
 	var mode string
 	if err := writer.QueryRowContext(t.Context(), "PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
 		t.Fatal("export changed source journal mode", mode, err)
+	}
+}
+
+func TestSQLiteOnlineSnapshotDoesNotRestartForContinuousWriters(t *testing.T) {
+	db, source := liveSQLite(t)
+	writes := 0
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	copyPath := filepath.Join(t.TempDir(), "copy.db")
+	err := snapshotSQLite(ctx, source, copyPath, 8<<20, func() {
+		if _, err := db.ExecContext(ctx, "UPDATE state SET generation=generation+1"); err != nil {
+			t.Error(err)
+			return
+		}
+		writes++
+	})
+	if err != nil || writes < 2 || writes > 32 {
+		t.Fatal("normal writer/heartbeat starved incremental export", writes, err)
+	}
+	uri, _ := sqliteURI(copyPath, "mode=ro&immutable=1")
+	copy, err := sql.Open("sqlite", uri)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copy.Close()
+	var generation int
+	if err := copy.QueryRow("SELECT generation FROM state WHERE id=1").Scan(&generation); err != nil || generation != 0 {
+		t.Fatal("read snapshot was not pinned", generation, err)
 	}
 }
 

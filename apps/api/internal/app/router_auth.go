@@ -206,6 +206,8 @@ func (a *App) Router() http.Handler {
 			r.With(a.requireSuperAdmin).Post("/admin/backups/destinations/{id}", a.handleUpdateBackupDestination)
 			r.With(a.requireSuperAdmin).Delete("/admin/backups/destinations/{id}", a.handleDeleteBackupDestination)
 			r.With(a.requireSuperAdmin).Get("/admin/backups/artifacts", a.handleBackupArtifacts)
+			r.With(a.requireSuperAdmin).Get("/admin/backups/capabilities", a.handleBackupCapabilities)
+			r.With(a.requireSuperAdmin).Post("/admin/backups/snapshots", a.handleCreateBackupSnapshot)
 			r.With(a.requireSuperAdmin).Get("/admin/backups/jobs", a.handleListBackupUploads)
 			r.With(a.requireSuperAdmin).Post("/admin/backups/jobs", a.handleCreateBackupUpload)
 			r.With(a.requireSuperAdmin).Get("/admin/backups/jobs/{id}", a.handleGetBackupUpload)
