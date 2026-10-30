@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,30 +24,31 @@ import (
 )
 
 type App struct {
-	collectionMu          sync.Mutex
-	cfg                   Config
-	db                    *sql.DB
-	log                   *slog.Logger
-	now                   func() time.Time
-	policy                *HTMLPolicy
-	workerCancel          context.CancelFunc
-	workerWG              sync.WaitGroup
-	health                *appHealthState
-	maildirHealth         *maildirSyncHealthTracker
-	maildirSyncMu         sync.Mutex
-	maildirDirs           map[string]maildirDirectorySignature
-	maildirRuns           uint64
-	syncEventsMu          sync.Mutex
-	syncEventClients      map[chan struct{}]string
-	sseConnections        map[string]int
-	externalIMAP          externalIMAPClientFactory
-	linuxDoOAuth          linuxDoOAuthClient
-	telegramAPIBaseURL    string
-	messageSearchFTS      bool
-	workerID              string
-	backupWake            chan struct{}
-	backupPrepareSnapshot func(context.Context, Config, string, OnlineBackupOptions) (*PreparedOnlineBackup, error)
-	backupUploadFile      func(context.Context, *os.File, string, storage.Config, storage.Options, func(string) (storage.Credentials, error)) (storage.Report, error)
+	collectionMu           sync.Mutex
+	cfg                    Config
+	db                     *sql.DB
+	log                    *slog.Logger
+	now                    func() time.Time
+	policy                 *HTMLPolicy
+	workerCancel           context.CancelFunc
+	workerWG               sync.WaitGroup
+	health                 *appHealthState
+	maildirHealth          *maildirSyncHealthTracker
+	maildirSyncMu          sync.Mutex
+	maildirDirs            map[string]maildirDirectorySignature
+	maildirRuns            uint64
+	syncEventsMu           sync.Mutex
+	syncEventClients       map[chan struct{}]string
+	sseConnections         map[string]int
+	externalIMAP           externalIMAPClientFactory
+	linuxDoOAuth           linuxDoOAuthClient
+	telegramAPIBaseURL     string
+	messageSearchFTS       bool
+	workerID               string
+	backupWake             chan struct{}
+	backupDriveOAuthClient *http.Client
+	backupPrepareSnapshot  func(context.Context, Config, string, OnlineBackupOptions) (*PreparedOnlineBackup, error)
+	backupUploadFile       func(context.Context, *os.File, string, storage.Config, storage.Options, func(string) (storage.Credentials, error)) (storage.Report, error)
 }
 
 func New(cfg Config, logger *slog.Logger) (*App, error) {
@@ -54,6 +56,9 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		logger = slog.Default()
 	}
 	cfg = normalizeDatabaseConfig(cfg)
+	if err := checkRestoreActivation(cfg.DataDir); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(cfg.SiteTitle) == "" {
 		cfg.SiteTitle = "LanQin Email"
 	}
@@ -119,6 +124,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 	if a.cfg.BackupArtifactDir != "" {
 		if _, err := a.backupCipher(); err == nil {
 			a.startWorker(func() { a.backupUploadWorker(workerCtx) })
+			a.startWorker(func() { a.backupScheduleWorker(workerCtx) })
 		}
 	}
 	if strings.TrimSpace(a.cfg.StatusWebhookURL) != "" {

@@ -31,11 +31,16 @@ var (
 )
 
 type backupCredentials struct {
-	AccessKeyID     string `json:"accessKeyId,omitempty"`
-	SecretAccessKey string `json:"secretAccessKey,omitempty"`
-	SessionToken    string `json:"sessionToken,omitempty"`
-	Username        string `json:"username,omitempty"`
-	Password        string `json:"password,omitempty"`
+	AccessKeyID       string    `json:"accessKeyId,omitempty"`
+	SecretAccessKey   string    `json:"secretAccessKey,omitempty"`
+	SessionToken      string    `json:"sessionToken,omitempty"`
+	Username          string    `json:"username,omitempty"`
+	Password          string    `json:"password,omitempty"`
+	DriveRefreshToken string    `json:"driveRefreshToken,omitempty"`
+	DriveAccessToken  string    `json:"driveAccessToken,omitempty"`
+	DriveTokenExpiry  time.Time `json:"driveTokenExpiry,omitempty"`
+	DriveClientID     string    `json:"driveClientId,omitempty"`
+	DriveAuthID       string    `json:"driveAuthId,omitempty"`
 }
 
 // The entire record is encrypted, including endpoint, ID and credentials. An
@@ -51,15 +56,20 @@ type backupDestinationState struct {
 }
 
 type backupDestinationView struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name"`
-	Type            string             `json:"type"`
-	Disabled        bool               `json:"disabled"`
-	S3              *backupS3Settings  `json:"s3,omitempty"`
-	WebDAV          *backupDAVSettings `json:"webdav,omitempty"`
-	CredentialsSet  bool               `json:"credentialsSet"`
-	SessionTokenSet bool               `json:"sessionTokenSet"`
-	LastSuccessAt   *time.Time         `json:"lastSuccessAt,omitempty"`
+	ID              string               `json:"id"`
+	Name            string               `json:"name"`
+	Type            string               `json:"type"`
+	Disabled        bool                 `json:"disabled"`
+	S3              *backupS3Settings    `json:"s3,omitempty"`
+	WebDAV          *backupDAVSettings   `json:"webdav,omitempty"`
+	Drive           *backupDriveSettings `json:"drive,omitempty"`
+	CredentialsSet  bool                 `json:"credentialsSet"`
+	SessionTokenSet bool                 `json:"sessionTokenSet"`
+	LastSuccessAt   *time.Time           `json:"lastSuccessAt,omitempty"`
+}
+
+type backupDriveSettings struct {
+	FolderID string `json:"folderId"`
 }
 
 type backupS3Settings struct {
@@ -180,6 +190,10 @@ func backupDestinationResponse(state backupDestinationState, raw string, configu
 		if d.WebDAV != nil {
 			view.WebDAV = &backupDAVSettings{URL: d.WebDAV.URL}
 		}
+		if d.Drive != nil {
+			view.Drive = &backupDriveSettings{FolderID: d.Drive.FolderID}
+			view.CredentialsSet = backupDriveBound(record)
+		}
 		response.Items = append(response.Items, view)
 	}
 	return response
@@ -192,6 +206,7 @@ type backupDestinationRequest struct {
 	Disabled bool            `json:"disabled"`
 	S3       *backupS3Input  `json:"s3,omitempty"`
 	WebDAV   *backupDAVInput `json:"webdav,omitempty"`
+	Drive    *struct{}       `json:"drive,omitempty"`
 }
 
 type backupS3Input struct {
@@ -222,7 +237,7 @@ func buildBackupDestination(id string, req backupDestinationRequest, old *backup
 	}
 	switch req.Type {
 	case "s3":
-		if req.S3 == nil || req.WebDAV != nil {
+		if req.S3 == nil || req.WebDAV != nil || req.Drive != nil {
 			return result, errBackupInvalid
 		}
 		s := req.S3
@@ -248,7 +263,7 @@ func buildBackupDestination(id string, req backupDestinationRequest, old *backup
 			return result, errBackupAuth
 		}
 	case "webdav":
-		if req.WebDAV == nil || req.S3 != nil {
+		if req.WebDAV == nil || req.S3 != nil || req.Drive != nil {
 			return result, errBackupInvalid
 		}
 		d := req.WebDAV
@@ -266,6 +281,27 @@ func buildBackupDestination(id string, req backupDestinationRequest, old *backup
 		if !validBackupSecret(c.Username) || strings.Contains(c.Username, ":") || !validBackupSecret(c.Password) {
 			return result, errBackupAuth
 		}
+	case "drive":
+		if req.Drive == nil || req.S3 != nil || req.WebDAV != nil {
+			return result, errBackupInvalid
+		}
+		result.Config.Drive = &storage.DriveConfig{AccessTokenEnv: "BACKUP_DRIVE_TOKEN"}
+		if old != nil && old.Config.Drive != nil {
+			copy := *old.Config.Drive
+			result.Config.Drive = &copy
+		}
+		// Unbound Drive destinations are valid configuration, not valid upload
+		// targets. Only the OAuth callback may bind a folder and refresh token.
+		validated := result.Config
+		if validated.Drive.FolderID == "" {
+			copy := *validated.Drive
+			copy.FolderID = "pending"
+			validated.Drive = &copy
+		}
+		if err := (storage.Config{Version: 1, Destinations: []storage.Destination{validated}}).Validate(); err != nil {
+			return result, errBackupInvalid
+		}
+		return result, nil
 	default:
 		return result, errBackupInvalid
 	}

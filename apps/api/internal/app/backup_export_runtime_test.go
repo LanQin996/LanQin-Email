@@ -41,6 +41,9 @@ func TestBackupExportRuntimeExcludesOnlyBackupExecutionStateFromCopy(t *testing.
 		('backup.job.v1.bkj_active','opaque-encrypted-running-A','synthetic'),
 		('backup.job.v1.bkj_pending','opaque-encrypted-queued-B','synthetic'),
 		('backup.job.v1.bkj_complete','opaque-encrypted-history','synthetic'),
+		('backup.schedules.v1','opaque-encrypted-enabled-plan','synthetic'),
+		('backup.drive.oauth.v1.actor','opaque-encrypted-verifier','synthetic'),
+		('backup.drive.oauth.v10.keep','unrelated-oauth-version','synthetic'),
 		('backup.destinations.v1','opaque-encrypted-vault','synthetic'),
 		('backup.job.v10.keep','unrelated-prefix','synthetic'),
 		('site.title','Synthetic site','synthetic');`
@@ -61,10 +64,10 @@ func TestBackupExportRuntimeExcludesOnlyBackupExecutionStateFromCopy(t *testing.
 		t.Fatal("recovered copy could claim a captured backup job", lease, err)
 	}
 	var count int
-	if err := copy.QueryRow(`SELECT count(*) FROM system_settings WHERE "key"='backup.queue.v1' OR substr("key",1,?)=?`, len(backupJobPrefix), backupJobPrefix).Scan(&count); err != nil || count != 0 {
+	if err := copy.QueryRow(`SELECT count(*) FROM system_settings WHERE "key"='backup.queue.v1' OR "key"='backup.schedules.v1' OR substr("key",1,?)=? OR substr("key",1,?)=?`, len(backupJobPrefix), backupJobPrefix, len(backupDriveOAuthPrefix), backupDriveOAuthPrefix).Scan(&count); err != nil || count != 0 {
 		t.Fatal("restored copy still has executable backup queue state", count, err)
 	}
-	for key, expected := range map[string]string{"backup.destinations.v1": "opaque-encrypted-vault", "backup.job.v10.keep": "unrelated-prefix", "site.title": "Synthetic site"} {
+	for key, expected := range map[string]string{"backup.destinations.v1": "opaque-encrypted-vault", "backup.job.v10.keep": "unrelated-prefix", "backup.drive.oauth.v10.keep": "unrelated-oauth-version", "site.title": "Synthetic site"} {
 		var value string
 		if err := copy.QueryRow(`SELECT value FROM system_settings WHERE "key"=?`, key).Scan(&value); err != nil || value != expected {
 			t.Fatal("unrelated setting changed", key, err)
@@ -75,7 +78,7 @@ func TestBackupExportRuntimeExcludesOnlyBackupExecutionStateFromCopy(t *testing.
 			t.Fatal("business delivery state changed", table, err)
 		}
 	}
-	if err := live.QueryRow(`SELECT count(*) FROM system_settings`).Scan(&count); err != nil || count != 7 {
+	if err := live.QueryRow(`SELECT count(*) FROM system_settings`).Scan(&count); err != nil || count != 10 {
 		t.Fatal("source settings mutated", count, err)
 	}
 	var journal string

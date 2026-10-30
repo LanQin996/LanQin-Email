@@ -171,6 +171,15 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 			continue
 		}
 		config := record.Config
+		driveToken := ""
+		if config.Type == "drive" {
+			var tokenErr error
+			driveToken, tokenErr = a.backupDriveToken(ctx, target.ID, target.Fingerprint)
+			if tokenErr != nil {
+				results[target.ID] = storage.Result{DestinationID: target.ID, State: "failed", ErrorCode: "reauthorization_required"}
+				continue
+			}
+		}
 		if config.S3 != nil {
 			copy := *config.S3
 			config.S3 = &copy
@@ -180,7 +189,7 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 		}
 		cfg.Destinations = append(cfg.Destinations, config)
 		c := record.Credentials
-		credentials[target.ID] = storage.Credentials{AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, SessionToken: c.SessionToken, Username: c.Username, Password: c.Password}
+		credentials[target.ID] = storage.Credentials{AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, SessionToken: c.SessionToken, Username: c.Username, Password: c.Password, DriveAccessToken: driveToken}
 	}
 	code := ""
 	if len(cfg.Destinations) > 0 {

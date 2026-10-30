@@ -83,6 +83,15 @@ func buildUploader(d Destination, env func(string) (string, bool), client *http.
 			client, cleanup = secureClient(u.Host)
 		}
 		return &webdavUploader{client: client, base: u, username: username, password: password, cleanup: cleanup}, nil
+	case "drive":
+		token, err := secret(d.Drive.AccessTokenEnv)
+		if err != nil {
+			return nil, err
+		}
+		if client == nil {
+			client, cleanup = GoogleDriveHTTPClient()
+		}
+		return &driveUploader{client: client, folder: d.Drive.FolderID, token: token, destination: d.ID, cleanup: cleanup}, nil
 	default:
 		return nil, errors.New("unsupported destination type")
 	}

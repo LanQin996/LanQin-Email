@@ -1,4 +1,4 @@
-// Package storage uploads already-encrypted offline backups. It has no access
+// Package storage transfers already-encrypted backup artifacts. It has no access
 // to the application database, recovery keys, live services or remote deletion.
 package storage
 
@@ -18,8 +18,8 @@ import (
 const maxDestinations = 64
 
 // Config contains references to operator-provided environment variables, never
-// credential values. Persistent encrypted credential storage belongs to the
-// future admin API, not this standalone CLI.
+// credential values. The application maintains its own encrypted credential
+// vault; standalone CLI configuration stores only environment references.
 type Config struct {
 	Version      int           `json:"version"`
 	Destinations []Destination `json:"destinations"`
@@ -32,7 +32,17 @@ type Destination struct {
 	Disabled bool          `json:"disabled,omitempty"`
 	S3       *S3Config     `json:"s3,omitempty"`
 	WebDAV   *WebDAVConfig `json:"webdav,omitempty"`
+	Drive    *DriveConfig  `json:"drive,omitempty"`
 }
+
+type DriveConfig struct {
+	FolderID       string `json:"folder_id"`
+	AccessTokenEnv string `json:"access_token_env"`
+}
+
+var driveIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,256}$`)
+
+func ValidDriveID(id string) bool { return driveIDPattern.MatchString(id) }
 
 type S3Config struct {
 	Endpoint           string `json:"endpoint"`
@@ -90,7 +100,7 @@ func (c Config) Validate() error {
 		ids[d.ID] = true
 		switch d.Type {
 		case "s3":
-			if d.S3 == nil || d.WebDAV != nil {
+			if d.S3 == nil || d.WebDAV != nil || d.Drive != nil {
 				return errors.New("s3 destination requires only s3 settings")
 			}
 			s := d.S3
@@ -99,11 +109,15 @@ func (c Config) Validate() error {
 				return errors.New("invalid s3 destination settings")
 			}
 		case "webdav":
-			if d.WebDAV == nil || d.S3 != nil {
+			if d.WebDAV == nil || d.S3 != nil || d.Drive != nil {
 				return errors.New("webdav destination requires only webdav settings")
 			}
 			if _, err := endpointURL(d.WebDAV.URL); err != nil || !envPattern.MatchString(d.WebDAV.UsernameEnv) || !envPattern.MatchString(d.WebDAV.PasswordEnv) {
 				return errors.New("invalid webdav destination settings")
+			}
+		case "drive":
+			if d.Drive == nil || d.S3 != nil || d.WebDAV != nil || !ValidDriveID(d.Drive.FolderID) || !envPattern.MatchString(d.Drive.AccessTokenEnv) {
+				return errors.New("invalid Google Drive destination settings")
 			}
 		default:
 			return errors.New("unsupported destination type (supported: s3, webdav)")

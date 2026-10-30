@@ -1,6 +1,6 @@
-// backup is a data-snapshot utility. It intentionally has no production
-// service-control or in-place overwrite capabilities. Cloud uploads are opt-in
-// and read per-destination credential references from operator configuration.
+// backup is a data-snapshot utility with an explicit maintenance-window restore
+// switch. It never controls services. Cloud uploads are opt-in and read
+// per-destination credential references from operator configuration.
 package main
 
 import (
@@ -32,10 +32,19 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: backup keygen|create|create-online|restore|upload|publish (see docs/backup.md)")
+		return errors.New("usage: backup keygen|create|create-online|restore|install|rollback|upload|fetch|publish (see docs/backup.md)")
+	}
+	if args[0] == "install" {
+		return runInstall(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "rollback" {
+		return runRollback(ctx, args[1:], stdout, stderr)
 	}
 	if args[0] == "upload" {
 		return runUpload(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "fetch" {
+		return runFetch(ctx, args[1:], stdout, stderr)
 	}
 	if args[0] == "publish" {
 		return runPublish(ctx, args[1:], stdout, stderr)

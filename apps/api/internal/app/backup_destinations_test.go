@@ -125,6 +125,8 @@ func TestBackupDestinationRoutesRequireActualSuperAdmin(t *testing.T) {
 		{"GET", "/api/admin/backups/destinations"}, {"POST", "/api/admin/backups/destinations"}, {"POST", "/api/admin/backups/destinations/bkd_missing"}, {"DELETE", "/api/admin/backups/destinations/bkd_missing"},
 		{"GET", "/api/admin/backups/artifacts"}, {"GET", "/api/admin/backups/jobs"}, {"POST", "/api/admin/backups/jobs"}, {"GET", "/api/admin/backups/jobs/bkj_missing"}, {"GET", "/api/admin/backups/jobs/bkj_missing?download=1"}, {"POST", "/api/admin/backups/jobs/bkj_missing/cancel"},
 		{"GET", "/api/admin/backups/capabilities"}, {"POST", "/api/admin/backups/snapshots"},
+		{"GET", "/api/admin/backups/schedules"}, {"POST", "/api/admin/backups/destinations/bkd_missing/schedule"},
+		{"POST", "/api/admin/backups/destinations/bkd_missing/drive/authorize"}, {"GET", "/api/admin/backups/drive/oauth/callback?code=synthetic-code&state=synthetic-state"},
 	} {
 		if code := ops.do(route.method, route.path, map[string]string{"revision": "0"}, &body); code != http.StatusForbidden {
 			t.Errorf("settings operator reached %s %s: %d", route.method, route.path, code)

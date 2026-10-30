@@ -63,6 +63,8 @@ import type {
   APIToken,
   BackupDestinationList,
   BackupDestinationPayload,
+  BackupScheduleList,
+  BackupSchedulePayload,
   BackupArtifact,
   BackupUploadJob,
 } from "./api-types"
@@ -515,10 +517,24 @@ export const api = {
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
   backupDestinations: () => request<BackupDestinationList>("/api/admin/backups/destinations"),
-  backupCapabilities: () =>
-    request<{ onlineBackupAvailable: boolean; recipient?: string; reason?: string }>(
-      "/api/admin/backups/capabilities"
+  authorizeBackupDrive: (id: string, revision: string) =>
+    request<{ authorizationUrl: string }>(
+      `/api/admin/backups/destinations/${encodeURIComponent(id)}/drive/authorize`,
+      { method: "POST", body: JSON.stringify({ revision }) }
     ),
+  backupSchedules: () => request<BackupScheduleList>("/api/admin/backups/schedules"),
+  updateBackupSchedule: (id: string, payload: BackupSchedulePayload) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}/schedule`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupCapabilities: () =>
+    request<{
+      onlineBackupAvailable: boolean
+      driveOAuthAvailable: boolean
+      recipient?: string
+      reason?: string
+    }>("/api/admin/backups/capabilities"),
   createBackupSnapshot: (payload: {
     destinationIds: string[]
     requestId: string

@@ -1,4 +1,93 @@
 {
+  "服务器尚未配置 Google Drive OAuth 客户端": {
+    "en": "The server has not configured a Google Drive OAuth client",
+    "zh-TW": "伺服器尚未設定 Google Drive OAuth 用戶端"
+  },
+  "Google Drive 授权已失效，请重新授权": {
+    "en": "Google Drive authorization has expired or been revoked; authorize again",
+    "zh-TW": "Google Drive 授權已失效，請重新授權"
+  },
+  "Google Drive 授权地址无效，请联系管理员": {
+    "en": "The Google Drive authorization URL is invalid; contact the administrator",
+    "zh-TW": "Google Drive 授權網址無效，請聯絡管理員"
+  },
+  "Google Drive 已授权": { "en": "Google Drive authorized", "zh-TW": "Google Drive 已授權" },
+  "Google Drive 需要授权": {
+    "en": "Google Drive authorization required",
+    "zh-TW": "Google Drive 需要授權"
+  },
+  "正在准备授权...": { "en": "Preparing authorization...", "zh-TW": "正在準備授權..." },
+  "重新授权 Google Drive": { "en": "Reauthorize Google Drive", "zh-TW": "重新授權 Google Drive" },
+  "授权 Google Drive": { "en": "Authorize Google Drive", "zh-TW": "授權 Google Drive" },
+  "每次授权会创建独立备份文件夹，不删除旧目录；仅申请应用文件权限": {
+    "en": "Each authorization creates a separate backup folder without deleting old folders; only app-file access is requested",
+    "zh-TW": "每次授權會建立獨立備份資料夾，不刪除舊目錄；僅申請應用程式檔案權限"
+  },
+  "请先启用此地点再进行 Google Drive 授权": {
+    "en": "Enable this destination before authorizing Google Drive",
+    "zh-TW": "請先啟用此地點再進行 Google Drive 授權"
+  },
+  "Google Drive 授权成功，备份目录已绑定": {
+    "en": "Google Drive authorization succeeded and the backup folder is linked",
+    "zh-TW": "Google Drive 授權成功，備份目錄已綁定"
+  },
+  "Google Drive 授权未完成，请重新授权": {
+    "en": "Google Drive authorization did not complete; authorize again",
+    "zh-TW": "Google Drive 授權未完成，請重新授權"
+  },
+  "Google Drive 文件夹 ID": { "en": "Google Drive folder ID", "zh-TW": "Google Drive 資料夾 ID" },
+  "授权后自动创建": {
+    "en": "Created automatically after authorization",
+    "zh-TW": "授權後自動建立"
+  },
+  "保存地点后通过 Google OAuth 授权；无需填写网盘密码、令牌或文件夹 ID": {
+    "en": "Save the destination, then authorize with Google OAuth; no Drive password, token or folder ID is entered",
+    "zh-TW": "儲存地點後透過 Google OAuth 授權；無需填寫網路硬碟密碼、權杖或資料夾 ID"
+  },
+  "未启用计划": { "en": "Schedule disabled", "zh-TW": "未啟用排程" },
+  "计划已启用": { "en": "Schedule enabled", "zh-TW": "排程已啟用" },
+  "每日备份计划": { "en": "Daily backup schedule", "zh-TW": "每日備份排程" },
+  "设置计划": { "en": "Configure schedule", "zh-TW": "設定排程" },
+  "每日执行时间": { "en": "Daily run time", "zh-TW": "每日執行時間" },
+  "下次触发": { "en": "Next trigger", "zh-TW": "下次觸發" },
+  "未安排": { "en": "Not scheduled", "zh-TW": "未安排" },
+  "最近入队任务": { "en": "Last queued job", "zh-TW": "最近入佇列任務" },
+  "刷新备份计划": { "en": "Refresh backup schedules", "zh-TW": "重新整理備份排程" },
+  "设置每日备份计划": { "en": "Configure daily backup", "zh-TW": "設定每日備份排程" },
+  "启用每日计划": { "en": "Enable daily schedule", "zh-TW": "啟用每日排程" },
+  "IANA 时区": { "en": "IANA time zone", "zh-TW": "IANA 時區" },
+  "计划公钥已变化，请重新确认计划": {
+    "en": "The encryption key changed; reconfirm the schedule",
+    "zh-TW": "排程公鑰已變更，請重新確認排程"
+  },
+  "计划地点不可用，请检查地点配置": {
+    "en": "The scheduled destination is unavailable; check its settings",
+    "zh-TW": "排程地點無法使用，請檢查地點設定"
+  },
+  "备份队列已满，计划将稍后重试": {
+    "en": "The backup queue is full; the schedule will retry later",
+    "zh-TW": "備份佇列已滿，排程將稍後重試"
+  },
+  "计划暂未执行，请检查配置后重新保存": {
+    "en": "The schedule could not run; check settings and save it again",
+    "zh-TW": "排程暫未執行，請檢查設定後重新儲存"
+  },
+  "请填写每日时间和 IANA 时区": {
+    "en": "Enter a daily time and an IANA time zone",
+    "zh-TW": "請填寫每日時間與 IANA 時區"
+  },
+  "启用计划需要可用的备份配置和已启用地点": {
+    "en": "Enabling a schedule requires working backup configuration and an enabled destination",
+    "zh-TW": "啟用排程需要可用的備份設定與已啟用地點"
+  },
+  "地点已停用，定时计划不会执行": {
+    "en": "This destination is disabled; scheduled backups will not run",
+    "zh-TW": "地點已停用，定時排程不會執行"
+  },
+  "关闭计划不影响手动备份；修改计划后以下次触发时间为准": {
+    "en": "Disabling a schedule does not block manual backups; changes use the new next-trigger time",
+    "zh-TW": "關閉排程不影響手動備份；修改後以下次觸發時間為準"
+  },
   "私有暂存清理失败，请联系管理员检查": {
     "en": "Private staging cleanup failed; ask the administrator to investigate",
     "zh-TW": "私有暫存清理失敗，請聯絡管理員檢查"

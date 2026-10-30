@@ -98,6 +98,7 @@ type backupJobLocation struct {
 	Bucket   string `json:"bucket,omitempty"`
 	Prefix   string `json:"prefix,omitempty"`
 	Region   string `json:"region,omitempty"`
+	FolderID string `json:"folderId,omitempty"`
 }
 
 func backupJobResponse(job backupJob) backupJobView {
@@ -114,6 +115,9 @@ func backupJobResponse(job backupJob) backupJobView {
 		}
 		if t.Config.WebDAV != nil {
 			location.Endpoint = t.Config.WebDAV.URL
+		}
+		if t.Config.Drive != nil {
+			location.FolderID = t.Config.Drive.FolderID
 		}
 		locations = append(locations, location)
 	}
@@ -284,6 +288,11 @@ func (a *App) backupCAS(ctx context.Context, db dbExecutor, key, previous string
 func backupTargetFingerprint(record backupDestinationRecord) string {
 	record.Config.Name = ""
 	record.Config.Disabled = false
+	if record.Config.Type == "drive" && record.Credentials.DriveAuthID != "" {
+		record.Credentials.DriveAccessToken = ""
+		record.Credentials.DriveRefreshToken = ""
+		record.Credentials.DriveTokenExpiry = time.Time{}
+	}
 	hash := sha256.Sum256([]byte(jsonEncode(record)))
 	return hex.EncodeToString(hash[:])
 }
@@ -297,6 +306,12 @@ func (a *App) enqueueBackupSnapshot(ctx context.Context, actorID, requestID stri
 }
 
 func (a *App) enqueueBackupJob(ctx context.Context, actorID, requestID, artifactID string, ids []string, kind, expectedRecipient string, expectedRevision ...string) (backupJob, error) {
+	return a.enqueueBackupJobGuarded(ctx, actorID, requestID, artifactID, ids, kind, expectedRecipient, expectedRevision, nil)
+}
+
+// guard participates in the same transaction as the queue/job insertion. Daily
+// schedule cursors must never advance separately from their durable work item.
+func (a *App) enqueueBackupJobGuarded(ctx context.Context, actorID, requestID, artifactID string, ids []string, kind, expectedRecipient string, expectedRevision []string, guard func(dbExecutor) error) (backupJob, error) {
 	var empty backupJob
 	if a.cfg.BackupArtifactDir == "" {
 		return empty, errBackupExecution
@@ -373,6 +388,9 @@ func (a *App) enqueueBackupJob(ctx context.Context, actorID, requestID, artifact
 		if !ok || record.Config.Disabled {
 			return empty, errBackupInvalid
 		}
+		if record.Config.Type == "drive" && !backupDriveBound(record) {
+			return empty, errBackupAuth
+		}
 		job.Targets = append(job.Targets, backupTarget{ID: id, Name: record.Config.Name, Fingerprint: backupTargetFingerprint(record), Config: record.Config})
 	}
 	registry.Pending = append(registry.Pending, job.ID)
@@ -392,6 +410,11 @@ func (a *App) enqueueBackupJob(ctx context.Context, actorID, requestID, artifact
 	defer tx.Rollback()
 	if err := a.backupCAS(ctx, tx, backupRegistryKey, registryRaw, registry); err != nil {
 		return empty, err
+	}
+	if guard != nil {
+		if err := guard(tx); err != nil {
+			return empty, err
+		}
 	}
 	if err := a.backupCAS(ctx, tx, backupJobPrefix+job.ID, "", job); err != nil {
 		return empty, err

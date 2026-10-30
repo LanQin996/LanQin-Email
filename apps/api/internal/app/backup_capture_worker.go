@@ -64,6 +64,8 @@ func (a *App) handleBackupCapabilities(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	recipient, reason := a.backupCaptureCapability()
 	response := map[string]any{"onlineBackupAvailable": reason == ""}
+	_, driveErr := a.backupDriveOAuthConfig()
+	response["driveOAuthAvailable"] = driveErr == nil
 	if reason != "" {
 		response["reason"] = reason
 	} else {

@@ -683,14 +683,34 @@ export type BackupS3Settings = {
 export type BackupDestination = {
   id: string
   name: string
-  type: "s3" | "webdav"
+  type: "s3" | "webdav" | "drive"
   disabled: boolean
   credentialsSet: boolean
   sessionTokenSet: boolean
   lastSuccessAt?: string
   s3?: BackupS3Settings
   webdav?: { url: string }
+  drive?: { folderId: string }
 }
+export type BackupSchedule = {
+  destinationId: string
+  enabled: boolean
+  time: string
+  timezone: string
+  nextRunAt?: string
+  lastJobId?: string
+  lastErrorCode?: string
+}
+export type BackupScheduleList = { revision: string; items: BackupSchedule[] }
+export type BackupSchedulePayload = {
+  revision: string
+  destinationsRevision: string
+  expectedRecipient: string
+  enabled: boolean
+  time: string
+  timezone: string
+}
+
 export type BackupArtifact = {
   version: number
   id: string
@@ -729,6 +749,7 @@ export type BackupUploadJob = {
     bucket?: string
     prefix?: string
     region?: string
+    folderId?: string
   }[]
   results: {
     destination_id: string
@@ -749,7 +770,7 @@ export type BackupDestinationList = {
 export type BackupDestinationPayload = {
   revision: string
   name: string
-  type: "s3" | "webdav"
+  type: "s3" | "webdav" | "drive"
   disabled: boolean
   s3?: BackupS3Settings & {
     accessKeyId?: string
@@ -758,6 +779,7 @@ export type BackupDestinationPayload = {
     clearSessionToken?: boolean
   }
   webdav?: { url: string; username?: string; password?: string }
+  drive?: Record<string, never>
 }
 export type LinuxDoPendingRegistration = {
   username: string

@@ -1,6 +1,8 @@
 import { exactTranslations } from "@/lib/language"
 
 const knownErrors: Record<string, string> = {
+  backup_drive_authorization_failed: "Google Drive 授权未完成，请重新授权",
+  reauthorization_required: "Google Drive 授权已失效，请重新授权",
   backup_key_unavailable: "备份加密密钥缺失或不匹配，请检查服务器配置",
   backup_destination_invalid: "备份地点配置无效，请检查名称、HTTPS 地址和存储参数",
   backup_credentials_required: "请完整填写凭据；更换地址或密钥对时需重新填写",

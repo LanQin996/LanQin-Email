@@ -87,7 +87,7 @@ func sanitizeBackupExportRuntime(ctx context.Context, copyPath string) (omittedJ
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM system_settings WHERE substr("key",1,?)=?`, len(backupJobPrefix), backupJobPrefix).Scan(&omittedJobs); err != nil {
 		return 0, errBackupExportRuntime
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM system_settings WHERE "key"=? OR substr("key",1,?)=?`, backupRegistryKey, len(backupJobPrefix), backupJobPrefix); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM system_settings WHERE "key"=? OR "key"=? OR substr("key",1,?)=? OR substr("key",1,?)=?`, backupRegistryKey, backupSchedulesKey, len(backupJobPrefix), backupJobPrefix, len(backupDriveOAuthPrefix), backupDriveOAuthPrefix); err != nil {
 		if ctx.Err() != nil {
 			return 0, ctx.Err()
 		}

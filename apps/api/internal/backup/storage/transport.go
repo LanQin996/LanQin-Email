@@ -78,15 +78,27 @@ func publicDial(ctx context.Context, network, address string, lookup lookupIP, d
 }
 
 type restrictedTransport struct {
-	hosts map[string]bool
-	base  *http.Transport
+	hosts   map[string]bool
+	base    *http.Transport
+	methods map[string]bool
 }
 
 func (t *restrictedTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.URL.Scheme != "https" || !t.hosts[strings.ToLower(r.URL.Host)] || r.URL.User != nil || r.Method != http.MethodPut {
+	methodAllowed := r.Method == http.MethodPut
+	if t.methods != nil {
+		methodAllowed = t.methods[r.Method]
+	}
+	if r.URL.Scheme != "https" || !t.hosts[strings.ToLower(r.URL.Host)] || r.URL.User != nil || !methodAllowed {
 		return nil, errEndpointBlocked
 	}
 	return t.base.RoundTrip(r)
+}
+
+// Fixed provider origins only; never accepts an operator-supplied OAuth endpoint.
+func GoogleDriveHTTPClient() (*http.Client, func()) {
+	client, close := secureClient("www.googleapis.com", "oauth2.googleapis.com")
+	client.Transport.(*restrictedTransport).methods = map[string]bool{http.MethodGet: true, http.MethodPost: true, http.MethodPut: true}
+	return client, close
 }
 
 func secureClient(hosts ...string) (*http.Client, func()) {

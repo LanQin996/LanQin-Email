@@ -1,5 +1,6 @@
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
+import { useSearchParams } from "react-router-dom"
 import {
   ChevronRight,
   CircleCheck,
@@ -25,6 +26,8 @@ import { uiMessage, uiText, useLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
 import { cn, formatDateTime } from "@/lib/utils"
 import { BackupUploadPanel } from "@/components/backup-upload-panel"
+import { BackupSchedulePanel } from "@/components/backup-schedule-panel"
+import { BackupDriveAuthorization } from "@/components/backup-drive-authorization"
 import { useMe } from "@/hooks/use-me"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -55,7 +58,7 @@ import { Switch } from "@/components/ui/switch"
 
 const emptyForm = {
   name: "",
-  type: "s3" as "s3" | "webdav",
+  type: "s3" as "s3" | "webdav" | "drive",
   disabled: false,
   endpoint: "",
   region: "auto",
@@ -69,6 +72,10 @@ const emptyForm = {
   url: "",
   username: "",
   password: "",
+}
+
+function storageTypeName(type: BackupDestination["type"]) {
+  return type === "s3" ? "S3" : type === "drive" ? "Google Drive" : "WebDAV"
 }
 
 function formFor(item?: BackupDestination) {
@@ -122,6 +129,18 @@ export function BackupDestinationsSection() {
   const [error, setError] = React.useState("")
   const [selectedId, setSelectedId] = React.useState("")
   const busy = React.useRef(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const oauthResult = searchParams.get("driveOAuth")
+  const [driveOutcome, setDriveOutcome] = React.useState<"success" | "failed" | null>(null)
+  const refetchDestinations = destinations.refetch
+  React.useEffect(() => {
+    if (!allowed || (oauthResult !== "success" && oauthResult !== "failed")) return
+    setDriveOutcome(oauthResult)
+    const next = new URLSearchParams(searchParams)
+    next.delete("driveOAuth")
+    setSearchParams(next, { replace: true })
+    void refetchDestinations()
+  }, [allowed, oauthResult, searchParams, setSearchParams, refetchDestinations])
   const data = destinations.data
   const selected = data?.items.find((item) => item.id === selectedId) || data?.items[0]
 
@@ -184,7 +203,9 @@ export function BackupDestinationsSection() {
               clearSessionToken: form.clearSessionToken,
             },
           }
-        : { webdav: { url: form.url, username: form.username, password: form.password } }),
+        : form.type === "webdav"
+          ? { webdav: { url: form.url, username: form.username, password: form.password } }
+          : { drive: {} }),
     }
     void perform(
       () =>
@@ -205,6 +226,7 @@ export function BackupDestinationsSection() {
         disabled: !item.disabled,
         s3: item.s3,
         webdav: item.webdav,
+        ...(item.type === "drive" && { drive: {} }),
       })
     )
   }
@@ -215,6 +237,21 @@ export function BackupDestinationsSection() {
     !!data?.encryptionConfigured && !destinations.isError && !pending && !destinations.isFetching
   return (
     <div className="space-y-4" data-lanqin-i18n-ignore>
+      {driveOutcome && (
+        <div
+          role={driveOutcome === "success" ? "status" : "alert"}
+          className={cn(
+            "rounded-lg border p-4 text-sm",
+            driveOutcome === "failed" && "text-destructive"
+          )}
+        >
+          {uiText(
+            driveOutcome === "success"
+              ? "Google Drive 授权成功，备份目录已绑定"
+              : "Google Drive 授权未完成，请重新授权"
+          )}
+        </div>
+      )}
       <section className="min-w-0 overflow-hidden rounded-xl border bg-background">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3 sm:px-5">
           <div className="flex items-center gap-2.5">
@@ -308,7 +345,7 @@ export function BackupDestinationsSection() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-medium">{item.name}</span>
                         <span className="mt-1 flex items-center gap-1.5 text-xs font-normal text-muted-foreground">
-                          <span>{item.type === "s3" ? "S3" : "WebDAV"}</span>
+                          <span>{storageTypeName(item.type)}</span>
                           <span aria-hidden>·</span>
                           <span className="inline-flex items-center gap-1">
                             {item.disabled ? (
@@ -375,7 +412,7 @@ export function BackupDestinationsSection() {
                           {selected.name}
                         </h2>
                         <Badge variant="secondary" className="font-normal">
-                          {selected.type === "s3" ? "S3" : "WebDAV"}
+                          {storageTypeName(selected.type)}
                         </Badge>
                       </div>
                     </div>
@@ -428,7 +465,7 @@ export function BackupDestinationsSection() {
                     />
                   </div>
                   <dl className="grid gap-x-6 gap-y-5 sm:grid-cols-2">
-                    {selected.s3 ? (
+                    {selected.type === "s3" && selected.s3 ? (
                       <>
                         <DestinationField
                           icon={Link2}
@@ -457,6 +494,13 @@ export function BackupDestinationsSection() {
                           value={uiText(selected.s3.pathStyle ? "路径式寻址" : "虚拟主机式寻址")}
                         />
                       </>
+                    ) : selected.type === "drive" ? (
+                      <DestinationField
+                        icon={FolderOpen}
+                        label={uiText("Google Drive 文件夹 ID")}
+                        value={selected.drive?.folderId || uiText("授权后自动创建")}
+                        wide
+                      />
                     ) : (
                       <DestinationField
                         icon={Link2}
@@ -481,6 +525,15 @@ export function BackupDestinationsSection() {
                     <ShieldCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
                     {uiText(selected.credentialsSet ? "凭据已加密保存" : "未配置")}
                   </div>
+                  {selected.type === "drive" && (
+                    <BackupDriveAuthorization
+                      key={selected.id}
+                      userId={me.data?.user.id || ""}
+                      destination={selected}
+                      revision={data.revision}
+                      editable={editable}
+                    />
+                  )}
                   <div
                     role="status"
                     className="flex items-start gap-2.5 border-t pt-5 text-sm text-muted-foreground"
@@ -488,6 +541,13 @@ export function BackupDestinationsSection() {
                     <Info className="mt-0.5 h-4 w-4 shrink-0" />
                     {uiText("可新建不停服在线备份或上传已有归档；生产覆盖恢复尚未接入")}
                   </div>
+                  <BackupSchedulePanel
+                    key={selected.id}
+                    userId={me.data?.user.id || ""}
+                    destination={selected}
+                    destinationsRevision={data.revision}
+                    editable={editable}
+                  />
                 </div>
               ) : (
                 <div className="flex min-h-72 flex-col items-center justify-center gap-4 text-muted-foreground">
@@ -541,7 +601,7 @@ export function BackupDestinationsSection() {
               <Select
                 value={form.type}
                 disabled={pending || !!editor?.id}
-                onValueChange={(type: "s3" | "webdav") =>
+                onValueChange={(type: "s3" | "webdav" | "drive") =>
                   setForm({ ...emptyForm, name: form.name, type })
                 }
               >
@@ -551,10 +611,11 @@ export function BackupDestinationsSection() {
                 <SelectContent>
                   <SelectItem value="s3">{"S3"}</SelectItem>
                   <SelectItem value="webdav">{"WebDAV"}</SelectItem>
+                  <SelectItem value="drive">{"Google Drive"}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {editor?.id && (
+            {editor?.id && form.type !== "drive" && (
               <div role="status" className="rounded-md border p-3 text-sm">
                 {uiText("凭据留空以保留；更换地址需重新填写，更新密钥对会清除旧会话令牌")}
               </div>
@@ -661,7 +722,7 @@ export function BackupDestinationsSection() {
                   </div>
                 )}
               </>
-            ) : (
+            ) : form.type === "webdav" ? (
               <>
                 <div className="space-y-2">
                   <Label htmlFor="backup-dav-url">{uiText("WebDAV 目录地址")}</Label>
@@ -699,6 +760,10 @@ export function BackupDestinationsSection() {
                   />
                 </div>
               </>
+            ) : (
+              <div role="status" className="rounded-md border p-3 text-sm">
+                {uiText("保存地点后通过 Google OAuth 授权；无需填写网盘密码、令牌或文件夹 ID")}
+              </div>
             )}
             {error && (
               <div role="alert" className="text-sm text-destructive">

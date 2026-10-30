@@ -74,6 +74,8 @@ type Config struct {
 	BackupArtifactDir               string
 	BackupWorkspace                 string
 	BackupRecipient                 string
+	BackupDriveClientID             string
+	BackupDriveClientSecret         string
 	DeliveryWebhookSecret           string
 	StatusWebhookURL                string
 	StatusWebhookSecret             string
@@ -148,6 +150,8 @@ func LoadConfig() Config {
 		BackupArtifactDir:               getenv("LANQIN_BACKUP_ARTIFACT_DIR", ""),
 		BackupWorkspace:                 getenv("LANQIN_BACKUP_WORKSPACE", ""),
 		BackupRecipient:                 getenv("LANQIN_BACKUP_RECIPIENT", ""),
+		BackupDriveClientID:             getenv("LANQIN_BACKUP_DRIVE_CLIENT_ID", ""),
+		BackupDriveClientSecret:         getenv("LANQIN_BACKUP_DRIVE_CLIENT_SECRET", ""),
 		DeliveryWebhookSecret:           getenv("LANQIN_DELIVERY_WEBHOOK_SECRET", ""),
 		StatusWebhookURL:                getenv("LANQIN_STATUS_WEBHOOK_URL", ""),
 		StatusWebhookSecret:             getenv("LANQIN_STATUS_WEBHOOK_SECRET", ""),

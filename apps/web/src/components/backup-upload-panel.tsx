@@ -28,6 +28,10 @@ function active(job?: BackupUploadJob) {
   return job?.status === "queued" || job?.status === "running"
 }
 
+function uploadReady(destination: BackupDestination) {
+  return !destination.disabled && (destination.type !== "drive" || destination.credentialsSet)
+}
+
 function jobStatusText(job: BackupUploadJob) {
   if (job.status === "running") {
     if (job.phase === "collecting") return uiText("正在采集数据")
@@ -74,6 +78,8 @@ function statusText(status: string) {
 
 function resultError(code?: string) {
   switch (code) {
+    case "reauthorization_required":
+      return uiText("Google Drive 授权已失效，请重新授权")
     case "snapshot_failed":
     case "collection_failed":
       return uiText("数据采集未完成，未生成可上传归档")
@@ -187,8 +193,8 @@ export function BackupUploadPanel({
     })
     setArtifactId(artifacts.data?.items[0]?.id || "")
     const preferred =
-      destinations.find((d) => d.id === preferredId && !d.disabled) ||
-      destinations.find((d) => !d.disabled)
+      destinations.find((d) => d.id === preferredId && uploadReady(d)) ||
+      destinations.find(uploadReady)
     setTargetIds(preferred ? [preferred.id] : [])
     setError("")
   }
@@ -279,7 +285,7 @@ export function BackupUploadPanel({
               pending ||
               !artifacts.data?.available ||
               !artifacts.data.items.length ||
-              !destinations.some((d) => !d.disabled)
+              !destinations.some(uploadReady)
             }
           >
             <Upload className="h-4 w-4" />
@@ -293,7 +299,7 @@ export function BackupUploadPanel({
               pending ||
               !capabilities.data?.onlineBackupAvailable ||
               !capabilities.data.recipient ||
-              !destinations.some((d) => !d.disabled)
+              !destinations.some(uploadReady)
             }
           >
             <Plus className="h-4 w-4" />
@@ -469,7 +475,11 @@ export function BackupUploadPanel({
                     <Checkbox
                       id={`backup-upload-${d.id}`}
                       checked={targetIds.includes(d.id)}
-                      disabled={pending || (targetIds.length >= 16 && !targetIds.includes(d.id))}
+                      disabled={
+                        pending ||
+                        !uploadReady(d) ||
+                        (targetIds.length >= 16 && !targetIds.includes(d.id))
+                      }
                       onCheckedChange={(checked) =>
                         setTargetIds((ids) =>
                           checked ? [...ids, d.id] : ids.filter((id) => id !== d.id)
@@ -478,6 +488,11 @@ export function BackupUploadPanel({
                     />
                     <Label className="break-words" htmlFor={`backup-upload-${d.id}`}>
                       {d.name}
+                      {d.type === "drive" && !d.credentialsSet && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {uiText("Google Drive 需要授权")}
+                        </span>
+                      )}
                     </Label>
                   </div>
                 ))}
@@ -605,6 +620,9 @@ export function BackupUploadPanel({
                     <div className="break-all text-xs text-muted-foreground">
                       {location.endpoint}
                       {location.bucket ? ` / ${location.bucket}` : ""}
+                      {location.folderId
+                        ? `${location.endpoint ? " / " : ""}${location.folderId}`
+                        : ""}
                     </div>
                     {result?.object_key && (
                       <div className="break-all font-mono text-xs">{result.object_key}</div>

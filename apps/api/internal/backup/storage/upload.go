@@ -72,6 +72,7 @@ type uploaderFactory func(Destination) (uploader, error)
 type Credentials struct {
 	AccessKeyID, SecretAccessKey, SessionToken string
 	Username, Password                         string
+	DriveAccessToken                           string
 }
 
 // UploadFile pins the caller's artifact handle and scopes in-memory credentials
@@ -94,6 +95,9 @@ func UploadFile(ctx context.Context, source *os.File, expected string, cfg Confi
 		}
 		if d.WebDAV != nil {
 			values[d.WebDAV.UsernameEnv], values[d.WebDAV.PasswordEnv] = credentials.Username, credentials.Password
+		}
+		if d.Drive != nil {
+			values[d.Drive.AccessTokenEnv] = credentials.DriveAccessToken
 		}
 		return buildUploader(d, func(name string) (string, bool) { v, ok := values[name]; return v, ok }, nil)
 	})
@@ -193,6 +197,9 @@ func uploadDestination(ctx context.Context, d Destination, data *artifact, opts 
 		if err == nil {
 			now := time.Now().UTC()
 			result.State, result.ObjectKey, result.CompletedAt = "succeeded", objectKey(d, key), &now
+			if provider, ok := client.(interface{ objectKey(string) string }); ok {
+				result.ObjectKey = provider.objectKey(key)
+			}
 			result.ErrorCode = ""
 			return result
 		}

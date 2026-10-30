@@ -55,7 +55,7 @@ Validation failures — including a duplicate domain name — return `400 Bad Re
 
 These session-authenticated routes require an actual super administrator (`user.role=admin`), not a permission group with `admin.settings.*`. They are not part of the bearer-token `/api/open/v1` API described by `openapi.json`.
 
-以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通 SQLite 新建在线备份、既有密文异步上传及历史；不是生产覆盖恢复，定时计划尚未接通。
+以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通 SQLite 新建在线备份、每日计划、Drive OAuth、既有密文上传及历史；不是生产覆盖恢复。
 
 | Endpoint | Semantics / 语义 |
 |------|---------|
@@ -64,7 +64,11 @@ These session-authenticated routes require an actual super administrator (`user.
 | `POST /api/admin/backups/destinations/{id}` | 更新地点；传入当前 `revision`，同地址下凭据留空保留，类型不可变 |
 | `DELETE /api/admin/backups/destinations/{id}` | JSON body 为 `{revision}`；仅删除配置，不删除远端备份 |
 | `GET /api/admin/backups/artifacts` | `{available, items, maxBytes}`，仅列出宿主机发布的认证密文目录；不接收文件路径 |
-| `GET /api/admin/backups/capabilities` | `{onlineBackupAvailable, recipient?, reason?}`；只有有效 X25519 公钥才返回 `recipient`，不返回本地路径或配置原字符串 |
+| `GET /api/admin/backups/capabilities` | `{onlineBackupAvailable, driveOAuthAvailable, recipient?, reason?}`；Drive 标志仅表示 OAuth 客户端配置可用，地点是否授权看 `credentialsSet`；不返回私钥、客户端 secret 或本地路径 |
+| `GET /api/admin/backups/schedules` | `{revision, items}`，每地点独立计划，只返回启停、HH:MM、IANA 时区、下次触发、最近入队 ID 和安全错误码 |
+| `POST /api/admin/backups/destinations/{id}/schedule` | `{revision, destinationsRevision, expectedRecipient, enabled, time, timezone}`；启用前绑定当前公钥和地点配置，CAS 防陈旧更新 |
+| `POST /api/admin/backups/destinations/{id}/drive/authorize` | `{revision}`，返回固定 Google `authorizationUrl`；不接受客户端令牌、私钥或回调 URL |
+| `GET /api/admin/backups/drive/oauth/callback` | 同发起超级管理员会话完成授权；单次 state/PKCE，成功或失败均重定向固定管理页，不回显 provider 信息 |
 | `POST /api/admin/backups/snapshots` | `{destinationIds, requestId, destinationsRevision, expectedRecipient}`；绑定当前公钥并入队，立即返回 `202` 及任务，不接受本地路径或私钥 |
 | `GET /api/admin/backups/jobs?cursor=...` | `{items, nextCursor}`，每页最多 20 条；游标由服务端返回 |
 | `POST /api/admin/backups/jobs` | `{artifactId, destinationIds, requestId, destinationsRevision}`，校验后入队并立即返回 `202` 及任务，不在 HTTP 请求中上传 |
