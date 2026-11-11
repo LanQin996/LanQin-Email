@@ -18,6 +18,7 @@ func backupSnapshotJobFixture(t *testing.T, a *App) (string, []string, string) {
 		t.Fatal(err)
 	}
 	a.cfg.BackupRecipient = identity.Recipient().String()
+	setBackupTestPassword(t, a, "synthetic snapshot password")
 	a.cfg.BackupWorkspace = t.TempDir()
 	a.cfg.MaildirRoot = t.TempDir()
 	_, raw, err := a.loadBackupDestinationState(t.Context())
@@ -27,16 +28,38 @@ func backupSnapshotJobFixture(t *testing.T, a *App) (string, []string, string) {
 	return entry.ID, []string{records[0].Config.ID, records[1].Config.ID}, backupRevision(raw)
 }
 
+func backupTestEncryption(t *testing.T, a *App) backupEncryptionConfiguration {
+	t.Helper()
+	current, err := a.backupEncryptionConfiguration(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return current
+}
+
+func backupTestRecipient(t *testing.T, a *App) string {
+	t.Helper()
+	return backupTestEncryption(t, a).Recipient
+}
+
+func setBackupTestPassword(t *testing.T, a *App, password string) {
+	t.Helper()
+	current := backupTestEncryption(t, a)
+	if err := a.saveBackupEncryption(t.Context(), current.Revision, "password", password, password, current.Password); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestBackupSnapshotJobHTTPAdmissionIdempotencyAndRedaction(t *testing.T) {
 	a := newTestApp(t)
 	artifactID, ids, revision := backupSnapshotJobFixture(t, a)
 	client := backupLoggedInAdmin(t, a)
-	payload := map[string]any{"destinationIds": ids, "requestId": "synthetic-snapshot-request-001", "destinationsRevision": revision, "expectedRecipient": a.cfg.BackupRecipient}
+	payload := map[string]any{"destinationIds": ids, "requestId": "synthetic-snapshot-request-001", "destinationsRevision": revision, "expectedRecipient": backupTestRecipient(t, a)}
 	var created backupJobView
 	if code := client.do("POST", "/api/admin/backups/snapshots", payload, &created); code != http.StatusAccepted {
 		t.Fatalf("create status=%d", code)
 	}
-	if created.Kind != "snapshot" || created.Phase != "queued" || created.Status != "queued" || created.Artifact.ID != "" || created.Recipient != a.cfg.BackupRecipient {
+	if created.Kind != "snapshot" || created.Phase != "queued" || created.Status != "queued" || created.Artifact.ID != "" || created.Recipient != backupTestRecipient(t, a) {
 		t.Fatal("unexpected initial snapshot DTO", created.Kind, created.Phase, created.Status)
 	}
 	var duplicate backupJobView
@@ -56,21 +79,16 @@ func TestBackupSnapshotJobHTTPAdmissionIdempotencyAndRedaction(t *testing.T) {
 	if _, err := a.enqueueBackupUpload(t.Context(), actor, "synthetic-snapshot-request-001", artifactID, ids); !errors.Is(err, errBackupConflict) {
 		t.Fatal("cross-kind reused idempotency key", err)
 	}
-	originalRecipient := a.cfg.BackupRecipient
-	rotated, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	a.cfg.BackupRecipient = rotated.Recipient().String()
-	if _, err := a.enqueueBackupSnapshot(t.Context(), actor, "synthetic-snapshot-request-001", ids, revision, a.cfg.BackupRecipient); !errors.Is(err, errBackupConflict) {
+	originalRecipient := backupTestRecipient(t, a)
+	setBackupTestPassword(t, a, "synthetic rotated password")
+	if _, err := a.enqueueBackupSnapshot(t.Context(), actor, "synthetic-snapshot-request-001", ids, revision, backupTestRecipient(t, a)); !errors.Is(err, errBackupConflict) {
 		t.Fatal("recipient rotation reused a prior idempotency request", err)
 	}
-	a.cfg.BackupRecipient = originalRecipient
 	job, raw, err := a.backupReadJob(t.Context(), created.ID)
-	if err != nil || job.Recipient != a.cfg.BackupRecipient {
+	if err != nil || job.Recipient != originalRecipient {
 		t.Fatal(err)
 	}
-	if strings.Contains(raw, a.cfg.BackupRecipient) {
+	if strings.Contains(raw, originalRecipient) {
 		t.Fatal("snapshot row not encrypted")
 	}
 	encoded := jsonEncode(created)
@@ -97,7 +115,7 @@ func TestBackupSnapshotJobRejectsConfigPathsStaleStateAndKeyChanges(t *testing.T
 	_, ids, revision := backupSnapshotJobFixture(t, a)
 	client := backupLoggedInAdmin(t, a)
 	base := func() map[string]any {
-		return map[string]any{"destinationIds": ids, "requestId": "synthetic-snapshot-validation", "destinationsRevision": revision, "expectedRecipient": a.cfg.BackupRecipient}
+		return map[string]any{"destinationIds": ids, "requestId": "synthetic-snapshot-validation", "destinationsRevision": revision, "expectedRecipient": backupTestRecipient(t, a)}
 	}
 	var body map[string]any
 	for _, field := range []string{"workspace", "database", "dataDir", "maildirRoot", "recipient", "artifactId"} {
@@ -165,7 +183,7 @@ func TestBackupSnapshotJobKindPhaseValidationAndLegacyDTO(t *testing.T) {
 	if validBackupJob(upload) {
 		t.Fatal("upload job accepted a snapshot-only phase")
 	}
-	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "synthetic-phase-snapshot", ids, revision, a.cfg.BackupRecipient)
+	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "synthetic-phase-snapshot", ids, revision, backupTestRecipient(t, a))
 	if err != nil {
 		t.Fatal(err)
 	}

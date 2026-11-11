@@ -4,11 +4,11 @@
 
 用户要求整个备份过程不停服，且不能依赖特定云平台、云盘 API、LVM、Btrfs 或 ZFS。普通 ext4 上也必须能工作。此前将存储级原子快照视为前提不适合这个需求，已撤销该设计前提。
 
-采用应用级在线采集：SQLite 一致导出 + 邮件/附件引用闭包 + 完整性验证 + 本地公钥加密 + 多地点异步上传。它不是整个磁盘同一物理时刻的快照，也不保证备份期间新增的数据全部包含。整个过程不停止 API、SMTP、IMAP/POP3 或后台任务，不主动冻结文件系统，不请求容器控制权限。
+采用应用级在线采集：同引擎数据库一致读取 + 邮件/附件引用闭包 + 完整性验证 + 本地 age 加密 + 多地点异步上传。SQLite 使用在线导出，PostgreSQL/MySQL 使用独立只读 repeatable-read 逻辑快照。它不是整个磁盘同一物理时刻的快照，也不保证备份期间新增的数据全部包含。整个过程不停止 API、SMTP、IMAP/POP3 或后台任务，不主动冻结文件系统，不请求容器控制权限。
 
 ## 已接通的在线采集链路
 
-新增独立 `create-online` CLI，调用 `app.PrepareOnlineBackup`，不调用 `app.New` 或启动后台服务，也不读取未显式指定的部署环境/主机秘密。只支持 SQLite；外部数据库直接拒绝，不尝试连接 DSN。
+独立 `create-online` CLI 调用 `app.PrepareOnlineBackup`，不调用 `app.New` 或启动后台服务，也不读取未显式指定的部署环境/主机秘密。下文主要描述 SQLite 版本；另已接通显式 `--driver mysql|postgres --dsn-env <variable>` 的 [原生逻辑快照、空库导入和维护安装](backup-native-databases.md)，归档 version/scope 与 SQLite 区分。管理端新建任务支持 SQLite/PostgreSQL/MySQL，按配置选择对应归档格式。原生恢复已接通 Linux 专用维护安装/激活/回滚及 Web 任务交接，真实 Linux 邮件服务恢复仍待验收。
 
 `apps/api/internal/backup/online.SnapshotSQLite` 使用现代 SQLite 驱动的 Online Backup API：
 
@@ -21,7 +21,7 @@
 
 同包的 `CollectDKIM` 已实现从该关闭副本重建活动域名的 DKIM 文件：默认 selector 与部署脚本一致，校验路径、公私钥匹配及 RSA 私钥有效性，私有暂存、独占创建，失败清理本轮自建文件，不覆盖既有键。合成测试验证源库随后轮换密钥不影响导出副本，并覆盖路径穿越、重复名称、错公钥、损坏私钥、数量上限及拒绝活跃 WAL 源。它不会访问或改写运行中的 rspamd 目录。
 
-这些原语已接入 CLI 及管理端新建在线备份任务，另保留上传既有归档入口。管理端需要显式配置公钥和私有工作区，详见 [管理端配置](backup-admin.md)。归档可解密暂存不等于生产覆盖恢复已完成。
+这些原语已接入 CLI 及管理端新建在线备份任务，另保留上传既有归档入口。管理端必须自行设置并确认备份密码及配置私有工作区；旧 `LANQIN_BACKUP_RECIPIENT` 不再启用后台新建或计划备份。下文独立 CLI 仍保留显式公钥参数，历史公钥归档仍需原私钥恢复，详见 [管理端配置](backup-admin.md)。归档可解密暂存不等于生产覆盖恢复已完成。
 
 ## 文件协调器的边界与实现
 

@@ -24,7 +24,7 @@ var errBackupDraftLimit = errors.New("backup draft exceeds reconstruction limits
 // The caller owns the private staging root and must not mutate it concurrently.
 // maxMIMEBytes caps the estimated MIME plus input memory before BuildMIME, then
 // the actual encoded result. This does not modify either database or directory.
-func rebuildBackupDraft(ctx context.Context, frozen *sql.DB, messageID, sourceDataDir string, snapshotData *os.Root, maxMIMEBytes int64) ([]byte, error) {
+func rebuildBackupDraft(ctx context.Context, frozen backupSnapshotQuery, messageID, sourceDataDir string, snapshotData *os.Root, maxMIMEBytes int64, drivers ...string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -37,7 +37,11 @@ func rebuildBackupDraft(ctx context.Context, frozen *sql.DB, messageID, sourceDa
 	// Bound Go allocations before loading potentially large draft strings. The
 	// independent snapshot connection is the only DB connection used here.
 	var headerBytes, bodyBytes int64
-	err := frozen.QueryRowContext(ctx, `SELECT
+	driver := databaseDriverSQLite
+	if len(drivers) > 0 {
+		driver = drivers[0]
+	}
+	query := `SELECT
 		length(CAST(m.subject AS BLOB))+length(CAST(m.from_addr AS BLOB))+length(CAST(m.from_name AS BLOB))+
 		length(CAST(m.to_addrs AS BLOB))+length(CAST(m.cc_addrs AS BLOB))+length(CAST(m.bcc_addrs AS BLOB))+length(CAST(m.message_id AS BLOB)),
 		length(CAST(m.body_text AS BLOB))+length(CAST(m.body_html AS BLOB))
@@ -45,7 +49,9 @@ func rebuildBackupDraft(ctx context.Context, frozen *sql.DB, messageID, sourceDa
 		JOIN mailboxes mb ON mb.id=m.mailbox_id
 		WHERE m.id=? AND lower(f.name)='drafts' AND f.role='drafts'
 		AND NOT EXISTS(SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id)
-		AND NOT EXISTS(SELECT 1 FROM external_imap_folder_states efs WHERE efs.local_folder_id=f.id)`, messageID).Scan(&headerBytes, &bodyBytes)
+		AND NOT EXISTS(SELECT 1 FROM external_imap_folder_states efs WHERE efs.local_folder_id=f.id)`
+	query = backupNativeLengthSQL(query, driver)
+	err := frozen.QueryRowContext(ctx, query, messageID).Scan(&headerBytes, &bodyBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, errBackupNotDraft
 	}
@@ -59,8 +65,7 @@ func rebuildBackupDraft(ctx context.Context, frozen *sql.DB, messageID, sourceDa
 	if estimated > maxMIMEBytes {
 		return nil, errBackupDraftLimit
 	}
-	snapshotApp := App{db: frozen}
-	msg, err := snapshotApp.storedMessageByID(ctx, messageID)
+	msg, err := storedMessageByIDWithQuery(ctx, frozen, messageID)
 	if err != nil {
 		return nil, errBackupDraftInvalid
 	}
@@ -83,9 +88,10 @@ func rebuildBackupDraft(ctx context.Context, frozen *sql.DB, messageID, sourceDa
 		return nil, errBackupDraftInvalid // Never manufacture a current-time date.
 	}
 	var count, minimum, total, nameBytes, typeBytes, pathBytes int64
-	if err := frozen.QueryRowContext(ctx, `SELECT count(*),COALESCE(min(size_bytes),0),COALESCE(sum(size_bytes),0),
+	query = `SELECT count(*),COALESCE(min(size_bytes),0),COALESCE(sum(size_bytes),0),
 		COALESCE(max(length(CAST(filename AS BLOB))),0),COALESCE(max(length(CAST(content_type AS BLOB))),0),
-		COALESCE(max(length(CAST(storage_path AS BLOB))),0) FROM attachments WHERE message_id=?`, messageID).Scan(&count, &minimum, &total, &nameBytes, &typeBytes, &pathBytes); err != nil {
+		COALESCE(max(length(CAST(storage_path AS BLOB))),0) FROM attachments WHERE message_id=?`
+	if err := frozen.QueryRowContext(ctx, backupNativeLengthSQL(query, driver), messageID).Scan(&count, &minimum, &total, &nameBytes, &typeBytes, &pathBytes); err != nil {
 		return nil, errBackupDraftInvalid
 	}
 	if count > 1024 || minimum < 0 || total < 0 || total > maxMIMEBytes/2 || nameBytes > 4096 || typeBytes > 4096 || pathBytes > 4096 {

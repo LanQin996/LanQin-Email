@@ -55,7 +55,7 @@ Validation failures — including a duplicate domain name — return `400 Bad Re
 
 These session-authenticated routes require an actual super administrator (`user.role=admin`), not a permission group with `admin.settings.*`. They are not part of the bearer-token `/api/open/v1` API described by `openapi.json`.
 
-以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通 SQLite 新建在线备份、每日计划、Drive OAuth、既有密文上传及历史；不是生产覆盖恢复。
+以下接口仅允许真正的超级管理员，普通系统设置管理员不能调用；所有响应均不回显凭据。完整字段及密钥运维说明见 [备份地点管理](backup-admin.md)。已接通 SQLite 在线快照、PostgreSQL/MySQL 原生导出备份、每日计划、Drive OAuth、既有密文上传及历史，以及远端发现和隔离恢复。可选主机维护交接只接受预批准计划 ID 和已认证恢复任务，不给 API Docker socket 或任意命令权限；操作、停服及覆盖由独立 root helper 控制。
 
 | Endpoint | Semantics / 语义 |
 |------|---------|
@@ -64,22 +64,58 @@ These session-authenticated routes require an actual super administrator (`user.
 | `POST /api/admin/backups/destinations/{id}` | 更新地点；传入当前 `revision`，同地址下凭据留空保留，类型不可变 |
 | `DELETE /api/admin/backups/destinations/{id}` | JSON body 为 `{revision}`；仅删除配置，不删除远端备份 |
 | `GET /api/admin/backups/artifacts` | `{available, items, maxBytes}`，仅列出宿主机发布的认证密文目录；不接收文件路径 |
-| `GET /api/admin/backups/capabilities` | `{onlineBackupAvailable, driveOAuthAvailable, recipient?, reason?}`；Drive 标志仅表示 OAuth 客户端配置可用，地点是否授权看 `credentialsSet`；不返回私钥、客户端 secret 或本地路径 |
-| `GET /api/admin/backups/schedules` | `{revision, items}`，每地点独立计划，只返回启停、HH:MM、IANA 时区、下次触发、最近入队 ID 和安全错误码 |
-| `POST /api/admin/backups/destinations/{id}/schedule` | `{revision, destinationsRevision, expectedRecipient, enabled, time, timezone}`；启用前绑定当前公钥和地点配置，CAS 防陈旧更新 |
+| `GET /api/admin/backups/capabilities` | `{onlineBackupAvailable, restoreAvailable, discoveryAvailable, restoreMaxBytes, driveOAuthAvailable, encryptionMode?, recipient?, reason?}`；独立发现不依赖本地归档目录，恢复大小上限以 `restoreMaxBytes` 为准；Drive 标志仅表示 OAuth 客户端配置可用，地点是否授权看 `credentialsSet`；不返回密码、私钥、客户端 secret 或本地路径 |
+| `GET /api/admin/backups/encryption` | `{mode,configured,passwordSet,recipient,revision,environmentKeyConfigured}`；`mode` 仅为 `password`；未设置密码（含旧公钥配置）时 `configured/passwordSet=false`、`recipient=""`，初始无记录的 `revision="0"`；设置后 `recipient` 为不透明密码配置代，不返回密码；`environmentKeyConfigured` 为废弃兼容字段，恒为 `false` |
+| `POST /api/admin/backups/encryption` | `{revision,mode,password,confirmPassword,currentPassword?}`；仅接受 `mode=password`，管理员须自行输入并确认新密码；已有密码时修改须原备份密码；不自动生成密码，不接受切换到公钥模式 |
+| `GET /api/admin/backups/schedules` | `{revision, items}`，每地点独立计划，返回启停、执行周期及适用参数、IANA 时区、下次触发、最近入队 ID 和安全错误码；不返回私有锚点、配置代或凭据 |
+| `POST /api/admin/backups/destinations/{id}/schedule` | `{revision,destinationsRevision,expectedRecipient,enabled,timezone,period?,time?,minute?,weekdays?,dayOfMonth?,interval?,unit?}`；周期参数见下文，启用前绑定当前加密配置及地点配置，CAS 防陈旧更新 |
+| `POST /api/admin/backups/destinations/{id}/retention` | `{revision, keepLast, confirm}`；`keepLast` 为 0–100，0 禁用旧备份清理，正数须 `confirm=true`；地点配置版本须匹配，成功 `200 {ok:true}` |
+| `GET /api/admin/backups/drive/client` | 返回 `{source,configured,editable,clientId,clientSecretSet,revision,redirectUri}`；来源为 `environment/database/none`，不返回 Client Secret |
+| `POST /api/admin/backups/drive/client` | `{revision,clientId,clientSecret}`；仅未由环境变量管理时可写，加密保存后即时生效；同 Client ID 可留空保留密钥，换 ID 必须填写新密钥；成功 `200 {ok:true}` |
 | `POST /api/admin/backups/destinations/{id}/drive/authorize` | `{revision}`，返回固定 Google `authorizationUrl`；不接受客户端令牌、私钥或回调 URL |
 | `GET /api/admin/backups/drive/oauth/callback` | 同发起超级管理员会话完成授权；单次 state/PKCE，成功或失败均重定向固定管理页，不回显 provider 信息 |
-| `POST /api/admin/backups/snapshots` | `{destinationIds, requestId, destinationsRevision, expectedRecipient}`；绑定当前公钥并入队，立即返回 `202` 及任务，不接受本地路径或私钥 |
+| `POST /api/admin/backups/snapshots` | `{destinationIds, requestId, destinationsRevision, expectedRecipient}`；须已自设备份密码，绑定当前密码配置代并入队，立即返回 `202` 及任务，不接受本地路径或私钥 |
+| `POST /api/admin/backups/discoveries` | `{destinationId, destinationsRevision, requestId, sourceFolderId?}`；单地点后台读取认证云索引，立即返回 `202` 的 `kind=discover` 任务；仅 Drive 可显式选原文件夹，不修改地点配置 |
+| `GET /api/admin/backups/jobs/{id}/discovery?cursor=...` | 仅成功且 ready 的发现任务可读；每页最多 32 条 `{id,originalDestinationId,objectKey,sha256,bytes,completedAt}`，服务端返回 `nextCursor`，最多 128 条；游标不能跨任务 |
+| `POST /api/admin/backups/restores` | `{sourceJobId,destinationId,expectedSHA256,destinationsRevision,requestId,encryptionMode?,identity?,backupPassword?,password,twoFactorCode?,confirm}`；`encryptionMode=key`（默认）用 `identity`，`password` 模式用 `backupPassword`，不可混传；`password` 字段始终是当前管理员重新认证密码；从发现结果恢复再附 `discoveryEntryId`；绝不接受对象名、endpoint 或本地路径 |
+| `GET /api/admin/backups/maintenance/plans` | `{available,items:[{id,templateSHA256,driver,queueQuarantine}]}`；仅返回 root helper 预批准计划的安全元数据；未配置/不可用时 `200 {available:false,items:[]}`，不返回 socket、路径或密钥 |
+| `POST /api/admin/backups/maintenance/requests` | `{sourceJobId,planId,templateSHA256,requestId,password,twoFactorCode?,confirm:true}`；源必须为成功、ready、未取消的在线恢复任务，driver 与计划匹配；密码/TOTP 重新认证和限流后提交本地主机 helper，返回 `202` 安全状态；不接受私钥、路径、命令、UID/GID 或 DSN |
+| `GET /api/admin/backups/maintenance/requests/{id}` | 查询 helper 的持久安全状态 `{version,id,planId,webJob,state,phase,errorCode?,createdAt,updatedAt}`；仅当前超级管理员会话，不依赖原恢复数据库仍保留旧任务或原发起人会话 |
 | `GET /api/admin/backups/jobs?cursor=...` | `{items, nextCursor}`，每页最多 20 条；游标由服务端返回 |
 | `POST /api/admin/backups/jobs` | `{artifactId, destinationIds, requestId, destinationsRevision}`，校验后入队并立即返回 `202` 及任务，不在 HTTP 请求中上传 |
 | `GET /api/admin/backups/jobs/{id}` | 查询任务及逐地点结果；`?download=1` 下载同一脱敏 JSON 报告 |
 | `POST /api/admin/backups/jobs/{id}/cancel` | 返回 `202`；排队任务移出队列，运行任务异步取消，不删除远端对象 |
+| `POST /api/admin/backups/jobs/{id}/resume` | `{destinationsRevision}`；返回 `202` 及任务，仅续传符合条件的失败密文目标，保留已成功结果；限制见下文 |
 
 并发修改返回 `409`，错误/缺失加密密钥返回 `503`，无效配置返回 `400`，数量或配置体积达到上限返回 `413`。改变远端地址须重新填写完整凭据；更新 S3 密钥对时不会保留旧会话令牌。
 
+备份新密码须为 8–128 个 Unicode 字符（按码点计数）、非全空白且不含控制字符，首尾空格不修剪；当前备份密码错误返回 `403`。密码通过 `LANQIN_BACKUP_SECRET_KEY` 加密后保存在既有 `system_settings`；GET 仅返回状态与不透明配置代。未设置密码时不能新建或启用计划备份，即使旧 `.env` 仍有 `LANQIN_BACKUP_RECIPIENT` 也不会自动启用或生成密码。更换密码只影响新归档，旧归档不会自动改密，仍需当时的历史密码或 age 私钥；历史公钥归档恢复及原始 CLI 显式公钥参数仍兼容。密码归档可用 CLI `restore --password-file` 跨服务器离线解密，但云端自动发现仍要求原索引主密钥与云端访问权限；`LANQIN_BACKUP_SECRET_KEY` 是加密配置/索引认证主密钥，不是归档恢复密码，备份密码不能替代索引信任。
+
+8–128 字符限制仅用于新设置或修改的密码；旧规则下已保存的密码继续可读、可执行备份及验证旧密码，历史归档恢复也不受新长度限制影响。字符按 Unicode 码点计数，不按 UTF-8 字节或浏览器 UTF-16 长度计数，不进行 Unicode 归一化。
+
+计划 `period` 省略时兼容旧 `daily`；仅提交所选周期适用的字段：
+
+| period | 周期参数与语义 |
+| --- | --- |
+| `daily` | `time:"HH:MM"`，按 `timezone` 每日执行 |
+| `hourly` | `minute:0..59`，每个本地小时的指定分钟；重复小时只选早一次 |
+| `weekly` | `time` 与 `weekdays:[0..6]`，0 为星期日，至少一天，不可重复 |
+| `monthly` | `time` 与 `dayOfMonth:1..31`；月份不足所选日时取月底 |
+| `interval` | `interval` 与 `unit:"minutes"|"hours"|"days"`；分别为 5–527040 分钟、1–8760 小时或 1–366 天，以服务端新配置锚点计算固定时长，首轮在一个完整间隔后执行 |
+
+所有周期仍要求明确 IANA `timezone`，`hourly/interval` 可省略 `time`；固定间隔按绝对时长计算，不受 DST 影响。客户端不能提交 `anchorAt`。暂不支持秒级计划、任意 cron 或脚本。保存新计划不会立即创建备份；立即执行复用 `POST /api/admin/backups/snapshots`，可在计划关闭时单地点手动创建，不改变计划游标。去重以地点、配置代和实际 UTC 触发点为准；错过多期只补最近一期，队列满时保留未消费的触发点。
+
 上传任务最多选择 16 个已启用地点，`requestId` 为 16–80 个字母、数字、`_` 或 `-`，同一用户、同一 ID 和同一请求重试不重复建任务；更换请求内容返回 `409`。地点版本必须来自当前列表；最多 16 个待执行任务，队列满返回 `429`。逐地点失败不是 HTTP 入队失败，需查询任务结果。取消/进程中断时远端可能已接收数据，不能把取消当作回滚。地点列表的 `lastSuccessAt` 仅代表同一配置下最近被远端接受的上传，不代表恢复演练通过。
 
-新建备份复用同一队列与资源限额，不另开无限并发 worker。任务 `kind` 为 `upload` 或 `snapshot`，`status` 沿用排队/运行/终态；`phase` 为 `queued/collecting/encrypting/uploading/completed`，是阶段而非百分比。snapshot 未生成归档时 `artifact.id` 为空，不应展示虚假的 SHA 或时间；生成后才附入经过认证发布的 artifact。`summary` 只包含日期、计数、字节及备份运行态清理标志，不含原始清单、来源路径、邮件 ID 或凭据。所有运行阶段可请求取消；配置换钥后排队任务不会悄悄更改收件公钥，而会失败要求重新确认。
+续传仅接受 `failed/partial/interrupted`、未请求取消、存在传输检查点且仍有失败密文目标的非恢复任务，每个任务最多续传 10 次。服务端重新验证本地认证密文、当前地点版本、失败目标配置及检查点；目标须仍启用，Drive 须仍授权。已进入排队或运行的续传请求重试返回同一任务。不符合续传条件返回 `409 backup_resume_unavailable`；仅恢复索引发布失败而密文全部成功时不能通过此接口重发索引。
+
+逐地点结果可包含 `index_state`（`succeeded` 或 `failed`）和安全分类 `index_error_code`，表示密文完整回读后认证云端恢复索引的发布结果；它们与密文的 `state/object_key/completed_at` 分开。索引失败仍保留成功密文收据，任务报告 `partial` 和 `recovery_index_publish_failed`，该地点不执行本轮旧备份清理。旧任务没有这些字段，不追认为已发布独立恢复索引。索引主密钥和 HMAC 派生材料不进入响应，见 [恢复索引](backup-discovery.md)。
+
+发现任务复用队列、跨进程租约、取消和中断处理，`phase=queued/discovering/completed`，返回 `discovery:{count,ready,sourceFolderId?}`。结果按 32 条独立加密分页，只在成功完成后开放，失败不返回部分库存。发现不改变最近上传成功时间或触发清理；从其条目恢复仍验证当前地点配置、签名来源、摘要/字节数和重新认证。Drive 保留索引原地点 ID 与原 folder，用当前已授权凭据下载，不把新配置 ID 当作旧媒体归属。索引认证仅证明观察到历史收据，不证明列表完整、最新或文件当前仍存在。
+
+维护请求的 host ID 是 `SHA256(UTF8(user.id + ":" + requestId))` 的前 16 字节小写 hex，不带前缀；客户端应在 POST 前持有它，响应丢失后查询同一 ID，不自动重新 POST。`409 backup_maintenance_conflict` 表示原批准摘要/请求不匹配，`404 backup_maintenance_not_found` 不表示已回滚或安全失败，未知 helper 错误统一 `503 backup_maintenance_unavailable`。状态 `state` 仅为 `queued/preparing/maintaining/succeeded/failed/needsRecovery`，`phase` 仅为 `queued/preparing/importing/maintenance/completed/interrupted`；不能把已排队或 Web 验证完成当成生产切换成功。主机停服会导致 API 短时不可达，安装会撤销旧会话；重新登录后才可继续查询。配置和部署边界见 [主机维护交接](backup-maintenance-host.md)。
+
+新建备份复用同一队列与资源限额，不另开无限并发 worker。任务 `kind` 为 `upload`、`snapshot`、`restore` 或 `discover`，`status` 沿用排队/运行/终态。`phase` 是阶段而非百分比：备份/上传使用 `queued/collecting/encrypting/uploading/retaining/completed` 中适用的阶段，隔离恢复使用 `downloading/decrypting/completed`，发现使用 `queued/discovering/completed`。snapshot 未生成归档时 `artifact.id` 为空，不应展示虚假的 SHA 或时间；生成后才附入经过认证发布的 artifact。`summary` 只包含日期、计数、字节及备份运行态清理标志，不含原始清单、来源路径、邮件 ID 或凭据。所有运行阶段可请求取消；配置变化后排队任务不会悄悄更改加密目标，而会失败要求重新确认。
 
 ## Health Endpoints / 健康检查
 

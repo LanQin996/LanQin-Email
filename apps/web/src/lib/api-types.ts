@@ -688,15 +688,24 @@ export type BackupDestination = {
   credentialsSet: boolean
   sessionTokenSet: boolean
   lastSuccessAt?: string
+  keepLast: number
   s3?: BackupS3Settings
   webdav?: { url: string }
   drive?: { folderId: string }
 }
+export type BackupSchedulePeriod = "daily" | "hourly" | "weekly" | "monthly" | "interval"
+export type BackupScheduleUnit = "minutes" | "hours" | "days"
 export type BackupSchedule = {
   destinationId: string
   enabled: boolean
   time: string
   timezone: string
+  period?: BackupSchedulePeriod
+  minute?: number
+  weekdays?: number[]
+  dayOfMonth?: number
+  interval?: number
+  unit?: BackupScheduleUnit
   nextRunAt?: string
   lastJobId?: string
   lastErrorCode?: string
@@ -707,8 +716,23 @@ export type BackupSchedulePayload = {
   destinationsRevision: string
   expectedRecipient: string
   enabled: boolean
-  time: string
+  time?: string
   timezone: string
+  period?: BackupSchedulePeriod
+  minute?: number
+  weekdays?: number[]
+  dayOfMonth?: number
+  interval?: number
+  unit?: BackupScheduleUnit
+}
+
+export type BackupEncryptionConfiguration = {
+  mode: "password" | "key"
+  configured: boolean
+  passwordSet: boolean
+  recipient: string
+  revision: string
+  environmentKeyConfigured: boolean
 }
 
 export type BackupArtifact = {
@@ -720,8 +744,17 @@ export type BackupArtifact = {
 }
 export type BackupUploadJob = {
   id: string
-  kind?: "upload" | "snapshot"
-  phase?: "queued" | "collecting" | "encrypting" | "uploading" | "completed"
+  kind?: "upload" | "snapshot" | "restore" | "discover"
+  phase?:
+    | "queued"
+    | "collecting"
+    | "encrypting"
+    | "uploading"
+    | "retaining"
+    | "downloading"
+    | "decrypting"
+    | "discovering"
+    | "completed"
   recipient?: string
   summary?: {
     snapshotStarted: string
@@ -758,9 +791,73 @@ export type BackupUploadJob = {
     object_key?: string
     error_code?: string
     completed_at?: string
+    index_state?: "succeeded" | "failed"
+    index_error_code?: string
   }[]
   cancelRequested: boolean
+  canResume?: boolean
+  resumeCount?: number
+  transfers?: Record<string, { phase: string; bytes: number; total: number; cleanupError?: string }>
+  resumeAudit?: {
+    at: string
+    actorId: string
+    previousStatus: string
+    previousErrorCode?: string
+  }[]
+  retention?: { destinationId: string; deleted: number; errorCode?: string }[]
+  pruned?: Record<string, { state: "pending" | "deleted" | "missing"; at: string; jobId: string }>
+  restore?: {
+    sourceJobId: string
+    destinationId: string
+    ready: boolean
+    manifest?: { version: number; scope: string; driver: string; created: string }
+  }
+  discovery?: { count: number; ready: boolean; sourceFolderId?: string }
   errorCode?: string
+}
+export type BackupDiscoveryEntry = {
+  id: string
+  originalDestinationId: string
+  objectKey: string
+  sha256: string
+  bytes: number
+  completedAt: string
+}
+export type BackupMaintenancePlan = {
+  id: string
+  templateSHA256: string
+  driver: string
+  queueQuarantine: boolean
+}
+export type BackupMaintenancePlans = { available: boolean; items: BackupMaintenancePlan[] }
+export type BackupMaintenanceStatus = {
+  version: number
+  id: string
+  planId: string
+  webJob: string
+  state: "queued" | "preparing" | "maintaining" | "succeeded" | "failed" | "needsRecovery"
+  phase: "queued" | "preparing" | "importing" | "maintenance" | "completed" | "interrupted"
+  errorCode?: string
+  createdAt: string
+  updatedAt: string
+}
+export type BackupDriveClientConfiguration = {
+  source: "environment" | "database" | "none"
+  configured: boolean
+  editable: boolean
+  clientId: string
+  clientSecretSet: boolean
+  revision: string
+  redirectUri: string
+}
+export type BackupDriveClientPayload = {
+  revision: string
+  clientId: string
+  clientSecret: string
+}
+export type BackupDiscoveryPage = {
+  items: BackupDiscoveryEntry[]
+  nextCursor?: string
 }
 export type BackupDestinationList = {
   encryptionConfigured: boolean

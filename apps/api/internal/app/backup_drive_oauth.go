@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 	"time"
@@ -25,26 +24,22 @@ var backupDriveStatePattern = regexp.MustCompile(`^([A-Za-z0-9_-]{1,64})\.([a-f0
 var errBackupDriveOAuth = errors.New("backup_drive_authorization_failed")
 
 type backupDriveOAuthState struct {
-	Version       int       `json:"version"`
-	ActorID       string    `json:"actorId"`
-	DestinationID string    `json:"destinationId"`
-	StateHash     string    `json:"stateHash"`
-	Fingerprint   string    `json:"fingerprint"`
-	ClientID      string    `json:"clientId"`
-	RedirectURI   string    `json:"redirectUri"`
-	Verifier      string    `json:"verifier"`
-	ExpiresAt     time.Time `json:"expiresAt"`
-	Used          bool      `json:"used"`
+	Version          int       `json:"version"`
+	ActorID          string    `json:"actorId"`
+	DestinationID    string    `json:"destinationId"`
+	StateHash        string    `json:"stateHash"`
+	Fingerprint      string    `json:"fingerprint"`
+	ClientID         string    `json:"clientId"`
+	ClientGeneration string    `json:"clientGeneration"`
+	RedirectURI      string    `json:"redirectUri"`
+	Verifier         string    `json:"verifier"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	Used             bool      `json:"used"`
 }
 
 func (a *App) backupDriveOAuthConfig() (*oauth2.Config, error) {
-	base, err := url.Parse(a.cfg.PublicBaseURL)
-	if err != nil || base.Scheme != "https" || base.Hostname() == "" || base.User != nil || base.RawQuery != "" || base.Fragment != "" || base.Opaque != "" || base.Path != "" && base.Path != "/" || strings.TrimSpace(a.cfg.BackupDriveClientID) == "" || strings.TrimSpace(a.cfg.BackupDriveClientSecret) == "" {
-		return nil, errBackupExecution
-	}
-	return &oauth2.Config{ClientID: a.cfg.BackupDriveClientID, ClientSecret: a.cfg.BackupDriveClientSecret,
-		RedirectURL: strings.TrimRight(a.cfg.PublicBaseURL, "/") + "/api/admin/backups/drive/oauth/callback", Scopes: []string{backupDriveScope},
-		Endpoint: oauth2.Endpoint{AuthURL: "https://accounts.google.com/o/oauth2/v2/auth", TokenURL: "https://oauth2.googleapis.com/token", AuthStyle: oauth2.AuthStyleInParams}}, nil
+	config, _, err := a.backupDriveOAuthConfigFor(context.Background())
+	return config, err
 }
 
 func backupDriveStateKey(actor, destination string) string {
@@ -58,7 +53,7 @@ func backupDriveHash(value string) string {
 }
 
 func (a *App) beginBackupDriveOAuth(ctx context.Context, actor, id, revision string) (string, error) {
-	config, err := a.backupDriveOAuthConfig()
+	config, generation, err := a.backupDriveOAuthConfigFor(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -88,7 +83,7 @@ func (a *App) beginBackupDriveOAuth(ctx context.Context, actor, id, revision str
 	}
 	value := id + "." + hex.EncodeToString(random[:])
 	verifier := oauth2.GenerateVerifier()
-	record := backupDriveOAuthState{Version: 1, ActorID: actor, DestinationID: id, StateHash: backupDriveHash(value), Fingerprint: backupTargetFingerprint(*target), ClientID: config.ClientID, RedirectURI: config.RedirectURL, Verifier: verifier, ExpiresAt: a.now().UTC().Add(10 * time.Minute)}
+	record := backupDriveOAuthState{Version: 1, ActorID: actor, DestinationID: id, StateHash: backupDriveHash(value), Fingerprint: backupTargetFingerprint(*target), ClientID: config.ClientID, ClientGeneration: generation, RedirectURI: config.RedirectURL, Verifier: verifier, ExpiresAt: a.now().UTC().Add(10 * time.Minute)}
 	key := backupDriveStateKey(actor, id)
 	var old backupDriveOAuthState
 	previous, err := a.backupRead(ctx, key, &old)
@@ -107,14 +102,14 @@ func (a *App) consumeBackupDriveOAuth(ctx context.Context, actor, value string) 
 	if len(parts) != 3 {
 		return empty, nil, errBackupDriveOAuth
 	}
-	config, err := a.backupDriveOAuthConfig()
+	config, generation, err := a.backupDriveOAuthConfigFor(ctx)
 	if err != nil {
 		return empty, nil, err
 	}
 	key := backupDriveStateKey(actor, parts[1])
 	var record backupDriveOAuthState
 	raw, err := a.backupRead(ctx, key, &record)
-	if err != nil || record.Version != 1 || record.Used || record.ActorID != actor || record.DestinationID != parts[1] || record.StateHash != backupDriveHash(value) || !record.ExpiresAt.After(a.now()) || record.ClientID != config.ClientID || record.RedirectURI != config.RedirectURL || len(record.Verifier) < 43 {
+	if err != nil || record.Version != 1 || record.Used || record.ActorID != actor || record.DestinationID != parts[1] || record.StateHash != backupDriveHash(value) || !record.ExpiresAt.After(a.now()) || record.ClientID != config.ClientID || record.ClientGeneration != generation || record.RedirectURI != config.RedirectURL || len(record.Verifier) < 43 {
 		return empty, nil, errBackupDriveOAuth
 	}
 	// Consume before network exchange, including denial/error callbacks. A lost
@@ -151,7 +146,10 @@ func (a *App) processBackupDriveCallback(ctx context.Context, actor, state, code
 	if err != nil || !validBackupDriveToken(token, true) {
 		return errBackupDriveOAuth
 	}
-	if err := a.completeBackupDriveAuthorization(ctx, record.DestinationID, record.Fingerprint, token); err != nil {
+	if !a.driveClientGenerationCurrent(ctx, record.ClientGeneration) {
+		return errBackupDriveOAuth
+	}
+	if err := a.completeBackupDriveAuthorization(ctx, record.DestinationID, record.Fingerprint, token, record.ClientID, record.ClientGeneration); err != nil {
 		return errBackupDriveOAuth
 	}
 	return nil

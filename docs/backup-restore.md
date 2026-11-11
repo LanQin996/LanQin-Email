@@ -2,15 +2,29 @@
 
 约束已确认：**备份不停服；覆盖恢复允许维护窗口，保留旧数据再切换。** 本工具不停止、启动或检查全部邮件服务，不控制 Docker。`--confirm-maintenance` 是操作者停写声明，不是自动证明。不要对运行中的目录使用它。
 
+上述边界指原 `install/rollback` 命令。另已增加显式部署计划驱动的 [维护协调 CLI](backup-maintenance.md)：可控制本仓库固定 Compose 应用服务、验证停止、离线检查及重建；默认要求 Postfix 队列可证为空。隔离的 all-in-one SQLite 真实 Docker/邮件恢复与回滚已通过，其他拓扑及生产验收仍未完成。Web API 不直接获得 Docker 权限，实验性主机 helper 只执行预批准计划。
+
 已在获准的 Linux `/tmp` 独立目录完成合成数据的真实复制、UID/GID、目录 fsync、不覆盖重命名、错误回滚和公开 CLI 演练，**没有访问或改动线上 data/mail/dkim，也没有停服务**。这不等于真实邮件服务器收发恢复、真实云账号或所有部署拓扑已验收；生产使用前仍须隔离环境演练。
 
 ## 1. 取回并验证
+
+也可使用 [Web 恢复验证](backup-web-restore.md) 从成功上传结果下载并隔离解密；维护安装时使用文中 `--web-job` 交接参数。它与下面的 CLI `fetch/restore` 路径共用同一认证归档及安装/回滚验证，Web 暂存成功不表示已经切换生产。
 
 按 [交付状态与下载说明](backup-progress.md) 使用 `fetch`，或从自己的云服务取回密文。使用独立可信 SHA-256 收据和离线恢复私钥执行：
 
 ```text
 ./lanqin-backup restore --in /staging/download.age --identity-file /offline/recovery-key.txt --expected-sha256 <trusted-64-hex> --out /staging/recovered
 ```
+
+若归档由管理员自设密码加密，改用创建该归档时的密码文件，不能用当前站点登录密码或之后更换的新备份密码替代：
+
+```text
+./lanqin-backup restore --in /staging/download.age --password-file /offline/backup-password.txt --expected-sha256 <trusted-64-hex> --out /staging/recovered
+```
+
+`--password-file` 与 `--identity-file` 必须且只能选一个。密码文件必须是操作者控制的私有普通文件（Unix 使用 `0600`，Windows 使用私有 ACL）；不要把密码值放到命令行。单个末尾 LF/CRLF 视为文件分隔符移除，其余空格原样保留。修改备份密码不会重新加密旧归档，请独立保留历史密码。
+
+这条离线解密路径可在另一台服务器运行，不需要原 `LANQIN_BACKUP_SECRET_KEY`。但它要求已经取得密文和独立可信的 SHA-256 收据；要自动发现并认证云端旧索引，仍需原主密钥和相应云端访问权限。备份密码不会替代索引认证密钥或原地点凭据，详见 [独立发现](backup-discovery.md)。
 
 成功容器包含 `READY`、`snapshot/data`、`snapshot/mail`、`snapshot/dkim`。当前维护安装只支持带完整 `data/backup-online.json` 的 `online-data` 归档；旧离线归档没有可靠路径映射，不猜测安装。原始解密暂存区保持不变。
 
@@ -23,6 +37,10 @@
 准备独立、当前安装操作者所有且私有的工作区和 journal 目录（Unix `0700`）。源暂存、准备区、journal、三个目标根不能相同或互为祖先。目标是现存真实目录，不接受符号链接、文件系统根或挂载点；目标父目录须由安装操作者控制且不可被组/其他用户写入。不同目标可在不同文件系统，工具会先复制到各自同父目录的 sibling，再在该文件系统内重命名。需要 Linux `RENAME_NOREPLACE`；不支持时失败，不退化为覆盖式 rename。
 
 六项 UID/GID 必须按**目标服务的实际运行身份及容器用户映射**显式设置，不能信归档 UID/GID，也不要照搬示例数字。新树默认目录 `0700`、文件 `0600`，不会重放可执行位/特殊权限。若多个服务以不同身份共享 SQLite 等文件，须在隔离验收中核对必要的受控共享访问；私有默认权限不是所有拓扑可直接运行的承诺，不应简单放开为全局可读写。
+
+SQLite 的 API 与 Postfix 以不同 UID 运行时，可显式使用 `--sqlite-group-read`，并将 `--data-gid` 设置为目标 Postfix 的**实际主 GID**，且必须为正整数。不要仅依据附加组成员关系判断可读；Postfix 降权后可能只保留主组。该选项不会授予组写权限，也不适用于 PostgreSQL/MySQL。
+
+启用后，仅新 live data 根设为 setgid `2750`，`lanqin.db` 设为 `0640`；运行中生成的固定 `lanqin.db-wal`、`lanqin.db-shm` 也必须保持相同批准 GID 和 `0640`。其他 data 子目录/文件仍为 `0700/0600`，原暂存和旧 rollback 树不改。读取组能读取完整 SQLite 数据库，不只是路由查询结果，因此必须是受信任的服务组，不能使用不相关共享组或改成世界可读。
 
 检查磁盘峰值：原目标、同父目录新树、旧 rollback 树、原始暂存及准备树会同时存在。工具不自动清除旧数据。
 
@@ -44,6 +62,8 @@
   --dkim-uid "$DKIM_UID" --dkim-gid "$DKIM_GID" \
   --confirm-maintenance
 ```
+
+需要上述 SQLite 服务组读取时，在同一命令显式追加 `--sqlite-group-read`；示例中的 `DATA_GID` 须先替换为已核对的目标 Postfix 主 GID，不能靠试填数字解除权限错误。省略该选项仍使用原私有权限。自动维护计划使用对应的 `sqliteGroupRead: true`，详见 [协调器](backup-maintenance.md#sqlite-服务组读取)。
 
 安装步骤：
 
@@ -82,10 +102,16 @@ journal 不是访问任意路径的授权：工具核对显式目标、事务、
 
 若新系统已使用后再回滚，回滚前的新邮件仍在保留的 failed 树中，**不会自动合并进旧库**；需另行核对和恢复。手工删除 journal、标记或任一旧树可能破坏可验证回滚能力，不要把这种情况当作强制覆盖重试的理由。
 
-## 本轮验证（2026-10-31）
+## 真实邮件验证（2026-11-04）
+
+全新隔离 ext4 VM 中，当前源码派生的 all-in-one 镜像已通过真实 SMTP → API 授权附件下载/IMAPS → 在线加密备份/解密 → 正式维护覆盖 → 新邮件收取 → 显式回滚闭环。SQLite 计划显式绑定实际 Postfix 主 GID 的组读策略；没有在安装后手工 chmod 绕过。恢复后的 MIME、二进制附件和实际 INTERNALDATE 与基线一致，旧定时发送为 `cancelled`，UIDVALIDITY 改变。回滚恢复了旧树中的快照后邮件，恢复期间新接受的邮件仍保留在 failed 树。
+
+这只证明隔离的 all-in-one SQLite CLI 路径，不包括真实云、stack、原生数据库 Docker、Web 点击到 helper 或非空队列重导入。未操作生产部署，未作断电耐久试验；当前工具来源、输入摘要及证据见 [真实邮件演练](backup-real-mail-validation.md)。
+
+## 此前合成目录验证（2026-10-31）
 
 - Windows 全量 Go 测试及针对性 install/CLI 测试通过；Windows 上公开安装/回滚入口直接拒绝，单元测试模拟 owner 和目录 fsync，未提供生产平台绕过开关。
 - 获用户明确授权后，在前述 Linux 服务器新建的独立 `/tmp/lanqin-restore-tests.*` 范围执行整个 install 包测试。真实 ownership、目录 fsync、`RENAME_NOREPLACE`、挂载点拒绝、断裂 journal、发布失败自动回滚及激活标记异常回滚通过；没有访问线上 data/mail/dkim 或调用服务管理命令。
 - 另运行真实 Linux CLI 子进程：合成 WAL SQLite/Maildir → create-online → restore → install → rollback → 重复 rollback。验证 runtime 路径、原文与 INTERNALDATE、实际数值 UID/GID、旧发送暂停且 payload 保留、旧树与失败树保留、source 未改及 workspace 清空。未启动邮件服务。
 - 最后在 Linux 验证导入副本自身会再次排除备份任务/计划/OAuth state，不仅依赖生产者的清理标志。合成测试结束后已清理该独立测试目录和临时程序。
-- 真实用户邮件收发、Postfix 队列恢复、真实云账号授权和完整部署生命周期尚未验收。此验证不授权也未执行生产恢复；自动远端保留策略仍未实现。
+- 真实用户邮件收发、Postfix 队列恢复、真实云账号授权和完整部署生命周期尚未验收。此验证不授权也未执行生产恢复；后续已接通默认关闭的 [远端保留策略](backup-retention.md)，不改变此恢复验收边界。

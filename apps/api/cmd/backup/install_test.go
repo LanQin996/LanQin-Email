@@ -22,6 +22,146 @@ func validRollbackArgs() []string {
 	return []string{"--journal=/host/journals/restore.journal", "--data-target=/host/data", "--mail-target=/host/mail", "--dkim-target=/host/dkim", "--confirm-maintenance"}
 }
 
+func TestInstallCLIExplicitSQLiteGroupReadReachesOnlyAccessAwareInstaller(t *testing.T) {
+	for _, scenario := range []string{"valid", "zero-group", "missing-aware-installer"} {
+		t.Run(scenario, func(t *testing.T) {
+			args := append(validInstallArgs(), "--sqlite-group-read")
+			prepared, applied := false, false
+			actions := installActions{
+				preflight: func() error { return nil },
+				prepare: func(context.Context, string, string, string, string, backup.Limits) (installPrepared, error) {
+					prepared = true
+					return installPrepared{path: "prepared", close: func() error { return nil }}, nil
+				},
+				apply: func(context.Context, string, install.Targets, install.Owners, string, bool) (install.JournalInfo, error) {
+					t.Fatal("explicit policy silently used legacy apply")
+					return install.JournalInfo{}, nil
+				},
+				applyAccess: func(_ context.Context, _ string, _ install.Targets, owners install.Owners, _ string, confirmed bool, access install.Access) (install.JournalInfo, error) {
+					applied = true
+					if !prepared || !confirmed || !access.SQLiteGroupRead || owners.Data.GID != 1 {
+						t.Fatal("explicit access policy or owner binding lost")
+					}
+					return install.JournalInfo{}, nil
+				},
+			}
+			if scenario == "zero-group" {
+				args = append(args, "--data-gid=0")
+			}
+			if scenario == "missing-aware-installer" {
+				actions.applyAccess = nil
+			}
+			err := runInstallWithActions(t.Context(), args, io.Discard, io.Discard, actions)
+			if (err == nil) != (scenario == "valid") || applied != (scenario == "valid") || scenario != "valid" && prepared {
+				t.Fatal("unsafe or dropped SQLite group access policy", scenario, err)
+			}
+		})
+	}
+}
+
+func TestInstallCLIWebHandoffBindsReceiptAndRejectsMixedInputs(t *testing.T) {
+	t.Setenv("LANQIN_BACKUP_SECRET_KEY", "synthetic-master-from-environment")
+	args := append([]string{}, validInstallArgs()[1:]...)
+	args = append(args, "--web-job=bkj_0123456789abcdef0123456789abcdef", "--web-state-db=/original/lanqin.db", "--web-restore-root=/private/recovery")
+	for _, values := range [][]string{
+		append(append([]string{}, args...), "--staged=other"),
+		append(append([]string{}, args...), "--web-state-db="),
+		append(append([]string{}, args...), "--web-restore-root="),
+		append(append([]string{}, args...), "--confirm-maintenance=false"),
+	} {
+		if err := runInstallWithActions(t.Context(), values, io.Discard, io.Discard, installActions{}); err == nil {
+			t.Fatal("incomplete or mixed web handoff accepted")
+		}
+	}
+	steps := []string{}
+	actions := installActions{
+		preflight: func() error { steps = append(steps, "preflight"); return nil },
+		resolve: func(_ context.Context, database, root, master, id string) (string, string, error) {
+			steps = append(steps, "resolve")
+			if database != "/original/lanqin.db" || root != "/private/recovery" || master != "synthetic-master-from-environment" || id != "bkj_0123456789abcdef0123456789abcdef" {
+				t.Fatal("handoff configuration changed")
+			}
+			return "verified-container", strings.Repeat("a", 64), nil
+		},
+		prepareVerified: func(_ context.Context, source, _, _, _ string, _ backup.Limits, receipt string) (installPrepared, error) {
+			steps = append(steps, "prepare-verified")
+			if source != "verified-container" || receipt != strings.Repeat("a", 64) {
+				t.Fatal("receipt dropped between handoff and private preparation")
+			}
+			return installPrepared{path: "prepared", close: func() error { steps = append(steps, "close"); return nil }}, nil
+		},
+		apply: func(context.Context, string, install.Targets, install.Owners, string, bool) (install.JournalInfo, error) {
+			steps = append(steps, "apply")
+			return install.JournalInfo{}, nil
+		},
+	}
+	if err := runInstallWithActions(t.Context(), args, io.Discard, io.Discard, actions); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(steps, []string{"preflight", "resolve", "prepare-verified", "apply", "close"}) {
+		t.Fatal("web handoff bypassed validation", steps)
+	}
+}
+
+func TestInstallCLIMappedWebRootPassesSeparateNamespacesAndKeepsFailuresPrivate(t *testing.T) {
+	t.Setenv("LANQIN_BACKUP_SECRET_KEY", "synthetic-mapped-master")
+	args := append([]string{}, validInstallArgs()[1:]...)
+	args = append(args, "--web-job=bkj_0123456789abcdef0123456789abcdef", "--web-state-db=/original/lanqin.db", "--web-restore-root=/host/private-recovery", "--web-recorded-root=/backups/restore")
+	for _, scenario := range []string{"valid", "resolve-failed", "mapped-resolver-missing"} {
+		t.Run(scenario, func(t *testing.T) {
+			resolved, prepared := false, false
+			actions := installActions{
+				preflight: func() error { return nil },
+				resolve: func(context.Context, string, string, string, string) (string, string, error) {
+					t.Fatal("explicit mapping used unmapped resolver")
+					return "", "", nil
+				},
+				resolveMapped: func(_ context.Context, database, root, recorded, master, job string) (string, string, error) {
+					resolved = true
+					if database != "/original/lanqin.db" || root != "/host/private-recovery" || recorded != "/backups/restore" || master != "synthetic-mapped-master" || job != "bkj_0123456789abcdef0123456789abcdef" {
+						t.Fatal("mapped namespace authority changed")
+					}
+					if scenario == "resolve-failed" {
+						return "", "", errors.New("synthetic-mapped-master /host/private-recovery /backups/restore")
+					}
+					return "/host/authenticated/recovered", strings.Repeat("b", 64), nil
+				},
+				prepareVerified: func(_ context.Context, source, _, _, _ string, _ backup.Limits, receipt string) (installPrepared, error) {
+					prepared = true
+					if !resolved || source != "/host/authenticated/recovered" || receipt != strings.Repeat("b", 64) {
+						t.Fatal("mapped handoff dropped copied-byte receipt")
+					}
+					return installPrepared{path: "prepared", close: func() error { return nil }}, nil
+				},
+				apply: func(context.Context, string, install.Targets, install.Owners, string, bool) (install.JournalInfo, error) {
+					if !prepared {
+						t.Fatal("mapped install skipped preparation")
+					}
+					return install.JournalInfo{}, nil
+				},
+			}
+			if scenario == "mapped-resolver-missing" {
+				actions.resolveMapped = nil
+			}
+			var out, diagnostic bytes.Buffer
+			err := runInstallWithActions(t.Context(), args, &out, &diagnostic, actions)
+			if (err == nil) != (scenario == "valid") || resolved != (scenario != "mapped-resolver-missing") || prepared != (scenario == "valid") || diagnostic.Len() != 0 {
+				t.Fatal("wrong mapped CLI outcome", scenario, err)
+			}
+			if err != nil {
+				for _, private := range []string{"synthetic-mapped-master", "/host/private-recovery", "/backups/restore", "/original/lanqin.db"} {
+					if strings.Contains(err.Error(), private) || strings.Contains(out.String(), private) {
+						t.Fatal("mapped CLI failure leaked configuration")
+					}
+				}
+			}
+		})
+	}
+	if err := runInstallWithActions(t.Context(), append(validInstallArgs(), "--web-recorded-root=/backups/restore"), io.Discard, io.Discard, installActions{}); err == nil {
+		t.Fatal("recorded-root flag accepted outside complete Web handoff")
+	}
+}
+
 func TestInstallCLIFlow(t *testing.T) {
 	for _, customLimits := range []bool{false, true} {
 		t.Run(map[bool]string{false: "defaults", true: "custom"}[customLimits], func(t *testing.T) {

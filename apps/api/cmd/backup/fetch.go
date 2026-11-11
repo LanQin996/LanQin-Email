@@ -26,28 +26,36 @@ func runFetch(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 // no-replace publication. This CLI never reads recovery keys or runs services.
 func runFetchWithDownloader(ctx context.Context, args []string, stdout, stderr io.Writer, download backupDownloader) error {
 	flags := flag.NewFlagSet("fetch", flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(io.Discard)
 	configFile := flags.String("config", "", "JSON destination config containing credential environment references")
 	destinationID := flags.String("destination", "", "one configured destination ID")
 	objectKey := flags.String("object-key", "", "object key or Drive file ID from the upload report")
 	receipt := flags.String("expected-sha256", "", "ciphertext SHA-256 from a separately trusted receipt")
+	indexFile := flags.String("recovery-index-file", "", "authenticated bundle from discover, instead of --expected-sha256")
+	indexKeyEnv := flags.String("index-key-env", "", "environment reference for original recovery index authentication key")
 	output := flags.String("out", "", "new encrypted output file (parent directory must exist)")
+	networkPolicyEnv := flags.String("network-policy-env", "", "explicit environment reference for a deployment host/port/private-IP allowlist; default public-only")
 	opts := storage.DefaultOptions()
 	flags.Int64Var(&opts.MaxBytes, "max-bytes", opts.MaxBytes, "maximum ciphertext bytes (up to 5 GiB)")
 	if err := flags.Parse(args); err != nil {
-		return err
+		return errors.New("invalid fetch arguments; use documented flags and environment references only")
 	}
-	if flags.NArg() != 0 || *configFile == "" || *destinationID == "" || *objectKey == "" || *receipt == "" || *output == "" {
+	indexed := *indexFile != "" || *indexKeyEnv != ""
+	if flags.NArg() != 0 || *configFile == "" || *destinationID == "" || *objectKey == "" || !indexed && *receipt == "" || indexed && (*indexFile == "" || *indexKeyEnv == "" || *receipt != "") || *output == "" {
 		return errors.New("fetch requires --config, --destination, --object-key, --expected-sha256 and --out; no positional arguments")
 	}
 	want, err := hex.DecodeString(*receipt)
-	if err != nil || len(want) != sha256.Size {
+	if !indexed && (err != nil || len(want) != sha256.Size) {
 		return errors.New("invalid trusted ciphertext SHA-256 receipt")
 	}
 	if opts.MaxBytes < 1 || opts.MaxBytes > storage.MaxUploadBytes {
 		return errors.New("invalid fetch size limit")
 	}
 	if err := ctx.Err(); err != nil {
+		return err
+	}
+	networkPolicy, err := backupNetworkPolicyFromEnv(*networkPolicyEnv)
+	if err != nil {
 		return err
 	}
 	if _, err := os.Lstat(*output); !errors.Is(err, os.ErrNotExist) {
@@ -70,7 +78,7 @@ func runFetchWithDownloader(ctx context.Context, args []string, stdout, stderr i
 	if err != nil {
 		return errors.New("cannot open destination config")
 	}
-	cfg, configErr := storage.DecodeConfig(file)
+	cfg, configErr := storage.DecodeConfigWithNetworkPolicy(file, networkPolicy)
 	closeErr := file.Close()
 	if configErr != nil {
 		return configErr
@@ -87,6 +95,27 @@ func runFetchWithDownloader(ctx context.Context, args []string, stdout, stderr i
 	}
 	if selected == nil {
 		return errors.New("fetch destination is not configured")
+	}
+	expectedBytes := int64(0)
+	if indexed {
+		key, err := backupIndexKeyFromEnv(*indexKeyEnv)
+		if err != nil {
+			return err
+		}
+		defer clear(key)
+		entry, err := readDiscoverySelection(*indexFile, *selected, *objectKey, key)
+		if err != nil {
+			return err
+		}
+		want, err = hex.DecodeString(entry.SHA256)
+		if err != nil || len(want) != sha256.Size || entry.Bytes > opts.MaxBytes {
+			return errors.New("selected recovery index exceeds fetch limits")
+		}
+		expectedBytes, opts.MaxBytes = entry.Bytes, entry.Bytes
+		// Google media metadata belongs to the original destination identity.
+		// Authentication bound that identity and folder; a new instance's UI ID
+		// must not be substituted for the source binding during recovery.
+		selected.ID = entry.DestinationID
 	}
 	credentials, err := fetchCredentials(*selected)
 	if err != nil {
@@ -106,7 +135,7 @@ func runFetchWithDownloader(ctx context.Context, args []string, stdout, stderr i
 		// not part of CLI diagnostics, even if an adapter ever returns them.
 		return errors.New("cannot fetch and verify encrypted backup; no verified download was reported")
 	}
-	if !strings.EqualFold(verified.SHA256, hex.EncodeToString(want)) || verified.Bytes < 1 || verified.Bytes > opts.MaxBytes {
+	if !strings.EqualFold(verified.SHA256, hex.EncodeToString(want)) || verified.Bytes < 1 || verified.Bytes > opts.MaxBytes || expectedBytes > 0 && verified.Bytes != expectedBytes {
 		return errors.New("fetch transport returned an invalid verification receipt")
 	}
 	if _, err := fmt.Fprintf(stdout, "Encrypted file verified: bytes=%d sha256=%s\nUse restore with an independently held recovery key to a NEW staging directory; this is NOT a production overwrite.\n", verified.Bytes, strings.ToLower(verified.SHA256)); err != nil {

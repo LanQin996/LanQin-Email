@@ -31,16 +31,17 @@ var (
 )
 
 type backupCredentials struct {
-	AccessKeyID       string    `json:"accessKeyId,omitempty"`
-	SecretAccessKey   string    `json:"secretAccessKey,omitempty"`
-	SessionToken      string    `json:"sessionToken,omitempty"`
-	Username          string    `json:"username,omitempty"`
-	Password          string    `json:"password,omitempty"`
-	DriveRefreshToken string    `json:"driveRefreshToken,omitempty"`
-	DriveAccessToken  string    `json:"driveAccessToken,omitempty"`
-	DriveTokenExpiry  time.Time `json:"driveTokenExpiry,omitempty"`
-	DriveClientID     string    `json:"driveClientId,omitempty"`
-	DriveAuthID       string    `json:"driveAuthId,omitempty"`
+	AccessKeyID           string    `json:"accessKeyId,omitempty"`
+	SecretAccessKey       string    `json:"secretAccessKey,omitempty"`
+	SessionToken          string    `json:"sessionToken,omitempty"`
+	Username              string    `json:"username,omitempty"`
+	Password              string    `json:"password,omitempty"`
+	DriveRefreshToken     string    `json:"driveRefreshToken,omitempty"`
+	DriveAccessToken      string    `json:"driveAccessToken,omitempty"`
+	DriveTokenExpiry      time.Time `json:"driveTokenExpiry,omitempty"`
+	DriveClientID         string    `json:"driveClientId,omitempty"`
+	DriveClientGeneration string    `json:"driveClientGeneration,omitempty"`
+	DriveAuthID           string    `json:"driveAuthId,omitempty"`
 }
 
 // The entire record is encrypted, including endpoint, ID and credentials. An
@@ -48,6 +49,7 @@ type backupCredentials struct {
 type backupDestinationRecord struct {
 	Config      storage.Destination `json:"config"`
 	Credentials backupCredentials   `json:"credentials"`
+	KeepLast    int                 `json:"keepLast,omitempty"`
 }
 
 type backupDestinationState struct {
@@ -66,6 +68,7 @@ type backupDestinationView struct {
 	CredentialsSet  bool                 `json:"credentialsSet"`
 	SessionTokenSet bool                 `json:"sessionTokenSet"`
 	LastSuccessAt   *time.Time           `json:"lastSuccessAt,omitempty"`
+	KeepLast        int                  `json:"keepLast"`
 }
 
 type backupDriveSettings struct {
@@ -112,6 +115,10 @@ func backupRevision(raw string) string {
 
 func (a *App) loadBackupDestinationState(ctx context.Context) (backupDestinationState, string, error) {
 	state := backupDestinationState{Version: 1, Items: []backupDestinationRecord{}}
+	policy, policyErr := a.backupNetworkPolicy()
+	if policyErr != nil {
+		return state, "", policyErr
+	}
 	var raw string
 	err := a.db.QueryRowContext(ctx, `SELECT value FROM system_settings WHERE `+keyColumnSQL(a.cfg.DBDriver)+`=?`, backupDestinationSetting).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -132,7 +139,24 @@ func (a *App) loadBackupDestinationState(ctx context.Context) (backupDestination
 	if err != nil || json.Unmarshal(plain, &state) != nil || state.Version != 1 || len(state.Items) > 64 {
 		return backupDestinationState{}, "", errBackupKey
 	}
+	for i := range state.Items {
+		state.Items[i].Config.NetworkPolicy = nil
+		if state.Items[i].Config.Type == "s3" || state.Items[i].Config.Type == "webdav" {
+			state.Items[i].Config.NetworkPolicy = policy
+		}
+	}
 	return state, raw, nil
+}
+
+func (a *App) backupNetworkPolicy() (*storage.NetworkPolicy, error) {
+	if strings.TrimSpace(a.cfg.BackupNetworkAllowlistJSON) == "" {
+		return nil, nil
+	}
+	policy, err := storage.DecodeNetworkPolicy(strings.NewReader(a.cfg.BackupNetworkAllowlistJSON))
+	if err != nil {
+		return nil, errBackupExecution
+	}
+	return policy, nil
 }
 
 // Compare-and-swap works across processes, not just an in-memory mutex. A stale
@@ -184,6 +208,7 @@ func backupDestinationResponse(state backupDestinationState, raw string, configu
 	for _, record := range state.Items {
 		d := record.Config
 		view := backupDestinationView{ID: d.ID, Name: d.Name, Type: d.Type, Disabled: d.Disabled, CredentialsSet: true, SessionTokenSet: record.Credentials.SessionToken != ""}
+		view.KeepLast = record.KeepLast
 		if d.S3 != nil {
 			view.S3 = &backupS3Settings{Endpoint: d.S3.Endpoint, Region: d.S3.Region, Bucket: d.S3.Bucket, Prefix: d.S3.Prefix, PathStyle: d.S3.PathStyle}
 		}
@@ -228,12 +253,20 @@ func validBackupSecret(s string) bool {
 }
 
 func buildBackupDestination(id string, req backupDestinationRequest, old *backupDestinationRecord) (backupDestinationRecord, error) {
+	return buildBackupDestinationWithNetworkPolicy(id, req, old, nil)
+}
+
+func buildBackupDestinationWithNetworkPolicy(id string, req backupDestinationRequest, old *backupDestinationRecord, policy *storage.NetworkPolicy) (backupDestinationRecord, error) {
 	result := backupDestinationRecord{Config: storage.Destination{ID: id, Name: strings.TrimSpace(req.Name), Type: req.Type, Disabled: req.Disabled}}
+	if req.Type == "s3" || req.Type == "webdav" {
+		result.Config.NetworkPolicy = policy
+	}
 	if old != nil {
 		if req.Type != old.Config.Type {
 			return result, errBackupInvalid
 		}
 		result.Credentials = old.Credentials
+		result.KeepLast = old.KeepLast
 	}
 	switch req.Type {
 	case "s3":

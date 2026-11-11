@@ -21,13 +21,22 @@ import {
   Trash2,
   type LucideIcon,
 } from "lucide-react"
-import { api, type BackupDestination, type BackupDestinationPayload } from "@/lib/api"
+import {
+  api,
+  type BackupDestination,
+  type BackupDestinationPayload,
+  type BackupUploadJob,
+} from "@/lib/api"
 import { uiMessage, uiText, useLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
 import { cn, formatDateTime } from "@/lib/utils"
 import { BackupUploadPanel } from "@/components/backup-upload-panel"
+import { BackupDiscoveryPanel } from "@/components/backup-discovery-panel"
 import { BackupSchedulePanel } from "@/components/backup-schedule-panel"
+import { BackupRetentionPanel } from "@/components/backup-retention-panel"
 import { BackupDriveAuthorization } from "@/components/backup-drive-authorization"
+import { BackupRunNowButton } from "@/components/backup-run-now-button"
+import { BackupEncryptionSettings } from "@/components/backup-encryption-settings"
 import { useMe } from "@/hooks/use-me"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -128,6 +137,7 @@ export function BackupDestinationsSection() {
   const [pending, setPending] = React.useState(false)
   const [error, setError] = React.useState("")
   const [selectedId, setSelectedId] = React.useState("")
+  const [inspectedJob, setInspectedJob] = React.useState<BackupUploadJob | null>(null)
   const busy = React.useRef(false)
   const [searchParams, setSearchParams] = useSearchParams()
   const oauthResult = searchParams.get("driveOAuth")
@@ -237,6 +247,11 @@ export function BackupDestinationsSection() {
     !!data?.encryptionConfigured && !destinations.isError && !pending && !destinations.isFetching
   return (
     <div className="space-y-4" data-lanqin-i18n-ignore>
+      <BackupEncryptionSettings
+        key={me.data?.user.id || ""}
+        userId={me.data?.user.id || ""}
+        editable={editable}
+      />
       {driveOutcome && (
         <div
           role={driveOutcome === "success" ? "status" : "alert"}
@@ -541,12 +556,27 @@ export function BackupDestinationsSection() {
                     <Info className="mt-0.5 h-4 w-4 shrink-0" />
                     {uiText("可新建不停服在线备份或上传已有归档；生产覆盖恢复尚未接入")}
                   </div>
+                  <BackupRunNowButton
+                    key={`run-${me.data?.user.id || ""}-${selected.id}`}
+                    userId={me.data?.user.id || ""}
+                    destination={selected}
+                    revision={data.revision}
+                    editable={editable}
+                    onCreated={setInspectedJob}
+                  />
                   <BackupSchedulePanel
-                    key={selected.id}
+                    key={`schedule-${me.data?.user.id || ""}-${selected.id}`}
                     userId={me.data?.user.id || ""}
                     destination={selected}
                     destinationsRevision={data.revision}
                     editable={editable}
+                  />
+                  <BackupRetentionPanel
+                    key={`retention-${selected.id}`}
+                    destination={selected}
+                    revision={data.revision}
+                    editable={editable}
+                    onSaved={() => destinations.refetch()}
                   />
                 </div>
               ) : (
@@ -561,13 +591,26 @@ export function BackupDestinationsSection() {
       </section>
 
       {data && !destinations.isError && (
-        <BackupUploadPanel
-          userId={me.data?.user.id || ""}
-          destinations={data.items}
-          revision={data.revision}
-          preferredId={selected?.id}
-          canUpload={editable}
-        />
+        <>
+          <BackupDiscoveryPanel
+            key={`discovery-${me.data?.user.id || ""}`}
+            userId={me.data?.user.id || ""}
+            destinations={data.items}
+            revision={data.revision}
+            preferredId={selected?.id}
+            canDiscover={editable}
+            onCreated={setInspectedJob}
+          />
+          <BackupUploadPanel
+            key={`upload-${me.data?.user.id || ""}`}
+            userId={me.data?.user.id || ""}
+            destinations={data.items}
+            revision={data.revision}
+            preferredId={selected?.id}
+            canUpload={editable}
+            inspectedJob={inspectedJob}
+          />
+        </>
       )}
 
       <Dialog

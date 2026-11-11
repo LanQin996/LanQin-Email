@@ -23,6 +23,7 @@ import (
 	"unicode"
 
 	"filippo.io/age"
+	"lanqin-email-api/internal/backup/nativedb"
 	_ "modernc.org/sqlite"
 )
 
@@ -118,6 +119,51 @@ func checkSnapshot(ctx context.Context, root *os.Root) error {
 	return nil
 }
 
+func checkSnapshotForDriver(ctx context.Context, root *os.Root, driver string, limits Limits) error {
+	if driver == "sqlite" {
+		return checkSnapshot(ctx, root)
+	}
+	invalid := errors.New("native snapshot data is invalid or incomplete")
+	if driver != "postgres" && driver != "mysql" {
+		return invalid
+	}
+	for _, name := range []string{"data", "mail", "dkim"} {
+		info, err := root.Lstat(name)
+		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return invalid
+		}
+	}
+	if _, err := root.Lstat("data/lanqin.db"); !errors.Is(err, os.ErrNotExist) {
+		return invalid
+	}
+	info, err := root.Lstat(nativedb.Filename)
+	if err != nil || !info.Mode().IsRegular() || info.Size() < 1 || info.Size() > limits.MaxBytes {
+		return invalid
+	}
+	file, err := root.Open(nativedb.Filename)
+	if err != nil {
+		return invalid
+	}
+	defer file.Close()
+	opened, err := file.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return invalid
+	}
+	nativeLimits := nativedb.DefaultLimits()
+	nativeLimits.MaxBytes = limits.MaxBytes
+	header, _, err := nativedb.Read(ctx, file, nativeLimits, nil, nil)
+	if err != nil || header.Driver != driver {
+		return invalid
+	}
+	final, err := file.Stat()
+	if err != nil || final.Size() != info.Size() || !final.ModTime().Equal(info.ModTime()) {
+		return invalid
+	}
+	return nil
+}
+
+func onlineScope(scope string) bool { return scope == "online-data" || scope == "online-native-data" }
+
 // Write encrypts a caller-prepared offline SQLite data snapshot. The recipient
 // must be an age X25519 public key. Callers must discard incomplete output.
 func Write(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits) (Manifest, error) {
@@ -133,7 +179,45 @@ func WriteOnline(ctx context.Context, snapshot string, dst io.Writer, recipient 
 	return writeSnapshot(ctx, snapshot, dst, recipient, limits, "online-data")
 }
 
-func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits, scope string) (Manifest, error) {
+// WriteNative retains the same authenticated age/tar container, with a version-2
+// manifest identifying a typed same-engine PostgreSQL/MySQL database payload.
+func WriteNative(ctx context.Context, snapshot string, dst io.Writer, recipient, driver string, limits Limits) (Manifest, error) {
+	if driver != "postgres" && driver != "mysql" {
+		return Manifest{}, errors.New("unsupported native database driver")
+	}
+	return writeSnapshot(ctx, snapshot, dst, recipient, limits, "online-native-data", driver)
+}
+
+// WriteOnlinePassword uses age's standard scrypt recipient. The password is
+// never written to the manifest or a public recipient descriptor.
+func WriteOnlinePassword(ctx context.Context, snapshot string, dst io.Writer, password string, limits Limits) (Manifest, error) {
+	key, err := age.NewScryptRecipient(password)
+	if err != nil {
+		return Manifest{}, errors.New("invalid backup password")
+	}
+	return writeSnapshotRecipient(ctx, snapshot, dst, key, limits, "online-data")
+}
+
+func WritePassword(ctx context.Context, snapshot string, dst io.Writer, password string, limits Limits) (Manifest, error) {
+	key, err := age.NewScryptRecipient(password)
+	if err != nil {
+		return Manifest{}, errors.New("invalid backup password")
+	}
+	return writeSnapshotRecipient(ctx, snapshot, dst, key, limits, "offline-data")
+}
+
+func WriteNativePassword(ctx context.Context, snapshot string, dst io.Writer, password, driver string, limits Limits) (Manifest, error) {
+	if driver != "postgres" && driver != "mysql" {
+		return Manifest{}, errors.New("unsupported native database driver")
+	}
+	key, err := age.NewScryptRecipient(password)
+	if err != nil {
+		return Manifest{}, errors.New("invalid backup password")
+	}
+	return writeSnapshotRecipient(ctx, snapshot, dst, key, limits, "online-native-data", driver)
+}
+
+func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipient string, limits Limits, scope string, drivers ...string) (Manifest, error) {
 	var empty Manifest
 	if !limits.valid() {
 		return empty, errors.New("backup limits must be positive")
@@ -142,17 +226,34 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 	if err != nil {
 		return empty, errors.New("invalid X25519 recipient")
 	}
+	return writeSnapshotRecipient(ctx, snapshot, dst, key, limits, scope, drivers...)
+}
+
+func writeSnapshotRecipient(ctx context.Context, snapshot string, dst io.Writer, key age.Recipient, limits Limits, scope string, drivers ...string) (Manifest, error) {
+	var empty Manifest
+	if !limits.valid() {
+		return empty, errors.New("backup limits must be positive")
+	}
+	if err := ctx.Err(); err != nil {
+		return empty, err
+	}
 	root, err := os.OpenRoot(snapshot)
 	if err != nil {
 		return empty, errors.New("cannot open snapshot directory")
 	}
 	defer root.Close()
-	if err := checkSnapshot(ctx, root); err != nil {
+	driver := "sqlite"
+	version := 1
+	if len(drivers) > 0 {
+		driver = drivers[0]
+		version = 2
+	}
+	if err := checkSnapshotForDriver(ctx, root, driver, limits); err != nil {
 		return empty, err
 	}
 	var markerDigest [sha256.Size]byte
-	if scope == "online-data" {
-		markerDigest, err = checkOnlineMarker(ctx, root, limits.MaxBytes)
+	if scope == "online-data" || scope == "online-native-data" {
+		markerDigest, err = checkOnlineMarker(ctx, root, limits.MaxBytes, driver)
 		if err != nil {
 			return empty, err
 		}
@@ -162,7 +263,7 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 		return empty, errors.New("cannot initialize backup encryption")
 	}
 	archive := tar.NewWriter(encrypted)
-	manifest := Manifest{Version: 1, Scope: scope, Driver: "sqlite", Created: time.Now().UTC()}
+	manifest := Manifest{Version: version, Scope: scope, Driver: driver, Created: time.Now().UTC()}
 	metadata, err := json.Marshal(manifest)
 	if err != nil {
 		return empty, err
@@ -174,7 +275,7 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 		return empty, err
 	}
 	remaining, entries := limits.MaxBytes, 0
-	markerArchived := scope != "online-data"
+	markerArchived := scope != "online-data" && scope != "online-native-data"
 	err = fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return errors.New("cannot enumerate snapshot")
@@ -196,7 +297,7 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 		if info.Size() < 0 || (!info.IsDir() && info.Size() > remaining) {
 			return errors.New("snapshot exceeds size limit")
 		}
-		if scope == "online-data" && name == onlineMarkerName && info.Size() > maxOnlineMarkerBytes {
+		if onlineScope(scope) && name == onlineMarkerName && info.Size() > maxOnlineMarkerBytes {
 			return errors.New("online completion marker exceeds limit")
 		}
 		header, err := tar.FileInfoHeader(info, "")
@@ -221,7 +322,7 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 		}
 		var actualMarker hash.Hash
 		var target io.Writer = archive
-		if scope == "online-data" && name == onlineMarkerName {
+		if onlineScope(scope) && name == onlineMarkerName {
 			// Bind the preflight check to the marker bytes actually archived,
 			// rather than rechecking a potentially different file afterward.
 			actualMarker = sha256.New()
@@ -268,7 +369,30 @@ func writeSnapshot(ctx context.Context, snapshot string, dst io.Writer, recipien
 // expectedSHA256 must come from a separately trusted receipt, not from an
 // untrusted storage provider alongside the archive. age is not a sender signature.
 func Restore(ctx context.Context, src io.Reader, destination, identity, expectedSHA256 string, limits Limits) (Manifest, error) {
+	key, err := age.ParseX25519Identity(identity)
+	if err != nil {
+		return Manifest{}, errors.New("invalid X25519 identity")
+	}
+	return restoreIdentity(ctx, src, destination, key, expectedSHA256, limits)
+}
+
+// RestorePassword explicitly selects password-based age decryption; existing
+// X25519 archives remain available through Restore. Work is bounded even for
+// malicious scrypt headers instead of trusting a provider's resource request.
+func RestorePassword(ctx context.Context, src io.Reader, destination, password, expectedSHA256 string, limits Limits) (Manifest, error) {
+	key, err := age.NewScryptIdentity(password)
+	if err != nil {
+		return Manifest{}, errors.New("invalid backup password")
+	}
+	key.SetMaxWorkFactor(18)
+	return restoreIdentity(ctx, src, destination, key, expectedSHA256, limits)
+}
+
+func restoreIdentity(ctx context.Context, src io.Reader, destination string, key age.Identity, expectedSHA256 string, limits Limits) (Manifest, error) {
 	var manifest Manifest
+	if err := ctx.Err(); err != nil {
+		return manifest, err
+	}
 	if !limits.valid() {
 		return manifest, errors.New("backup limits must be positive")
 	}
@@ -278,10 +402,6 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	}
 	digest := sha256.New()
 	src = io.TeeReader(src, digest)
-	key, err := age.ParseX25519Identity(identity)
-	if err != nil {
-		return manifest, errors.New("invalid X25519 identity")
-	}
 	decrypted, err := age.Decrypt(contextReader{ctx, src}, key)
 	if err != nil {
 		return manifest, errors.New("cannot decrypt backup with supplied identity")
@@ -293,7 +413,7 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	}
 	decoder := json.NewDecoder(archive)
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil || manifest.Version != 1 || (manifest.Scope != "offline-data" && manifest.Scope != "online-data") || manifest.Driver != "sqlite" || manifest.Created.IsZero() {
+	if err := decoder.Decode(&manifest); err != nil || !validManifest(manifest) {
 		return manifest, errors.New("unsupported backup manifest")
 	}
 	var extra any
@@ -330,7 +450,7 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 		if entries >= limits.MaxEntries || !allowed(name) || seen[name] || header.Size < 0 || header.Size > remaining {
 			return manifest, errors.New("invalid backup path, duplicate entry, or resource limit exceeded")
 		}
-		if manifest.Scope == "online-data" && name == onlineMarkerName && header.Size > maxOnlineMarkerBytes {
+		if onlineScope(manifest.Scope) && name == onlineMarkerName && header.Size > maxOnlineMarkerBytes {
 			return manifest, errors.New("online completion marker exceeds limit")
 		}
 		seen[name] = true
@@ -373,11 +493,11 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	if hex.EncodeToString(digest.Sum(nil)) != strings.ToLower(expectedSHA256) {
 		return manifest, errors.New("backup does not match trusted receipt")
 	}
-	if err := checkSnapshot(ctx, stage); err != nil {
+	if err := checkSnapshotForDriver(ctx, stage, manifest.Driver, limits); err != nil {
 		return manifest, err
 	}
-	if manifest.Scope == "online-data" {
-		if _, err := checkOnlineMarker(ctx, stage, limits.MaxBytes); err != nil {
+	if onlineScope(manifest.Scope) {
+		if _, err := checkOnlineMarker(ctx, stage, limits.MaxBytes, manifest.Driver); err != nil {
 			return manifest, err
 		}
 	}
@@ -394,6 +514,9 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 	if manifest.Scope == "online-data" {
 		ready = "Verified online-data archive staged; collector completion marker validated, NOT an in-place service restore. Unindexed mail remains quarantined; no automatic promotion.\n"
 	}
+	if manifest.Scope == "online-native-data" {
+		ready = "Verified typed native database archive staged; NOT activated. Native database import and maintenance-window installation are still required.\n"
+	}
 	if err := root.WriteFile("READY", []byte(ready), 0o600); err != nil {
 		return manifest, err
 	}
@@ -404,7 +527,7 @@ func Restore(ctx context.Context, src io.Reader, destination, identity, expected
 // Its private source/summary fields are neither interpreted as trusted authority
 // nor returned in Manifest or errors. A separately trusted ciphertext receipt is
 // still required, and READY still means staging, never production activation.
-func checkOnlineMarker(ctx context.Context, root *os.Root, maxBytes int64) ([sha256.Size]byte, error) {
+func checkOnlineMarker(ctx context.Context, root *os.Root, maxBytes int64, drivers ...string) ([sha256.Size]byte, error) {
 	var empty [sha256.Size]byte
 	invalid := errors.New("online completion marker is missing or invalid")
 	parent, err := root.Lstat("data")
@@ -438,7 +561,15 @@ func checkOnlineMarker(ctx context.Context, root *os.Root, maxBytes int64) ([sha
 		Files    json.RawMessage `json:"files"`
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	if decoder.Decode(&marker) != nil || marker.Version != 1 || marker.Scope != "sqlite-reference-closure" || !marker.Complete {
+	driver := "sqlite"
+	version := 1
+	if len(drivers) > 0 {
+		driver = drivers[0]
+	}
+	if driver != "sqlite" {
+		version = 2
+	}
+	if decoder.Decode(&marker) != nil || marker.Version != version || marker.Scope != driver+"-reference-closure" || !marker.Complete {
 		return empty, invalid
 	}
 	object := func(raw json.RawMessage, start byte) bool {
@@ -456,4 +587,41 @@ func checkOnlineMarker(ctx context.Context, root *os.Root, maxBytes int64) ([sha
 		return empty, invalid
 	}
 	return sha256.Sum256(data), nil
+}
+
+// StagedOnlineReportSHA256 is the small trust anchor for a Web-to-maintenance
+// handoff. Full file/digest/schema validation remains the installer's job.
+func StagedOnlineReportSHA256(ctx context.Context, container string, drivers ...string) (string, error) {
+	root, err := os.OpenRoot(filepath.Join(container, "snapshot"))
+	if err != nil {
+		return "", errors.New("cannot inspect staged online report")
+	}
+	defer root.Close()
+	digest, err := checkOnlineMarker(ctx, root, maxOnlineMarkerBytes, drivers...)
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func VerifyStagedOnlineReport(ctx context.Context, container, expected string, drivers ...string) error {
+	want, err := hex.DecodeString(expected)
+	if err != nil || len(want) != sha256.Size {
+		return errors.New("staged online report receipt required")
+	}
+	actual, err := StagedOnlineReportSHA256(ctx, container, drivers...)
+	if err != nil || actual != strings.ToLower(expected) {
+		return errors.New("staged online report does not match authenticated recovery")
+	}
+	return nil
+}
+
+func validManifest(manifest Manifest) bool {
+	if manifest.Created.IsZero() {
+		return false
+	}
+	if manifest.Version == 1 {
+		return manifest.Driver == "sqlite" && (manifest.Scope == "offline-data" || manifest.Scope == "online-data")
+	}
+	return manifest.Version == 2 && manifest.Scope == "online-native-data" && (manifest.Driver == "postgres" || manifest.Driver == "mysql")
 }

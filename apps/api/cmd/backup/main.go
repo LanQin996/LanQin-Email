@@ -1,6 +1,6 @@
-// backup is a data-snapshot utility with an explicit maintenance-window restore
-// switch. It never controls services. Cloud uploads are opt-in and read
-// per-destination credential references from operator configuration.
+// backup exports encrypted data snapshots and isolated recovery evidence.
+// Service coordination requires an explicit pinned maintenance plan. Cloud
+// uploads are opt-in and use per-destination operator credential references.
 package main
 
 import (
@@ -32,10 +32,31 @@ func main() {
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("usage: backup keygen|create|create-online|restore|install|rollback|upload|fetch|publish (see docs/backup.md)")
+		return errors.New("usage: backup keygen|create|create-online|restore|import-native|install-native|activate-native|rollback-native|verify-native|maintenance-host|maintenance-host-resolve|maintain-plan|maintain|maintain-status|maintain-recover|preservation-verify|preservation-restore|install|rollback|upload|fetch|discover|publish-index|publish (see docs/backup.md)")
+	}
+	if args[0] == "maintenance-host" {
+		return runMaintenanceHost(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "maintenance-host-resolve" {
+		return runMaintenanceHostMode(ctx, args[0], args[1:], stdout, stderr)
+	}
+	if args[0] == "maintain" || args[0] == "maintain-plan" || args[0] == "maintain-status" || args[0] == "maintain-recover" {
+		return runMaintenance(ctx, args[0], args[1:], stdout, stderr)
+	}
+	if args[0] == "preservation-verify" || args[0] == "preservation-restore" {
+		return runPreservation(ctx, args[0], args[1:], stdout, stderr)
 	}
 	if args[0] == "install" {
 		return runInstall(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "import-native" {
+		return runImportNative(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "verify-native" {
+		return runVerifyNative(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "install-native" || args[0] == "activate-native" || args[0] == "rollback-native" {
+		return runNativeMaintenance(ctx, args[0], args[1:], stdout, stderr)
 	}
 	if args[0] == "rollback" {
 		return runRollback(ctx, args[1:], stdout, stderr)
@@ -46,6 +67,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	if args[0] == "fetch" {
 		return runFetch(ctx, args[1:], stdout, stderr)
 	}
+	if args[0] == "discover" {
+		return runDiscover(ctx, args[1:], stdout, stderr)
+	}
+	if args[0] == "publish-index" {
+		return runPublishIndex(ctx, args[1:], stdout, stderr)
+	}
 	if args[0] == "publish" {
 		return runPublish(ctx, args[1:], stdout, stderr)
 	}
@@ -53,8 +80,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runCreateOnline(ctx, args[1:], stdout, stderr)
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
-	flags.SetOutput(stderr)
+	flags.SetOutput(io.Discard)
 	keyFile := flags.String("identity-file", "", "private recovery key file (never a command-line key value)")
+	passwordFile := flags.String("password-file", "", "private backup password file, instead of a recipient or recovery identity")
 	snapshot := flags.String("snapshot", "", "prepared offline SQLite snapshot containing data, mail, dkim")
 	recipient := flags.String("recipient", "", "age X25519 public recipient")
 	output := flags.String("out", "", "new output file or new restore container directory")
@@ -65,7 +93,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	maxBytes := flags.Int64("max-bytes", defaults.MaxBytes, "maximum total payload size")
 	maxEntries := flags.Int("max-entries", defaults.MaxEntries, "maximum payload entry count")
 	if err := flags.Parse(args[1:]); err != nil {
-		return err
+		return errors.New("invalid backup arguments; use documented flags and private credential files, never password values")
 	}
 	if flags.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
@@ -73,7 +101,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 	limits := backup.Limits{MaxBytes: *maxBytes, MaxEntries: *maxEntries}
 	switch args[0] {
 	case "keygen":
-		if *keyFile == "" {
+		if *keyFile == "" || *passwordFile != "" {
 			return errors.New("--identity-file is required")
 		}
 		identity, err := age.GenerateX25519Identity()
@@ -89,8 +117,20 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_, err = fmt.Fprintln(stdout, identity.Recipient().String())
 		return err
 	case "create":
-		if !*offline || *snapshot == "" || *output == "" || *recipient == "" {
-			return errors.New("create requires --snapshot, --recipient, --out and --confirm-offline-snapshot")
+		if !*offline || *snapshot == "" || *output == "" || (*recipient == "") == (*passwordFile == "") || *keyFile != "" {
+			return errors.New("create requires --snapshot, exactly one --recipient or --password-file, --out and --confirm-offline-snapshot")
+		}
+		var password []byte
+		if *passwordFile != "" {
+			var err error
+			password, err = readBackupPasswordFile(*passwordFile)
+			if err != nil {
+				return err
+			}
+			defer clear(password)
+			if !validNewBackupPassword(password) {
+				return errors.New("new backup passwords must contain 8 to 128 Unicode characters, without control characters or only whitespace")
+			}
 		}
 		// Do not create a temporary output inside a source that WalkDir will read.
 		source, err := filepath.EvalSymlinks(*snapshot)
@@ -115,7 +155,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		}
 		digest := sha256.New()
 		if err := publish(*output, func(file *os.File) error {
-			_, err := backup.Write(ctx, source, io.MultiWriter(file, digest), *recipient, limits)
+			var err error
+			if *passwordFile != "" {
+				_, err = backup.WritePassword(ctx, source, io.MultiWriter(file, digest), string(password), limits)
+			} else {
+				_, err = backup.Write(ctx, source, io.MultiWriter(file, digest), *recipient, limits)
+			}
 			return err
 		}); err != nil {
 			return err
@@ -123,31 +168,55 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		_, err = fmt.Fprintln(stdout, "Encrypted offline DATA snapshot created; deployment secrets and Postfix queue are NOT included.\nKeep this receipt separately trusted: sha256="+hex.EncodeToString(digest.Sum(nil)))
 		return err
 	case "restore":
-		if *keyFile == "" || *input == "" || *output == "" || *expectedHash == "" {
-			return errors.New("restore requires --identity-file, --in, --out and --expected-sha256 from a trusted receipt")
+		if (*keyFile == "") == (*passwordFile == "") || *recipient != "" || *input == "" || *output == "" || *expectedHash == "" {
+			return errors.New("restore requires exactly one --identity-file or --password-file, --in, --out and --expected-sha256 from a trusted receipt")
 		}
 		want, err := hex.DecodeString(*expectedHash)
 		if err != nil || len(want) != sha256.Size {
 			return errors.New("invalid expected SHA-256")
 		}
-		identityFile, err := os.Open(*keyFile)
-		if err != nil {
-			return errors.New("cannot open recovery key file")
+		var key []byte
+		if *passwordFile != "" {
+			key, err = readBackupPasswordFile(*passwordFile)
+			if err != nil {
+				return err
+			}
+		} else {
+			identityFile, err := os.Open(*keyFile)
+			if err != nil {
+				return errors.New("cannot open recovery key file")
+			}
+			var readErr error
+			key, readErr = io.ReadAll(io.LimitReader(identityFile, 4097))
+			closeErr := identityFile.Close()
+			if readErr != nil || closeErr != nil || len(key) > 4096 {
+				clear(key)
+				return errors.New("cannot read recovery key file")
+			}
 		}
-		key, readErr := io.ReadAll(io.LimitReader(identityFile, 4097))
-		closeErr := identityFile.Close()
-		if readErr != nil || closeErr != nil || len(key) > 4096 {
-			return errors.New("cannot read recovery key file")
-		}
+		defer clear(key)
 		archive, err := os.Open(*input)
 		if err != nil {
 			return errors.New("cannot open backup file")
 		}
 		defer archive.Close()
-		if _, err := backup.Restore(ctx, archive, *output, strings.TrimSpace(string(key)), *expectedHash, limits); err != nil {
+		var manifest backup.Manifest
+		if *passwordFile != "" {
+			manifest, err = backup.RestorePassword(ctx, archive, *output, string(key), *expectedHash, limits)
+		} else {
+			manifest, err = backup.Restore(ctx, archive, *output, strings.TrimSpace(string(key)), *expectedHash, limits)
+		}
+		if err != nil {
 			return err
 		}
 		_, err = fmt.Fprintln(stdout, "Verified data staged under out/snapshot; READY is present. No live services or ownership were changed.")
+		if err == nil && (manifest.Scope == "online-native-data" || manifest.Scope == "online-data") {
+			reportSHA, reportErr := backup.StagedOnlineReportSHA256(ctx, *output, manifest.Driver)
+			if reportErr != nil {
+				return errors.New("cannot obtain authenticated installation report receipt")
+			}
+			_, err = fmt.Fprintln(stdout, "Keep this installation report receipt separately trusted: report-sha256="+reportSHA)
+		}
 		return err
 	default:
 		return errors.New("unknown backup command")

@@ -15,16 +15,20 @@ import (
 	"time"
 )
 
-const MaxUploadBytes int64 = 5 << 30 // Single PUT only; multipart is not implemented.
+const MaxUploadBytes int64 = 5 << 30 // Shared cap for legacy PUT and checkpointed multipart/chunk uploads.
 
 var ErrPartialFailure = errors.New("one or more backup destinations did not succeed; inspect the JSON report")
+var ErrRecoveryIndexFailure = errors.New("encrypted backup uploaded but its independent recovery index was not confirmed")
 
 type Options struct {
-	Concurrency    int
-	Attempts       int
-	AttemptTimeout time.Duration
-	MaxBytes       int64
-	SpoolDir       string
+	Concurrency        int
+	Attempts           int
+	AttemptTimeout     time.Duration
+	MaxBytes           int64
+	SpoolDir           string
+	Checkpoints        CheckpointStore
+	RecoveryIndexKey   []byte                              `json:"-"`
+	RecoveryIndexGuard func(context.Context, string) error `json:"-"`
 }
 
 func DefaultOptions() Options {
@@ -38,12 +42,14 @@ type Report struct {
 }
 
 type Result struct {
-	DestinationID string     `json:"destination_id"`
-	State         string     `json:"state"`
-	Attempts      int        `json:"attempts"`
-	ObjectKey     string     `json:"object_key,omitempty"`
-	ErrorCode     string     `json:"error_code,omitempty"`
-	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+	DestinationID          string     `json:"destination_id"`
+	State                  string     `json:"state"`
+	Attempts               int        `json:"attempts"`
+	ObjectKey              string     `json:"object_key,omitempty"`
+	ErrorCode              string     `json:"error_code,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	RecoveryIndexState     string     `json:"index_state,omitempty"`
+	RecoveryIndexErrorCode string     `json:"index_error_code,omitempty"`
 }
 
 type artifact struct {
@@ -56,6 +62,10 @@ type artifact struct {
 type uploader interface {
 	put(context.Context, string, *io.SectionReader, *artifact) error
 	close()
+}
+
+type recoveryIndexPublisher interface {
+	publishRecoveryIndex(context.Context, string, string, int64, time.Time, []byte, func(context.Context) error) error
 }
 
 type uploadError struct {
@@ -86,21 +96,25 @@ func UploadFile(ctx context.Context, source *os.File, expected string, cfg Confi
 		if err != nil {
 			return nil, errors.New("destination credentials unavailable")
 		}
-		values := make(map[string]string)
-		if d.S3 != nil {
-			values[d.S3.AccessKeyIDEnv], values[d.S3.SecretAccessKeyEnv] = credentials.AccessKeyID, credentials.SecretAccessKey
-			if d.S3.SessionTokenEnv != "" {
-				values[d.S3.SessionTokenEnv] = credentials.SessionToken
-			}
-		}
-		if d.WebDAV != nil {
-			values[d.WebDAV.UsernameEnv], values[d.WebDAV.PasswordEnv] = credentials.Username, credentials.Password
-		}
-		if d.Drive != nil {
-			values[d.Drive.AccessTokenEnv] = credentials.DriveAccessToken
-		}
-		return buildUploader(d, func(name string) (string, bool) { v, ok := values[name]; return v, ok }, nil)
+		return credentialsUploader(d, credentials)
 	})
+}
+
+func credentialsUploader(d Destination, credentials Credentials) (uploader, error) {
+	values := make(map[string]string)
+	if d.S3 != nil {
+		values[d.S3.AccessKeyIDEnv], values[d.S3.SecretAccessKeyEnv] = credentials.AccessKeyID, credentials.SecretAccessKey
+		if d.S3.SessionTokenEnv != "" {
+			values[d.S3.SessionTokenEnv] = credentials.SessionToken
+		}
+	}
+	if d.WebDAV != nil {
+		values[d.WebDAV.UsernameEnv], values[d.WebDAV.PasswordEnv] = credentials.Username, credentials.Password
+	}
+	if d.Drive != nil {
+		values[d.Drive.AccessTokenEnv] = credentials.DriveAccessToken
+	}
+	return buildUploader(d, func(name string) (string, bool) { v, ok := values[name]; return v, ok }, nil)
 }
 
 // Upload stages and hashes the source once, then gives each upload an independent
@@ -123,6 +137,13 @@ func uploadSource(ctx context.Context, prepare func() (*artifact, error), cfg Co
 	if opts.Concurrency < 1 || opts.Concurrency > 8 || opts.Attempts < 1 || opts.Attempts > 3 || opts.AttemptTimeout <= 0 || opts.AttemptTimeout > time.Hour || opts.MaxBytes < 1 || opts.MaxBytes > MaxUploadBytes {
 		return report, errors.New("invalid upload limits (concurrency 1..8, attempts 1..3, timeout up to 1h, size up to 5 GiB)")
 	}
+	if len(opts.RecoveryIndexKey) != 0 && len(opts.RecoveryIndexKey) != 32 {
+		return report, errors.New("recovery index requires a 32-byte key")
+	}
+	// Workers only read this private copy; the caller may reuse its key once
+	// Upload returns, and transport/checkpoint/report structures never retain it.
+	opts.RecoveryIndexKey = append([]byte(nil), opts.RecoveryIndexKey...)
+	defer clear(opts.RecoveryIndexKey)
 	active := 0
 	for _, d := range cfg.Destinations {
 		if !d.Disabled {
@@ -157,10 +178,17 @@ func uploadSource(ctx context.Context, prepare func() (*artifact, error), cfg Co
 		})
 	}
 	workers.Wait()
+	indexFailure := false
 	for _, result := range report.Destinations {
 		if result.State != "succeeded" && result.State != "skipped" {
 			return report, ErrPartialFailure
 		}
+		if result.RecoveryIndexState != "" && result.RecoveryIndexState != "succeeded" {
+			indexFailure = true
+		}
+	}
+	if indexFailure {
+		return report, errors.Join(ErrPartialFailure, ErrRecoveryIndexFailure)
 	}
 	return report, nil
 }
@@ -192,17 +220,53 @@ func uploadDestination(ctx context.Context, d Destination, data *artifact, opts 
 		key := "lanqin-" + hex.EncodeToString(nonce[:]) + ".age"
 		attemptCtx, cancel := context.WithTimeout(ctx, opts.AttemptTimeout)
 		result.Attempts = attempt
-		err := client.put(attemptCtx, key, io.NewSectionReader(data.file, 0, data.size), data)
-		cancel()
+		completedObject := ""
+		var err error
+		if opts.Checkpoints != nil {
+			resumable, ok := client.(resumableUploader)
+			if !ok {
+				err = &uploadError{code: "resume_unsupported"}
+			} else {
+				completedObject, err = resumable.resume(attemptCtx, data, opts.Checkpoints)
+			}
+		} else {
+			err = client.put(attemptCtx, key, io.NewSectionReader(data.file, 0, data.size), data)
+		}
 		if err == nil {
 			now := time.Now().UTC()
 			result.State, result.ObjectKey, result.CompletedAt = "succeeded", objectKey(d, key), &now
 			if provider, ok := client.(interface{ objectKey(string) string }); ok {
 				result.ObjectKey = provider.objectKey(key)
 			}
+			if opts.Checkpoints != nil {
+				result.ObjectKey = completedObject
+			}
 			result.ErrorCode = ""
+			if len(opts.RecoveryIndexKey) > 0 {
+				result.RecoveryIndexState, result.RecoveryIndexErrorCode = "failed", "recovery_index_publish_failed"
+				guard := func(ctx context.Context) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if opts.RecoveryIndexGuard != nil {
+						return opts.RecoveryIndexGuard(ctx, d.ID)
+					}
+					return nil
+				}
+				publisher, ok := client.(recoveryIndexPublisher)
+				if !ok {
+					result.RecoveryIndexErrorCode = "recovery_index_unavailable"
+				} else if guard(attemptCtx) == nil && publisher.publishRecoveryIndex(attemptCtx, result.ObjectKey, data.sha256, data.size, now, opts.RecoveryIndexKey, guard) == nil {
+					result.RecoveryIndexState, result.RecoveryIndexErrorCode = "succeeded", ""
+				}
+				if attemptCtx.Err() != nil && result.RecoveryIndexState != "succeeded" {
+					result.RecoveryIndexErrorCode = "recovery_index_interrupted"
+				}
+			}
+			cancel()
 			return result
 		}
+		cancel()
 		if ctx.Err() != nil {
 			result.State, result.ErrorCode = "cancelled", "cancelled"
 			return result

@@ -51,6 +51,20 @@ func CollectDKIMLimited(ctx context.Context, snapshot string, output *os.Root, m
 	}
 	defer db.Close()
 	db.SetMaxOpenConns(1)
+	return CollectDKIMFromSnapshot(ctx, db, output, maxKeys, maxBytes)
+}
+
+type DKIMSnapshotQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+// CollectDKIMFromSnapshot reuses the same validation for a caller-owned frozen
+// native read transaction. The caller must never pass an independently changing
+// live connection as a substitute for the database cut used by the archive.
+func CollectDKIMFromSnapshot(ctx context.Context, db DKIMSnapshotQuery, output *os.Root, maxKeys int, maxBytes int64) (int, error) {
+	if db == nil || output == nil || maxKeys < 0 || maxKeys > 100000 || maxBytes < 0 {
+		return 0, errors.New("invalid DKIM snapshot query or limits")
+	}
 	rows, err := db.QueryContext(ctx, `SELECT name,dkim_selector,dkim_public_key,dkim_private_key FROM domains WHERE status='active' ORDER BY name`)
 	if err != nil {
 		return 0, errors.New("cannot read DKIM snapshot")

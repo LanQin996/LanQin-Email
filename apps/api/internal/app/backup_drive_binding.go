@@ -13,8 +13,12 @@ func backupDriveBound(record backupDestinationRecord) bool {
 	return record.Config.Type == "drive" && record.Config.Drive != nil && storage.ValidDriveID(record.Config.Drive.FolderID) && validBackupSecret(record.Credentials.DriveRefreshToken) && record.Credentials.DriveAuthID != "" && record.Credentials.DriveClientID != ""
 }
 
-func (a *App) completeBackupDriveAuthorization(ctx context.Context, id, expected string, token *oauth2.Token) error {
+func (a *App) completeBackupDriveAuthorization(ctx context.Context, id, expected string, token *oauth2.Token, clientID, generation string) error {
 	if !validBackupDriveToken(token, true) {
+		return errBackupDriveOAuth
+	}
+	effective, currentGeneration, clientErr := a.backupDriveOAuthConfigFor(ctx)
+	if clientErr != nil || effective.ClientID != clientID || currentGeneration != generation {
 		return errBackupDriveOAuth
 	}
 	vault, _, err := a.loadBackupDestinationState(ctx)
@@ -46,6 +50,9 @@ func (a *App) completeBackupDriveAuthorization(ctx context.Context, id, expected
 	// Network work finished before taking a DB write slot. A concurrently
 	// changed/deleted destination must not receive this authorization.
 	for range 5 {
+		if !a.driveClientGenerationCurrent(ctx, generation) {
+			return errBackupDriveOAuth
+		}
 		current, raw, err := a.loadBackupDestinationState(ctx)
 		if err != nil {
 			return err
@@ -60,7 +67,7 @@ func (a *App) completeBackupDriveAuthorization(ctx context.Context, id, expected
 				return errBackupConflict
 			}
 			r.Config.Drive = &storage.DriveConfig{FolderID: folder, AccessTokenEnv: "BACKUP_DRIVE_TOKEN"}
-			r.Credentials = backupCredentials{DriveRefreshToken: token.RefreshToken, DriveAccessToken: token.AccessToken, DriveTokenExpiry: token.Expiry, DriveClientID: a.cfg.BackupDriveClientID, DriveAuthID: newID("bda")}
+			r.Credentials = backupCredentials{DriveRefreshToken: token.RefreshToken, DriveAccessToken: token.AccessToken, DriveTokenExpiry: token.Expiry, DriveClientID: clientID, DriveClientGeneration: generation, DriveAuthID: newID("bda")}
 			found = true
 			break
 		}
@@ -69,6 +76,9 @@ func (a *App) completeBackupDriveAuthorization(ctx context.Context, id, expected
 		}
 		err = a.saveBackupDestinationState(ctx, raw, current)
 		if !errors.Is(err, errBackupConflict) {
+			if err == nil && !a.driveClientGenerationCurrent(ctx, generation) {
+				return errBackupDriveOAuth
+			}
 			return err
 		}
 	}

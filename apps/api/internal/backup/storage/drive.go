@@ -21,6 +21,8 @@ type driveUploader struct {
 	client                               *http.Client
 	folder, token, destination, resultID string
 	cleanup                              func()
+	config                               Destination
+	binding                              string
 }
 
 func (d *driveUploader) close()                  { d.cleanup() }

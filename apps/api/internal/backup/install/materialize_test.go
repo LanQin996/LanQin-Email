@@ -27,7 +27,7 @@ func TestPrepareIndependentlyExcludesRestoredBackupRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = db.Exec(`CREATE TABLE system_settings("key" TEXT PRIMARY KEY,value TEXT);
-	INSERT INTO system_settings VALUES('backup.queue.v1','opaque'),('backup.schedules.v1','opaque'),('backup.job.v1.old','opaque'),('backup.drive.oauth.v1.actor','opaque'),('backup.destinations.v1','keep'),('backup.drive.oauth.v10.keep','keep');`)
+	INSERT INTO system_settings VALUES('backup.queue.v1','opaque'),('backup.schedules.v1','opaque'),('backup.job.v1.old','opaque'),('backup.drive.oauth.v1.actor','opaque'),('backup.transfer.v1.old.target','opaque'),('backup.discovery.v1.old.0','opaque'),('backup.destinations.v1','keep'),('backup.drive.oauth.v10.keep','keep'),('backup.discovery.v10.keep','keep');`)
 	if err != nil {
 		db.Close()
 		t.Fatal(err)
@@ -45,7 +45,7 @@ func TestPrepareIndependentlyExcludesRestoredBackupRuntime(t *testing.T) {
 	}
 	defer copy.Close()
 	var count int
-	if err := copy.QueryRow(`SELECT count(*) FROM system_settings`).Scan(&count); err != nil || count != 2 {
+	if err := copy.QueryRow(`SELECT count(*) FROM system_settings`).Scan(&count); err != nil || count != 3 {
 		t.Fatal("imported backup jobs/plans/oauth could replay", count, err)
 	}
 	planBytes, err := os.ReadFile(filepath.Join(p.Path, "data", "restore-install-plan.json"))
@@ -53,7 +53,7 @@ func TestPrepareIndependentlyExcludesRestoredBackupRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	var plan recoveryPlan
-	if err := json.Unmarshal(planBytes, &plan); err != nil || plan.BackupRuntimeSettingsRemoved != 4 {
+	if err := json.Unmarshal(planBytes, &plan); err != nil || plan.BackupRuntimeSettingsRemoved != 6 {
 		t.Fatal("runtime cleanup missing from persistent plan", err)
 	}
 }
@@ -61,6 +61,38 @@ func TestPrepareIndependentlyExcludesRestoredBackupRuntime(t *testing.T) {
 type materializeFixture struct {
 	container, stage, workspace string
 	report                      collectionReport
+}
+
+func TestPrepareBindsCopiedReportToWebReceipt(t *testing.T) {
+	f := newMaterializeFixture(t)
+	content, err := os.ReadFile(filepath.Join(f.stage, reportName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(content)
+	expected := hex.EncodeToString(hash[:])
+	p, err := Prepare(t.Context(), f.container, f.workspace, "/runtime/data", "/runtime/mail", backup.DefaultLimits(), expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// A valid but different JSON document must fail the copied-byte receipt,
+	// even if every payload digest and semantic field is otherwise unchanged.
+	if err := os.WriteFile(filepath.Join(f.stage, reportName), append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := Prepare(t.Context(), f.container, f.workspace, "/runtime/data", "/runtime/mail", backup.DefaultLimits(), expected); err == nil {
+		p.Close()
+		t.Fatal("modified report bypassed Web receipt")
+	}
+	for _, digest := range []string{"", "not-a-digest", strings.Repeat("0", 64)} {
+		if p, err := Prepare(t.Context(), f.container, f.workspace, "/runtime/data", "/runtime/mail", backup.DefaultLimits(), digest); err == nil {
+			p.Close()
+			t.Fatal("invalid receipt accepted")
+		}
+	}
 }
 
 func newMaterializeFixture(t *testing.T) materializeFixture {

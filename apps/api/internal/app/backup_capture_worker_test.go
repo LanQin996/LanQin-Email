@@ -38,7 +38,7 @@ func TestBackupCaptureWorkerRealArchiveUploadAndRecoveryRuntimeIsolation(t *test
 		}
 		return prepared, err
 	}
-	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-worker-real-0001", ids, revision, a.cfg.BackupRecipient)
+	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-worker-real-0001", ids, revision, backupTestRecipient(t, a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestBackupCaptureWorkerRealArchiveUploadAndRecoveryRuntimeIsolation(t *test
 	}
 	f.Close()
 	out := filepath.Join(t.TempDir(), "restored")
-	if _, err := backup.Restore(t.Context(), bytes.NewReader(encrypted), out, identity.String(), entry.SHA256, backup.DefaultLimits()); err != nil {
+	if _, err := backup.RestorePassword(t.Context(), bytes.NewReader(encrypted), out, backupTestEncryption(t, a).Password, entry.SHA256, backup.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
 	frozen, err := openFrozenBackupDB(filepath.Join(out, "snapshot", "data", "lanqin.db"))
@@ -115,7 +115,7 @@ func TestBackupCaptureWorkerCancellationDuringCollectionKeepsAPIResponsive(t *te
 	a := newTestApp(t)
 	_, ids, revision := backupSnapshotJobFixture(t, a)
 	client := backupLoggedInAdmin(t, a)
-	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-cancel-collect-001", ids, revision, a.cfg.BackupRecipient)
+	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-cancel-collect-001", ids, revision, backupTestRecipient(t, a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestBackupCaptureWorkerCancellationDuringCollectionKeepsAPIResponsive(t *te
 func TestBackupCaptureWorkerKeyRotationAndStalePhaseFence(t *testing.T) {
 	a := newTestApp(t)
 	_, ids, revision := backupSnapshotJobFixture(t, a)
-	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-rotate-fence-001", ids, revision, a.cfg.BackupRecipient)
+	job, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-actor", "capture-rotate-fence-001", ids, revision, backupTestRecipient(t, a))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,11 +174,7 @@ func TestBackupCaptureWorkerKeyRotationAndStalePhaseFence(t *testing.T) {
 	if _, err := a.updateBackupCapture(t.Context(), wrong, "encrypting", nil, nil); !errors.Is(err, errBackupConflict) {
 		t.Fatal("stale worker mutated capture", err)
 	}
-	identity, err := age.GenerateX25519Identity()
-	if err != nil {
-		t.Fatal(err)
-	}
-	a.cfg.BackupRecipient = identity.Recipient().String()
+	setBackupTestPassword(t, a, "synthetic rotated password")
 	a.backupPrepareSnapshot = func(context.Context, Config, string, OnlineBackupOptions) (*PreparedOnlineBackup, error) {
 		t.Error("rotated recipient started collection")
 		return nil, errors.New("unexpected")
@@ -199,6 +195,9 @@ func TestBackupCapabilitiesNeverEchoMisconfiguredPrivateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.cfg.BackupRecipient = identity.String()
+	if _, err := a.db.Exec(`DELETE FROM system_settings WHERE key=?`, backupEncryptionSetting); err != nil {
+		t.Fatal(err)
+	}
 	var response map[string]any
 	if code := client.do("GET", "/api/admin/backups/capabilities", nil, &response); code != http.StatusOK {
 		t.Fatal(code)

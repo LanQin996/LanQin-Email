@@ -437,7 +437,11 @@ func (a *App) maildirMessageState(ctx context.Context, id string) (maildirMessag
 }
 
 func (a *App) storedMessageByID(ctx context.Context, id string) (storedMessage, error) {
-	row := a.db.QueryRowContext(ctx, `SELECT COALESCE(mailbox_id,''),COALESCE(folder_id,''),recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,raw_path FROM messages WHERE id=?`, id)
+	return storedMessageByIDWithQuery(ctx, a.db, id)
+}
+
+func storedMessageByIDWithQuery(ctx context.Context, db dbQueryer, id string) (storedMessage, error) {
+	row := db.QueryRowContext(ctx, `SELECT COALESCE(mailbox_id,''),COALESCE(folder_id,''),recipient_addr,message_uid,message_id,subject,from_addr,from_name,to_addrs,cc_addrs,bcc_addrs,sent_at,received_at,snippet,body_text,body_html,is_read,is_starred,raw_path FROM messages WHERE id=?`, id)
 	var msg storedMessage
 	var toJSON, ccJSON, bccJSON, sent, received string
 	var read, starred int

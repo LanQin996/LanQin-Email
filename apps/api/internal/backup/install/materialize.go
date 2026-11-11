@@ -91,7 +91,16 @@ type recoveryPlan struct {
 // and must not be guessed. runtime roots are Linux/container paths, NEVER host
 // deployment paths. The caller must provide an existing private workspace;
 // Windows inherits its operator-configured ACL (0700 alone does not set a DACL).
-func Prepare(ctx context.Context, restoredContainer, workspace, runtimeDataRoot, runtimeMailRoot string, limits backup.Limits) (_ *Prepared, result error) {
+func Prepare(ctx context.Context, restoredContainer, workspace, runtimeDataRoot, runtimeMailRoot string, limits backup.Limits, expectedReportSHA256 ...string) (_ *Prepared, result error) {
+	if len(expectedReportSHA256) > 1 {
+		return nil, errInvalid
+	}
+	if len(expectedReportSHA256) == 1 {
+		decoded, err := hex.DecodeString(expectedReportSHA256[0])
+		if err != nil || len(decoded) != sha256.Size {
+			return nil, errInvalid
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -231,6 +240,12 @@ func Prepare(ctx context.Context, restoredContainer, workspace, runtimeDataRoot,
 	content, err := output.ReadFile(reportName)
 	if err != nil {
 		return nil, errInvalid
+	}
+	if len(expectedReportSHA256) == 1 {
+		digest := sha256.Sum256(content)
+		if !strings.EqualFold(hex.EncodeToString(digest[:]), expectedReportSHA256[0]) {
+			return nil, errInvalid
+		}
 	}
 	report, _, err := validateReport(content, copied)
 	if err != nil {
@@ -418,10 +433,22 @@ func inventory(ctx context.Context, root *os.Root, limits backup.Limits) (map[st
 	return files, dirs, err
 }
 
-func validateReport(data []byte, copied []online.CollectedFile) (collectionReport, map[string]reportFile, error) {
+func validateReport(data []byte, copied []online.CollectedFile, drivers ...string) (collectionReport, map[string]reportFile, error) {
+	driver := "sqlite"
+	version := 1
+	databaseName := "data/lanqin.db"
+	if len(drivers) > 0 {
+		driver = drivers[0]
+	}
+	if driver == "mysql" || driver == "postgres" {
+		version = 2
+		databaseName = "data/lanqin-native.jsonl"
+	} else if driver != "sqlite" {
+		return collectionReport{}, nil, errInvalid
+	}
 	var report collectionReport
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	if decoder.Decode(&report) != nil || decoder.Decode(new(any)) != io.EOF || report.Version != 1 || report.Scope != "sqlite-reference-closure" || !report.Complete || len(bytes.TrimSpace(report.Summary)) == 0 || bytes.TrimSpace(report.Summary)[0] != '{' || report.Sources.Data == "" || report.Sources.Mail == "" || !validSourceRoot(report.Sources.Data) || !validSourceRoot(report.Sources.Mail) || report.Files == nil || len(report.Files)+1 != len(copied) {
+	if decoder.Decode(&report) != nil || decoder.Decode(new(any)) != io.EOF || report.Version != version || report.Scope != driver+"-reference-closure" || !report.Complete || len(bytes.TrimSpace(report.Summary)) == 0 || bytes.TrimSpace(report.Summary)[0] != '{' || report.Sources.Data == "" || report.Sources.Mail == "" || !validSourceRoot(report.Sources.Data) || !validSourceRoot(report.Sources.Mail) || report.Files == nil || len(report.Files)+1 != len(copied) {
 		return report, nil, errInvalid
 	}
 	expected := map[string]reportFile{}
@@ -438,7 +465,7 @@ func validateReport(data []byte, copied []online.CollectedFile) (collectionRepor
 		}
 		switch item.Kind {
 		case "database":
-			if item.Destination != "data/lanqin.db" {
+			if item.Destination != databaseName {
 				return report, nil, errInvalid
 			}
 		case "attachment":
@@ -465,7 +492,7 @@ func validateReport(data []byte, copied []online.CollectedFile) (collectionRepor
 		}
 		expected[item.Destination] = item
 	}
-	if expected["data/lanqin.db"].Kind != "database" || len(expected)+1 != len(copied) {
+	if expected[databaseName].Kind != "database" || len(expected)+1 != len(copied) {
 		return report, nil, errInvalid
 	}
 	for _, item := range copied {
@@ -743,7 +770,7 @@ func remapDatabase(ctx context.Context, database string, report collectionReport
 		{"sessions", "", "DELETE FROM sessions", &plan.SessionsRevoked},
 		{"login_challenges", "", "DELETE FROM login_challenges", &plan.LoginChallengesRevoked},
 		{"api_tokens", " WHERE disabled IS NOT 1", "UPDATE api_tokens SET disabled=1 WHERE disabled IS NOT 1", &plan.APITokensDisabled},
-		{"system_settings", ` WHERE "key" IN ('backup.queue.v1','backup.schedules.v1') OR substr("key",1,14)='backup.job.v1.' OR substr("key",1,22)='backup.drive.oauth.v1.'`, `DELETE FROM system_settings WHERE "key" IN ('backup.queue.v1','backup.schedules.v1') OR substr("key",1,14)='backup.job.v1.' OR substr("key",1,22)='backup.drive.oauth.v1.'`, &plan.BackupRuntimeSettingsRemoved},
+		{"system_settings", ` WHERE "key" IN ('backup.queue.v1','backup.schedules.v1') OR substr("key",1,14)='backup.job.v1.' OR substr("key",1,22)='backup.drive.oauth.v1.' OR substr("key",1,19)='backup.transfer.v1.' OR substr("key",1,20)='backup.discovery.v1.'`, `DELETE FROM system_settings WHERE "key" IN ('backup.queue.v1','backup.schedules.v1') OR substr("key",1,14)='backup.job.v1.' OR substr("key",1,22)='backup.drive.oauth.v1.' OR substr("key",1,19)='backup.transfer.v1.' OR substr("key",1,20)='backup.discovery.v1.'`, &plan.BackupRuntimeSettingsRemoved},
 		{"status_webhook_outbox", " WHERE delivered_at IS NULL", "UPDATE status_webhook_outbox SET next_attempt_at='9999-12-31T23:59:59Z' WHERE delivered_at IS NULL", &plan.WebhookNotificationsHeld},
 		{"telegram_notification_outbox", " WHERE delivered_at IS NULL", "UPDATE telegram_notification_outbox SET next_attempt_at='9999-12-31T23:59:59Z' WHERE delivered_at IS NULL", &plan.TelegramNotificationsHeld},
 	} {

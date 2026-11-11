@@ -14,7 +14,9 @@ func (a *App) handleBackupSchedules(w http.ResponseWriter, r *http.Request) {
 	}
 	items := []backupScheduleView{}
 	for _, p := range state.Items {
-		items = append(items, backupScheduleView{DestinationID: p.DestinationID, Enabled: p.Enabled, Time: p.Time, Timezone: p.Timezone, NextRunAt: p.NextRunAt, LastJobID: p.LastJobID, LastErrorCode: p.LastErrorCode})
+		items = append(items, backupScheduleView{DestinationID: p.DestinationID, Enabled: p.Enabled, Time: p.Time, Timezone: p.Timezone,
+			Period: backupSchedulePeriod(p), Minute: p.Minute, Weekdays: p.Weekdays, DayOfMonth: p.DayOfMonth, Interval: p.Interval, Unit: p.Unit,
+			NextRunAt: p.NextRunAt, LastJobID: p.LastJobID, LastErrorCode: p.LastErrorCode})
 	}
 	respondJSON(w, http.StatusOK, map[string]any{"revision": backupRevision(raw), "items": items})
 }

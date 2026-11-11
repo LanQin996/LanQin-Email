@@ -33,7 +33,7 @@ func setDailySchedule(t *testing.T, a *App, id string, enabled bool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.saveBackupSchedule(t.Context(), id, backupScheduleRequest{Revision: backupRevision(raw), DestinationsRevision: backupRevision(vaultRaw), ExpectedRecipient: a.cfg.BackupRecipient, Enabled: enabled, Time: "09:00", Timezone: "Asia/Shanghai"}); err != nil {
+	if err := a.saveBackupSchedule(t.Context(), id, backupScheduleRequest{Revision: backupRevision(raw), DestinationsRevision: backupRevision(vaultRaw), ExpectedRecipient: backupTestRecipient(t, a), Enabled: enabled, Time: "09:00", Timezone: "Asia/Shanghai"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -81,7 +81,7 @@ func TestBackupDailyScheduleAtomicAdmissionAndMultiInstanceDedup(t *testing.T) {
 	if p.LastJobID != registry.Pending[0] || p.NextRunAt == nil || !p.NextRunAt.After(a.now()) {
 		t.Fatal("cursor and job not committed together")
 	}
-	if strings.Contains(raw, a.cfg.BackupRecipient) || strings.Contains(raw, "Asia/Shanghai") {
+	if strings.Contains(raw, backupTestRecipient(t, a)) || strings.Contains(raw, "Asia/Shanghai") {
 		t.Fatal("schedule state not encrypted")
 	}
 	job, _, err := a.backupReadJob(t.Context(), p.LastJobID)
@@ -107,7 +107,7 @@ func TestBackupDailyScheduleQueueFullDoesNotConsumeOccurrence(t *testing.T) {
 	setTime(due)
 	_, raw, _ := a.loadBackupDestinationState(t.Context())
 	for n := range 16 {
-		if _, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-filler", fmt.Sprintf("filler-request-%04d", n), []string{id}, backupRevision(raw), a.cfg.BackupRecipient); err != nil {
+		if _, err := a.enqueueBackupSnapshot(t.Context(), "synthetic-filler", fmt.Sprintf("filler-request-%04d", n), []string{id}, backupRevision(raw), backupTestRecipient(t, a)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -142,7 +142,7 @@ func TestBackupDailyScheduleDisableChangedConfigurationAndCAS(t *testing.T) {
 			}
 			setTime(*state.Items[0].NextRunAt)
 			if scenario == "recipient" {
-				a.cfg.BackupRecipient = "misconfigured"
+				setBackupTestPassword(t, a, "synthetic rotated password")
 			} else {
 				vault, raw, err := a.loadBackupDestinationState(t.Context())
 				if err != nil {
@@ -213,7 +213,7 @@ func TestBackupDailyScheduleTimezoneDSTAndValidation(t *testing.T) {
 func TestBackupDailyScheduleGuardRollsBackWholeAdmission(t *testing.T) {
 	a, id, _ := scheduleFixture(t)
 	_, vaultRaw, _ := a.loadBackupDestinationState(t.Context())
-	_, err := a.enqueueBackupJobGuarded(t.Context(), "backup-scheduler", "synthetic-guard-reject-001", "", []string{id}, "snapshot", a.cfg.BackupRecipient, []string{backupRevision(vaultRaw)}, func(dbExecutor) error { return errBackupConflict })
+	_, err := a.enqueueBackupJobGuarded(t.Context(), "backup-scheduler", "synthetic-guard-reject-001", "", []string{id}, "snapshot", backupTestRecipient(t, a), []string{backupRevision(vaultRaw)}, func(dbExecutor) error { return errBackupConflict })
 	if !errors.Is(err, errBackupConflict) {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestBackupDailyScheduleHTTPPublicViewAndStrictBody(t *testing.T) {
 	client := backupLoggedInAdmin(t, a)
 	_, vaultRaw, _ := a.loadBackupDestinationState(t.Context())
 	var response map[string]any
-	payload := map[string]any{"revision": "0", "destinationsRevision": backupRevision(vaultRaw), "expectedRecipient": a.cfg.BackupRecipient, "enabled": true, "time": "09:00", "timezone": "Asia/Shanghai"}
+	payload := map[string]any{"revision": "0", "destinationsRevision": backupRevision(vaultRaw), "expectedRecipient": backupTestRecipient(t, a), "enabled": true, "time": "09:00", "timezone": "Asia/Shanghai"}
 	if code := client.do("POST", "/api/admin/backups/destinations/"+id+"/schedule", payload, &response); code != http.StatusOK {
 		t.Fatalf("save schedule status=%d", code)
 	}

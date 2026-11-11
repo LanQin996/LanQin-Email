@@ -19,6 +19,13 @@ type backupSchedule struct {
 	Enabled       bool       `json:"enabled"`
 	Time          string     `json:"time"`
 	Timezone      string     `json:"timezone"`
+	Period        string     `json:"period,omitempty"`
+	Minute        int        `json:"minute,omitempty"`
+	Weekdays      []int      `json:"weekdays,omitempty"`
+	DayOfMonth    int        `json:"dayOfMonth,omitempty"`
+	Interval      int        `json:"interval,omitempty"`
+	Unit          string     `json:"unit,omitempty"`
+	AnchorAt      *time.Time `json:"anchorAt,omitempty"`
 	NextRunAt     *time.Time `json:"nextRunAt,omitempty"`
 	LastJobID     string     `json:"lastJobId,omitempty"`
 	LastErrorCode string     `json:"lastErrorCode,omitempty"`
@@ -37,6 +44,12 @@ type backupScheduleView struct {
 	Enabled       bool       `json:"enabled"`
 	Time          string     `json:"time"`
 	Timezone      string     `json:"timezone"`
+	Period        string     `json:"period,omitempty"`
+	Minute        int        `json:"minute,omitempty"`
+	Weekdays      []int      `json:"weekdays,omitempty"`
+	DayOfMonth    int        `json:"dayOfMonth,omitempty"`
+	Interval      int        `json:"interval,omitempty"`
+	Unit          string     `json:"unit,omitempty"`
 	NextRunAt     *time.Time `json:"nextRunAt,omitempty"`
 	LastJobID     string     `json:"lastJobId,omitempty"`
 	LastErrorCode string     `json:"lastErrorCode,omitempty"`
@@ -123,7 +136,7 @@ func (a *App) loadBackupSchedules(ctx context.Context) (backupSchedules, string,
 		if p.DestinationID == "" || seen[p.DestinationID] || p.Generation == "" {
 			return state, "", errBackupInvalid
 		}
-		if _, _, err := parseBackupSchedule(p.Time, p.Timezone); err != nil {
+		if err := validateBackupSchedulePeriod(p); err != nil {
 			return state, "", err
 		}
 		if p.Enabled && (p.NextRunAt == nil || p.Recipient == "" || p.Fingerprint == "") {
@@ -141,10 +154,28 @@ type backupScheduleRequest struct {
 	Enabled              bool   `json:"enabled"`
 	Time                 string `json:"time"`
 	Timezone             string `json:"timezone"`
+	Period               string `json:"period,omitempty"`
+	Minute               int    `json:"minute,omitempty"`
+	Weekdays             []int  `json:"weekdays,omitempty"`
+	DayOfMonth           int    `json:"dayOfMonth,omitempty"`
+	Interval             int    `json:"interval,omitempty"`
+	Unit                 string `json:"unit,omitempty"`
 }
 
 func (a *App) saveBackupSchedule(ctx context.Context, id string, req backupScheduleRequest) error {
-	if _, _, err := parseBackupSchedule(req.Time, req.Timezone); err != nil {
+	plan := backupSchedule{DestinationID: id, Enabled: req.Enabled, Time: req.Time, Timezone: req.Timezone,
+		Period: req.Period, Minute: req.Minute, Weekdays: append([]int(nil), req.Weekdays...),
+		DayOfMonth: req.DayOfMonth, Interval: req.Interval, Unit: req.Unit, Generation: newID("bsg")}
+	if plan.Period == "hourly" || plan.Period == "interval" {
+		if plan.Time == "" {
+			plan.Time = "00:00"
+		}
+	}
+	if plan.Period == "interval" {
+		anchor := a.now().UTC()
+		plan.AnchorAt = &anchor
+	}
+	if err := validateBackupSchedulePeriod(plan); err != nil {
 		return err
 	}
 	state, raw, err := a.loadBackupSchedules(ctx)
@@ -192,7 +223,6 @@ func (a *App) saveBackupSchedule(ctx context.Context, id string, req backupSched
 			break
 		}
 	}
-	plan := backupSchedule{DestinationID: id, Enabled: req.Enabled, Time: req.Time, Timezone: req.Timezone, Generation: newID("bsg")}
 	if index >= 0 {
 		plan.LastJobID = state.Items[index].LastJobID
 	}
@@ -210,7 +240,7 @@ func (a *App) saveBackupSchedule(ctx context.Context, id string, req backupSched
 		if req.ExpectedRecipient != recipient {
 			return errBackupConflict
 		}
-		next, err := nextBackupSchedule(a.now(), req.Time, req.Timezone)
+		next, err := nextBackupSchedulePeriod(a.now(), plan)
 		if err != nil {
 			return err
 		}
@@ -296,16 +326,15 @@ func (a *App) enqueueDueBackupSchedule(ctx context.Context, id string) error {
 		state.Items[index].LastErrorCode = code
 		return a.backupCAS(ctx, a.db, backupSchedulesKey, raw, state)
 	}
-	occurrence, err := latestBackupSchedule(now, plan.Time, plan.Timezone)
+	occurrence, err := latestBackupSchedulePeriod(now, plan)
 	if err != nil {
 		return err
 	}
-	_, loc, _ := parseBackupSchedule(plan.Time, plan.Timezone)
-	digest := sha256.Sum256([]byte(id + "\x00" + plan.Generation + "\x00" + occurrence.In(loc).Format("2006-01-02")))
+	digest := sha256.Sum256([]byte(id + "\x00" + plan.Generation + "\x00" + occurrence.UTC().Format(time.RFC3339Nano)))
 	requestID := "schedule_" + hex.EncodeToString(digest[:])
 	identity := sha256.Sum256([]byte("backup-scheduler\x00" + requestID))
 	jobID := "bkj_" + hex.EncodeToString(identity[:16])
-	next, err := nextBackupSchedule(now, plan.Time, plan.Timezone)
+	next, err := nextBackupSchedulePeriod(now, plan)
 	if err != nil {
 		return err
 	}

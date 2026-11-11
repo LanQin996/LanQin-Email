@@ -26,6 +26,10 @@ type Targets struct{ Data, Mail, DKIM string }
 type Owner struct{ UID, GID int }
 type Owners struct{ Data, Mail, DKIM Owner }
 
+// Access is explicit deployment policy, never restored archive metadata.
+// SQLiteGroupRead grants the selected Data GID read-only database access.
+type Access struct{ SQLiteGroupRead bool }
+
 const (
 	switchActivationName  = ".lanqin-restore-not-activated"
 	switchActivationValue = "prepared-online-restore-v1\n"
@@ -48,10 +52,12 @@ type switchRoot struct {
 }
 
 type switchJournal struct {
-	Version int
-	Txn     string
-	Roots   []switchRoot
-	Events  []string `json:"-"`
+	Version         int
+	Txn             string
+	Roots           []switchRoot
+	Events          []string `json:"-"`
+	SQLiteGroupRead bool     `json:"SQLiteGroupRead,omitempty"`
+	DataReadGID     int      `json:"DataReadGID,omitempty"`
 }
 
 type switchOps struct {
@@ -82,7 +88,7 @@ func productionSwitchOps() switchOps {
 // writers first. The three separate renames are not a global atomic operation.
 // Owners are mandatory numeric identities of the destination service accounts;
 // ownership and permissions from the backup are never replayed.
-func Apply(ctx context.Context, preparedPath string, targets Targets, owners Owners, journalDir string, confirmMaintenance bool) (JournalInfo, error) {
+func Apply(ctx context.Context, preparedPath string, targets Targets, owners Owners, journalDir string, confirmMaintenance bool, access ...Access) (JournalInfo, error) {
 	if runtime.GOOS != "linux" {
 		return JournalInfo{}, ErrSwitchPlatform
 	}
@@ -92,7 +98,7 @@ func Apply(ctx context.Context, preparedPath string, targets Targets, owners Own
 	if _, err := validateSwitchActivationFlag(filepath.Join(preparedPath, "data"), true); err != nil {
 		return JournalInfo{}, err
 	}
-	return applyWithOps(ctx, preparedPath, targets, owners, journalDir, confirmMaintenance, productionSwitchOps())
+	return applyWithOps(ctx, preparedPath, targets, owners, journalDir, confirmMaintenance, productionSwitchOps(), access...)
 }
 
 // Rollback requires the operator to supply all three destination roots again.
@@ -105,12 +111,19 @@ func Rollback(ctx context.Context, journalFile string, targets Targets, confirmM
 	return rollbackWithOps(ctx, journalFile, targets, confirmMaintenance, productionSwitchOps())
 }
 
-func applyWithOps(ctx context.Context, preparedPath string, targets Targets, owners Owners, journalDir string, confirmed bool, ops switchOps) (info JournalInfo, result error) {
+func applyWithOps(ctx context.Context, preparedPath string, targets Targets, owners Owners, journalDir string, confirmed bool, ops switchOps, access ...Access) (info JournalInfo, result error) {
 	if !confirmed {
 		return info, ErrMaintenanceRequired
 	}
 	if err := ctx.Err(); err != nil {
 		return info, err
+	}
+	if len(access) > 1 {
+		return info, ErrSwitchUnsafe
+	}
+	groupRead := len(access) == 1 && access[0].SQLiteGroupRead
+	if groupRead && (owners.Data.GID <= 0 || int64(owners.Data.GID) > 2147483647) {
+		return info, ErrSwitchUnsafe
 	}
 	ownerList := []Owner{owners.Data, owners.Mail, owners.DKIM}
 	for _, owner := range ownerList {
@@ -121,6 +134,9 @@ func applyWithOps(ctx context.Context, preparedPath string, targets Targets, own
 	source, err := switchRealDirectory(preparedPath)
 	if err != nil {
 		return info, err
+	}
+	if groupRead && validateSQLiteGroupSource(filepath.Join(source, "data")) != nil {
+		return info, ErrSwitchUnsafe
 	}
 	activationPresent, err := validateSwitchActivationFlag(filepath.Join(source, "data"), false)
 	if err != nil {
@@ -159,6 +175,9 @@ func applyWithOps(ctx context.Context, preparedPath string, targets Targets, own
 		return info, err
 	}
 	j := switchJournal{Version: 1, Txn: txn}
+	if groupRead {
+		j.SQLiteGroupRead, j.DataReadGID = true, owners.Data.GID
+	}
 	for i, name := range []string{"data", "mail", "dkim"} {
 		oldToken, err := randomSwitchID()
 		if err != nil {
@@ -226,6 +245,11 @@ func applyWithOps(ctx context.Context, preparedPath string, targets Targets, own
 		clones[clone] = identity
 		if err := clonePreparedTree(ctx, filepath.Join(source, root.Name), clone, ownerList[i], &remainingBytes, &remainingEntries, root.Name == "data", ops); err != nil {
 			return info, err
+		}
+		if root.Name == "data" && groupRead {
+			if err := setSQLiteGroupAccess(clone, owners.Data, ops); err != nil {
+				return info, err
+			}
 		}
 		if root.Name == "data" {
 			present, err := validateSwitchActivationFlag(clone, activationPresent)
@@ -831,7 +855,7 @@ func readSwitchJournal(path string) (switchJournal, string, error) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(scanner.Text()))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&j); err != nil || j.Version != 1 || !switchIDPattern.MatchString(j.Txn) || filepath.Base(path) != "restore-"+j.Txn+".journal" {
+	if err := decoder.Decode(&j); err != nil || j.Version != 1 || !switchIDPattern.MatchString(j.Txn) || filepath.Base(path) != "restore-"+j.Txn+".journal" || j.SQLiteGroupRead && (j.DataReadGID <= 0 || int64(j.DataReadGID) > 2147483647) || !j.SQLiteGroupRead && j.DataReadGID != 0 {
 		return j, "", ErrSwitchUnsafe
 	}
 	if decoder.Decode(new(any)) != io.EOF {

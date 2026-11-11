@@ -10,6 +10,8 @@ ARG TARGETOS
 ARG TARGETARCH
 RUN --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/lanqin-api ./cmd/server
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -o /out/lanqin-backup ./cmd/backup
 
 FROM --platform=$BUILDPLATFORM node:20-bookworm-slim AS web-build
 WORKDIR /src
@@ -35,6 +37,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rspamd
 
 COPY --from=api-build /out/lanqin-api /usr/local/bin/lanqin-api
+COPY --from=api-build /out/lanqin-backup /usr/local/bin/lanqin-backup
 COPY --from=web-build /src/apps/web/dist /usr/share/nginx/html
 
 COPY deploy/all-in-one/supervisord.conf /etc/supervisor/conf.d/lanqin.conf

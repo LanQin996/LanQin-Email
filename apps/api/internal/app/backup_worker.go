@@ -16,6 +16,12 @@ func (a *App) backupUploadWorker(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		select {
+		case execution := <-a.backupRestoreRequests:
+			a.runBackupRestore(ctx, execution)
+			continue
+		default:
+		}
 		lease, err := a.claimBackupUpload(ctx)
 		if err != nil && !errors.Is(err, errBackupConflict) && ctx.Err() == nil {
 			a.log.Warn("backup queue unavailable")
@@ -39,6 +45,8 @@ func (a *App) backupUploadWorker(ctx context.Context) {
 			return
 		case <-ticker.C:
 		case <-a.backupWake:
+		case execution := <-a.backupRestoreRequests:
+			a.runBackupRestore(ctx, execution)
 		}
 	}
 }
@@ -110,12 +118,21 @@ func (a *App) runBackupUpload(parent context.Context, lease backupLease) {
 	done := make(chan struct{})
 	go a.monitorBackupUpload(ctx, lease, cancel, reason, done)
 	var results []storage.Result
+	var retention []backupRetentionResult
 	code := ""
-	if backupJobKind(job) == "snapshot" {
+	if backupJobKind(job) == "discover" {
+		results, code = a.executeBackupDiscovery(ctx, lease, job)
+	}
+	if backupJobKind(job) == "snapshot" && job.Artifact.ID == "" {
 		job, code = a.createBackupArtifact(ctx, lease, job)
 	}
-	if code == "" {
-		results, code = a.executeBackupUpload(ctx, job)
+	if code == "" && backupJobKind(job) != "discover" {
+		results, code = a.executeBackupUpload(ctx, job, lease)
+	}
+	// Retention failures are reported separately; they must not turn a durable
+	// successful upload into a failed upload or clear its trusted receipt.
+	if ctx.Err() == nil && len(results) > 0 && backupJobKind(job) != "discover" {
+		retention = a.runBackupRetention(ctx, lease, job, results)
 	}
 	deadline := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	cancel()
@@ -125,26 +142,33 @@ func (a *App) runBackupUpload(parent context.Context, lease backupLease) {
 		code = why
 	default:
 	}
-	if parent.Err() != nil && code != "" {
+	if parent.Err() != nil && (code != "" || backupJobKind(job) == "discover") {
 		code = "server_shutdown"
 	}
-	if deadline && code != "" {
+	if deadline && (code != "" || backupJobKind(job) == "discover") {
 		code = "timeout"
+	}
+	if parent.Err() == nil {
+		current, _, err := a.backupReadJob(parent, lease.ID)
+		if err == nil && current.CancelRequested && backupJobKind(current) != "discover" {
+			a.cleanupCancelledTransfers(parent, lease, current)
+		}
 	}
 	// Persist termination before App.Close closes the pool. Fencing rejects a
 	// stale process trying to finish after lease recovery by another instance.
 	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer finishCancel()
-	if err := a.finishBackupUpload(finishCtx, lease, results, code); err != nil && !errors.Is(err, errBackupConflict) {
+	if err := a.finishBackupUpload(finishCtx, lease, results, code, retention); err != nil && !errors.Is(err, errBackupConflict) {
 		a.log.Warn("backup result persistence failed; remote outcome may be uncertain")
 	}
 }
 
-func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage.Result, string) {
+func (a *App) executeBackupUpload(ctx context.Context, job backupJob, leases ...backupLease) ([]storage.Result, string) {
 	key, err := a.backupMasterKey()
 	if err != nil {
 		return nil, "key_unavailable"
 	}
+	defer clear(key)
 	file, entry, err := catalog.Open(a.cfg.BackupArtifactDir, job.Artifact.ID, key, backupMaxBytes)
 	if err != nil || entry.SHA256 != job.Artifact.SHA256 || entry.Bytes != job.Artifact.Bytes {
 		if file != nil {
@@ -163,8 +187,16 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 	}
 	cfg := storage.Config{Version: 1, Destinations: []storage.Destination{}}
 	results := map[string]storage.Result{}
+	for _, result := range job.Results {
+		if result.State == "succeeded" {
+			results[result.DestinationID] = result
+		}
+	}
 	credentials := map[string]storage.Credentials{}
 	for _, target := range job.Targets {
+		if previous, ok := results[target.ID]; ok && previous.State == "succeeded" {
+			continue
+		}
 		record, ok := records[target.ID]
 		if !ok || record.Config.Disabled || backupTargetFingerprint(record) != target.Fingerprint {
 			results[target.ID] = storage.Result{DestinationID: target.ID, State: "failed", ErrorCode: "destination_changed"}
@@ -195,6 +227,21 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 	if len(cfg.Destinations) > 0 {
 		opts := storage.DefaultOptions()
 		opts.MaxBytes = backupMaxBytes
+		opts.RecoveryIndexKey = key
+		opts.RecoveryIndexGuard = func(ctx context.Context, id string) error {
+			if len(leases) != 1 {
+				return errBackupConflict
+			}
+			for _, target := range job.Targets {
+				if target.ID == id {
+					return a.guardBackupRecoveryIndex(ctx, leases[0], target)
+				}
+			}
+			return errBackupConflict
+		}
+		if len(leases) > 0 {
+			opts.Checkpoints = &backupTransferStore{app: a, lease: leases[0]}
+		}
 		report, err := a.backupUploadFile(ctx, file, entry.SHA256, cfg, opts, func(id string) (storage.Credentials, error) {
 			c, ok := credentials[id]
 			if !ok {
@@ -204,6 +251,9 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 		})
 		if err != nil {
 			code = "upload_failed"
+			if errors.Is(err, storage.ErrRecoveryIndexFailure) {
+				code = "recovery_index_publish_failed"
+			}
 		}
 		for _, result := range report.Destinations {
 			results[result.DestinationID] = result
@@ -217,13 +267,44 @@ func (a *App) executeBackupUpload(ctx context.Context, job backupJob) ([]storage
 		}
 		if result.State != "succeeded" {
 			code = "upload_failed"
+		} else if result.RecoveryIndexState != "" && result.RecoveryIndexState != "succeeded" && code == "" {
+			code = "recovery_index_publish_failed"
 		}
 		ordered = append(ordered, result)
 	}
 	return ordered, code
 }
 
-func (a *App) finishBackupUpload(ctx context.Context, lease backupLease, results []storage.Result, code string) error {
+func (a *App) guardBackupRecoveryIndex(ctx context.Context, lease backupLease, target backupTarget) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	vault, _, err := a.loadBackupDestinationState(ctx)
+	if err != nil {
+		return err
+	}
+	matched := false
+	for _, record := range vault.Items {
+		if record.Config.ID == target.ID && !record.Config.Disabled && backupTargetFingerprint(record) == target.Fingerprint {
+			matched = true
+			break
+		}
+	}
+	if !matched {
+		return errBackupConflict
+	}
+	registry, _, err := a.backupRegistry(ctx)
+	if err != nil || registry.Active == nil || registry.Active.ID != lease.ID || registry.Active.Token != lease.Token || !registry.Active.Until.After(a.now()) {
+		return errBackupConflict
+	}
+	job, _, err := a.backupReadJob(ctx, lease.ID)
+	if err != nil || job.Status != "running" || job.WorkerToken != lease.Token || job.CancelRequested {
+		return errBackupConflict
+	}
+	return ctx.Err()
+}
+
+func (a *App) finishBackupUpload(ctx context.Context, lease backupLease, results []storage.Result, code string, retention ...[]backupRetentionResult) error {
 	for range 5 {
 		job, raw, err := a.backupReadJob(ctx, lease.ID)
 		if err != nil {
@@ -240,7 +321,16 @@ func (a *App) finishBackupUpload(ctx context.Context, lease backupLease, results
 		job.CompletedAt = &now
 		job.Phase = "completed"
 		job.Results = results
+		if len(retention) > 0 {
+			job.Retention = retention[0]
+		}
 		job.ErrorCode = code
+		if job.Restore != nil && (code != "" || job.CancelRequested) {
+			job.Restore.Ready = false
+		}
+		if job.Discovery != nil && (code != "" || job.CancelRequested) {
+			job.Discovery.Ready = false
+		}
 		if job.Results == nil {
 			job.Results = []storage.Result{}
 		}
@@ -280,10 +370,26 @@ func (a *App) finishBackupUpload(ctx context.Context, lease backupLease, results
 			}
 		}
 		for _, r := range results {
-			if r.State == "succeeded" && r.CompletedAt != nil {
+			if backupJobKind(job) != "restore" && backupJobKind(job) != "discover" && r.State == "succeeded" && r.CompletedAt != nil {
 				for _, t := range job.Targets {
 					if t.ID == r.DestinationID && current[t.ID] == t.Fingerprint {
-						registry.Success[t.ID] = backupSuccess{At: *r.CompletedAt, Fingerprint: t.Fingerprint, JobID: job.ID}
+						previous := registry.Success[t.ID]
+						if job.ResumeCount > 0 && previous.Fingerprint == t.Fingerprint && previous.JobID != "" && previous.JobID != job.ID {
+							created := previous.CreatedAt
+							if created.IsZero() {
+								previousJob, _, err := a.backupReadJob(ctx, previous.JobID)
+								if err != nil {
+									continue
+								}
+								created = previousJob.CreatedAt
+							}
+							if created.After(job.CreatedAt) {
+								continue
+							}
+						}
+						if previous.Fingerprint != t.Fingerprint || !previous.At.After(*r.CompletedAt) {
+							registry.Success[t.ID] = backupSuccess{At: *r.CompletedAt, CreatedAt: job.CreatedAt, Fingerprint: t.Fingerprint, JobID: job.ID}
+						}
 					}
 				}
 			}

@@ -6,6 +6,7 @@ import { uiText, useLanguage } from "@/lib/language"
 import { errorMessage } from "@/lib/ui-errors"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { BackupDriveClientSettings } from "@/components/backup-drive-client-settings"
 
 export function BackupDriveAuthorization({
   destination,
@@ -109,9 +110,10 @@ export function BackupDriveAuthorization({
       )}
       {capabilities.data && !capabilities.data.driveOAuthAvailable && (
         <div role="status" className="text-sm text-muted-foreground">
-          {uiText("服务器尚未配置 Google Drive OAuth 客户端")}
+          {uiText("Google Drive OAuth 客户端不可用，请先完成下方配置")}
         </div>
       )}
+      <BackupDriveClientSettings key={userId} userId={userId} />
       <div role="status" className="text-sm text-muted-foreground">
         {uiText("每次授权会创建独立备份文件夹，不删除旧目录；仅申请应用文件权限")}
       </div>

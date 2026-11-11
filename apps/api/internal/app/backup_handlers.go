@@ -11,6 +11,14 @@ import (
 
 func backupError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, errBackupResume):
+		respondError(w, http.StatusConflict, errBackupResume.Error())
+	case errors.Is(err, errBackupRestoreConfiguration):
+		respondError(w, http.StatusServiceUnavailable, errBackupRestoreConfiguration.Error())
+	case errors.Is(err, errBackupRestoreBusy):
+		respondError(w, http.StatusConflict, errBackupRestoreBusy.Error())
+	case errors.Is(err, errBackupRestoreSource):
+		respondError(w, http.StatusConflict, errBackupRestoreSource.Error())
 	case errors.Is(err, errBackupExecution):
 		respondError(w, http.StatusServiceUnavailable, errBackupExecution.Error())
 	case errors.Is(err, errBackupQueue):
@@ -126,7 +134,12 @@ func (a *App) mutateBackupDestination(w http.ResponseWriter, r *http.Request, op
 		} else {
 			old = &state.Items[index]
 		}
-		record, err := buildBackupDestination(id, req, old)
+		policy, err := a.backupNetworkPolicy()
+		if err != nil {
+			backupError(w, err)
+			return
+		}
+		record, err := buildBackupDestinationWithNetworkPolicy(id, req, old, policy)
 		if err != nil {
 			backupError(w, err)
 			return

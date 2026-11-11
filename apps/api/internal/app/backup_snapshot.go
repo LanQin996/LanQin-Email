@@ -23,6 +23,11 @@ import (
 
 var errBackupSnapshotInvalid = errors.New("online backup contains unsupported or inconsistent references")
 
+type backupSnapshotQuery interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 type OnlineBackupOptions struct {
 	MaxBytes     int64
 	MaxEntries   int
@@ -106,8 +111,8 @@ type backupSnapshotHooks struct {
 
 func prepareOnlineBackup(ctx context.Context, cfg Config, workspace string, opts OnlineBackupOptions, hooks *backupSnapshotHooks) (*PreparedOnlineBackup, error) {
 	cfg = normalizeDatabaseConfig(cfg)
-	if cfg.DBDriver != databaseDriverSQLite || opts.MaxBytes < 4096 || opts.MaxBytes > 1<<40 || opts.MaxEntries < 4 || opts.MaxEntries > 100000 || opts.MaxMIMEBytes < 8192 || opts.MaxMIMEBytes > 256<<20 || opts.Attempts < 1 || opts.Attempts > 3 {
-		return nil, errors.New("online backup requires SQLite and valid bounded collection limits")
+	if cfg.DBDriver != databaseDriverSQLite && cfg.DBDriver != databaseDriverMySQL && cfg.DBDriver != databaseDriverPostgres || opts.MaxBytes < 4096 || opts.MaxBytes > 1<<40 || opts.MaxEntries < 4 || opts.MaxEntries > 100000 || opts.MaxMIMEBytes < 8192 || opts.MaxMIMEBytes > 256<<20 || opts.Attempts < 1 || opts.Attempts > 3 {
+		return nil, errors.New("online backup requires a supported database and valid bounded collection limits")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -350,6 +355,9 @@ func (b *backupSnapshotBudget) copy(ctx context.Context, source, output *os.Root
 
 func collectOnlineBackup(ctx context.Context, cfg Config, directory string, dataRoot, mailRoot *os.Root, opts OnlineBackupOptions, attempt int, hooks *backupSnapshotHooks) (OnlineBackupReport, error) {
 	report := OnlineBackupReport{Version: 1, Scope: "sqlite-reference-closure", Files: []OnlineBackupFile{}}
+	if cfg.DBDriver != databaseDriverSQLite {
+		report.Version, report.Scope = 2, cfg.DBDriver+"-reference-closure"
+	}
 	report.Sources.Data, report.Sources.Mail = cfg.DataDir, cfg.MaildirRoot
 	report.Summary.Attempts = attempt
 	budget := backupSnapshotBudget{bytes: opts.MaxBytes, entries: opts.MaxEntries, report: &report}
@@ -358,24 +366,45 @@ func collectOnlineBackup(ctx context.Context, cfg Config, directory string, data
 		return report, online.ErrFileIO
 	}
 	defer root.Close()
-	for _, name := range []string{"data/lanqin.db", "mail/.placeholder", "dkim/.placeholder"} {
+	databaseName := "data/lanqin.db"
+	if cfg.DBDriver != databaseDriverSQLite {
+		databaseName = "data/lanqin-native.jsonl"
+	}
+	for _, name := range []string{databaseName, "mail/.placeholder", "dkim/.placeholder"} {
 		if err := budget.parents(root, name); err != nil {
 			return report, err
 		}
 	}
-	database := filepath.Join(directory, "data", "lanqin.db")
+	database := filepath.Join(directory, filepath.FromSlash(databaseName))
 	report.Summary.SnapshotStarted = time.Now().UTC()
-	if err := online.SnapshotSQLite(ctx, cfg.DBPath, database, budget.bytes); err != nil {
-		return report, err
+	var frozen backupSnapshotQuery
+	if cfg.DBDriver == databaseDriverSQLite {
+		if err := online.SnapshotSQLite(ctx, cfg.DBPath, database, budget.bytes); err != nil {
+			return report, err
+		}
+		omitted, err := sanitizeBackupExportRuntime(ctx, database)
+		if err != nil {
+			return report, err
+		}
+		report.Summary.RuntimeBackupJobsOmitted = omitted
+		db, err := openFrozenBackupDB(database)
+		if err != nil {
+			return report, errBackupSnapshotInvalid
+		}
+		defer db.Close()
+		frozen = db
+	} else {
+		cut, err := prepareNativeDatabaseCut(ctx, cfg, database, budget.bytes)
+		if err != nil {
+			return report, err
+		}
+		defer cut.Close()
+		frozen = cut.Tx
+		report.Summary.RuntimeBackupJobsOmitted = cut.OmittedJobs
 	}
 	report.Summary.SnapshotFinished = time.Now().UTC()
-	omitted, err := sanitizeBackupExportRuntime(ctx, database)
-	if err != nil {
-		return report, err
-	}
-	report.Summary.RuntimeBackupJobsOmitted = omitted
 	report.Summary.RuntimeBackupQueueCleared = true
-	file, err := hashBackupStagedFile(ctx, root, "data/lanqin.db")
+	file, err := hashBackupStagedFile(ctx, root, databaseName)
 	if err != nil {
 		return report, err
 	}
@@ -387,11 +416,6 @@ func collectOnlineBackup(ctx context.Context, cfg Config, directory string, data
 			return report, err
 		}
 	}
-	frozen, err := openFrozenBackupDB(database)
-	if err != nil {
-		return report, errBackupSnapshotInvalid
-	}
-	defer frozen.Close()
 	if err := collectBackupAttachments(ctx, frozen, cfg, dataRoot, root, &budget); err != nil {
 		return report, err
 	}
@@ -417,7 +441,12 @@ func collectOnlineBackup(ctx context.Context, cfg Config, directory string, data
 	if err != nil {
 		return report, online.ErrFileIO
 	}
-	count, err := online.CollectDKIMLimited(ctx, database, dkim, budget.entries, budget.bytes)
+	var count int
+	if cfg.DBDriver == databaseDriverSQLite {
+		count, err = online.CollectDKIMLimited(ctx, database, dkim, budget.entries, budget.bytes)
+	} else {
+		count, err = online.CollectDKIMFromSnapshot(ctx, frozen, dkim, budget.entries, budget.bytes)
+	}
 	dkim.Close()
 	if err != nil {
 		return report, err
@@ -489,7 +518,7 @@ func (r backupSnapshotReader) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 
-func collectBackupAttachments(ctx context.Context, frozen *sql.DB, cfg Config, data, output *os.Root, budget *backupSnapshotBudget) error {
+func collectBackupAttachments(ctx context.Context, frozen backupSnapshotQuery, cfg Config, data, output *os.Root, budget *backupSnapshotBudget) error {
 	rows, err := frozen.QueryContext(ctx, `SELECT a.id,a.message_id,a.storage_path,a.size_bytes,m.id FROM attachments a LEFT JOIN messages m ON m.id=a.message_id ORDER BY a.id`)
 	if err != nil {
 		return errBackupSnapshotInvalid
@@ -536,7 +565,7 @@ func collectBackupAttachments(ctx context.Context, frozen *sql.DB, cfg Config, d
 	return nil
 }
 
-func collectBackupMessages(ctx context.Context, frozen *sql.DB, cfg Config, output, mailRoot *os.Root, inventory []online.MaildirEntry, index *online.MaildirIndex, budget *backupSnapshotBudget, opts OnlineBackupOptions) error {
+func collectBackupMessages(ctx context.Context, frozen backupSnapshotQuery, cfg Config, output, mailRoot *os.Root, inventory []online.MaildirEntry, index *online.MaildirIndex, budget *backupSnapshotBudget, opts OnlineBackupOptions) error {
 	rows, err := frozen.QueryContext(ctx, `SELECT m.id,m.raw_path,COALESCE(m.mailbox_id,''),m.recipient_addr,COALESCE(f.role,''),COALESCE(d.name,''),COALESCE(b.local_part,''),COALESCE(f.mailbox_id,''),
 		CASE WHEN EXISTS(SELECT 1 FROM external_imap_messages em WHERE em.local_message_id=m.id)
 		OR EXISTS(SELECT 1 FROM external_imap_folder_states efs WHERE efs.local_folder_id=f.id) THEN 1 ELSE 0 END
@@ -611,7 +640,7 @@ func collectBackupMessages(ctx context.Context, frozen *sql.DB, cfg Config, outp
 			} else if !errors.Is(resolveErr, online.ErrSourceMissing) {
 				return resolveErr
 			}
-			raw, err := rebuildBackupDraft(ctx, frozen, item.id, cfg.DataDir, draftRoot, min(opts.MaxMIMEBytes, budget.bytes))
+			raw, err := rebuildBackupDraft(ctx, frozen, item.id, cfg.DataDir, draftRoot, min(opts.MaxMIMEBytes, budget.bytes), cfg.DBDriver)
 			if err != nil {
 				return err
 			}

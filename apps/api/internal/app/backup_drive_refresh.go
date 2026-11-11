@@ -15,7 +15,7 @@ import (
 // nearly expired cached access token. Credential generations are bound to an
 // authorization ID; a late refresh cannot overwrite a newly authorized target.
 func (a *App) backupDriveToken(ctx context.Context, id string, expectedFingerprint ...string) (string, error) {
-	config, err := a.backupDriveOAuthConfig()
+	config, generation, err := a.backupDriveOAuthConfigFor(ctx)
 	if err != nil {
 		return "", errBackupDriveOAuth
 	}
@@ -41,7 +41,7 @@ func (a *App) backupDriveToken(ctx context.Context, id string, expectedFingerpri
 			return "", errBackupDriveOAuth
 		}
 		original := vault.Items[index]
-		if original.Config.Type != "drive" || original.Config.Disabled || original.Config.Drive == nil || original.Config.Drive.FolderID == "" || original.Credentials.DriveClientID != config.ClientID || original.Credentials.DriveAuthID == "" || !validBackupSecret(original.Credentials.DriveRefreshToken) {
+		if original.Config.Type != "drive" || original.Config.Disabled || original.Config.Drive == nil || original.Config.Drive.FolderID == "" || !a.backupDriveGrantMatches(ctx, original.Credentials, config.ClientID, generation) || original.Credentials.DriveAuthID == "" || !validBackupSecret(original.Credentials.DriveRefreshToken) {
 			return "", errBackupDriveOAuth
 		}
 		fingerprint := backupTargetFingerprint(original)
@@ -49,6 +49,9 @@ func (a *App) backupDriveToken(ctx context.Context, id string, expectedFingerpri
 			return "", errBackupDriveOAuth
 		}
 		token, err := refreshBackupDriveAccess(ctx, config, original.Credentials.DriveRefreshToken, client)
+		if !a.driveClientGenerationCurrent(ctx, generation) {
+			return "", errBackupDriveOAuth
+		}
 		if err != nil {
 			// A concurrent successful refresh may have rotated the refresh token.
 			// Retry only that demonstrated generation-preserving change.
@@ -71,6 +74,9 @@ func (a *App) backupDriveToken(ctx context.Context, id string, expectedFingerpri
 		// refresh with the old token could lose an already rotated grant.
 		retryCurrentGrant := false
 		for range 5 {
+			if !a.driveClientGenerationCurrent(ctx, generation) {
+				return "", errBackupDriveOAuth
+			}
 			current, currentRaw, err := a.loadBackupDestinationState(ctx)
 			if err != nil {
 				return "", errBackupDriveOAuth
@@ -96,6 +102,9 @@ func (a *App) backupDriveToken(ctx context.Context, id string, expectedFingerpri
 				if errors.Is(err, errBackupConflict) {
 					continue
 				}
+				return "", errBackupDriveOAuth
+			}
+			if !a.driveClientGenerationCurrent(ctx, generation) {
 				return "", errBackupDriveOAuth
 			}
 			return token.AccessToken, nil

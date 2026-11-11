@@ -30,6 +30,38 @@ func assertBackupScheduleDatabaseContract(t *testing.T, a *App) {
 	if err := a.saveBackupSchedule(t.Context(), records[0].Config.ID, req); !errors.Is(err, errBackupConflict) {
 		t.Fatal("stale schedule update accepted", err)
 	}
+	// Extended periods use the same encrypted CAS setting on every dialect.
+	for _, period := range []string{"hourly", "weekly", "monthly", "interval"} {
+		_, currentRaw, err := a.loadBackupSchedules(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		updated := backupScheduleRequest{Revision: backupRevision(currentRaw), DestinationsRevision: backupRevision(vaultRaw),
+			Period: period, Time: "04:30", Timezone: "UTC"}
+		switch period {
+		case "hourly":
+			updated.Time = ""
+			updated.Minute = 35
+		case "weekly":
+			updated.Weekdays = []int{1, 4}
+		case "monthly":
+			updated.DayOfMonth = 31
+		case "interval":
+			updated.Time = ""
+			updated.Interval = 5
+			updated.Unit = "minutes"
+		}
+		if err := a.saveBackupSchedule(t.Context(), records[0].Config.ID, updated); err != nil {
+			t.Fatal("period contract save", period, err)
+		}
+		stored, _, err := a.loadBackupSchedules(t.Context())
+		if err != nil || len(stored.Items) != 1 || backupSchedulePeriod(stored.Items[0]) != period {
+			t.Fatal("period contract read", period, err)
+		}
+		if period == "interval" && stored.Items[0].AnchorAt == nil {
+			t.Fatal("interval contract lost server anchor")
+		}
+	}
 }
 
 func TestBackupScheduleSQLiteDatabaseContract(t *testing.T) {

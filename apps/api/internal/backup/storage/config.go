@@ -1,5 +1,6 @@
 // Package storage transfers already-encrypted backup artifacts. It has no access
-// to the application database, recovery keys, live services or remote deletion.
+// to the application database, recovery keys or live services. Retention deletes
+// only explicitly receipted objects after readback and conditional verification.
 package storage
 
 import (
@@ -26,13 +27,14 @@ type Config struct {
 }
 
 type Destination struct {
-	ID       string        `json:"id"`
-	Name     string        `json:"name"`
-	Type     string        `json:"type"`
-	Disabled bool          `json:"disabled,omitempty"`
-	S3       *S3Config     `json:"s3,omitempty"`
-	WebDAV   *WebDAVConfig `json:"webdav,omitempty"`
-	Drive    *DriveConfig  `json:"drive,omitempty"`
+	ID            string         `json:"id"`
+	Name          string         `json:"name"`
+	Type          string         `json:"type"`
+	Disabled      bool           `json:"disabled,omitempty"`
+	S3            *S3Config      `json:"s3,omitempty"`
+	WebDAV        *WebDAVConfig  `json:"webdav,omitempty"`
+	Drive         *DriveConfig   `json:"drive,omitempty"`
+	NetworkPolicy *NetworkPolicy `json:"-"`
 }
 
 type DriveConfig struct {
@@ -72,6 +74,10 @@ var (
 // DecodeConfig rejects unknown fields, trailing JSON and oversized input. Errors
 // deliberately omit input fragments, which could contain misplaced secrets.
 func DecodeConfig(r io.Reader) (Config, error) {
+	return DecodeConfigWithNetworkPolicy(r, nil)
+}
+
+func DecodeConfigWithNetworkPolicy(r io.Reader, policy *NetworkPolicy) (Config, error) {
 	var cfg Config
 	data, err := io.ReadAll(io.LimitReader(r, (1<<20)+1))
 	if err != nil || len(data) > 1<<20 {
@@ -85,6 +91,7 @@ func DecodeConfig(r io.Reader) (Config, error) {
 	if err := decoder.Decode(new(any)); err != io.EOF {
 		return Config{}, errors.New("destination config must contain one JSON value")
 	}
+	cfg = cfg.WithNetworkPolicy(policy)
 	return cfg, cfg.Validate()
 }
 
@@ -104,15 +111,18 @@ func (c Config) Validate() error {
 				return errors.New("s3 destination requires only s3 settings")
 			}
 			s := d.S3
-			u, err := endpointURL(s.Endpoint)
+			u, err := endpointURLWithPolicy(s.Endpoint, d.NetworkPolicy)
 			if err != nil || (u.Path != "" && u.Path != "/") || !regionPattern.MatchString(s.Region) || !validBucket(s.Bucket) || !validPrefix(s.Prefix) || !envPattern.MatchString(s.AccessKeyIDEnv) || !envPattern.MatchString(s.SecretAccessKeyEnv) || (s.SessionTokenEnv != "" && !envPattern.MatchString(s.SessionTokenEnv)) {
 				return errors.New("invalid s3 destination settings")
+			}
+			if d.NetworkPolicy.addresses(u.Hostname(), endpointPort(u)) != nil && !s.PathStyle {
+				return errors.New("private s3 destinations require path_style")
 			}
 		case "webdav":
 			if d.WebDAV == nil || d.S3 != nil || d.Drive != nil {
 				return errors.New("webdav destination requires only webdav settings")
 			}
-			if _, err := endpointURL(d.WebDAV.URL); err != nil || !envPattern.MatchString(d.WebDAV.UsernameEnv) || !envPattern.MatchString(d.WebDAV.PasswordEnv) {
+			if _, err := endpointURLWithPolicy(d.WebDAV.URL, d.NetworkPolicy); err != nil || !envPattern.MatchString(d.WebDAV.UsernameEnv) || !envPattern.MatchString(d.WebDAV.PasswordEnv) {
 				return errors.New("invalid webdav destination settings")
 			}
 		case "drive":
@@ -139,6 +149,17 @@ func validPrefix(s string) bool {
 }
 
 func endpointURL(value string) (*url.URL, error) {
+	return endpointURLWithPolicy(value, nil)
+}
+
+func endpointPort(u *url.URL) string {
+	if u.Port() == "" {
+		return "443"
+	}
+	return u.Port()
+}
+
+func endpointURLWithPolicy(value string, policy *NetworkPolicy) (*url.URL, error) {
 	u, err := url.Parse(value)
 	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(value, "#") || u.RawPath != "" || strings.ContainsAny(u.Path, "\\%") || strings.IndexFunc(value, unicode.IsControl) >= 0 || strings.IndexFunc(u.Path, unicode.IsControl) >= 0 {
 		return nil, errors.New("destination must be an unambiguous HTTPS URL without credentials, query or fragment")
@@ -150,7 +171,9 @@ func endpointURL(value string) (*url.URL, error) {
 		return nil, errors.New("invalid destination host")
 	}
 	if ip, err := netip.ParseAddr(u.Hostname()); err == nil && !publicIP(ip) {
-		return nil, errors.New("private and special-use destination addresses are not allowed")
+		if !privateBackupIP(ip) || !policy.addresses(u.Hostname(), endpointPort(u))[ip] {
+			return nil, errors.New("private and special-use destination addresses are not allowed")
+		}
 	}
 	if port := u.Port(); port != "" {
 		n, err := strconv.Atoi(port)

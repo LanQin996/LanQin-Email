@@ -52,12 +52,16 @@ func buildUploader(d Destination, env func(string) (string, bool), client *http.
 			}
 		}
 		if client == nil {
-			u, _ := endpointURL(cfg.Endpoint) // Config.Validate ran before construction.
+			u, _ := endpointURLWithPolicy(cfg.Endpoint, d.NetworkPolicy) // Config.Validate ran before construction.
 			virtualHost := cfg.Bucket + "." + u.Hostname()
 			if port := u.Port(); port != "" {
 				virtualHost = net.JoinHostPort(virtualHost, port)
 			}
-			client, cleanup = secureClient(u.Host, virtualHost)
+			hosts := []string{u.Host}
+			if d.NetworkPolicy.addresses(u.Hostname(), endpointPort(u)) == nil {
+				hosts = append(hosts, virtualHost)
+			}
+			client, cleanup = secureClientWithPolicy(d.NetworkPolicy, hosts...)
 		}
 		credentials := aws.Credentials{AccessKeyID: key, SecretAccessKey: password, SessionToken: token, Source: "LanQinBackupDestination"}
 		api := s3.New(s3.Options{
@@ -67,7 +71,8 @@ func buildUploader(d Destination, env func(string) (string, bool), client *http.
 			RetryMaxAttempts: 1, Logger: logging.Nop{},
 			RequestChecksumCalculation: aws.RequestChecksumCalculationWhenRequired,
 		})
-		return &s3Uploader{api: api, bucket: cfg.Bucket, prefix: cfg.Prefix, cleanup: cleanup}, nil
+		c := Credentials{AccessKeyID: key, SecretAccessKey: password, SessionToken: token}
+		return &s3Uploader{api: api, bucket: cfg.Bucket, prefix: cfg.Prefix, cleanup: cleanup, client: client, destination: d, credentials: c, binding: transferBinding(d, c)}, nil
 	case "webdav":
 		cfg := d.WebDAV
 		username, err := secret(cfg.UsernameEnv)
@@ -78,11 +83,12 @@ func buildUploader(d Destination, env func(string) (string, bool), client *http.
 		if err != nil {
 			return nil, err
 		}
-		u, _ := endpointURL(cfg.URL)
+		u, _ := endpointURLWithPolicy(cfg.URL, d.NetworkPolicy)
 		if client == nil {
-			client, cleanup = secureClient(u.Host)
+			client, cleanup = secureClientWithPolicy(d.NetworkPolicy, u.Host)
 		}
-		return &webdavUploader{client: client, base: u, username: username, password: password, cleanup: cleanup}, nil
+		c := Credentials{Username: username, Password: password}
+		return &webdavUploader{client: client, base: u, username: username, password: password, cleanup: cleanup, destination: d, binding: transferBinding(d, c)}, nil
 	case "drive":
 		token, err := secret(d.Drive.AccessTokenEnv)
 		if err != nil {
@@ -91,7 +97,7 @@ func buildUploader(d Destination, env func(string) (string, bool), client *http.
 		if client == nil {
 			client, cleanup = GoogleDriveHTTPClient()
 		}
-		return &driveUploader{client: client, folder: d.Drive.FolderID, token: token, destination: d.ID, cleanup: cleanup}, nil
+		return &driveUploader{client: client, folder: d.Drive.FolderID, token: token, destination: d.ID, cleanup: cleanup, config: d, binding: transferBinding(d, Credentials{})}, nil
 	default:
 		return nil, errors.New("unsupported destination type")
 	}
@@ -101,6 +107,10 @@ type s3Uploader struct {
 	api            *s3.Client
 	bucket, prefix string
 	cleanup        func()
+	client         *http.Client
+	destination    Destination
+	credentials    Credentials
+	binding        string
 }
 
 // The SDK normally accepts any 2xx status and reads error XML into memory.
@@ -144,6 +154,8 @@ type webdavUploader struct {
 	base               *url.URL
 	username, password string
 	cleanup            func()
+	destination        Destination
+	binding            string
 }
 
 func (w *webdavUploader) close() { w.cleanup() }
@@ -207,6 +219,8 @@ func statusError(status int) error {
 	switch {
 	case status == 401 || status == 403:
 		return &uploadError{code: "access_denied"}
+	case status == 404:
+		return &uploadError{code: "object_missing"}
 	case status == 409:
 		return &uploadError{code: "conflict", retry: true}
 	case status == 412:

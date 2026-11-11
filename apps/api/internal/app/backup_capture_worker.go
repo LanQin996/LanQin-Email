@@ -6,24 +6,26 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"lanqin-email-api/internal/backup"
+	"lanqin-email-api/internal/backup/catalog"
 	"net/http"
 	"os"
 	"runtime"
-	"strings"
-
-	"filippo.io/age"
-	"lanqin-email-api/internal/backup"
-	"lanqin-email-api/internal/backup/catalog"
 )
 
 // Only stable capability reasons cross the API boundary. Invalid recipient
 // configuration must never be echoed: it might accidentally contain a private key.
 func (a *App) backupCaptureCapability() (string, string) {
-	if normalizeDatabaseConfig(a.cfg).DBDriver != databaseDriverSQLite {
-		return "", "sqlite_required"
+	return a.backupCaptureCapabilityFor(context.Background())
+}
+
+func (a *App) backupCaptureCapabilityFor(ctx context.Context) (string, string) {
+	driver := normalizeDatabaseConfig(a.cfg).DBDriver
+	if driver != databaseDriverSQLite && driver != databaseDriverMySQL && driver != databaseDriverPostgres {
+		return "", "database_unsupported"
 	}
-	key, err := age.ParseX25519Recipient(strings.TrimSpace(a.cfg.BackupRecipient))
-	if err != nil || a.cfg.BackupWorkspace == "" || a.cfg.BackupArtifactDir == "" {
+	encryption, err := a.backupEncryptionConfiguration(ctx)
+	if err != nil || encryption.Mode != "password" || !validStoredBackupPassword(encryption.Password) || !passwordDescriptor(encryption.Recipient) || a.cfg.BackupWorkspace == "" || a.cfg.BackupArtifactDir == "" {
 		return "", "configuration_required"
 	}
 	if _, err := a.backupMasterKey(); err != nil {
@@ -49,11 +51,15 @@ func (a *App) backupCaptureCapability() (string, string) {
 	if err != nil || runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
 		return "", "workspace_unavailable"
 	}
-	return key.String(), ""
+	return encryption.Recipient, ""
 }
 
 func (a *App) backupCaptureConfiguration() (string, error) {
-	recipient, reason := a.backupCaptureCapability()
+	return a.backupCaptureConfigurationFor(context.Background())
+}
+
+func (a *App) backupCaptureConfigurationFor(ctx context.Context) (string, error) {
+	recipient, reason := a.backupCaptureCapabilityFor(ctx)
 	if reason != "" {
 		return "", errBackupExecution
 	}
@@ -62,10 +68,20 @@ func (a *App) backupCaptureConfiguration() (string, error) {
 
 func (a *App) handleBackupCapabilities(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	recipient, reason := a.backupCaptureCapability()
+	recipient, reason := a.backupCaptureCapabilityFor(r.Context())
 	response := map[string]any{"onlineBackupAvailable": reason == ""}
-	_, driveErr := a.backupDriveOAuthConfig()
+	discoveryKey, discoveryKeyErr := a.backupMasterKey()
+	clear(discoveryKey)
+	_, discoveryPolicyErr := a.backupNetworkPolicy()
+	response["discoveryAvailable"] = discoveryKeyErr == nil && discoveryPolicyErr == nil
+	response["restoreMaxBytes"] = backupMaxBytes
+	_, restoreErr := a.backupRestoreRoot()
+	response["restoreAvailable"] = restoreErr == nil
+	_, _, driveErr := a.backupDriveOAuthConfigFor(r.Context())
 	response["driveOAuthAvailable"] = driveErr == nil
+	if encryption, err := a.backupEncryptionConfiguration(r.Context()); err == nil {
+		response["encryptionMode"] = encryption.Mode
+	}
 	if reason != "" {
 		response["reason"] = reason
 	} else {
@@ -114,8 +130,12 @@ func (a *App) updateBackupCapture(ctx context.Context, lease backupLease, phase 
 // Returns only safe stage codes. The prepared private report with paths and
 // message IDs is never persisted in task JSON or returned by HTTP.
 func (a *App) createBackupArtifact(ctx context.Context, lease backupLease, job backupJob) (backupJob, string) {
-	recipient, err := a.backupCaptureConfiguration()
+	recipient, err := a.backupCaptureConfigurationFor(ctx)
 	if err != nil || recipient != job.Recipient {
+		return job, "capture_configuration_changed"
+	}
+	encryption, err := a.backupEncryptionConfiguration(ctx)
+	if err != nil || encryption.Mode != "password" || !validStoredBackupPassword(encryption.Password) || encryption.Recipient != recipient {
 		return job, "capture_configuration_changed"
 	}
 	prepare := a.backupPrepareSnapshot
@@ -143,9 +163,19 @@ func (a *App) createBackupArtifact(ctx context.Context, lease backupLease, job b
 	defer file.Close()
 	digest := sha256.New()
 	bounded := backupCipherWriter{dst: io.MultiWriter(file, digest), remaining: backupMaxBytes}
-	_, err = backup.WriteOnline(ctx, prepared.Path, &bounded, recipient, backup.Limits{MaxBytes: opts.MaxBytes, MaxEntries: opts.MaxEntries})
+	limits := backup.Limits{MaxBytes: opts.MaxBytes, MaxEntries: opts.MaxEntries}
+	driver := normalizeDatabaseConfig(a.cfg).DBDriver
+	if driver == databaseDriverSQLite {
+		_, err = backup.WriteOnlinePassword(ctx, prepared.Path, &bounded, encryption.Password, limits)
+	} else {
+		_, err = backup.WriteNativePassword(ctx, prepared.Path, &bounded, encryption.Password, driver, limits)
+	}
 	if err != nil {
 		return job, "encryption_failed"
+	}
+	current, loadErr := a.backupEncryptionConfiguration(ctx)
+	if loadErr != nil || current.Recipient != encryption.Recipient {
+		return job, "capture_configuration_changed"
 	}
 	if err := prepared.Close(); err != nil {
 		return job, "snapshot_cleanup_failed"

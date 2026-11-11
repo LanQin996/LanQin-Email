@@ -51,6 +51,10 @@ type lookupIP func(context.Context, string, string) ([]net.IP, error)
 // Resolve once per connection, validate ALL answers, then dial the validated IP
 // directly. Never re-resolve the hostname between validation and dialing.
 func publicDial(ctx context.Context, network, address string, lookup lookupIP, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
+	return policyDial(ctx, network, address, nil, lookup, dial)
+}
+
+func policyDial(ctx context.Context, network, address string, policy *NetworkPolicy, lookup lookupIP, dial func(context.Context, string, string) (net.Conn, error)) (net.Conn, error) {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, errEndpointBlocked
@@ -59,12 +63,21 @@ func publicDial(ctx context.Context, network, address string, lookup lookupIP, d
 	if err != nil {
 		return nil, errors.New("destination DNS lookup failed")
 	}
-	if len(ips) == 0 {
+	if len(ips) == 0 || len(ips) > 64 {
 		return nil, errEndpointBlocked
 	}
+	allowedPrivate := policy.addresses(host, port)
 	for _, ip := range ips {
 		addr, ok := netip.AddrFromSlice(ip)
-		if !ok || !publicIP(addr) {
+		if !ok {
+			return nil, errEndpointBlocked
+		}
+		addr = addr.Unmap()
+		if allowedPrivate != nil {
+			if !privateBackupIP(addr) || !allowedPrivate[addr] {
+				return nil, errEndpointBlocked
+			}
+		} else if !publicIP(addr) {
 			return nil, errEndpointBlocked
 		}
 	}
@@ -102,12 +115,16 @@ func GoogleDriveHTTPClient() (*http.Client, func()) {
 }
 
 func secureClient(hosts ...string) (*http.Client, func()) {
+	return secureClientWithPolicy(nil, hosts...)
+}
+
+func secureClientWithPolicy(policy *NetworkPolicy, hosts ...string) (*http.Client, func()) {
 	dialer := &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	transport := &http.Transport{
 		// No proxy environment: a proxy could bypass the validated-IP policy.
 		Proxy: nil,
 		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
-			return publicDial(ctx, network, address, net.DefaultResolver.LookupIP, dialer.DialContext)
+			return policyDial(ctx, network, address, policy, net.DefaultResolver.LookupIP, dialer.DialContext)
 		},
 		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12},
 		TLSHandshakeTimeout:    10 * time.Second,

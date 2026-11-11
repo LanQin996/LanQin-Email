@@ -27,6 +27,11 @@ type DownloadReceipt struct {
 	Bytes  int64  `json:"bytes"`
 }
 
+type remoteDownload struct {
+	io.ReadCloser
+	etag string
+}
+
 var backupObjectName = regexp.MustCompile(`^lanqin-[a-f0-9]{32}\.age$`)
 
 // Download fetches one explicitly selected encrypted backup, validates its
@@ -148,17 +153,24 @@ func validDownloadCredentials(d Destination, c Credentials) bool {
 func downloadClient(d Destination) (*http.Client, func()) {
 	hosts := []string{"www.googleapis.com"}
 	if d.S3 != nil {
-		u, _ := endpointURL(d.S3.Endpoint)
+		u, _ := endpointURLWithPolicy(d.S3.Endpoint, d.NetworkPolicy)
 		virtual := d.S3.Bucket + "." + u.Hostname()
 		if port := u.Port(); port != "" {
 			virtual = net.JoinHostPort(virtual, port)
 		}
-		hosts = []string{u.Host, virtual}
+		hosts = []string{u.Host}
+		if d.NetworkPolicy.addresses(u.Hostname(), endpointPort(u)) == nil {
+			hosts = append(hosts, virtual)
+		}
 	} else if d.WebDAV != nil {
-		u, _ := endpointURL(d.WebDAV.URL)
+		u, _ := endpointURLWithPolicy(d.WebDAV.URL, d.NetworkPolicy)
 		hosts = []string{u.Host}
 	}
-	client, closeClient := secureClient(hosts...)
+	policy := d.NetworkPolicy
+	if d.Type == "drive" {
+		policy = nil
+	}
+	client, closeClient := secureClientWithPolicy(policy, hosts...)
 	client.Transport.(*restrictedTransport).methods = map[string]bool{http.MethodGet: true}
 	return client, closeClient
 }
@@ -194,11 +206,12 @@ func openDownload(ctx context.Context, d Destination, object, expected string, c
 		if err != nil {
 			return nil, classify(err)
 		}
-		return result.Body, nil
+		return &remoteDownload{ReadCloser: result.Body, etag: aws.ToString(result.ETag)}, nil
 	}
 	endpoint := ""
+	metadataETag := ""
 	if d.Type == "webdav" {
-		u, _ := endpointURL(d.WebDAV.URL)
+		u, _ := endpointURLWithPolicy(d.WebDAV.URL, d.NetworkPolicy)
 		u.Path = strings.TrimSuffix(u.Path, "/") + "/" + object
 		endpoint = u.String()
 	} else {
@@ -216,6 +229,7 @@ func openDownload(ctx context.Context, d Destination, object, expected string, c
 			r.Body.Close()
 			return nil, statusError(r.StatusCode)
 		}
+		metadataETag = r.Header.Get("ETag")
 		var metadata struct {
 			Parents       []string          `json:"parents"`
 			AppProperties map[string]string `json:"appProperties"`
@@ -251,5 +265,9 @@ func openDownload(ctx context.Context, d Destination, object, expected string, c
 		r.Body.Close()
 		return nil, statusError(r.StatusCode)
 	}
-	return r.Body, nil
+	etag := r.Header.Get("ETag")
+	if d.Type == "drive" {
+		etag = metadataETag
+	}
+	return &remoteDownload{ReadCloser: r.Body, etag: etag}, nil
 }

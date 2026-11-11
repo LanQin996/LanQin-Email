@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"lanqin-email-api/internal/backup"
 	"lanqin-email-api/internal/backup/catalog"
 	"lanqin-email-api/internal/backup/storage"
 )
@@ -37,23 +38,30 @@ type backupTarget struct {
 }
 
 type backupJob struct {
-	Kind               string               `json:"kind,omitempty"`
-	Phase              string               `json:"phase,omitempty"`
-	Recipient          string               `json:"recipient,omitempty"`
-	Summary            *OnlineBackupSummary `json:"summary,omitempty"`
-	Version            int                  `json:"version"`
-	ID                 string               `json:"id"`
-	Artifact           catalog.Entry        `json:"artifact"`
-	Status             string               `json:"status"`
-	CreatedAt          time.Time            `json:"createdAt"`
-	StartedAt          *time.Time           `json:"startedAt,omitempty"`
-	CompletedAt        *time.Time           `json:"completedAt,omitempty"`
-	Targets            []backupTarget       `json:"targets"`
-	Results            []storage.Result     `json:"results"`
-	CancelRequested    bool                 `json:"cancelRequested"`
-	ErrorCode          string               `json:"errorCode,omitempty"`
-	RequestFingerprint string               `json:"requestFingerprint,omitempty"`
-	WorkerToken        string               `json:"workerToken,omitempty"`
+	Kind               string                            `json:"kind,omitempty"`
+	Phase              string                            `json:"phase,omitempty"`
+	Recipient          string                            `json:"recipient,omitempty"`
+	Summary            *OnlineBackupSummary              `json:"summary,omitempty"`
+	Version            int                               `json:"version"`
+	ID                 string                            `json:"id"`
+	Artifact           catalog.Entry                     `json:"artifact"`
+	Status             string                            `json:"status"`
+	CreatedAt          time.Time                         `json:"createdAt"`
+	StartedAt          *time.Time                        `json:"startedAt,omitempty"`
+	CompletedAt        *time.Time                        `json:"completedAt,omitempty"`
+	Targets            []backupTarget                    `json:"targets"`
+	Results            []storage.Result                  `json:"results"`
+	CancelRequested    bool                              `json:"cancelRequested"`
+	ErrorCode          string                            `json:"errorCode,omitempty"`
+	RequestFingerprint string                            `json:"requestFingerprint,omitempty"`
+	WorkerToken        string                            `json:"workerToken,omitempty"`
+	Retention          []backupRetentionResult           `json:"retention,omitempty"`
+	Pruned             map[string]backupPruned           `json:"pruned,omitempty"`
+	Restore            *backupRestoreState               `json:"restore,omitempty"`
+	Discovery          *backupDiscoveryState             `json:"discovery,omitempty"`
+	Transfers          map[string]backupTransferProgress `json:"transfers,omitempty"`
+	ResumeCount        int                               `json:"resumeCount,omitempty"`
+	ResumeAudit        []backupResumeAudit               `json:"resumeAudit,omitempty"`
 }
 
 type backupLease struct {
@@ -62,6 +70,7 @@ type backupLease struct {
 }
 type backupSuccess struct {
 	At                 time.Time
+	CreatedAt          time.Time
 	Fingerprint, JobID string
 }
 type backupRegistry struct {
@@ -73,21 +82,29 @@ type backupRegistry struct {
 
 // Explicit DTOs ensure private fingerprints and fencing tokens never escape.
 type backupJobView struct {
-	Kind             string               `json:"kind"`
-	Phase            string               `json:"phase"`
-	Recipient        string               `json:"recipient,omitempty"`
-	Summary          *OnlineBackupSummary `json:"summary,omitempty"`
-	ID               string               `json:"id"`
-	Artifact         catalog.Entry        `json:"artifact"`
-	Status           string               `json:"status"`
-	CreatedAt        time.Time            `json:"createdAt"`
-	StartedAt        *time.Time           `json:"startedAt,omitempty"`
-	CompletedAt      *time.Time           `json:"completedAt,omitempty"`
-	DestinationNames []string             `json:"destinationNames"`
-	Locations        []backupJobLocation  `json:"locations"`
-	Results          []storage.Result     `json:"results"`
-	CancelRequested  bool                 `json:"cancelRequested"`
-	ErrorCode        string               `json:"errorCode,omitempty"`
+	Kind             string                            `json:"kind"`
+	Phase            string                            `json:"phase"`
+	Recipient        string                            `json:"recipient,omitempty"`
+	Summary          *OnlineBackupSummary              `json:"summary,omitempty"`
+	ID               string                            `json:"id"`
+	Artifact         catalog.Entry                     `json:"artifact"`
+	Status           string                            `json:"status"`
+	CreatedAt        time.Time                         `json:"createdAt"`
+	StartedAt        *time.Time                        `json:"startedAt,omitempty"`
+	CompletedAt      *time.Time                        `json:"completedAt,omitempty"`
+	DestinationNames []string                          `json:"destinationNames"`
+	Locations        []backupJobLocation               `json:"locations"`
+	Results          []storage.Result                  `json:"results"`
+	CancelRequested  bool                              `json:"cancelRequested"`
+	ErrorCode        string                            `json:"errorCode,omitempty"`
+	Retention        []backupRetentionResult           `json:"retention,omitempty"`
+	Pruned           map[string]backupPruned           `json:"pruned,omitempty"`
+	Restore          *backupRestoreView                `json:"restore,omitempty"`
+	Discovery        *backupDiscoveryView              `json:"discovery,omitempty"`
+	Transfers        map[string]backupTransferProgress `json:"transfers,omitempty"`
+	ResumeCount      int                               `json:"resumeCount"`
+	CanResume        bool                              `json:"canResume"`
+	ResumeAudit      []backupResumeAudit               `json:"resumeAudit,omitempty"`
 }
 
 type backupJobLocation struct {
@@ -131,7 +148,15 @@ func backupJobResponse(job backupJob) backupJobView {
 			phase = "uploading"
 		}
 	}
-	return backupJobView{Kind: kind, Phase: phase, Recipient: job.Recipient, Summary: job.Summary, ID: job.ID, Artifact: job.Artifact, Status: job.Status, CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, DestinationNames: names, Locations: locations, Results: job.Results, CancelRequested: job.CancelRequested, ErrorCode: job.ErrorCode}
+	view := backupJobView{Kind: kind, Phase: phase, Recipient: job.Recipient, Summary: job.Summary, ID: job.ID, Artifact: job.Artifact, Status: job.Status, CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, CompletedAt: job.CompletedAt, DestinationNames: names, Locations: locations, Results: job.Results, CancelRequested: job.CancelRequested, ErrorCode: job.ErrorCode, Retention: job.Retention, Pruned: job.Pruned}
+	if job.Restore != nil {
+		view.Restore = &backupRestoreView{SourceJobID: job.Restore.SourceJobID, DestinationID: job.Restore.DestinationID, Manifest: job.Restore.Manifest, Ready: job.Restore.Ready}
+	}
+	if job.Discovery != nil {
+		view.Discovery = &backupDiscoveryView{Count: job.Discovery.Count, Ready: job.Discovery.Ready && job.Status == "succeeded", SourceFolderID: job.Discovery.SourceFolderID}
+	}
+	view.Transfers, view.ResumeCount, view.CanResume, view.ResumeAudit = job.Transfers, job.ResumeCount, canResumeBackupUpload(job), job.ResumeAudit
+	return view
 }
 
 func backupJobKind(job backupJob) string {
@@ -142,22 +167,47 @@ func backupJobKind(job backupJob) string {
 }
 
 func validBackupJob(job backupJob) bool {
-	if job.Version != 1 || !backupJobIDPattern.MatchString(job.ID) || len(job.Targets) > 16 {
+	if job.Version != 1 || !backupJobIDPattern.MatchString(job.ID) || len(job.Targets) > 16 || len(job.Transfers) > 16 || job.ResumeCount < 0 || job.ResumeCount > 10 || len(job.ResumeAudit) > 10 {
 		return false
 	}
 	switch job.Phase {
-	case "", "queued", "collecting", "encrypting", "uploading", "completed":
+	case "", "queued", "collecting", "encrypting", "uploading", "retaining", "downloading", "decrypting", "discovering", "completed":
 	default:
 		return false
 	}
 	switch backupJobKind(job) {
 	case "upload":
-		return catalog.ValidID(job.Artifact.ID) && (job.Phase == "" || job.Phase == "queued" || job.Phase == "uploading" || job.Phase == "completed")
+		return catalog.ValidID(job.Artifact.ID) && (job.Phase == "" || job.Phase == "queued" || job.Phase == "uploading" || job.Phase == "retaining" || job.Phase == "completed")
 	case "snapshot":
 		return job.Recipient != "" && (catalog.ValidID(job.Artifact.ID) || job.Artifact.ID == "" && job.Phase != "uploading")
+	case "restore":
+		return catalog.ValidID(job.Artifact.ID) && len(job.Targets) == 1 && job.Restore != nil && backupJobIDPattern.MatchString(job.Restore.SourceJobID) && job.Restore.DestinationID == job.Targets[0].ID && (job.Phase == "downloading" || job.Phase == "decrypting" || job.Phase == "completed")
+	case "discover":
+		return validBackupDiscoveryJob(job)
 	default:
 		return false
 	}
+}
+
+type backupRestoreState struct {
+	SourceJobID         string           `json:"sourceJobId"`
+	DestinationID       string           `json:"destinationId"`
+	ObjectKey           string           `json:"objectKey"`
+	Root                string           `json:"root"`
+	Directory           string           `json:"directory,omitempty"`
+	Manifest            *backup.Manifest `json:"manifest,omitempty"`
+	Ready               bool             `json:"ready"`
+	ReportSHA256        string           `json:"reportSHA256,omitempty"`
+	DiscoveryEntryID    string           `json:"discoveryEntryId,omitempty"`
+	SourceDestinationID string           `json:"sourceDestinationId,omitempty"`
+	SourceFolderID      string           `json:"sourceFolderId,omitempty"`
+}
+
+type backupRestoreView struct {
+	SourceJobID   string           `json:"sourceJobId"`
+	DestinationID string           `json:"destinationId"`
+	Manifest      *backup.Manifest `json:"manifest,omitempty"`
+	Ready         bool             `json:"ready"`
 }
 
 func (a *App) backupMasterKey() ([]byte, error) {
@@ -286,6 +336,7 @@ func (a *App) backupCAS(ctx context.Context, db dbExecutor, key, previous string
 }
 
 func backupTargetFingerprint(record backupDestinationRecord) string {
+	record.KeepLast = 0 // Retention changes do not rebind credentials or disable daily schedules.
 	record.Config.Name = ""
 	record.Config.Disabled = false
 	if record.Config.Type == "drive" && record.Credentials.DriveAuthID != "" {
@@ -447,6 +498,9 @@ func (a *App) claimBackupUpload(ctx context.Context) (*backupLease, error) {
 		now := a.now().UTC()
 		job.Status, job.ErrorCode, job.CompletedAt, job.WorkerToken = "interrupted", "lease_expired", &now, ""
 		job.Phase = "completed"
+		if job.Discovery != nil {
+			job.Discovery.Ready = false
+		}
 		registry.Active = nil
 		tx, err := a.db.BeginTx(ctx, nil)
 		if err != nil {
@@ -476,7 +530,12 @@ func (a *App) claimBackupUpload(ctx context.Context) (*backupLease, error) {
 	job.Status, job.StartedAt, job.WorkerToken = "running", &now, lease.Token
 	job.Phase = "uploading"
 	if backupJobKind(job) == "snapshot" {
-		job.Phase = "collecting"
+		if job.Artifact.ID == "" {
+			job.Phase = "collecting"
+		}
+	}
+	if backupJobKind(job) == "discover" {
+		job.Phase = "discovering"
 	}
 	registry.Pending, registry.Active = registry.Pending[1:], lease
 	tx, err := a.db.BeginTx(ctx, nil)
