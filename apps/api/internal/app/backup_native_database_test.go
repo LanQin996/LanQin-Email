@@ -421,7 +421,7 @@ func assertNativeInstallationPreparation(t *testing.T, source *App, cfg Config, 
 	if _, err := PrepareNativeInstallation(t.Context(), cfg, container, work, "/different/data", runtimeMail, targets, reportSHA, backup.DefaultLimits()); err == nil {
 		t.Fatal("prepared DB silently rebound to different roots")
 	}
-	journal := t.TempDir()
+	journal := privateBackupTestDir(t)
 	activate := ActivateNativeInstallation
 	rollback := RollbackNativeInstallation
 	var info install.JournalInfo
