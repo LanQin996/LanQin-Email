@@ -3,7 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, type BackupMaintenanceStatus, type BackupUploadJob } from "@/lib/api"
 import { uiText, useLanguage } from "@/lib/language"
 import { ApiError, errorMessage } from "@/lib/ui-errors"
-import { backupMaintenanceRequestId } from "@/lib/backup-maintenance"
+import {
+  backupMaintenanceElapsed,
+  backupMaintenanceFinished as finished,
+  backupMaintenanceMilestones,
+  backupMaintenanceRequestId,
+  backupMaintenanceStep,
+} from "@/lib/backup-maintenance"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -24,10 +30,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-
-function finished(status?: BackupMaintenanceStatus) {
-  return !!status && ["succeeded", "failed", "needsRecovery"].includes(status.state)
-}
 
 function stateText(status?: BackupMaintenanceStatus) {
   switch (status?.state) {
@@ -86,6 +88,8 @@ export function BackupMaintenanceProgress({
   sourceJobId,
   status,
   disconnected,
+  statusUnauthorized = false,
+  receivedAt,
   fetching,
   submitting,
   onRetry,
@@ -95,17 +99,99 @@ export function BackupMaintenanceProgress({
   sourceJobId: string
   status?: BackupMaintenanceStatus
   disconnected: boolean
+  statusUnauthorized?: boolean
+  receivedAt?: number
   fetching: boolean
   submitting: boolean
   onRetry: () => void
   onDismiss?: () => void
 }) {
-  useLanguage()
+  const [language] = useLanguage()
+  const [now, setNow] = React.useState(Date.now)
+  const terminal = finished(status)
+  React.useEffect(() => {
+    if (terminal || disconnected) return
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [terminal, disconnected])
+  const step = backupMaintenanceStep(status)
+  const updated = receivedAt || Date.parse(status?.updatedAt || "")
+  const end = terminal ? Date.parse(status?.updatedAt || "") : disconnected ? updated : now
+  const elapsed = backupMaintenanceElapsed(status?.createdAt, end)
+  const stageElapsed = backupMaintenanceElapsed(status?.progress?.startedAt, end)
+  const updatedText =
+    Number.isFinite(updated) && updated > 0
+      ? new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "medium" }).format(
+          updated
+        )
+      : uiText("等待状态更新")
   return (
     <div className="space-y-3 rounded-md border p-3" aria-live="polite" data-lanqin-i18n-ignore>
       <Badge variant={status?.state === "needsRecovery" ? "destructive" : "secondary"}>
-        {stateText(status)}
+        {disconnected && !terminal ? uiText("状态连接已中断") : stateText(status)}
       </Badge>
+      <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <div className="min-w-0 sm:col-span-2">
+          <dt className="text-muted-foreground">
+            {uiText(disconnected && !terminal ? "上次确认的阶段" : "当前阶段")}
+          </dt>
+          <dd className="font-medium">{uiText(step.label)}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">
+            {uiText(disconnected && !terminal ? "上次确认时耗时" : "总耗时")}
+          </dt>
+          <dd className="font-mono tabular-nums">{elapsed || uiText("等待状态更新")}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{uiText("最近查询成功")}</dt>
+          <dd>{updatedText}</dd>
+        </div>
+        {stageElapsed && !terminal && (
+          <div>
+            <dt className="text-muted-foreground">
+              {uiText(disconnected ? "上次确认的阶段耗时" : "当前阶段耗时")}
+            </dt>
+            <dd className="font-mono tabular-nums">{stageElapsed}</dd>
+          </div>
+        )}
+      </dl>
+      {step.milestone >= 0 && (
+        <ol className="grid gap-2 text-sm sm:grid-cols-2" aria-label={uiText("恢复进度")}>
+          {backupMaintenanceMilestones.map((label, index) => {
+            const complete = status?.state === "succeeded" || index < step.milestone
+            const current = status?.state !== "succeeded" && index === step.milestone
+            return (
+              <li
+                key={label}
+                aria-current={current ? "step" : undefined}
+                className="flex items-start gap-2"
+              >
+                <span
+                  aria-hidden="true"
+                  className={`flex size-5 shrink-0 items-center justify-center rounded-full border text-xs ${complete || current ? "border-foreground bg-foreground text-background" : "text-muted-foreground"}`}
+                >
+                  {complete ? "✓" : index + 1}
+                </span>
+                <span className={current ? "font-medium" : complete ? "" : "text-muted-foreground"}>
+                  {uiText(label)}
+                  <span className="sr-only">
+                    {uiText(
+                      complete
+                        ? "已完成"
+                        : current
+                          ? disconnected
+                            ? "上次确认的阶段"
+                            : "当前阶段"
+                          : "尚未执行"
+                    )}
+                  </span>
+                </span>
+              </li>
+            )
+          })}
+        </ol>
+      )}
       <dl className="grid gap-2 text-sm sm:grid-cols-2">
         <div className="min-w-0">
           <dt>{uiText("覆盖恢复请求编号")}</dt>
@@ -121,16 +207,18 @@ export function BackupMaintenanceProgress({
           {uiText("覆盖恢复未完成，请保留请求编号并联系管理员检查；不要重复提交")}
         </div>
       )}
-      {disconnected && (
-        <div role="status" className="text-sm">
+      {disconnected && !terminal && (
+        <div role="status" className="rounded-md border p-3 text-sm">
           {uiText(
-            "维护期间可能暂时断连或撤销会话。请求编号已保留，仅重试查询；服务恢复后请重新登录"
+            statusUnauthorized
+              ? "登录会话已失效，请重新登录后回到备份页面查询此请求；请求编号已保留，请勿重复提交"
+              : "与服务器连接暂时中断，以上为最后确认的进度。每 3 秒自动查询，恢复连接后会更新结果；请勿重复提交"
           )}
         </div>
       )}
       {!finished(status) && (
         <div role="note" className="text-sm">
-          {uiText("关闭弹窗仍会查询此请求；请勿重复发起覆盖恢复")}
+          {uiText("每 3 秒自动查询；关闭弹窗仍会继续，请勿重复发起覆盖恢复")}
         </div>
       )}
       <Button type="button" variant="outline" disabled={submitting || fetching} onClick={onRetry}>
@@ -195,7 +283,8 @@ export function BackupMaintenancePanel({
     queryFn: () => api.backupMaintenanceStatus(attempt!.statusId),
     enabled: !!userId && !!attempt && !submitting,
     retry: false,
-    refetchInterval: (query) => (finished(query.state.data) ? false : 5000),
+    refetchInterval: (query) => (finished(query.state.data) ? false : 3000),
+    refetchIntervalInBackground: true,
   })
   const tracking = !!attempt && !finished(status.data)
 
@@ -267,6 +356,10 @@ export function BackupMaintenancePanel({
       sourceJobId={attempt.sourceJobId}
       status={status.data}
       disconnected={status.isError}
+      statusUnauthorized={
+        status.error instanceof ApiError && [401, 403].includes(status.error.status)
+      }
+      receivedAt={status.dataUpdatedAt}
       fetching={status.isFetching}
       submitting={submitting}
       onRetry={() => void status.refetch()}

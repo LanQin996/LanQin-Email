@@ -840,6 +840,25 @@ export type BackupMaintenanceStatus = {
   errorCode?: string
   createdAt: string
   updatedAt: string
+  progress?: {
+    step:
+      | "queued"
+      | "checking-source"
+      | "copying"
+      | "checking-copy"
+      | "importing"
+      | "preflight"
+      | "stopping"
+      | "installing"
+      | "validating"
+      | "committing"
+      | "starting"
+      | "health-check"
+      | "rolling-back"
+      | "recovering-original"
+      | "completed"
+    startedAt: string
+  }
 }
 export type BackupDriveClientConfiguration = {
   source: "environment" | "database" | "none"

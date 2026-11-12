@@ -269,9 +269,15 @@ func TestHostWorkerPublishesFiniteStatesAndSanitizesErrors(t *testing.T) {
 				if got != r {
 					return Outcome{}, ErrUnavailable
 				}
-				for _, p := range []string{"preparing", "importing", "maintenance"} {
+				for _, p := range []string{"preparing", "checking-source", "copying", "checking-copy", "importing", "maintenance", "preflight", "stopping", "installing", "validating", "committing", "starting", "health-check", "rolling-back", "recovering-original"} {
 					if phase(p) != nil {
 						return Outcome{}, ErrUnavailable
+					}
+					s.mu.Lock()
+					status := s.records[r.ID].Status
+					s.mu.Unlock()
+					if status.Progress == nil || !ValidProgress(status) {
+						t.Error("stage progress missing or unsafe")
 					}
 				}
 				if phase("/private/unapproved") == nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 )
 
 var ErrMaildirAmbiguous = errors.New("ambiguous Maildir file identity")
@@ -183,6 +184,16 @@ func maildirTraversal(level int, name string) (int, bool) {
 
 func maildirComponent(name string) bool {
 	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\\x00") && strings.IndexFunc(name, unicode.IsControl) < 0
+}
+
+// ValidMaildirPath shares the collector's mailbox, folder and flag grammar with
+// restore consumers. In particular, ':2,S' is a Maildir suffix, not a Windows ADS.
+func ValidMaildirPath(relative string) bool {
+	if !utf8.ValidString(relative) {
+		return false
+	}
+	_, err := parseMaildirPath(relative)
+	return err == nil
 }
 
 func parseMaildirPath(relative string) (MaildirEntry, error) {

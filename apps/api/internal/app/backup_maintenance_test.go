@@ -271,7 +271,7 @@ func TestBackupMaintenanceSocketConfigAndStatusSanitization(t *testing.T) {
 }
 
 func TestBackupMaintenanceHTTPUnavailableAndUnsafeHelperResponsesAreFailClosed(t *testing.T) {
-	for _, scenario := range []string{"not-configured", "unavailable", "unknown-error", "bad-plan-id", "duplicate-plan", "private-template", "bad-status-phase", "bad-status-error", "wrong-status-id", "wrong-status-job", "wrong-status-plan"} {
+	for _, scenario := range []string{"not-configured", "unavailable", "unknown-error", "bad-plan-id", "duplicate-plan", "private-template", "bad-status-phase", "bad-status-error", "bad-status-progress", "bad-status-progress-time", "wrong-status-id", "wrong-status-job", "wrong-status-plan"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, client, host, _, req := maintenanceHTTPFixture(t)
 			switch scenario {
@@ -294,6 +294,10 @@ func TestBackupMaintenanceHTTPUnavailableAndUnsafeHelperResponsesAreFailClosed(t
 						status.Phase = "/root/private-phase-do-not-echo"
 					case "bad-status-error":
 						status.ErrorCode = "private-token-do-not-echo"
+					case "bad-status-progress":
+						status.Progress = &maintenancehost.Progress{Step: "/root/private-phase-do-not-echo", StartedAt: status.CreatedAt}
+					case "bad-status-progress-time":
+						status.Progress = &maintenancehost.Progress{Step: "installing", StartedAt: status.UpdatedAt.Add(time.Hour)}
 					case "wrong-status-id":
 						status.ID = strings.Repeat("0", 32)
 					case "wrong-status-job":

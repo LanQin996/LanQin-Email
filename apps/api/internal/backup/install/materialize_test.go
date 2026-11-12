@@ -821,3 +821,82 @@ func TestSourceRootMappingIsLexicalAndPlatformIndependent(t *testing.T) {
 		t.Fatal("trigger normalization obscures affected columns")
 	}
 }
+
+func TestRestorePathsAllowOnlyMaildirFlagColons(t *testing.T) {
+	valid := "example.test/user/Maildir/cur/synthetic:2,RS"
+	if runtime.GOOS != "windows" && !allowed("mail/"+valid) {
+		t.Fatal("standard Maildir flags rejected")
+	}
+	for _, name := range []string{"data/a:stream", "dkim/key:stream", "mail/a:stream", "mail/example.test/user/Maildir/cur/file:stream", "mail/example.test/user/Maildir/cur/file:2,S:stream", "mail/example.test/user/Maildir/cur/file:2,S/child", "mail/example.test/user/Maildir/cur/../file:2,S", "mail/example.test/user/Maildir/.bad:2,S/cur/file", "mail/example.test/user/Maildir/tmp/file:2,S"} {
+		if allowed(name) {
+			t.Fatal("unsafe colon path accepted", name)
+		}
+	}
+	if _, err := sourceRelative("/old/mail", "/old/mail/"+valid, "mail"); runtime.GOOS != "windows" && err != nil {
+		t.Fatal("Maildir mapping rejected", err)
+	}
+	if _, err := sourceRelative("/old/data", "/old/data/"+valid); err == nil {
+		t.Fatal("Maildir exception leaked into data paths")
+	}
+}
+
+func TestPrepareLinuxMaildirFlagsSurviveArchiveAndPathRemapping(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("colon filenames require the Linux filesystem")
+	}
+	f := newMaterializeFixture(t)
+	old := "mail/example.test/user/Maildir/cur/m.eml"
+	flagged := old + ":2,RS"
+	if err := os.Rename(filepath.Join(f.stage, filepath.FromSlash(old)), filepath.Join(f.stage, filepath.FromSlash(flagged))); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(f.stage, "data", "lanqin.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Match the collector's actual source root while keeping the flag suffix.
+	_, err = db.Exec("UPDATE messages SET raw_path=? WHERE id='m'", "/old/mail/"+strings.TrimPrefix(flagged, "mail/"))
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for i := range f.report.Files {
+		if f.report.Files[i].Destination == old {
+			f.report.Files[i].Destination = flagged
+		}
+	}
+	f.rehashDatabase(t)
+	var ciphertext bytes.Buffer
+	if _, err := backup.WriteOnlinePassword(t.Context(), f.stage, &ciphertext, "synthetic-password", backup.DefaultLimits()); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(ciphertext.Bytes())
+	recovered := filepath.Join(t.TempDir(), "recovered")
+	if _, err := backup.RestorePassword(t.Context(), bytes.NewReader(ciphertext.Bytes()), recovered, "synthetic-password", hex.EncodeToString(digest[:]), backup.DefaultLimits()); err != nil {
+		t.Fatal(err)
+	}
+	reportSHA, err := backup.StagedOnlineReportSHA256(t.Context(), recovered)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := Prepare(t.Context(), recovered, f.workspace, "/runtime/data", "/runtime/mail", backup.DefaultLimits(), reportSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer prepared.Close()
+	if _, err := os.Stat(filepath.Join(prepared.Path, filepath.FromSlash(flagged))); err != nil {
+		t.Fatal(err)
+	}
+	copy, err := sql.Open("sqlite", filepath.Join(prepared.Path, "data", "lanqin.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copy.Close()
+	var mapped string
+	if err := copy.QueryRow("SELECT raw_path FROM messages WHERE id='m'").Scan(&mapped); err != nil || mapped != "/runtime/mail/"+strings.TrimPrefix(flagged, "mail/") {
+		t.Fatal("Maildir path changed", err)
+	}
+}

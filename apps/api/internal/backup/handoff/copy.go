@@ -18,6 +18,7 @@ import (
 
 	"lanqin-email-api/internal/backup"
 	"lanqin-email-api/internal/backup/install"
+	"lanqin-email-api/internal/backup/online"
 )
 
 var errInvalid = errors.New("authenticated recovery handoff could not be verified or safely published")
@@ -270,7 +271,10 @@ func failure(ctx context.Context) error {
 }
 
 func allowed(name string) bool {
-	if !fs.ValidPath(name) || !utf8.ValidString(name) || len(name) > 4096 || strings.ContainsAny(name, "\\:\x00") || strings.Count(name, "/") > 66 || strings.IndexFunc(name, unicode.IsControl) >= 0 {
+	if !fs.ValidPath(name) || !utf8.ValidString(name) || len(name) > 4096 || strings.ContainsAny(name, "\\\x00") || strings.Count(name, "/") > 66 || strings.IndexFunc(name, unicode.IsControl) >= 0 || !filepath.IsLocal(filepath.FromSlash(name)) {
+		return false
+	}
+	if strings.Contains(name, ":") && (!strings.HasPrefix(name, "snapshot/mail/") || !online.ValidMaildirPath(strings.TrimPrefix(name, "snapshot/mail/"))) {
 		return false
 	}
 	if name == "READY" || name == "snapshot" {

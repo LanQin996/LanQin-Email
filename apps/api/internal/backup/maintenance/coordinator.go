@@ -31,6 +31,9 @@ type recoveryPreflighter interface {
 }
 
 type Actions struct {
+	// OnProgress observes a successfully persisted state. Reporting must not
+	// control execution or authorize replay of a maintenance action.
+	OnProgress        func(State)
 	Install           func(context.Context) (install.JournalInfo, error)
 	Validate          func(context.Context, install.JournalInfo) error
 	ValidateCommitted func(context.Context, install.JournalInfo) error
@@ -261,6 +264,9 @@ func (c *coordinator) save(phase, pending string) error {
 		c.state.NeedsRecovery = true
 		c.state.LastErrorCode = "state_persistence_failed"
 		return ErrState
+	}
+	if c.actions.OnProgress != nil {
+		c.actions.OnProgress(c.state)
 	}
 	return nil
 }

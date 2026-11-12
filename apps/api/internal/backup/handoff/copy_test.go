@@ -110,6 +110,50 @@ func TestCopyNativeIndependentPrivateTree(t *testing.T) {
 	}
 }
 
+func TestHandoffColonExceptionIsLimitedToMaildirFlags(t *testing.T) {
+	for _, name := range []string{"snapshot/mail/example.test/user/Maildir/cur/message:2,S", "snapshot/mail/example.test/user/Maildir/.Sent/cur/message:2,RS"} {
+		if allowed(name) != (runtime.GOOS != "windows") {
+			t.Fatal("Maildir flag handoff rejected")
+		}
+	}
+	for _, name := range []string{"snapshot/data/a:stream", "snapshot/dkim/a:stream", "snapshot/mail/a:stream", "snapshot/mail/example.test/user/Maildir/cur/a:2,S:stream", "snapshot/mail/example.test/user/Maildir/cur/../a:2,S", "snapshot/mail/example.test/user/Maildir/tmp/a:2,S"} {
+		if allowed(name) {
+			t.Fatal("unsafe handoff path accepted", name)
+		}
+	}
+}
+
+func TestCopyLinuxMaildirFlagPayloadPreserved(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("colon filenames require the Linux filesystem")
+	}
+	source, _ := nativeFixture(t)
+	name := "mail/example.test/user/Maildir/cur/synthetic:2,RS"
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(source, "snapshot", name)), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(filepath.Join(source, "snapshot/mail/synthetic.eml"), filepath.Join(source, "snapshot", name)); err != nil {
+		t.Fatal(err)
+	}
+	reportPath := filepath.Join(source, "snapshot/data/backup-online.json")
+	data, err := os.ReadFile(reportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = bytes.ReplaceAll(data, []byte("mail/synthetic.eml"), []byte(name))
+	if err := os.WriteFile(reportPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(data)
+	out := filepath.Join(t.TempDir(), "copied")
+	if err := Copy(t.Context(), source, out, sourceUID(), hex.EncodeToString(digest[:]), "postgres", testLimits()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(out, "snapshot", name)); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCopyRejectsChangedOrUnknownSource(t *testing.T) {
 	for _, damage := range []string{"report", "payload", "extra", "missing", "bad-driver", "budget", "entries", "canceled", "uid"} {
 		t.Run(damage, func(t *testing.T) {

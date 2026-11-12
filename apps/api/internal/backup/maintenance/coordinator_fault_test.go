@@ -117,6 +117,12 @@ func TestCoordinatorFaultsRespectStopInstallAndFirstWriterBoundaries(t *testing.
 			installs, validations, rollbacks := 0, 0, 0
 			transaction := install.JournalInfo{Path: filepath.Join(cfg.StateDir, "restore-"+strings.Repeat("1", 32)+".journal"), TransactionID: strings.Repeat("1", 32), RollbackTargets: cfg.Targets}
 			actions := Actions{
+				OnProgress: func(observed State) {
+					persisted, readErr := ReadState(cfg)
+					if readErr != nil || persisted != observed {
+						t.Fatal("progress preceded its durable journal state", readErr)
+					}
+				},
 				Install: func(ctx context.Context) (install.JournalInfo, error) {
 					installs++
 					if controller.count("stop") < 1 || controller.count("verify-stopped") < 1 {

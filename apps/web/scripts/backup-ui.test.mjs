@@ -213,3 +213,137 @@ test("new backup passwords count Unicode characters rather than bytes or UTF-16 
   }
   env.client.clear()
 })
+
+for (const language of ["zh-CN", "zh-TW", "en"]) {
+  test(`maintenance progress shows real stages and disconnected last-known state (${language})`, () => {
+    const env = setup(language)
+    const text = env.load("src/lib/language.tsx").uiText
+    const filename = "src/components/backup-maintenance-panel.tsx"
+    const base = {
+      requestId: "0123456789abcdef0123456789abcdef",
+      sourceJobId: "bkj_synthetic",
+      disconnected: false,
+      fetching: false,
+      submitting: false,
+      receivedAt: Date.parse("2026-11-12T05:10:15Z"),
+      onRetry() {},
+    }
+    const status = {
+      version: 1,
+      id: base.requestId,
+      planId: "synthetic-plan",
+      webJob: base.sourceJobId,
+      state: "maintaining",
+      phase: "maintenance",
+      createdAt: "2026-11-12T05:10:00Z",
+      updatedAt: "2026-11-12T05:10:15Z",
+      progress: { step: "installing", startedAt: "2026-11-12T05:10:10Z" },
+    }
+    const running = env.render(filename, "BackupMaintenanceProgress", { ...base, status })
+    assert.ok(running.includes(text("替换数据库及邮件文件")))
+    assert.ok(running.includes(text("恢复进度")))
+    assert.match(running, /aria-current="step"/)
+    assert.ok(running.includes(text("尚未执行")))
+    assert.doesNotMatch(running, /[0-9]+%/)
+    const disconnected = env.render(filename, "BackupMaintenanceProgress", {
+      ...base,
+      status,
+      disconnected: true,
+    })
+    assert.ok(disconnected.includes(text("状态连接已中断")))
+    assert.ok(disconnected.includes(text("上次确认的阶段")))
+    assert.ok(disconnected.includes("00:00:15"))
+    assert.ok(disconnected.includes("00:00:05"))
+    assert.ok(!disconnected.includes(text("正在维护并覆盖恢复")))
+    assert.ok(disconnected.includes(text("上次确认的阶段耗时")))
+    const stalledStage = env.render(filename, "BackupMaintenanceProgress", {
+      ...base,
+      status: {
+        ...status,
+        updatedAt: "2026-11-12T05:10:01Z",
+        progress: { step: "installing", startedAt: "2026-11-12T05:10:01Z" },
+      },
+      receivedAt: Date.parse("2026-11-12T05:10:20Z"),
+      disconnected: true,
+    })
+    assert.ok(stalledStage.includes("00:00:20"))
+    assert.ok(stalledStage.includes("00:00:19"))
+    assert.ok(!stalledStage.includes("00:00:01"))
+    const unauthorized = env.render(filename, "BackupMaintenanceProgress", {
+      ...base,
+      status,
+      disconnected: true,
+      statusUnauthorized: true,
+    })
+    assert.ok(
+      unauthorized.includes(
+        text("登录会话已失效，请重新登录后回到备份页面查询此请求；请求编号已保留，请勿重复提交")
+      )
+    )
+    const succeeded = env.render(filename, "BackupMaintenanceProgress", {
+      ...base,
+      disconnected: true,
+      status: {
+        ...status,
+        state: "succeeded",
+        phase: "completed",
+        updatedAt: "2026-11-12T05:11:17Z",
+        progress: { step: "completed", startedAt: "2026-11-12T05:11:17Z" },
+      },
+    })
+    assert.ok(succeeded.includes("00:01:17"))
+    assert.ok(succeeded.includes(text("覆盖恢复完成，请重新登录")))
+    assert.ok(!succeeded.includes(text("状态连接已中断")))
+    assert.ok(!succeeded.includes(text("尚未执行")))
+    const unknown = env.render(filename, "BackupMaintenanceProgress", {
+      ...base,
+      status: {
+        ...status,
+        progress: { step: "/private/credential", startedAt: "invalid" },
+        phase: "private-phase",
+        errorCode: "private-error",
+      },
+    })
+    assert.ok(
+      !unknown.includes("/private/credential") &&
+        !unknown.includes("private-phase") &&
+        !unknown.includes("private-error")
+    )
+    assert.ok(unknown.includes(text("等待状态更新")))
+    assert.ok(!unknown.includes('aria-label="' + text("恢复进度") + '"'))
+    env.client.clear()
+  })
+}
+
+test("maintenance elapsed time and legacy progress fallback are bounded and never infer later completion", () => {
+  const env = setup()
+  const { backupMaintenanceElapsed, backupMaintenanceStep } = env.load(
+    "src/lib/backup-maintenance.ts"
+  )
+  assert.equal(
+    backupMaintenanceElapsed("2026-11-12T00:00:00Z", Date.parse("2026-11-12T01:02:03Z")),
+    "01:02:03"
+  )
+  assert.equal(
+    backupMaintenanceElapsed("2026-11-12T00:00:00Z", Date.parse("2026-11-11T23:59:00Z")),
+    "00:00:00"
+  )
+  assert.equal(backupMaintenanceElapsed("invalid", Date.now()), undefined)
+  assert.equal(backupMaintenanceElapsed(undefined, NaN), undefined)
+  assert.equal(backupMaintenanceStep({ state: "maintaining", phase: "maintenance" }).milestone, -1)
+  assert.equal(
+    backupMaintenanceStep({
+      state: "maintaining",
+      phase: "maintenance",
+      progress: { step: "rolling-back" },
+    }).milestone,
+    -1
+  )
+  assert.equal(
+    backupMaintenanceStep({ state: "failed", phase: "completed", progress: { step: "completed" } })
+      .milestone,
+    -1
+  )
+  assert.equal(backupMaintenanceStep({ state: "succeeded" }).milestone, 6)
+  env.client.clear()
+})

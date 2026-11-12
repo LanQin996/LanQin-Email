@@ -212,7 +212,7 @@ func (a *App) handleBackupMaintenanceStatus(w http.ResponseWriter, r *http.Reque
 }
 
 func validBackupMaintenanceStatus(status maintenancehost.Status) bool {
-	if status.Version != 1 || !backupMaintenanceHostIDPattern.MatchString(status.ID) || !backupMaintenancePlanPattern.MatchString(status.PlanID) || !backupJobIDPattern.MatchString(status.WebJob) || status.CreatedAt.IsZero() || status.UpdatedAt.IsZero() || status.UpdatedAt.Before(status.CreatedAt) {
+	if status.Version != 1 || !backupMaintenanceHostIDPattern.MatchString(status.ID) || !backupMaintenancePlanPattern.MatchString(status.PlanID) || !backupJobIDPattern.MatchString(status.WebJob) || status.CreatedAt.IsZero() || status.UpdatedAt.IsZero() || status.UpdatedAt.Before(status.CreatedAt) || !maintenancehost.ValidProgress(status) {
 		return false
 	}
 	switch status.State {

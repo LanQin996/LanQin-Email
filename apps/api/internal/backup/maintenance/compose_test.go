@@ -28,6 +28,7 @@ type fakeComposeDocker struct {
 	keepContainerIDs         bool
 	commandFailure           string
 	imageChanged             bool
+	imageHealthcheck         []string
 	onConfig                 func()
 	directoryIDs             map[string]string
 	spoolArchives            map[string][]byte
@@ -146,6 +147,9 @@ func (f *fakeComposeDocker) container(name string, index int) composeContainer {
 		container.Config.Env = append(container.Config.Env, key+"="+*service.Environment[key])
 	}
 	container.Config.Healthcheck.Test = append([]string{}, service.Healthcheck.Test...)
+	if len(container.Config.Healthcheck.Test) == 0 {
+		container.Config.Healthcheck.Test = append([]string{}, f.imageHealthcheck...)
+	}
 	container.State.Status, container.State.Running, container.State.Pid, container.State.Health.Status = "running", true, index+100, "healthy"
 	for _, volume := range service.Volumes {
 		container.Mounts = append(container.Mounts, struct {
@@ -250,10 +254,12 @@ func (f *fakeComposeDocker) run(ctx context.Context, cfg Config, args []string) 
 		if f.imageChanged {
 			imageID = "sha256:" + strings.Repeat("d", 64)
 		}
+		imageConfig := composeImageCommand{Cmd: []string{"/synthetic-entrypoint"}}
+		imageConfig.Healthcheck.Test = append([]string{}, f.imageHealthcheck...)
 		return json.Marshal(struct {
 			ID     string              `json:"Id"`
 			Config composeImageCommand `json:"Config"`
-		}{imageID, composeImageCommand{Cmd: []string{"/synthetic-entrypoint"}}})
+		}{imageID, imageConfig})
 	case "cp":
 		if len(args) != 3 || args[2] != "-" || !strings.HasSuffix(args[1], ":/var/spool/postfix") {
 			f.t.Fatal("copy command was not the fixed spool read")
@@ -395,6 +401,63 @@ func TestComposeControllerFixedServicesStopRecreateAndRoleHealth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestComposeControllerBindsExplicitAndInheritedImageHealthchecks(t *testing.T) {
+	for _, mode := range []string{"all-in-one", "stack"} {
+		for _, scenario := range []string{"inherited", "explicit-overrides-image", "missing", "image-none", "compose-none", "compose-disabled", "actual-healthcheck-changed"} {
+			t.Run(mode+"/"+scenario, func(t *testing.T) {
+				cfg, controller, fake := newFakeComposeDocker(t, mode)
+				fake.imageHealthcheck = []string{"CMD", "synthetic-image-healthcheck"}
+				for _, name := range composeServices(mode) {
+					service := fake.deployment.Services[name]
+					if scenario != "explicit-overrides-image" {
+						service.Healthcheck.Test = nil
+					}
+					if scenario == "compose-none" {
+						service.Healthcheck.Test = []string{"NONE"}
+					}
+					if scenario == "compose-disabled" {
+						service.Healthcheck.Disable = true
+					}
+					fake.deployment.Services[name] = service
+				}
+				if scenario == "missing" {
+					fake.imageHealthcheck = nil
+				}
+				if scenario == "image-none" {
+					fake.imageHealthcheck = []string{"NONE"}
+				}
+				for i, container := range fake.containers {
+					service := container.Config.Labels["com.docker.compose.service"]
+					if !appContainer(cfg, container) {
+						continue
+					}
+					fake.containers[i] = fake.container(service, i+1)
+					if scenario == "actual-healthcheck-changed" {
+						fake.containers[i].Config.Healthcheck.Test = []string{"CMD", "unapproved-healthcheck"}
+					}
+				}
+				err := controller.Preflight(t.Context(), cfg)
+				accepted := scenario == "inherited" || scenario == "explicit-overrides-image"
+				if (err == nil) != accepted {
+					t.Fatal("unexpected healthcheck admission", err)
+				}
+				if accepted {
+					if err := controller.Healthy(t.Context(), cfg); err != nil {
+						t.Fatal("healthy deployment rejected", err)
+					}
+				}
+				for _, call := range fake.calls {
+					for _, value := range call {
+						if value == "stop" || value == "start" || value == "up" {
+							t.Fatal("read-only healthcheck admission controlled services")
+						}
+					}
+				}
+			})
+		}
 	}
 }
 

@@ -300,6 +300,19 @@ func (s *service) update(id, state, phase, code string) error {
 	}
 	rec.Status.State, rec.Status.Phase, rec.Status.ErrorCode = state, phase, code
 	rec.Status.UpdatedAt = time.Now().UTC()
+	step := phase
+	switch phase {
+	case "preparing":
+		step = "checking-source"
+	case "maintenance":
+		step = "preflight"
+	}
+	if phase == "completed" && state != "succeeded" && rec.Status.Progress != nil {
+		step = rec.Status.Progress.Step
+	}
+	if rec.Status.Progress == nil || rec.Status.Progress.Step != step {
+		rec.Status.Progress = &Progress{Step: step, StartedAt: rec.Status.UpdatedAt}
+	}
 	if s.persist(rec) != nil {
 		s.poisoned = true
 		return ErrUnavailable
@@ -330,6 +343,10 @@ func (s *service) worker(ctx context.Context) {
 					return s.update(req.ID, "preparing", value, "")
 				case "maintenance":
 					return s.update(req.ID, "maintaining", value, "")
+				case "checking-source", "copying", "checking-copy":
+					return s.progress(req.ID, "preparing", "preparing", value)
+				case "preflight", "stopping", "installing", "validating", "committing", "starting", "health-check", "rolling-back", "recovering-original":
+					return s.progress(req.ID, "maintaining", "maintenance", value)
 				default:
 					return ErrUnavailable
 				}
@@ -352,6 +369,25 @@ func (s *service) worker(ctx context.Context) {
 			s.mu.Unlock()
 		}
 	}
+}
+
+func (s *service) progress(id, state, phase, step string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.records[id]
+	if !ok || s.poisoned {
+		return ErrUnavailable
+	}
+	rec.Status.State, rec.Status.Phase = state, phase
+	rec.Status.UpdatedAt = time.Now().UTC()
+	if rec.Status.Progress == nil || rec.Status.Progress.Step != step {
+		rec.Status.Progress = &Progress{Step: step, StartedAt: rec.Status.UpdatedAt}
+	}
+	// Stage observations remain in memory. Only the existing coarse state
+	// transitions persist records; progress cannot add transaction IO or alter
+	// the outcome of a service-control or data-switch operation.
+	s.records[id] = rec
+	return nil
 }
 
 // RequestFingerprint is useful for audit receipts without recording credentials.

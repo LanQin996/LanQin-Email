@@ -57,6 +57,28 @@ type Status struct {
 	ErrorCode string    `json:"errorCode,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	Progress  *Progress `json:"progress,omitempty"`
+}
+
+// Progress exposes only finite stage names and timestamps, never executor data.
+type Progress struct {
+	Step      string    `json:"step"`
+	StartedAt time.Time `json:"startedAt"`
+}
+
+func ValidProgress(status Status) bool {
+	if status.Progress == nil {
+		return true // Legacy records and helpers remain readable.
+	}
+	p := status.Progress
+	if p.StartedAt.Before(status.CreatedAt) || p.StartedAt.After(status.UpdatedAt) {
+		return false
+	}
+	switch p.Step {
+	case "queued", "checking-source", "copying", "checking-copy", "importing", "preflight", "stopping", "installing", "validating", "committing", "starting", "health-check", "rolling-back", "recovering-original", "completed":
+		return true
+	}
+	return false
 }
 
 type Source struct {
@@ -185,7 +207,7 @@ func validRecord(r record) bool {
 	default:
 		return false
 	}
-	if !ValidRequest(r.Request) || s.Version != 1 || s.ID != r.Request.ID || s.PlanID != r.Request.PlanID || s.WebJob != r.Request.WebJob || s.CreatedAt.IsZero() || s.UpdatedAt.Before(s.CreatedAt) {
+	if !ValidRequest(r.Request) || s.Version != 1 || s.ID != r.Request.ID || s.PlanID != r.Request.PlanID || s.WebJob != r.Request.WebJob || s.CreatedAt.IsZero() || s.UpdatedAt.Before(s.CreatedAt) || !ValidProgress(s) {
 		return false
 	}
 	switch s.State {

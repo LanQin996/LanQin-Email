@@ -5582,5 +5582,149 @@
   "界面语言": {
     "zh-TW": "介面語言",
     "en": "Interface language"
+  },
+  "准备恢复文件": {
+    "zh-TW": "準備還原檔案",
+    "en": "Prepare restore files"
+  },
+  "导入恢复数据": {
+    "zh-TW": "匯入還原資料",
+    "en": "Import restore data"
+  },
+  "执行恢复预检查": {
+    "zh-TW": "執行還原預先檢查",
+    "en": "Run restore preflight checks"
+  },
+  "停止邮件服务": {
+    "zh-TW": "停止郵件服務",
+    "en": "Stop mail services"
+  },
+  "切换并校验数据": {
+    "zh-TW": "切換並驗證資料",
+    "en": "Switch and validate data"
+  },
+  "启动并检查服务": {
+    "zh-TW": "啟動並檢查服務",
+    "en": "Start and check services"
+  },
+  "恢复完成": {
+    "zh-TW": "還原完成",
+    "en": "Restore complete"
+  },
+  "等待执行覆盖恢复": {
+    "zh-TW": "等待執行覆寫還原",
+    "en": "Waiting for overwrite restore"
+  },
+  "检查已验证的备份": {
+    "zh-TW": "檢查已驗證的備份",
+    "en": "Check the verified backup"
+  },
+  "复制恢复文件到维护工作区": {
+    "zh-TW": "複製還原檔案至維護工作區",
+    "en": "Copy restore files to the maintenance workspace"
+  },
+  "校验维护工作区文件": {
+    "zh-TW": "驗證維護工作區檔案",
+    "en": "Verify maintenance workspace files"
+  },
+  "替换数据库及邮件文件": {
+    "zh-TW": "替換資料庫及郵件檔案",
+    "en": "Replace the database and mail files"
+  },
+  "校验切换后的数据": {
+    "zh-TW": "驗證切換後的資料",
+    "en": "Validate the restored data"
+  },
+  "确认恢复数据切换": {
+    "zh-TW": "確認還原資料切換",
+    "en": "Commit the restored data"
+  },
+  "启动邮件服务": {
+    "zh-TW": "啟動郵件服務",
+    "en": "Start mail services"
+  },
+  "检查邮件服务健康状态": {
+    "zh-TW": "檢查郵件服務健康狀態",
+    "en": "Check mail service health"
+  },
+  "回退尚未提交的数据切换": {
+    "zh-TW": "復原尚未提交的資料切換",
+    "en": "Roll back the uncommitted data switch"
+  },
+  "恢复原有邮件服务": {
+    "zh-TW": "恢復原有郵件服務",
+    "en": "Recover the original mail services"
+  },
+  "正在准备恢复文件": {
+    "zh-TW": "正在準備還原檔案",
+    "en": "Preparing restore files"
+  },
+  "正在执行维护恢复": {
+    "zh-TW": "正在執行維護還原",
+    "en": "Performing maintenance restore"
+  },
+  "等待状态更新": {
+    "zh-TW": "等待狀態更新",
+    "en": "Waiting for a status update"
+  },
+  "状态连接已中断": {
+    "zh-TW": "狀態連線已中斷",
+    "en": "Status connection interrupted"
+  },
+  "上次确认的阶段": {
+    "zh-TW": "上次確認的階段",
+    "en": "Last confirmed stage"
+  },
+  "当前阶段": {
+    "zh-TW": "目前階段",
+    "en": "Current stage"
+  },
+  "上次确认时耗时": {
+    "zh-TW": "上次確認時耗時",
+    "en": "Elapsed at last confirmation"
+  },
+  "总耗时": {
+    "zh-TW": "總耗時",
+    "en": "Total elapsed time"
+  },
+  "最近查询成功": {
+    "zh-TW": "最近查詢成功",
+    "en": "Last successful status check"
+  },
+  "当前阶段耗时": {
+    "zh-TW": "目前階段耗時",
+    "en": "Time in this stage"
+  },
+  "恢复进度": {
+    "zh-TW": "還原進度",
+    "en": "Restore progress"
+  },
+  "尚未执行": {
+    "zh-TW": "尚未執行",
+    "en": "Not yet performed"
+  },
+  "登录会话已失效，请重新登录后回到备份页面查询此请求；请求编号已保留，请勿重复提交": {
+    "zh-TW": "登入工作階段已失效，請重新登入後回到備份頁面查詢此請求；請求編號已保留，請勿重複提交",
+    "en": "Your session has expired. Sign in again and return to Backups to check this request. The request ID is retained; do not resubmit"
+  },
+  "与服务器连接暂时中断，以上为最后确认的进度。每 3 秒自动查询，恢复连接后会更新结果；请勿重复提交": {
+    "zh-TW": "與伺服器連線暫時中斷，以上為最後確認的進度。每 3 秒自動查詢，恢復連線後會更新結果；請勿重複提交",
+    "en": "The server connection was interrupted. This is the last confirmed progress. Status checks continue every 3 seconds and will update when reconnected; do not resubmit"
+  },
+  "每 3 秒自动查询；关闭弹窗仍会继续，请勿重复发起覆盖恢复": {
+    "zh-TW": "每 3 秒自動查詢；關閉視窗仍會繼續，請勿重複發起覆寫還原",
+    "en": "Status updates every 3 seconds, including after closing this dialog. Do not submit another overwrite restore"
+  },
+  "准备恢复数据": {
+    "zh-TW": "準備還原資料",
+    "en": "Prepare restore data"
+  },
+  "已完成": {
+    "zh-TW": "已完成",
+    "en": "Completed"
+  },
+  "上次确认的阶段耗时": {
+    "zh-TW": "上次確認的階段耗時",
+    "en": "Time in stage at last confirmation"
   }
 }

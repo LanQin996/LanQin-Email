@@ -267,7 +267,7 @@ func (c *ComposeController) deploymentMode(ctx context.Context, cfg Config, meta
 		if !allowed[name] || service.Scale > 1 || service.Deploy.Replicas != nil && *service.Deploy.Replicas != 1 || validateComposeMounts(cfg, name, service.Volumes) != nil {
 			return deployment, errCompose
 		}
-		if name != "mysql" && name != "postgres" && (service.Healthcheck.Disable || len(service.Healthcheck.Test) < 1 || service.Healthcheck.Test[0] == "NONE") {
+		if name != "mysql" && name != "postgres" && (service.Healthcheck.Disable || len(service.Healthcheck.Test) > 0 && service.Healthcheck.Test[0] == "NONE") {
 			return deployment, errCompose
 		}
 		if name != "mysql" && name != "postgres" && (service.Image == "" || strings.HasPrefix(service.Image, "-") || len(service.Image) > 512 || strings.IndexFunc(service.Image, unicode.IsSpace) >= 0 || strings.IndexFunc(service.Image, unicode.IsControl) >= 0) {
@@ -307,6 +307,10 @@ func (c *ComposeController) deploymentMode(ctx context.Context, cfg Config, meta
 			}
 			imageIDs[service] = image.ID
 			imageCommands[service] = image.Config
+			test := effectiveComposeHealthcheck(deployment.Services[service], image.Config)
+			if len(test) == 0 || test[0] == "NONE" {
+				return deployment, errCompose
+			}
 		}
 	}
 	if !metadataOnly {
@@ -422,8 +426,21 @@ type composeContainer struct {
 }
 
 type composeImageCommand struct {
-	Cmd        []string `json:"Cmd"`
-	Entrypoint []string `json:"Entrypoint"`
+	Cmd         []string `json:"Cmd"`
+	Entrypoint  []string `json:"Entrypoint"`
+	Healthcheck struct {
+		Test []string `json:"Test"`
+	} `json:"Healthcheck"`
+}
+
+func effectiveComposeHealthcheck(service composeService, image composeImageCommand) []string {
+	if service.Healthcheck.Disable {
+		return nil
+	}
+	if len(service.Healthcheck.Test) > 0 {
+		return service.Healthcheck.Test
+	}
+	return image.Healthcheck.Test
 }
 
 func containerEnvironment(values []string) (map[string]string, error) {
@@ -562,7 +579,7 @@ func (c *ComposeController) inventory(ctx context.Context, cfg Config, deploymen
 				return nil, errCompose
 			}
 			test := container.Config.Healthcheck.Test
-			if len(test) == 0 || test[0] == "NONE" {
+			if len(test) == 0 || test[0] == "NONE" || !slices.Equal(test, effectiveComposeHealthcheck(deployment.Services[service], imageCommand)) {
 				return nil, errCompose
 			}
 		}

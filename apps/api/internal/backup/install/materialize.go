@@ -373,7 +373,10 @@ func within(root, name string) bool {
 }
 
 func allowed(name string) bool {
-	if !fs.ValidPath(name) || name == "." || !utf8.ValidString(name) || len(name) > 4096 || strings.Count(name, "/") > 64 || strings.ContainsAny(name, "\\:\x00") || strings.IndexFunc(name, unicode.IsControl) >= 0 || !filepath.IsLocal(filepath.FromSlash(name)) {
+	if !fs.ValidPath(name) || name == "." || !utf8.ValidString(name) || len(name) > 4096 || strings.Count(name, "/") > 64 || strings.ContainsAny(name, "\\\x00") || strings.IndexFunc(name, unicode.IsControl) >= 0 || !filepath.IsLocal(filepath.FromSlash(name)) {
+		return false
+	}
+	if strings.Contains(name, ":") && (!strings.HasPrefix(name, "mail/") || !online.ValidMaildirPath(strings.TrimPrefix(name, "mail/"))) {
 		return false
 	}
 	first := strings.SplitN(name, "/", 2)[0]
@@ -512,7 +515,17 @@ func validSourceRoot(name string) bool {
 	return utf8.ValidString(name) && len(name) <= 4096 && strings.IndexFunc(name, unicode.IsControl) < 0 && name != "/" && name != "\\" && strings.TrimRight(name, "/\\") == name
 }
 
-func sourceRelative(root, name string) (string, error) {
+func sourceRelative(root, name string, scopes ...string) (string, error) {
+	scope := "data"
+	if len(scopes) > 1 {
+		return "", errInvalid
+	}
+	if len(scopes) == 1 {
+		scope = scopes[0]
+		if scope != "mail" && scope != "data" {
+			return "", errInvalid
+		}
+	}
 	separator := "/"
 	if strings.Contains(root, "\\") {
 		separator = "\\"
@@ -524,7 +537,7 @@ func sourceRelative(root, name string) (string, error) {
 	if separator == "\\" {
 		rel = strings.ReplaceAll(rel, "\\", "/")
 	}
-	if !allowed("data/" + rel) {
+	if !allowed(scope + "/" + rel) {
 		return "", errInvalid
 	}
 	return rel, nil
@@ -725,7 +738,7 @@ func remapDatabase(ctx context.Context, database string, report collectionReport
 				return plan, errInvalid
 			}
 		} else {
-			rel, err := sourceRelative(report.Sources.Mail, old)
+			rel, err := sourceRelative(report.Sources.Mail, old, "mail")
 			if err != nil || item.Destination != "mail/"+rel {
 				rows.Close()
 				return plan, errInvalid

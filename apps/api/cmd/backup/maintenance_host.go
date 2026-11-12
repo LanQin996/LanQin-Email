@@ -104,11 +104,17 @@ func executeHostMaintenance(ctx context.Context, host maintenancehost.Config, re
 	}
 	staged := filepath.Join(operation, "recovered")
 	limits := backup.Limits{MaxBytes: 1 << 30, MaxEntries: 100000}
+	if phase("copying") != nil {
+		return failure("interrupted")
+	}
 	if handoff.Copy(ctx, source.Directory, staged, host.APIUID, source.ReportSHA256, source.Driver, limits) != nil {
 		return failure("preparation_failed")
 	}
 	// Recheck the authenticated record and current actor after potentially long
 	// copying, before any empty-database import or deployment service control.
+	if phase("checking-copy") != nil {
+		return failure("interrupted")
+	}
 	after, err := app.ResolveWebMaintenanceSource(ctx, sourceConfig, plan.Source.RestoreRoot, plan.Source.RecordedRoot, os.Getenv("LANQIN_BACKUP_SECRET_KEY"), req.WebJob, req.Actor, req.ReportSHA256)
 	if err != nil || after != source {
 		return failure("source_unavailable")
@@ -146,7 +152,10 @@ func executeHostMaintenance(ctx context.Context, host maintenancehost.Config, re
 	if phase("maintenance") != nil {
 		return maintenancehost.Outcome{State: "needsRecovery", ErrorCode: "interrupted"}, maintenancehost.ErrUnavailable
 	}
-	state, err := executeMaintenance(ctx, "maintain", cfg, maintenanceCLIRequest{})
+	state, err := executeMaintenanceWithProgress(ctx, "maintain", cfg, maintenanceCLIRequest{}, func(state maintenance.State) {
+		// A reporting failure must not change the durable transaction decision.
+		_ = phase(hostMaintenanceStep(state))
+	})
 	if err != nil {
 		if state.NeedsRecovery || imported {
 			return maintenancehost.Outcome{State: "needsRecovery", ErrorCode: "maintenance_failed"}, maintenancehost.ErrUnavailable
@@ -157,6 +166,42 @@ func executeHostMaintenance(ctx context.Context, host maintenancehost.Config, re
 		return maintenancehost.Outcome{State: "needsRecovery", ErrorCode: "maintenance_failed"}, maintenancehost.ErrUnavailable
 	}
 	return maintenancehost.Outcome{State: "succeeded"}, nil
+}
+
+func hostMaintenanceStep(state maintenance.State) string {
+	switch state.PendingAction {
+	case "validate", "validate-committed":
+		return "validating"
+	case "recreate", "recreate-original", "start-original":
+		if state.Phase == "failed" {
+			return "recovering-original"
+		}
+		return "starting"
+	case "health", "health-original":
+		if state.Phase == "failed" {
+			return "recovering-original"
+		}
+		return "health-check"
+	case "rollback", "rollback-environment":
+		return "rolling-back"
+	case "stop":
+		return "stopping"
+	}
+	switch state.Phase {
+	case "preflight":
+		return "preflight"
+	case "stopping", "stopped":
+		return "stopping"
+	case "installing", "installed":
+		return "installing"
+	case "validated", "committed":
+		return "committing"
+	case "starting":
+		return "starting"
+	case "healthy":
+		return "health-check"
+	}
+	return ""
 }
 
 func writeHostPlan(name string, cfg maintenance.Config) error {

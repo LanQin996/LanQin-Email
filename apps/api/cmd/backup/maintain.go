@@ -138,6 +138,10 @@ func writeMaintenanceJSON(output io.Writer, value any) error {
 }
 
 func executeMaintenance(ctx context.Context, mode string, cfg maintenance.Config, request maintenanceCLIRequest) (maintenance.State, error) {
+	return executeMaintenanceWithProgress(ctx, mode, cfg, request, nil)
+}
+
+func executeMaintenanceWithProgress(ctx context.Context, mode string, cfg maintenance.Config, request maintenanceCLIRequest, progress func(maintenance.State)) (maintenance.State, error) {
 	if mode == "maintain-status" {
 		return maintenance.ReadState(cfg)
 	}
@@ -164,6 +168,7 @@ func executeMaintenance(ctx context.Context, mode string, cfg maintenance.Config
 	if err != nil {
 		return maintenance.State{}, err
 	}
+	actions.OnProgress = progress
 	if mode == "maintain-recover" {
 		if request.Transaction != nil {
 			return maintenance.Recover(ctx, cfg, controller, actions, request.Operation, true, *request.Transaction)
