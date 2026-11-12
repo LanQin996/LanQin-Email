@@ -94,6 +94,10 @@ jobs:
         working-directory: apps/api
         run: go test ./...
 
+      - name: Test root-owned maintenance host boundaries
+        working-directory: apps/api
+        run: sudo env "PATH=$PATH" TMPDIR=/tmp go test ./internal/backup/maintenancehost -count=1 -timeout=2m
+
       - name: Check deployment shell scripts
         run: >-
           go run mvdan.cc/sh/v3/cmd/shfmt@v3.10.0 -d
@@ -117,6 +121,10 @@ jobs:
           cp deploy/.env.example deploy/.env
           docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml config --quiet
           docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml config --quiet
+          docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.backup.yml config --quiet
+          docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.mysql.yml -f deploy/docker-compose.backup.yml config --quiet
+          docker compose --env-file deploy/.env -f deploy/docker-compose.yml -f deploy/docker-compose.postgres.yml -f deploy/docker-compose.backup.yml config --quiet
+          docker compose --env-file deploy/.env -f deploy/docker-compose.stack.yml -f deploy/docker-compose.stack.backup.yml config --quiet
 
   database-contracts:
     name: Database contracts
@@ -152,6 +160,19 @@ jobs:
     env:
       LANQIN_TEST_POSTGRES_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin?sslmode=disable
       LANQIN_TEST_MYSQL_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin
+      LANQIN_TEST_NATIVE_POSTGRES_SOURCE_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_source?sslmode=disable
+      LANQIN_TEST_NATIVE_POSTGRES_TARGET_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_target?sslmode=disable
+      LANQIN_TEST_NATIVE_POSTGRES_CLI_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_cli?sslmode=disable
+      LANQIN_TEST_NATIVE_POSTGRES_BAD_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_bad?sslmode=disable
+      LANQIN_TEST_NATIVE_POSTGRES_WEB_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_web?sslmode=disable
+      LANQIN_TEST_NATIVE_POSTGRES_HOST_DSN: postgres://lanqin:lanqin_contract@127.0.0.1:5432/lanqin_native_host?sslmode=disable
+      LANQIN_TEST_NATIVE_MYSQL_SOURCE_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_source
+      LANQIN_TEST_NATIVE_MYSQL_TARGET_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_target
+      LANQIN_TEST_NATIVE_MYSQL_CLI_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_cli
+      LANQIN_TEST_NATIVE_MYSQL_BAD_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_bad
+      LANQIN_TEST_NATIVE_MYSQL_WEB_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_web
+      LANQIN_TEST_NATIVE_MYSQL_HOST_DSN: lanqin:lanqin_contract@tcp(127.0.0.1:3306)/lanqin_native_host
+      LANQIN_TEST_BACKUP_CLI: ${{ github.workspace }}/tmp/lanqin-backup-native
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -162,6 +183,24 @@ jobs:
           go-version-file: apps/api/go.mod
           cache-dependency-path: apps/api/go.sum
 
-      - name: Test PostgreSQL and MySQL contracts
+      - name: Prepare isolated native backup databases
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          for database in lanqin_native_source lanqin_native_target lanqin_native_cli lanqin_native_bad lanqin_native_web lanqin_native_host; do
+            docker exec -e PGPASSWORD=lanqin_contract "$POSTGRES_CONTAINER" createdb -h 127.0.0.1 -U lanqin "$database"
+          done
+          docker exec -e MYSQL_PWD=root_contract "$MYSQL_CONTAINER" mysql --no-defaults -uroot -e "CREATE DATABASE lanqin_native_source CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; CREATE DATABASE lanqin_native_target CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; CREATE DATABASE lanqin_native_cli CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; CREATE DATABASE lanqin_native_bad CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; CREATE DATABASE lanqin_native_web CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL ON lanqin_native_source.* TO 'lanqin'@'%'; GRANT ALL ON lanqin_native_target.* TO 'lanqin'@'%'; GRANT ALL ON lanqin_native_cli.* TO 'lanqin'@'%'; GRANT ALL ON lanqin_native_bad.* TO 'lanqin'@'%'; GRANT ALL ON lanqin_native_web.* TO 'lanqin'@'%';"
+
+          docker exec -e MYSQL_PWD=root_contract "$MYSQL_CONTAINER" mysql --no-defaults -uroot -e "CREATE DATABASE lanqin_native_host CHARACTER SET utf8mb4 COLLATE utf8mb4_bin; GRANT ALL ON lanqin_native_host.* TO 'lanqin'@'%';"
+
+      - name: Build native backup CLI for roundtrip tests
         working-directory: apps/api
-        run: go test ./internal/app -run '^TestExternalDatabaseContract$' -count=1 -timeout=5m
+        run: |
+          mkdir -p "$(dirname "$LANQIN_TEST_BACKUP_CLI")"
+          go build -o "$LANQIN_TEST_BACKUP_CLI" ./cmd/backup
+
+      - name: Test PostgreSQL and MySQL contracts and native backup roundtrips
+        working-directory: apps/api
+        run: go test ./internal/app -run '^TestExternalDatabaseContract$|^TestNativeDatabaseBackupRestoreContract$' -count=1 -timeout=5m

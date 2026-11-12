@@ -1,0 +1,369 @@
+package storage
+
+import (
+	"bytes"
+	"context"
+	"crypto/md5" // S3 Content-MD5 transport check only; receipts use SHA-256.
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"errors"
+	"io"
+	"os"
+	"sync"
+	"time"
+)
+
+const MaxUploadBytes int64 = 5 << 30 // Shared cap for legacy PUT and checkpointed multipart/chunk uploads.
+
+var ErrPartialFailure = errors.New("one or more backup destinations did not succeed; inspect the JSON report")
+var ErrRecoveryIndexFailure = errors.New("encrypted backup uploaded but its independent recovery index was not confirmed")
+
+type Options struct {
+	Concurrency        int
+	Attempts           int
+	AttemptTimeout     time.Duration
+	MaxBytes           int64
+	SpoolDir           string
+	Checkpoints        CheckpointStore
+	RecoveryIndexKey   []byte                              `json:"-"`
+	RecoveryIndexGuard func(context.Context, string) error `json:"-"`
+}
+
+func DefaultOptions() Options {
+	return Options{Concurrency: 2, Attempts: 3, AttemptTimeout: 20 * time.Minute, MaxBytes: 1 << 30}
+}
+
+type Report struct {
+	SHA256       string   `json:"sha256"`
+	Bytes        int64    `json:"bytes"`
+	Destinations []Result `json:"destinations"`
+}
+
+type Result struct {
+	DestinationID          string     `json:"destination_id"`
+	State                  string     `json:"state"`
+	Attempts               int        `json:"attempts"`
+	ObjectKey              string     `json:"object_key,omitempty"`
+	ErrorCode              string     `json:"error_code,omitempty"`
+	CompletedAt            *time.Time `json:"completed_at,omitempty"`
+	RecoveryIndexState     string     `json:"index_state,omitempty"`
+	RecoveryIndexErrorCode string     `json:"index_error_code,omitempty"`
+}
+
+type artifact struct {
+	file   *os.File
+	size   int64
+	sha256 string
+	md5    string
+}
+
+type uploader interface {
+	put(context.Context, string, *io.SectionReader, *artifact) error
+	close()
+}
+
+type recoveryIndexPublisher interface {
+	publishRecoveryIndex(context.Context, string, string, int64, time.Time, []byte, func(context.Context) error) error
+}
+
+type uploadError struct {
+	code  string
+	retry bool
+}
+
+func (e *uploadError) Error() string { return e.code }
+
+type uploaderFactory func(Destination) (uploader, error)
+
+// Credentials are resolved per destination and invocation. Never put these in
+// process environment variables, API responses, job records or error logs.
+type Credentials struct {
+	AccessKeyID, SecretAccessKey, SessionToken string
+	Username, Password                         string
+	DriveAccessToken                           string
+}
+
+// UploadFile pins the caller's artifact handle and scopes in-memory credentials
+// to each destination. It does not close the original file or change its offset.
+func UploadFile(ctx context.Context, source *os.File, expected string, cfg Config, opts Options, resolve func(string) (Credentials, error)) (Report, error) {
+	if source == nil || resolve == nil {
+		return Report{}, errors.New("artifact and credential resolver are required")
+	}
+	return uploadSource(ctx, func() (*artifact, error) { return stageFile(ctx, source, expected, opts) }, cfg, opts, func(d Destination) (uploader, error) {
+		credentials, err := resolve(d.ID)
+		if err != nil {
+			return nil, errors.New("destination credentials unavailable")
+		}
+		return credentialsUploader(d, credentials)
+	})
+}
+
+func credentialsUploader(d Destination, credentials Credentials) (uploader, error) {
+	values := make(map[string]string)
+	if d.S3 != nil {
+		values[d.S3.AccessKeyIDEnv], values[d.S3.SecretAccessKeyEnv] = credentials.AccessKeyID, credentials.SecretAccessKey
+		if d.S3.SessionTokenEnv != "" {
+			values[d.S3.SessionTokenEnv] = credentials.SessionToken
+		}
+	}
+	if d.WebDAV != nil {
+		values[d.WebDAV.UsernameEnv], values[d.WebDAV.PasswordEnv] = credentials.Username, credentials.Password
+	}
+	if d.Drive != nil {
+		values[d.Drive.AccessTokenEnv] = credentials.DriveAccessToken
+	}
+	return buildUploader(d, func(name string) (string, bool) { v, ok := values[name]; return v, ok }, nil)
+}
+
+// Upload stages and hashes the source once, then gives each upload an independent
+// reader over the private immutable copy. Credentials and provider errors are
+// never included in the report. A successful result means remote PUT acceptance,
+// not an independently downloaded or decrypted recovery verification.
+func Upload(ctx context.Context, source, expectedSHA256 string, cfg Config, opts Options) (Report, error) {
+	return upload(ctx, source, expectedSHA256, cfg, opts, newUploader)
+}
+
+func upload(ctx context.Context, source, expectedSHA256 string, cfg Config, opts Options, factory uploaderFactory) (Report, error) {
+	return uploadSource(ctx, func() (*artifact, error) { return stage(ctx, source, expectedSHA256, opts) }, cfg, opts, factory)
+}
+
+func uploadSource(ctx context.Context, prepare func() (*artifact, error), cfg Config, opts Options, factory uploaderFactory) (Report, error) {
+	var report Report
+	if err := cfg.Validate(); err != nil {
+		return report, err
+	}
+	if opts.Concurrency < 1 || opts.Concurrency > 8 || opts.Attempts < 1 || opts.Attempts > 3 || opts.AttemptTimeout <= 0 || opts.AttemptTimeout > time.Hour || opts.MaxBytes < 1 || opts.MaxBytes > MaxUploadBytes {
+		return report, errors.New("invalid upload limits (concurrency 1..8, attempts 1..3, timeout up to 1h, size up to 5 GiB)")
+	}
+	if len(opts.RecoveryIndexKey) != 0 && len(opts.RecoveryIndexKey) != 32 {
+		return report, errors.New("recovery index requires a 32-byte key")
+	}
+	// Workers only read this private copy; the caller may reuse its key once
+	// Upload returns, and transport/checkpoint/report structures never retain it.
+	opts.RecoveryIndexKey = append([]byte(nil), opts.RecoveryIndexKey...)
+	defer clear(opts.RecoveryIndexKey)
+	active := 0
+	for _, d := range cfg.Destinations {
+		if !d.Disabled {
+			active++
+		}
+	}
+	if active == 0 {
+		return report, errors.New("no enabled backup destinations")
+	}
+	data, err := prepare()
+	if err != nil {
+		return report, err
+	}
+	defer os.Remove(data.file.Name()) // Only our own ciphertext spool file.
+	defer data.file.Close()
+	report.SHA256, report.Bytes = data.sha256, data.size
+	report.Destinations = make([]Result, len(cfg.Destinations))
+	jobs := make(chan int, len(cfg.Destinations))
+	for i, d := range cfg.Destinations {
+		report.Destinations[i] = Result{DestinationID: d.ID, State: "skipped"}
+		if !d.Disabled {
+			jobs <- i
+		}
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(opts.Concurrency, active) {
+		workers.Go(func() {
+			for i := range jobs {
+				report.Destinations[i] = uploadDestination(ctx, cfg.Destinations[i], data, opts, factory)
+			}
+		})
+	}
+	workers.Wait()
+	indexFailure := false
+	for _, result := range report.Destinations {
+		if result.State != "succeeded" && result.State != "skipped" {
+			return report, ErrPartialFailure
+		}
+		if result.RecoveryIndexState != "" && result.RecoveryIndexState != "succeeded" {
+			indexFailure = true
+		}
+	}
+	if indexFailure {
+		return report, errors.Join(ErrPartialFailure, ErrRecoveryIndexFailure)
+	}
+	return report, nil
+}
+
+func uploadDestination(ctx context.Context, d Destination, data *artifact, opts Options, factory uploaderFactory) Result {
+	result := Result{DestinationID: d.ID, State: "failed"}
+	if ctx.Err() != nil {
+		result.State, result.ErrorCode = "cancelled", "cancelled"
+		return result
+	}
+	client, err := factory(d)
+	if err != nil {
+		result.ErrorCode = "destination_unavailable"
+		return result
+	}
+	defer client.close()
+	for attempt := 1; attempt <= opts.Attempts; attempt++ {
+		if ctx.Err() != nil {
+			result.State, result.ErrorCode = "cancelled", "cancelled"
+			return result
+		}
+		// A fresh unpredictable name per attempt avoids overwriting either a
+		// previous backup or an object accepted before a lost success response.
+		var nonce [16]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			result.ErrorCode = "random_source_failed"
+			return result
+		}
+		key := "lanqin-" + hex.EncodeToString(nonce[:]) + ".age"
+		attemptCtx, cancel := context.WithTimeout(ctx, opts.AttemptTimeout)
+		result.Attempts = attempt
+		completedObject := ""
+		var err error
+		if opts.Checkpoints != nil {
+			resumable, ok := client.(resumableUploader)
+			if !ok {
+				err = &uploadError{code: "resume_unsupported"}
+			} else {
+				completedObject, err = resumable.resume(attemptCtx, data, opts.Checkpoints)
+			}
+		} else {
+			err = client.put(attemptCtx, key, io.NewSectionReader(data.file, 0, data.size), data)
+		}
+		if err == nil {
+			now := time.Now().UTC()
+			result.State, result.ObjectKey, result.CompletedAt = "succeeded", objectKey(d, key), &now
+			if provider, ok := client.(interface{ objectKey(string) string }); ok {
+				result.ObjectKey = provider.objectKey(key)
+			}
+			if opts.Checkpoints != nil {
+				result.ObjectKey = completedObject
+			}
+			result.ErrorCode = ""
+			if len(opts.RecoveryIndexKey) > 0 {
+				result.RecoveryIndexState, result.RecoveryIndexErrorCode = "failed", "recovery_index_publish_failed"
+				guard := func(ctx context.Context) error {
+					if err := ctx.Err(); err != nil {
+						return err
+					}
+					if opts.RecoveryIndexGuard != nil {
+						return opts.RecoveryIndexGuard(ctx, d.ID)
+					}
+					return nil
+				}
+				publisher, ok := client.(recoveryIndexPublisher)
+				if !ok {
+					result.RecoveryIndexErrorCode = "recovery_index_unavailable"
+				} else if guard(attemptCtx) == nil && publisher.publishRecoveryIndex(attemptCtx, result.ObjectKey, data.sha256, data.size, now, opts.RecoveryIndexKey, guard) == nil {
+					result.RecoveryIndexState, result.RecoveryIndexErrorCode = "succeeded", ""
+				}
+				if attemptCtx.Err() != nil && result.RecoveryIndexState != "succeeded" {
+					result.RecoveryIndexErrorCode = "recovery_index_interrupted"
+				}
+			}
+			cancel()
+			return result
+		}
+		cancel()
+		if ctx.Err() != nil {
+			result.State, result.ErrorCode = "cancelled", "cancelled"
+			return result
+		}
+		var classified *uploadError
+		if !errors.As(err, &classified) {
+			classified = &uploadError{code: "upload_failed"}
+		}
+		result.ErrorCode = classified.code
+		if !classified.retry || attempt == opts.Attempts {
+			return result
+		}
+		// Bounded exponential backoff with jitter, cancellable during shutdown.
+		wait := time.Duration(1<<(attempt-1))*time.Second + time.Duration(nonce[0])*time.Millisecond
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			result.State, result.ErrorCode = "cancelled", "cancelled"
+			return result
+		case <-timer.C:
+		}
+	}
+	return result
+}
+
+func objectKey(d Destination, name string) string {
+	if d.S3 != nil && d.S3.Prefix != "" {
+		return d.S3.Prefix + "/" + name
+	}
+	return name
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
+}
+
+func stage(ctx context.Context, source, expected string, opts Options) (*artifact, error) {
+	info, err := os.Lstat(source)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, errors.New("upload input must be a regular ciphertext file")
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return nil, errors.New("cannot open encrypted backup")
+	}
+	defer in.Close()
+	opened, err := in.Stat()
+	if err != nil || !os.SameFile(info, opened) || !opened.Mode().IsRegular() || opened.Size() > opts.MaxBytes {
+		return nil, errors.New("encrypted backup changed or exceeds upload size limit")
+	}
+	return stageFile(ctx, in, expected, opts)
+}
+
+func stageFile(ctx context.Context, in *os.File, expected string, opts Options) (*artifact, error) {
+	want, err := hex.DecodeString(expected)
+	if err != nil || len(want) != sha256.Size {
+		return nil, errors.New("upload requires a trusted ciphertext SHA-256 receipt")
+	}
+	opened, err := in.Stat()
+	if err != nil || !opened.Mode().IsRegular() || opened.Size() > opts.MaxBytes {
+		return nil, errors.New("invalid artifact handle or size limit")
+	}
+	file, err := os.CreateTemp(opts.SpoolDir, ".lanqin-upload-*")
+	if err != nil {
+		return nil, errors.New("cannot create private ciphertext spool")
+	}
+	ok := false
+	defer func() {
+		if !ok {
+			file.Close()
+			os.Remove(file.Name())
+		}
+	}()
+	sha, md := sha256.New(), md5.New()
+	n, err := io.Copy(io.MultiWriter(file, sha, md), io.LimitReader(contextReader{ctx, io.NewSectionReader(in, 0, opened.Size())}, opts.MaxBytes+1))
+	if err != nil || n > opts.MaxBytes || n != opened.Size() || ctx.Err() != nil {
+		return nil, errors.New("cannot stage encrypted backup within limits")
+	}
+	if !bytes.Equal(sha.Sum(nil), want) {
+		return nil, errors.New("ciphertext does not match trusted SHA-256 receipt; no upload attempted")
+	}
+	const ageHeader = "age-encryption.org/v1\n"
+	header := make([]byte, len(ageHeader))
+	if _, err := file.ReadAt(header, 0); err != nil || string(header) != ageHeader {
+		return nil, errors.New("upload accepts binary age backups only, not plaintext")
+	}
+	// This detects an accidental plaintext input, not ciphertext authentication.
+	// Full age authentication still requires the private recovery key at restore.
+	ok = true
+	return &artifact{file: file, size: n, sha256: hex.EncodeToString(want), md5: base64.StdEncoding.EncodeToString(md.Sum(nil))}, nil
+}

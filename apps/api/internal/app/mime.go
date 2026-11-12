@@ -98,6 +98,9 @@ func BuildMIME(m MIMEMessage) ([]byte, error) {
 			contentType = "application/octet-stream"
 		}
 		filename := mime.QEncoding.Encode("utf-8", att.Filename)
+		// QEncoding leaves printable ASCII unchanged. Escape quoted-string
+		// delimiters so a legitimate quote/backslash remains part of the name.
+		filename = strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(filename)
 		h := textprotoMIMEHeader(map[string]string{
 			"Content-Type":              contentType + `; name="` + filename + `"`,
 			"Content-Disposition":       `attachment; filename="` + filename + `"`,

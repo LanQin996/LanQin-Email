@@ -1,0 +1,24 @@
+# Opt-in only: layer after docker-compose.stack.yml. Backup plaintext and
+# ciphertext roots are private to API; SMTP, IMAP, Rspamd and web need no access.
+services:
+  api:
+    environment:
+      LANQIN_BACKUP_WORKSPACE: /backups/work
+      LANQIN_BACKUP_ARTIFACT_DIR: /backups/artifacts
+      LANQIN_BACKUP_RESTORE_DIR: /backups/restore
+    volumes:
+      - type: bind
+        source: ./backups/work
+        target: /backups/work
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./backups/artifacts
+        target: /backups/artifacts
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./backups/restore
+        target: /backups/restore
+        bind:
+          create_host_path: false

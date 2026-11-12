@@ -202,7 +202,7 @@ done
 
 	echo "## Docker 镜像"
 	echo
-	echo "发布平台：\`linux/amd64\`"
+	echo "发布平台：\`${PLATFORMS:-linux/amd64,linux/arm64}\`"
 	echo
 	echo '| 组件 | 固定版本镜像 |'
 	echo '| --- | --- |'

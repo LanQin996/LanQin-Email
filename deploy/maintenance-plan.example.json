@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "mode": "all-in-one",
+  "driver": "sqlite",
+  "dockerPath": "/usr/bin/docker",
+  "projectDirectory": "/srv/lanqin",
+  "projectName": "lanqin",
+  "composeFiles": [
+    {
+      "path": "/srv/lanqin/docker-compose.yml",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ],
+  "environmentFile": {
+    "path": "/srv/lanqin/.env",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "stateDir": "/srv/lanqin-maintenance/restore-001",
+  "workspace": "/srv/lanqin-maintenance/work-001",
+  "targets": {
+    "data": "/srv/lanqin/data",
+    "mail": "/srv/lanqin/mail",
+    "dkim": "/srv/lanqin/dkim"
+  },
+  "owners": {
+    "data": { "uid": -1, "gid": -1 },
+    "mail": { "uid": -1, "gid": -1 },
+    "dkim": { "uid": -1, "gid": -1 }
+  },
+  "runtimeDataRoot": "/data",
+  "runtimeMailRoot": "/var/mail/vhosts",
+  "runtimeDKIMRoot": "/var/lib/rspamd/dkim",
+  "staged": "/srv/lanqin-recovery/attempt-001",
+  "expectedReportSHA256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "stepTimeoutSeconds": 120,
+  "healthTimeoutSeconds": 180
+}

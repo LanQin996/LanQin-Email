@@ -12,6 +12,7 @@ export type AdminSection =
   | "messages"
   | "sendAudit"
   | "deliveryQueue"
+  | "backups"
   | "settings"
 
 export const adminSectionLabels: Record<AdminSection, string> = {
@@ -24,6 +25,7 @@ export const adminSectionLabels: Record<AdminSection, string> = {
   messages: "全部邮件",
   sendAudit: "发送审计",
   deliveryQueue: "投递队列",
+  backups: "备份地点",
   settings: "系统设置",
 }
 
@@ -39,6 +41,7 @@ export const adminSectionPermissions: Record<AdminSection, PermissionKey[]> = {
   messages: ["admin.messages.view"],
   sendAudit: ["admin.messages.view"],
   deliveryQueue: ["admin.settings.view"],
+  backups: [], // Additionally restricted to actual super administrators.
   settings: ["admin.settings.view", "admin.templates.view"],
 }
 

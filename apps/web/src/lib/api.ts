@@ -61,6 +61,17 @@ import type {
   PermissionKey,
   PermissionLimits,
   APIToken,
+  BackupDestinationList,
+  BackupDestinationPayload,
+  BackupScheduleList,
+  BackupSchedulePayload,
+  BackupArtifact,
+  BackupUploadJob,
+  BackupDiscoveryPage,
+  BackupMaintenancePlans,
+  BackupMaintenanceStatus,
+  BackupDriveClientConfiguration,
+  BackupDriveClientPayload,
 } from "./api-types"
 export * from "./api-types"
 
@@ -510,6 +521,165 @@ export const api = {
       method: "DELETE",
     }),
   systemSettings: () => request<SystemSettings>("/api/admin/settings"),
+  backupDestinations: () => request<BackupDestinationList>("/api/admin/backups/destinations"),
+  updateBackupRetention: (
+    id: string,
+    payload: { revision: string; keepLast: number; confirm: boolean }
+  ) =>
+    request<{ ok: boolean }>(
+      `/api/admin/backups/destinations/${encodeURIComponent(id)}/retention`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }
+    ),
+  authorizeBackupDrive: (id: string, revision: string) =>
+    request<{ authorizationUrl: string }>(
+      `/api/admin/backups/destinations/${encodeURIComponent(id)}/drive/authorize`,
+      { method: "POST", body: JSON.stringify({ revision }) }
+    ),
+  backupDriveClientConfiguration: () =>
+    request<BackupDriveClientConfiguration>("/api/admin/backups/drive/client"),
+  saveBackupDriveClientConfiguration: (payload: BackupDriveClientPayload) =>
+    request<{ ok: boolean }>("/api/admin/backups/drive/client", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupSchedules: () => request<BackupScheduleList>("/api/admin/backups/schedules"),
+  backupEncryptionConfiguration: () =>
+    request<import("./api-types").BackupEncryptionConfiguration>("/api/admin/backups/encryption"),
+  saveBackupEncryptionConfiguration: (payload: {
+    revision: string
+    mode: "password"
+    password?: string
+    confirmPassword?: string
+    currentPassword?: string
+  }) =>
+    request<{ ok: boolean }>("/api/admin/backups/encryption", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateBackupSchedule: (id: string, payload: BackupSchedulePayload) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}/schedule`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupCapabilities: () =>
+    request<{
+      onlineBackupAvailable: boolean
+      restoreAvailable: boolean
+      restoreMaxBytes: number
+      discoveryAvailable: boolean
+      driveOAuthAvailable: boolean
+      recipient?: string
+      reason?: string
+    }>("/api/admin/backups/capabilities"),
+  createBackupRestore: (payload: {
+    sourceJobId: string
+    discoveryEntryId?: string
+    destinationId: string
+    expectedSHA256: string
+    destinationsRevision: string
+    requestId: string
+    identity?: string
+    encryptionMode?: "password" | "key"
+    backupPassword?: string
+    password: string
+    twoFactorCode: string
+    confirm: boolean
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/restores", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupMaintenancePlans: () =>
+    request<BackupMaintenancePlans>("/api/admin/backups/maintenance/plans"),
+  createBackupMaintenance: (payload: {
+    sourceJobId: string
+    planId: string
+    templateSHA256: string
+    requestId: string
+    password: string
+    twoFactorCode?: string
+    confirm: boolean
+  }) =>
+    request<BackupMaintenanceStatus>("/api/admin/backups/maintenance/requests", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupMaintenanceStatus: (requestId: string) =>
+    request<BackupMaintenanceStatus>(
+      `/api/admin/backups/maintenance/requests/${encodeURIComponent(requestId)}`
+    ),
+  createBackupDiscovery: (payload: {
+    destinationId: string
+    destinationsRevision: string
+    requestId: string
+    sourceFolderId?: string
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/discoveries", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupDiscoveryEntries: (id: string, cursor = "", signal?: AbortSignal) =>
+    request<BackupDiscoveryPage>(
+      `/api/admin/backups/jobs/${encodeURIComponent(id)}/discovery${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`,
+      { signal }
+    ),
+  createBackupSnapshot: (payload: {
+    destinationIds: string[]
+    requestId: string
+    destinationsRevision: string
+    expectedRecipient: string
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/snapshots", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  backupArtifacts: () =>
+    request<{ available: boolean; items: BackupArtifact[]; maxBytes: number }>(
+      "/api/admin/backups/artifacts"
+    ),
+  backupUploadJobs: (cursor = "") =>
+    request<{ items: BackupUploadJob[]; nextCursor: string }>(
+      `/api/admin/backups/jobs${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`
+    ),
+  backupUploadJob: (id: string) =>
+    request<BackupUploadJob>(`/api/admin/backups/jobs/${encodeURIComponent(id)}`),
+  createBackupUpload: (payload: {
+    artifactId: string
+    destinationIds: string[]
+    requestId: string
+    destinationsRevision: string
+  }) =>
+    request<BackupUploadJob>("/api/admin/backups/jobs", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cancelBackupUpload: (id: string) =>
+    request<{ ok: boolean }>(`/api/admin/backups/jobs/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }),
+  resumeBackupUpload: (id: string, destinationsRevision: string) =>
+    request<BackupUploadJob>(`/api/admin/backups/jobs/${encodeURIComponent(id)}/resume`, {
+      method: "POST",
+      body: JSON.stringify({ destinationsRevision }),
+    }),
+  createBackupDestination: (payload: BackupDestinationPayload) =>
+    request<{ ok: boolean }>("/api/admin/backups/destinations", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateBackupDestination: (id: string, payload: BackupDestinationPayload) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteBackupDestination: (id: string, revision: string) =>
+    request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      body: JSON.stringify({ revision }),
+    }),
   uploadFavicon: (file: File) => {
     const form = new FormData()
     form.append("file", file)
