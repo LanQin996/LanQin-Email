@@ -92,7 +92,7 @@ func snapshotFixture(t *testing.T) onlineSnapshotFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return onlineSnapshotFixture{db: db, cfg: Config{DBDriver: "sqlite", DBPath: database, DataDir: draft.dataDir, MaildirRoot: mail}, workspace: t.TempDir(), raw: raw, draft: oldDraft, unindexed: unindexed, attachment: filepath.Join(draft.dataDir, draft.attachment), rawBytes: rawBytes, privateKey: key}
+	return onlineSnapshotFixture{db: db, cfg: Config{DBDriver: "sqlite", DBPath: database, DataDir: draft.dataDir, MaildirRoot: mail}, workspace: privateBackupTestDir(t), raw: raw, draft: oldDraft, unindexed: unindexed, attachment: filepath.Join(draft.dataDir, draft.attachment), rawBytes: rawBytes, privateKey: key}
 }
 
 func TestPrepareOnlineBackupConcurrentMoveDraftAndRealEncryptedRecovery(t *testing.T) {

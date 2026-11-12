@@ -119,7 +119,7 @@ func TestNativeDatabaseBackupRestoreContract(t *testing.T) {
 			if err := a.db.QueryRowContext(t.Context(), "SELECT value FROM system_settings WHERE "+column+"=?", "backup.discovery.v1.synthetic.0").Scan(&originalDiscovery); err != nil || originalDiscovery != "synthetic-sensitive-discovery" {
 				t.Fatal("native export changed source discovery runtime", err)
 			}
-			prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, t.TempDir(), DefaultOnlineBackupOptions())
+			prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, privateBackupTestDir(t), DefaultOnlineBackupOptions())
 			if err != nil {
 				t.Fatal("native full reference collection", err)
 			}
@@ -147,7 +147,7 @@ func TestNativeDatabaseBackupRestoreContract(t *testing.T) {
 			targetCfg.DBDSN = targetDSN
 			targetCfg.DataDir = filepath.Join(root, "target-data")
 			targetCfg.MaildirRoot = filepath.Join(root, "target-mail")
-			importWorkspace := t.TempDir()
+			importWorkspace := privateBackupTestDir(t)
 			wrong, _ := age.GenerateX25519Identity()
 			if _, err := ImportNativeBackup(t.Context(), targetCfg, ciphertextPath, wrong.String(), hex.EncodeToString(digest[:]), importWorkspace, backup.DefaultLimits()); err == nil {
 				t.Fatal("wrong native recovery key accepted")
@@ -283,7 +283,7 @@ func TestNativeDatabaseBackupRestoreContract(t *testing.T) {
 				if err := os.WriteFile(keyFile, []byte(identity.String()), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				workspace := t.TempDir()
+				workspace := privateBackupTestDir(t)
 				environment := []string{}
 				for _, item := range os.Environ() {
 					if !strings.HasPrefix(item, "LANQIN_") {
@@ -375,7 +375,7 @@ func assertNativeInstallationPreparation(t *testing.T, source *App, cfg Config, 
 	if runtime.GOOS == "linux" {
 		runtimeData, runtimeMail = targets.Data, targets.Mail
 	}
-	work := t.TempDir()
+	work := privateBackupTestDir(t)
 	p, err := PrepareNativeInstallation(t.Context(), cfg, container, work, runtimeData, runtimeMail, targets, reportSHA, backup.DefaultLimits())
 	if err != nil {
 		t.Fatal("native installation preparation", err)
@@ -574,7 +574,7 @@ func assertNativeMaintenanceCLILifecycle(t *testing.T, run func(...string) []byt
 			t.Fatal(err)
 		}
 	}
-	work, journalDir := t.TempDir(), t.TempDir()
+	work, journalDir := privateBackupTestDir(t), privateBackupTestDir(t)
 	base := []string{"--driver", driver, "--target-dsn-env", "NATIVE_SYNTHETIC_TARGET_DSN", "--data-target", targets.Data, "--mail-target", targets.Mail, "--dkim-target", targets.DKIM, "--confirm-maintenance"}
 	args := append([]string{"install-native"}, base...)
 	args = append(args, sourceArgs...)
@@ -717,7 +717,7 @@ func simulateNativeCommittedTrees(t *testing.T, prepared string, targets install
 func assertNativeWebBackup(t *testing.T, a *App, identity *age.X25519Identity) {
 	t.Helper()
 	_, records, _ := backupJobFixture(t, a)
-	a.cfg.BackupRecipient, a.cfg.BackupWorkspace = identity.Recipient().String(), t.TempDir()
+	a.cfg.BackupRecipient, a.cfg.BackupWorkspace = identity.Recipient().String(), privateBackupTestDir(t)
 	setBackupTestPassword(t, a, "synthetic native Web password")
 	_, raw, err := a.loadBackupDestinationState(t.Context())
 	if err != nil {
@@ -766,7 +766,7 @@ func assertNativeWebBackup(t *testing.T, a *App, identity *age.X25519Identity) {
 	if entries, err := os.ReadDir(a.cfg.BackupWorkspace); err != nil || len(entries) != 0 {
 		t.Fatal("native Web snapshot retained plaintext", err)
 	}
-	a.cfg.BackupRestoreDir = t.TempDir()
+	a.cfg.BackupRestoreDir = privateBackupTestDir(t)
 	a.backupDownloadFile = func(_ context.Context, _ storage.Destination, _, sha, output string, _ storage.Options, _ storage.Credentials) (storage.DownloadReceipt, error) {
 		if err := os.WriteFile(output, ciphertext, 0o600); err != nil {
 			return storage.DownloadReceipt{}, err
@@ -862,7 +862,7 @@ func assertNativeWebImportCLI(t *testing.T, a *App, jobID, container, reportSHA,
 	if targetDSN == a.cfg.DBDSN {
 		t.Fatal("Web import test requires separate EMPTY database")
 	}
-	workspace := t.TempDir()
+	workspace := privateBackupTestDir(t)
 	cfg := Config{DBDriver: a.cfg.DBDriver, DBDSN: targetDSN}
 	// A report can remain authenticated while a later payload changes. Both
 	// original and copied-byte validation must run before creating target tables.

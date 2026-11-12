@@ -94,6 +94,10 @@ jobs:
         working-directory: apps/api
         run: go test ./...
 
+      - name: Test root-owned maintenance host boundaries
+        working-directory: apps/api
+        run: sudo env "PATH=$PATH" TMPDIR=/tmp go test ./internal/backup/maintenancehost -count=1 -timeout=2m
+
       - name: Check deployment shell scripts
         run: >-
           go run mvdan.cc/sh/v3/cmd/shfmt@v3.10.0 -d

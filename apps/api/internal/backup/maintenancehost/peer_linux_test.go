@@ -66,6 +66,19 @@ func requireLinuxRoot(t *testing.T) {
 	}
 }
 
+func TestHostLinuxRejectsNonrootOwnedConfiguration(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("requires a nonroot owner")
+	}
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if trustedPath(directory, true, true) {
+		t.Fatal("nonroot-owned host configuration accepted")
+	}
+}
+
 func waitHost(t *testing.T, client *Client) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

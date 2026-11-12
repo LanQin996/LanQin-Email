@@ -9,8 +9,19 @@ import (
 	"testing"
 )
 
-func TestFileCheckpointsEncryptedExclusiveAndBoundToNamespace(t *testing.T) {
+func privateCheckpointDirectory(t *testing.T) string {
+	t.Helper()
 	directory := t.TempDir()
+	// TempDir's numbered child uses 0777 before umask, not MkdirTemp's 0700.
+	// Match the CLI's explicitly private checkpoint directory on Unix.
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return directory
+}
+
+func TestFileCheckpointsEncryptedExclusiveAndBoundToNamespace(t *testing.T) {
+	directory := privateCheckpointDirectory(t)
 	key := bytes.Repeat([]byte{0x53}, 32)
 	store, err := OpenFileCheckpointStore(directory, "synthetic-operation", key)
 	if err != nil {

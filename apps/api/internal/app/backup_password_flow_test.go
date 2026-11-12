@@ -17,7 +17,7 @@ func TestBackupPasswordCaptureAndRealRestoreWithoutAgeEnvironmentKey(t *testing.
 	a := newTestApp(t)
 	_, ids, revision := backupSnapshotJobFixture(t, a)
 	a.cfg.BackupRecipient = ""
-	a.cfg.BackupRestoreDir = t.TempDir()
+	a.cfg.BackupRestoreDir = privateBackupTestDir(t)
 	const password = "  synthetic portable backup password  "
 	setBackupTestPassword(t, a, password)
 	configuration, err := a.backupEncryptionConfiguration(t.Context())

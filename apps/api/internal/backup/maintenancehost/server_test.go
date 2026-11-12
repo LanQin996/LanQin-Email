@@ -23,6 +23,9 @@ import (
 
 func hostFixture(t *testing.T) Config {
 	t.Helper()
+	if runtime.GOOS == "linux" && os.Geteuid() != 0 {
+		t.Skip("requires actual Linux root for the approved host configuration; run the maintenancehost test binary with sudo")
+	}
 	root := t.TempDir()
 	if runtime.GOOS == "linux" {
 		// Unix sockaddr paths are bounded independently of Go's descriptive test names.

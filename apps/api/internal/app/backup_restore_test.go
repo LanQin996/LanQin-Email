@@ -20,11 +20,22 @@ import (
 	"lanqin-email-api/internal/backup/storage"
 )
 
+// TempDir's numbered directory follows the process umask. Private backup
+// workspaces must satisfy the production permission check on Unix as well.
+func privateBackupTestDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func restoreJobFixture(t *testing.T, a *App) (backupJob, backupRestoreRequest, []byte) {
 	t.Helper()
 	_, records, _ := backupJobFixture(t, a)
 	a.cfg.MaildirRoot = t.TempDir()
-	a.cfg.BackupRestoreDir = t.TempDir()
+	a.cfg.BackupRestoreDir = privateBackupTestDir(t)
 	if _, err := a.backfillSQLiteMessagesToMaildir(t.Context()); err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +44,7 @@ func restoreJobFixture(t *testing.T, a *App) (backupJob, backupRestoreRequest, [
 		t.Fatal(err)
 	}
 	opts := DefaultOnlineBackupOptions()
-	prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, t.TempDir(), opts)
+	prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, privateBackupTestDir(t), opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +149,7 @@ func TestBackupRestoreMappedPrivateRootBindsAuthenticatedRecordAndCopiedPayload(
 	if _, _, err := ResolveWebRestoreAt(t.Context(), a.cfg.DBPath, hostRoot, recordedRoot, a.cfg.BackupSecretKey, job.ID); err != nil {
 		t.Fatal("report-only resolver unexpectedly replaced payload validation", err)
 	}
-	prepared, err := install.Prepare(t.Context(), container, t.TempDir(), "/runtime/data", "/runtime/mail", backup.DefaultLimits(), receipt)
+	prepared, err := install.Prepare(t.Context(), container, privateBackupTestDir(t), "/runtime/data", "/runtime/mail", backup.DefaultLimits(), receipt)
 	if err == nil {
 		prepared.Close()
 		t.Fatal("mapped handoff installed changed payload")
@@ -147,7 +158,7 @@ func TestBackupRestoreMappedPrivateRootBindsAuthenticatedRecordAndCopiedPayload(
 	if err := os.WriteFile(databasePath, database, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err = install.Prepare(t.Context(), container, t.TempDir(), "/runtime/data", "/runtime/mail", backup.DefaultLimits(), receipt)
+	prepared, err = install.Prepare(t.Context(), container, privateBackupTestDir(t), "/runtime/data", "/runtime/mail", backup.DefaultLimits(), receipt)
 	if err != nil {
 		t.Fatal("valid mapped payload could not be prepared", err)
 	}
@@ -439,7 +450,7 @@ func TestBackupRestoreWorkspaceRejectsLiveOverlapAndRetainedDataLimit(t *testing
 func assertBackupRestoreDatabaseContract(t *testing.T, a *App) {
 	t.Helper()
 	entry, records, _ := backupJobFixture(t, a)
-	a.cfg.BackupRestoreDir = t.TempDir()
+	a.cfg.BackupRestoreDir = privateBackupTestDir(t)
 	source, err := a.enqueueBackupUpload(t.Context(), "restore-contract", "restore-contract-source", entry.ID, []string{records[0].Config.ID})
 	if err != nil {
 		t.Fatal(err)

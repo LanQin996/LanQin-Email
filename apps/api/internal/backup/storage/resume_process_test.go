@@ -413,7 +413,7 @@ func TestResumableUploadsSurviveActualProcessDeath(t *testing.T) {
 				server := httptest.NewTLSServer(protocol)
 				defer server.Close()
 				defer protocol.releaseOnce.Do(func() { close(protocol.release) })
-				directory := t.TempDir()
+				directory := privateCheckpointDirectory(t)
 				cfg := resumeChildConfig{Kind: kind, Root: directory, Input: input, SHA256: receipt, Address: server.URL, Certificate: base64.StdEncoding.EncodeToString(server.Certificate().Raw), Report: filepath.Join(t.TempDir(), "report.json")}
 				cfgPath := filepath.Join(t.TempDir(), "child.json")
 				encoded, _ := json.Marshal(cfg)

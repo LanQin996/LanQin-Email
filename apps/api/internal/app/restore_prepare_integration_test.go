@@ -20,7 +20,7 @@ func TestRestorePrepareAcceptsCurrentApplicationSchemaAndRuntimeMapping(t *testi
 	if _, err := a.backfillSQLiteMessagesToMaildir(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	captured, err := PrepareOnlineBackup(t.Context(), a.cfg, t.TempDir(), DefaultOnlineBackupOptions())
+	captured, err := PrepareOnlineBackup(t.Context(), a.cfg, privateBackupTestDir(t), DefaultOnlineBackupOptions())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestRestorePrepareAcceptsCurrentApplicationSchemaAndRuntimeMapping(t *testi
 	if _, err := backup.Restore(t.Context(), bytes.NewReader(encrypted.Bytes()), stage, identity.String(), hex.EncodeToString(hash[:]), backup.DefaultLimits()); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := install.Prepare(t.Context(), stage, t.TempDir(), "/runtime/data", "/runtime/mail", backup.DefaultLimits())
+	prepared, err := install.Prepare(t.Context(), stage, privateBackupTestDir(t), "/runtime/data", "/runtime/mail", backup.DefaultLimits())
 	if err != nil {
 		t.Fatal("healthy current application schema rejected", err)
 	}

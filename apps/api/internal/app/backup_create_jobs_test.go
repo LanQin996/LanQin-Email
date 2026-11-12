@@ -19,7 +19,7 @@ func backupSnapshotJobFixture(t *testing.T, a *App) (string, []string, string) {
 	}
 	a.cfg.BackupRecipient = identity.Recipient().String()
 	setBackupTestPassword(t, a, "synthetic snapshot password")
-	a.cfg.BackupWorkspace = t.TempDir()
+	a.cfg.BackupWorkspace = privateBackupTestDir(t)
 	a.cfg.MaildirRoot = t.TempDir()
 	_, raw, err := a.loadBackupDestinationState(t.Context())
 	if err != nil {

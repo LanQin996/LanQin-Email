@@ -51,7 +51,7 @@ func newDiscoveryFixture(t *testing.T, kind string) discoveryFixture {
 	a := newTestApp(t)
 	a.cfg.BackupSecretKey = backupTestKey
 	a.cfg.MaildirRoot = t.TempDir()
-	a.cfg.BackupRestoreDir = t.TempDir()
+	a.cfg.BackupRestoreDir = privateBackupTestDir(t)
 	// Independent discovery must work after the instance's original local
 	// artifact catalog and upload history have gone away.
 	a.cfg.BackupArtifactDir = filepath.Join(t.TempDir(), "absent-local-catalog")
@@ -99,7 +99,7 @@ func newDiscoveryFixture(t *testing.T, kind string) discoveryFixture {
 	if _, err := a.backfillSQLiteMessagesToMaildir(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, t.TempDir(), DefaultOnlineBackupOptions())
+	prepared, err := PrepareOnlineBackup(t.Context(), a.cfg, privateBackupTestDir(t), DefaultOnlineBackupOptions())
 	if err != nil {
 		t.Fatal(err)
 	}

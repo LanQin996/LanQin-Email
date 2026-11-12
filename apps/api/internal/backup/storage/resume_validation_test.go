@@ -73,7 +73,7 @@ func TestDriveResumeRejectsUntrustedProgressAndReadback(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			store, err := OpenFileCheckpointStore(t.TempDir(), "validation", bytes.Repeat([]byte{0x56}, 32))
+			store, err := OpenFileCheckpointStore(privateCheckpointDirectory(t), "validation", bytes.Repeat([]byte{0x56}, 32))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,7 +105,7 @@ func TestResumeRejectsChangedSourceAndCredentialsBeforeNetwork(t *testing.T) {
 	input, receipt, data := fixture(t)
 	for _, scenario := range []string{"source", "credentials", "type", "name"} {
 		t.Run(scenario, func(t *testing.T) {
-			store, err := OpenFileCheckpointStore(t.TempDir(), "validation", bytes.Repeat([]byte{0x56}, 32))
+			store, err := OpenFileCheckpointStore(privateCheckpointDirectory(t), "validation", bytes.Repeat([]byte{0x56}, 32))
 			if err != nil {
 				t.Fatal(err)
 			}
