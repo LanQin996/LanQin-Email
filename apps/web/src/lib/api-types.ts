@@ -614,6 +614,7 @@ export type SystemSettings = {
 }
 export type SystemSettingsPayload = Omit<
   SystemSettings,
+  | "siteTitle"
   | "smtpPasswordSet"
   | "turnstileSecretSet"
   | "linuxDoClientSecretSet"

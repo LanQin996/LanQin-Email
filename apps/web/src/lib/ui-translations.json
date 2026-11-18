@@ -666,6 +666,13 @@
     "zh-TW": "無法讀取或儲存備份設定，請稍後重試",
     "en": "Cannot load or save backup configuration; try again later"
   },
+  "站点品牌": { "zh-TW": "網站品牌", "en": "Site branding" },
+  "保存网站标题": { "zh-TW": "儲存網站標題", "en": "Save website title" },
+  "网站标题已保存": { "zh-TW": "網站標題已儲存", "en": "Website title saved" },
+  "无法修改站点品牌": {
+    "zh-TW": "無法修改網站品牌",
+    "en": "You do not have permission to edit site branding"
+  },
   "网站标题": { "zh-TW": "網站標題", "en": "Website title" },
   "网站图标": { "zh-TW": "網站圖示", "en": "Website icon" },
   "选择 ICO 文件": { "zh-TW": "選擇 ICO 檔案", "en": "Choose ICO file" },

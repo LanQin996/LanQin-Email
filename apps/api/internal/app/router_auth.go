@@ -236,6 +236,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/delivery-queue/{queueType}/{id}/retry", a.handleAdminDeliveryQueueRetry)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/delivery-queue/{queueType}/{id}", a.handleAdminDeliveryQueueCancel)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings", a.handleUpdateSystemSettings)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/branding", a.handleUpdateSiteBranding)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme", a.handleUpdateUITheme)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/layouts", a.handleUpdateUILayouts)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/favicon", a.handleUploadFavicon)

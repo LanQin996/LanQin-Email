@@ -695,6 +695,11 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ revision }),
     }),
+  updateSiteBranding: (siteTitle: string) =>
+    request<{ siteTitle: string }>("/api/admin/settings/branding", {
+      method: "POST",
+      body: JSON.stringify({ siteTitle }),
+    }),
   uploadFavicon: (file: File) => {
     const form = new FormData()
     form.append("file", file)
