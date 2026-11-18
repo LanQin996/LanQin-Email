@@ -1,0 +1,7 @@
+{
+  "apiVersion": 1,
+  "id": "workbench",
+  "name": "工作台模板",
+  "author": "LanQin Email",
+  "surfaces": ["front", "admin"]
+}

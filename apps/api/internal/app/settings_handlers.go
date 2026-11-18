@@ -92,6 +92,7 @@ type systemSettingsUpdate struct {
 
 type PublicSettings struct {
 	ThemeID                    string         `json:"themeId"`
+	FrontLayoutID              string         `json:"frontLayoutId"`
 	OpenRegistration           bool           `json:"openRegistration"`
 	InviteRegistrationEnabled  bool           `json:"inviteRegistrationEnabled"`
 	TurnstileEnabled           bool           `json:"turnstileEnabled"`
@@ -131,6 +132,10 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	settings.ThemeID = defaultUIThemeID
 	if id, err := a.readUIThemeID(r.Context()); err == nil {
 		settings.ThemeID = id
+	}
+	settings.FrontLayoutID = defaultUILayoutID
+	if layouts, err := a.readUILayouts(r.Context()); err == nil {
+		settings.FrontLayoutID = layouts.FrontLayoutID
 	}
 
 	// Include available domains for mailbox creation during registration

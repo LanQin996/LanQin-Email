@@ -631,8 +631,10 @@ export type SystemSettingsPayload = Omit<
 }
 export type PublicDomain = { id: string; name: string }
 export type UIThemeSettings = { themeId: string }
+export type UILayoutSettings = { frontLayoutId: string; adminLayoutId: string }
 export type PublicSettings = {
   themeId?: string
+  frontLayoutId?: string
   openRegistration: boolean
   inviteRegistrationEnabled: boolean
   turnstileEnabled: boolean

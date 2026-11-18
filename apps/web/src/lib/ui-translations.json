@@ -5778,5 +5778,65 @@
   "上次确认的阶段耗时": {
     "zh-TW": "上次確認的階段耗時",
     "en": "Time in stage at last confirmation"
+  },
+  "工作台模板": {
+    "zh-TW": "工作臺版型",
+    "en": "Workbench layout"
+  },
+  "界面模板管理": {
+    "zh-TW": "介面版型管理",
+    "en": "Interface layouts"
+  },
+  "用户前台模板": {
+    "zh-TW": "使用者前臺版型",
+    "en": "User-facing layout"
+  },
+  "管理后台模板": {
+    "zh-TW": "管理後臺版型",
+    "en": "Administration layout"
+  },
+  "预览模板": {
+    "zh-TW": "預覽版型",
+    "en": "Preview layout"
+  },
+  "应用模板": {
+    "zh-TW": "套用版型",
+    "en": "Apply layout"
+  },
+  "恢复经典模板": {
+    "zh-TW": "恢復經典版型",
+    "en": "Restore Classic layout"
+  },
+  "应用到前台和后台": {
+    "zh-TW": "套用至前臺與後臺",
+    "en": "Apply to both areas"
+  },
+  "以经典布局打开模板设置": {
+    "zh-TW": "以經典版型開啟版型設定",
+    "en": "Open layout settings in Classic"
+  },
+  "桌面尺寸": {
+    "zh-TW": "桌面尺寸",
+    "en": "Desktop size"
+  },
+  "手机尺寸": {
+    "zh-TW": "手機尺寸",
+    "en": "Phone size"
+  },
+  "浅色预览": {
+    "zh-TW": "淺色預覽",
+    "en": "Light preview"
+  },
+  "深色预览": {
+    "zh-TW": "深色預覽",
+    "en": "Dark preview"
+  },
+  "预览使用示例数据，不会应用模板": {
+    "zh-TW": "預覽使用示例資料，不會套用版型",
+    "en": "Preview uses sample data and does not apply the layout."
+  },
+  "示例邮件": {
+    "zh-TW": "示例郵件",
+    "en": "Sample message"
   }
 }

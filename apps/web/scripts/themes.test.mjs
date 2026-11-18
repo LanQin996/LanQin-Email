@@ -117,3 +117,34 @@ test("Paper text pairs meet 4.5:1 contrast on key surfaces", () => {
     }
   }
 })
+
+test("layout pack manifests validate independently for each area", async () => {
+  const source = readFileSync(new URL("../src/themes/layouts/manifest.ts", import.meta.url), "utf8")
+  const { outputText: js } = ts.transpileModule(source, {
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext },
+  })
+  const { isLayoutManifest, resolveLayoutFrom } = await import(
+    "data:text/javascript;base64," + Buffer.from(js).toString("base64")
+  )
+  const readPack = (id) => {
+    const path = new URL(`../src/themes/layouts/packs/${id}/theme.json`, import.meta.url)
+    const raw = readFileSync(path, "utf8")
+    assertUniqueJSONProperties(raw, path.pathname)
+    const value = JSON.parse(raw)
+    assert.equal(value.id, id)
+    assert.ok(isLayoutManifest(value))
+    return value
+  }
+  const classic = readPack("classic")
+  const workbench = readPack("workbench")
+  const fixture = { ...workbench, id: "mail-only", surfaces: ["front"] }
+  assert.ok(isLayoutManifest(fixture))
+  assert.ok(!isLayoutManifest({ ...workbench, apiVersion: 2 }))
+  assert.ok(!isLayoutManifest({ ...workbench, id: " invalid\n" }))
+  assert.ok(!isLayoutManifest({ ...workbench, surfaces: ["front", "front"] }))
+  const layouts = [classic, workbench, fixture]
+  assert.equal(resolveLayoutFrom(layouts, "workbench", "admin"), "workbench")
+  assert.equal(resolveLayoutFrom(layouts, "mail-only", "front"), "mail-only")
+  assert.equal(resolveLayoutFrom(layouts, "mail-only", "admin"), "classic")
+  assert.equal(resolveLayoutFrom(layouts, "missing", "front"), "classic")
+})

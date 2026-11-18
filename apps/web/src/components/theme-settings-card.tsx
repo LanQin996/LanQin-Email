@@ -14,10 +14,20 @@ import { api, type PublicSettings } from "@/lib/api"
 import { uiText, useLanguage } from "@/lib/language"
 import { adminThemeKey } from "@/lib/site-theme"
 import { DEFAULT_THEME_ID, resolveThemeId, themes } from "@/themes/registry"
+import { LayoutSettingsCard } from "./layout-settings-card"
 
 const publicSettingsKey = ["public-settings"] as const
 
 export function ThemeSettingsCard({ canUpdate }: { canUpdate: boolean }) {
+  return (
+    <div className="space-y-4">
+      <LayoutSettingsCard canUpdate={canUpdate} />
+      <ColorThemeSettingsCard canUpdate={canUpdate} />
+    </div>
+  )
+}
+
+function ColorThemeSettingsCard({ canUpdate }: { canUpdate: boolean }) {
   useLanguage()
   const client = useQueryClient()
   const current = useQuery({ queryKey: adminThemeKey, queryFn: api.uiTheme })

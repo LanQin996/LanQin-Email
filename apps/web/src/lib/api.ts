@@ -50,6 +50,7 @@ import type {
   SystemSettingsPayload,
   PublicSettings,
   UIThemeSettings,
+  UILayoutSettings,
   LoginPayload,
   LoginResponse,
   RegisterPayload,
@@ -131,6 +132,13 @@ export const api = {
     request<UIThemeSettings>("/api/admin/settings/theme", {
       method: "POST",
       body: JSON.stringify({ themeId }),
+    }),
+  siteLayout: () => request<Pick<UILayoutSettings, "adminLayoutId">>("/api/me/site-layout"),
+  uiLayouts: () => request<UILayoutSettings>("/api/admin/settings/layouts"),
+  setUILayouts: (selection: Partial<UILayoutSettings>) =>
+    request<UILayoutSettings>("/api/admin/settings/layouts", {
+      method: "POST",
+      body: JSON.stringify(selection),
     }),
   register: (payload: RegisterPayload) =>
     request<{ user: User }>("/api/auth/register", {

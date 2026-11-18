@@ -1,3 +1,7 @@
+import { LayoutBoundary } from "@/components/layout-boundary"
+import { useTemplateLayout } from "@/lib/template-layout"
+import type { FrontDesktopSlots } from "@/themes/layouts/front/front-layout"
+import { frontTemplateLayouts, getFrontLayoutTemplate } from "@/themes/layouts/front/registry"
 import {
   uiMessage,
   type UiText,
@@ -113,7 +117,6 @@ import {
 } from "@/components/ui/select"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
 import {
   Sidebar,
   SidebarContent,
@@ -191,7 +194,7 @@ export function ProfilePage() {
   const passwordFormRef = React.useRef<HTMLFormElement>(null)
   const twoFactorFormRef = React.useRef<HTMLFormElement>(null)
   const sidebarPanelRef = React.useRef<ImperativePanelHandle>(null)
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
+  const [classicSidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const [mailboxId, setMailboxId] = React.useState(
     () => localStorage.getItem("lanqin:selected-mailbox") || ""
   )
@@ -202,6 +205,15 @@ export function ProfilePage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false)
   const [externalRunAccountId, setExternalRunAccountId] = React.useState("")
   const isMobile = useIsMobile()
+  const layoutId = useTemplateLayout("front")
+  const template = getFrontLayoutTemplate(layoutId)
+  const { desktop: DesktopLayout } = template
+  const { desktop: ClassicDesktop } = frontTemplateLayouts.classic
+  const customLayout = template.id !== "classic"
+  const sidebarCollapsed = !isMobile && classicSidebarCollapsed
+  React.useEffect(() => {
+    if (isMobile || customLayout) setSidebarCollapsed(false)
+  }, [isMobile, customLayout])
   const themeMountedRef = React.useRef(false)
 
   const rawTab = params.get("tab") as Tab | null
@@ -759,39 +771,45 @@ export function ProfilePage() {
       </div>
     )
 
+  const profileNavigation = (
+    <SidebarContent>
+      <SidebarGroup>
+        {!sidebarCollapsed && <SidebarGroupLabel>{uiText("个人中心")}</SidebarGroupLabel>}
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {visibleTabKeys.map((key) => (
+              <SidebarMenuItem key={key}>
+                <SidebarMenuButton
+                  isActive={tab === key}
+                  className={cn(sidebarCollapsed && "justify-center px-0")}
+                  onClick={() => setTab(key)}
+                >
+                  {tabs[key].icon}
+                  {!sidebarCollapsed && <span>{uiText(tabs[key].label)}</span>}
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </SidebarContent>
+  )
+  const profileIdentity = (
+    <AccountHeader
+      collapsed={sidebarCollapsed}
+      name={user.displayName || selectedMailbox?.address || "LanQin"}
+      email={user.email || selectedMailbox?.address}
+      darkMode={darkMode}
+      onToggleTheme={() => setDarkMode((v) => !v)}
+      onBack={() => navigate("/")}
+    />
+  )
   const sidebarContent = (
     <Sidebar collapsible="none" className="h-full w-full border-r bg-sidebar">
       <SidebarHeader className={cn("border-b py-4", sidebarCollapsed ? "px-2" : "px-4")}>
-        <AccountHeader
-          collapsed={sidebarCollapsed}
-          name={user.displayName || selectedMailbox?.address || "LanQin"}
-          email={user.email || selectedMailbox?.address}
-          darkMode={darkMode}
-          onToggleTheme={() => setDarkMode((v) => !v)}
-          onBack={() => navigate("/")}
-        />
+        {profileIdentity}
       </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          {!sidebarCollapsed && <SidebarGroupLabel>{uiText("个人中心")}</SidebarGroupLabel>}
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {visibleTabKeys.map((key) => (
-                <SidebarMenuItem key={key}>
-                  <SidebarMenuButton
-                    isActive={tab === key}
-                    className={cn(sidebarCollapsed && "justify-center px-0")}
-                    onClick={() => setTab(key)}
-                  >
-                    {tabs[key].icon}
-                    {!sidebarCollapsed && <span>{uiText(tabs[key].label)}</span>}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
+      {profileNavigation}
       <div
         className={cn("mt-auto border-t p-2", sidebarCollapsed ? "flex flex-col items-center" : "")}
       >
@@ -827,6 +845,36 @@ export function ProfilePage() {
       </div>
     </Sidebar>
   )
+
+  const desktopSlots: FrontDesktopSlots = {
+    sidebar: sidebarContent,
+    navigation: (
+      <>
+        {profileNavigation}
+        <div className="border-t p-2">
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start text-muted-foreground"
+            onClick={logout}
+          >
+            <LogOut className="h-4 w-4" />
+            {uiText("退出登录")}
+          </Button>
+        </div>
+      </>
+    ),
+    identity: <div className="w-48 min-w-0">{profileIdentity}</div>,
+    toolbar: <div className="text-sm font-semibold">{uiText(tabs[tab].label)}</div>,
+    content: (
+      <ScrollArea className="min-h-0 flex-1">
+        <main className="mx-auto w-full max-w-6xl p-6">{!isMobile && renderTab()}</main>
+      </ScrollArea>
+    ),
+    sidebarPanelRef,
+    onSidebarToggle: setSidebarCollapsed,
+  }
 
   return (
     <div className="h-svh overflow-hidden bg-background">
@@ -864,32 +912,12 @@ export function ProfilePage() {
               <main className="w-full min-w-0 max-w-full overflow-x-hidden p-4">{renderTab()}</main>
             </ScrollArea>
           </div>
+        ) : customLayout ? (
+          <LayoutBoundary layoutId={template.id} fallback={<ClassicDesktop {...desktopSlots} />}>
+            <DesktopLayout {...desktopSlots} />
+          </LayoutBoundary>
         ) : (
-          <ResizablePanelGroup direction="horizontal" className="h-full min-h-0 w-full">
-            <ResizablePanel
-              ref={sidebarPanelRef}
-              collapsible
-              collapsedSize={4}
-              defaultSize={15}
-              minSize={11}
-              maxSize={24}
-              onCollapse={() => setSidebarCollapsed(true)}
-              onExpand={() => setSidebarCollapsed(false)}
-            >
-              {sidebarContent}
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={85} minSize={60}>
-              <section className="flex h-full min-h-0 flex-col">
-                <header className="flex h-16 shrink-0 items-center justify-between gap-3 border-b px-5">
-                  <div className="text-sm font-semibold">{uiText(tabs[tab].label)}</div>
-                </header>
-                <ScrollArea className="min-h-0 flex-1">
-                  <main className="mx-auto w-full max-w-6xl p-6">{renderTab()}</main>
-                </ScrollArea>
-              </section>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+          <ClassicDesktop {...desktopSlots} />
         )}
       </SidebarProvider>
     </div>

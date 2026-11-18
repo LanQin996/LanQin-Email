@@ -1,3 +1,5 @@
+import { useTemplateLayout } from "@/lib/template-layout"
+import { FrontAuthLayout } from "@/themes/layouts/front/front-auth-layout"
 import { errorMessage } from "@/lib/ui-errors"
 import { LanguageSelector } from "@/components/language-selector"
 import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
@@ -25,6 +27,7 @@ import { validatePasswordConfirm } from "@/lib/validation"
 
 export function RegisterPage() {
   useUiLanguage()
+  const layoutId = useTemplateLayout("front")
 
   const me = useMe()
   const qc = useQueryClient()
@@ -98,219 +101,219 @@ export function RegisterPage() {
   const turnstileRequired = !!publicSettings.data?.turnstileEnabled
   if (me.data?.user) return <Navigate to="/" replace />
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-10">
-      <div className="w-full max-w-[420px]">
-        <div className="mb-7 text-center">
+    <FrontAuthLayout
+      layoutId={layoutId}
+      brand={
+        <>
           <div className="flex justify-end">
             <LanguageSelector />
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             {publicSettings.data?.siteTitle || "LanQin Email"}
           </h1>
-        </div>
-        <div className="rounded-lg border bg-background p-6 shadow-sm sm:p-7">
-          <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <UserPlus className="h-4 w-4" />
-            {linuxDoRegistration ? uiText("补全 Linux.do 注册信息") : uiText("注册账号")}
+        </>
+      }
+      footer={
+        !linuxDoRegistration &&
+        !(
+          publicSettings.isSuccess &&
+          !publicSettings.data.openRegistration &&
+          !publicSettings.data.inviteRegistrationEnabled
+        ) && (
+          <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <span>{uiText("已有账号？")}</span>
+            <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
+              <Link to="/login">{uiText("返回登录")}</Link>
+            </Button>
           </div>
-          {linuxDoRegistration && pendingLinuxDo.isLoading ? (
-            <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
-              {uiText("正在加载已验证的 Linux.do 账号...")}
+        )
+      }
+    >
+      <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        <UserPlus className="h-4 w-4" />
+        {linuxDoRegistration ? uiText("补全 Linux.do 注册信息") : uiText("注册账号")}
+      </div>
+      {linuxDoRegistration && pendingLinuxDo.isLoading ? (
+        <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+          {uiText("正在加载已验证的 Linux.do 账号...")}
+        </div>
+      ) : linuxDoRegistration && pendingLinuxDo.isError ? (
+        <div className="space-y-5">
+          <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+            {uiText(errorMessage(pendingLinuxDo.error))}
+          </div>
+          <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
+            <Link to="/login">
+              <ArrowLeft className="h-4 w-4" />
+              {uiText("重新登录")}
+            </Link>
+          </Button>
+        </div>
+      ) : linuxDoRegistration && pendingLinuxDo.isSuccess && domains.length === 0 ? (
+        <div className="space-y-5">
+          <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+            {uiText("当前没有可用于注册的邮箱域名")}
+          </div>
+          <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
+            <Link to="/login">
+              <ArrowLeft className="h-4 w-4" />
+              {uiText("返回登录")}
+            </Link>
+          </Button>
+        </div>
+      ) : !linuxDoRegistration &&
+        publicSettings.isSuccess &&
+        !publicSettings.data.openRegistration &&
+        !publicSettings.data.inviteRegistrationEnabled ? (
+        <div className="space-y-5">
+          <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
+            {uiText("当前未开放注册")}
+          </div>
+          <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
+            <Link to="/login">
+              <ArrowLeft className="h-4 w-4" />
+              {uiText("返回登录")}
+            </Link>
+          </Button>
+        </div>
+      ) : (
+        <form
+          className="space-y-5"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (turnstileRequired && !turnstileToken) {
+              toast({ title: "请先完成人机验证" })
+              return
+            }
+            register.mutate(new FormData(e.currentTarget))
+          }}
+        >
+          {linuxDoRegistration && pendingLinuxDo.data && (
+            <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+              {uiText("已验证 Linux.do 用户{0}", [" "])}
+              <span className="font-medium text-foreground">@{pendingLinuxDo.data.username}</span>
             </div>
-          ) : linuxDoRegistration && pendingLinuxDo.isError ? (
-            <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
-                {uiText(errorMessage(pendingLinuxDo.error))}
+          )}
+          {domains.length > 0 ? (
+            <div className="space-y-2">
+              <Label htmlFor="localPart" className="text-sm font-medium">
+                {uiText("邮箱地址")}
+              </Label>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
+                <Input
+                  id="localPart"
+                  name="localPart"
+                  className="h-11 text-base"
+                  placeholder={uiText("邮箱前缀")}
+                  required
+                />
+                <Select value={domainId} onValueChange={setDomainId} required>
+                  <SelectTrigger className="h-11">
+                    <SelectValue placeholder={uiText("选择域名")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {domains.map((d) => (
+                      <SelectItem key={d.id} value={d.id}>
+                        {d.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
-                <Link to="/login">
-                  <ArrowLeft className="h-4 w-4" />
-                  {uiText("重新登录")}
-                </Link>
-              </Button>
-            </div>
-          ) : linuxDoRegistration && pendingLinuxDo.isSuccess && domains.length === 0 ? (
-            <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
-                {uiText("当前没有可用于注册的邮箱域名")}
-              </div>
-              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
-                <Link to="/login">
-                  <ArrowLeft className="h-4 w-4" />
-                  {uiText("返回登录")}
-                </Link>
-              </Button>
-            </div>
-          ) : !linuxDoRegistration &&
-            publicSettings.isSuccess &&
-            !publicSettings.data.openRegistration &&
-            !publicSettings.data.inviteRegistrationEnabled ? (
-            <div className="space-y-5">
-              <div className="rounded-md bg-muted/40 px-4 py-3 text-center text-sm text-muted-foreground">
-                {uiText("当前未开放注册")}
-              </div>
-              <Button type="button" variant="outline" className="h-11 w-full text-base" asChild>
-                <Link to="/login">
-                  <ArrowLeft className="h-4 w-4" />
-                  {uiText("返回登录")}
-                </Link>
-              </Button>
             </div>
           ) : (
-            <form
-              className="space-y-5"
-              onSubmit={(e) => {
-                e.preventDefault()
-                if (turnstileRequired && !turnstileToken) {
-                  toast({ title: "请先完成人机验证" })
-                  return
-                }
-                register.mutate(new FormData(e.currentTarget))
-              }}
-            >
-              {linuxDoRegistration && pendingLinuxDo.data && (
-                <div className="rounded-md bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-                  {uiText("已验证 Linux.do 用户{0}", [" "])}
-                  <span className="font-medium text-foreground">
-                    @{pendingLinuxDo.data.username}
-                  </span>
-                </div>
-              )}
-              {domains.length > 0 ? (
-                <div className="space-y-2">
-                  <Label htmlFor="localPart" className="text-sm font-medium">
-                    {uiText("邮箱地址")}
-                  </Label>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_150px]">
-                    <Input
-                      id="localPart"
-                      name="localPart"
-                      className="h-11 text-base"
-                      placeholder={uiText("邮箱前缀")}
-                      required
-                    />
-                    <Select value={domainId} onValueChange={setDomainId} required>
-                      <SelectTrigger className="h-11">
-                        <SelectValue placeholder={uiText("选择域名")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {domains.map((d) => (
-                          <SelectItem key={d.id} value={d.id}>
-                            {d.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-medium">
-                    {uiText("邮箱")}
-                  </Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autoComplete="username"
-                    required
-                    className="h-11 text-base"
-                  />
-                </div>
-              )}
-              <div className="space-y-2">
-                <Label htmlFor="displayName" className="text-sm font-medium">
-                  {uiText("显示名称")}
-                </Label>
-                <Input
-                  id="displayName"
-                  name="displayName"
-                  autoComplete="name"
-                  defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""}
-                  className="h-11 text-base"
-                />
-              </div>
-              {!linuxDoRegistration &&
-                publicSettings.data?.inviteRegistrationEnabled &&
-                !publicSettings.data.openRegistration && (
-                  <div className="space-y-2">
-                    <Label htmlFor="inviteCode" className="text-sm font-medium">
-                      {uiText("邀请码")}
-                    </Label>
-                    <Input
-                      id="inviteCode"
-                      name="inviteCode"
-                      autoComplete="off"
-                      required
-                      className="h-11 font-mono text-base uppercase"
-                      placeholder={uiText("请输入邀请码")}
-                    />
-                  </div>
-                )}
-              <div className="space-y-2">
-                <Label htmlFor="password" className="text-sm font-medium">
-                  {uiText("密码")}
-                </Label>
-                <PasswordInput
-                  id="password"
-                  name="password"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  className="h-11 text-base"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword" className="text-sm font-medium">
-                  {uiText("确认密码")}
-                </Label>
-                <PasswordInput
-                  id="confirmPassword"
-                  name="confirmPassword"
-                  autoComplete="new-password"
-                  minLength={8}
-                  required
-                  className="h-11 text-base"
-                />
-              </div>
-              {turnstileRequired && (
-                <TurnstileBox
-                  siteKey={publicSettings.data?.turnstileSiteKey || ""}
-                  onToken={setTurnstileToken}
-                />
-              )}
-              <Button
-                className="h-11 w-full text-base"
-                disabled={
-                  register.isPending ||
-                  publicSettings.isLoading ||
-                  (linuxDoRegistration && pendingLinuxDo.isLoading)
-                }
-              >
-                {register.isPending
-                  ? uiText("注册中...")
-                  : linuxDoRegistration
-                    ? uiText("完成注册")
-                    : uiText("注册")}
-                {!register.isPending && <ArrowRight className="h-4 w-4" />}
-              </Button>
-            </form>
-          )}
-        </div>
-        {!linuxDoRegistration &&
-          !(
-            publicSettings.isSuccess &&
-            !publicSettings.data.openRegistration &&
-            !publicSettings.data.inviteRegistrationEnabled
-          ) && (
-            <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
-              <span>{uiText("已有账号？")}</span>
-              <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
-                <Link to="/login">{uiText("返回登录")}</Link>
-              </Button>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-sm font-medium">
+                {uiText("邮箱")}
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                required
+                className="h-11 text-base"
+              />
             </div>
           )}
-      </div>
-    </div>
+          <div className="space-y-2">
+            <Label htmlFor="displayName" className="text-sm font-medium">
+              {uiText("显示名称")}
+            </Label>
+            <Input
+              id="displayName"
+              name="displayName"
+              autoComplete="name"
+              defaultValue={linuxDoRegistration ? pendingLinuxDo.data?.displayName : ""}
+              className="h-11 text-base"
+            />
+          </div>
+          {!linuxDoRegistration &&
+            publicSettings.data?.inviteRegistrationEnabled &&
+            !publicSettings.data.openRegistration && (
+              <div className="space-y-2">
+                <Label htmlFor="inviteCode" className="text-sm font-medium">
+                  {uiText("邀请码")}
+                </Label>
+                <Input
+                  id="inviteCode"
+                  name="inviteCode"
+                  autoComplete="off"
+                  required
+                  className="h-11 font-mono text-base uppercase"
+                  placeholder={uiText("请输入邀请码")}
+                />
+              </div>
+            )}
+          <div className="space-y-2">
+            <Label htmlFor="password" className="text-sm font-medium">
+              {uiText("密码")}
+            </Label>
+            <PasswordInput
+              id="password"
+              name="password"
+              autoComplete="new-password"
+              minLength={8}
+              required
+              className="h-11 text-base"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="confirmPassword" className="text-sm font-medium">
+              {uiText("确认密码")}
+            </Label>
+            <PasswordInput
+              id="confirmPassword"
+              name="confirmPassword"
+              autoComplete="new-password"
+              minLength={8}
+              required
+              className="h-11 text-base"
+            />
+          </div>
+          {turnstileRequired && (
+            <TurnstileBox
+              siteKey={publicSettings.data?.turnstileSiteKey || ""}
+              onToken={setTurnstileToken}
+            />
+          )}
+          <Button
+            className="h-11 w-full text-base"
+            disabled={
+              register.isPending ||
+              publicSettings.isLoading ||
+              (linuxDoRegistration && pendingLinuxDo.isLoading)
+            }
+          >
+            {register.isPending
+              ? uiText("注册中...")
+              : linuxDoRegistration
+                ? uiText("完成注册")
+                : uiText("注册")}
+            {!register.isPending && <ArrowRight className="h-4 w-4" />}
+          </Button>
+        </form>
+      )}
+    </FrontAuthLayout>
   )
 }
