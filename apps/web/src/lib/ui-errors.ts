@@ -1,6 +1,18 @@
 import { exactTranslations } from "@/lib/language"
 
 const knownErrors: Record<string, string> = {
+  "Invalid theme package archive or manifest": "主题包压缩文件或清单无效",
+  "Could not import a valid GitHub theme package release":
+    "无法从 GitHub 获取有效的主题包，请检查发布附件",
+  "Theme package ID is already installed": "此主题包已安装",
+  "Theme package version is already installed": "此版本已安装，无需更新",
+  "Disable the theme package on each active surface before removing it": "请先停用此主题包",
+  "No previous theme package version is installed": "没有可回退的版本",
+  "Theme package catalog is full": "主题包目录已满，请先删除不使用的主题包",
+  "Theme package version changed; refresh before activating": "主题包版本已变更，请重新确认后启用",
+  "Update must match the installed GitHub source and theme package ID":
+    "更新与已安装的主题包来源或 ID 不符",
+  "Theme package does not support this surface": "此主题包不支持这个界面",
   backup_encryption_invalid: "备份加密设置无效，请检查密码与加密方式",
   backup_encryption_conflict: "备份加密设置已变化，请关闭窗口重新打开后重试",
   backup_encryption_unavailable: "无法读取或保存备份加密设置，请检查服务器加密配置",

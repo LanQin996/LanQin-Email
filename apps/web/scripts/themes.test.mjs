@@ -5,12 +5,19 @@ import ts from "typescript"
 import postcss from "postcss"
 import { assertUniqueJSONProperties } from "./theme-json.mjs"
 
-const themeSource = readFileSync(new URL("../src/themes/contract.ts", import.meta.url), "utf8")
-const { outputText } = ts.transpileModule(themeSource, {
-  compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext },
-})
+function transpileThemeModule(name, transform = (source) => source) {
+  const source = readFileSync(new URL(`../src/themes/${name}.ts`, import.meta.url), "utf8")
+  const { outputText } = ts.transpileModule(transform(source), {
+    compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext },
+  })
+  return "data:text/javascript;base64," + Buffer.from(outputText).toString("base64")
+}
+const contractModule = transpileThemeModule("contract")
 const { DEFAULT_THEME_ID, readThemePack, renderThemeCSS, resolveThemeId, validateThemeIds } =
-  await import("data:text/javascript;base64," + Buffer.from(outputText).toString("base64"))
+  await import(contractModule)
+const { normalizeThemePackage, runtimeThemeCSS } = await import(
+  transpileThemeModule("runtime-package", (source) => source.replace("./contract", contractModule))
+)
 
 const paperText = readFileSync(new URL("../src/themes/paper/theme.json", import.meta.url), "utf8")
 const paper = JSON.parse(paperText)
@@ -147,4 +154,34 @@ test("layout pack manifests validate independently for each area", async () => {
   assert.equal(resolveLayoutFrom(layouts, "mail-only", "front"), "mail-only")
   assert.equal(resolveLayoutFrom(layouts, "mail-only", "admin"), "classic")
   assert.equal(resolveLayoutFrom(layouts, "missing", "front"), "classic")
+})
+
+
+test("runtime package CSS uses only scoped allowlisted tokens from the selected appearance", () => {
+  const front = normalizeThemePackage({
+    layout: "workbench",
+    light: { background: "40 26% 96%", radius: "0.65rem" },
+    dark: { background: "28 17% 12%" },
+  })
+  const admin = normalizeThemePackage({
+    layout: "classic",
+    light: { background: "45 15% 97%" },
+    dark: {},
+  })
+  assert.equal(front.layout, "workbench")
+  assert.equal(admin.layout, "classic")
+  const frontCSS = postcss.parse(runtimeThemeCSS(front)).nodes
+  const adminCSS = postcss.parse(runtimeThemeCSS(admin)).nodes
+  assert.deepEqual(
+    frontCSS.map((rule) => rule.selector),
+    ["html:root[data-lanqin-theme]:not(.dark)", "html:root[data-lanqin-theme].dark"]
+  )
+  assert.equal(frontCSS[0].nodes.find(({ prop }) => prop === "--background").value, "40 26% 96%")
+  assert.equal(frontCSS[1].nodes.find(({ prop }) => prop === "--background").value, "28 17% 12%")
+  assert.equal(adminCSS[0].nodes.find(({ prop }) => prop === "--background").value, "45 15% 97%")
+  assert.equal(adminCSS[0].nodes.some(({ prop }) => prop === "--radius"), false)
+  assert.equal(normalizeThemePackage({ ...front, layout: "external" }), undefined)
+  assert.equal(normalizeThemePackage({ ...front, light: null }), undefined)
+  assert.equal(normalizeThemePackage({ ...front, light: { radius: "3rem" } }), undefined)
+  assert.equal(normalizeThemePackage({ ...front, dark: { unknown: "0 0% 0%" } }), undefined)
 })

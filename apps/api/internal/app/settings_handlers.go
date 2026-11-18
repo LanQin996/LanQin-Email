@@ -92,20 +92,21 @@ type systemSettingsUpdate struct {
 }
 
 type PublicSettings struct {
-	ThemeID                    string         `json:"themeId"`
-	FrontLayoutID              string         `json:"frontLayoutId"`
-	OpenRegistration           bool           `json:"openRegistration"`
-	InviteRegistrationEnabled  bool           `json:"inviteRegistrationEnabled"`
-	TurnstileEnabled           bool           `json:"turnstileEnabled"`
-	TurnstileSiteKey           string         `json:"turnstileSiteKey"`
-	PublicHostname             string         `json:"publicHostname"`
-	SiteTitle                  string         `json:"siteTitle"`
-	MailAutoRefresh            bool           `json:"mailAutoRefresh"`
-	MailRefreshMs              int            `json:"mailRefreshMs"`
-	ExternalIMAPEnabled        bool           `json:"externalImapEnabled"`
-	LinuxDoSSOEnabled          bool           `json:"linuxDoSSOEnabled"`
-	LinuxDoRegistrationEnabled bool           `json:"linuxDoRegistrationEnabled"`
-	MailboxDomains             []PublicDomain `json:"mailboxDomains,omitempty"`
+	ThemeID                    string                  `json:"themeId"`
+	FrontLayoutID              string                  `json:"frontLayoutId"`
+	ThemePackage               *themePackageAppearance `json:"themePackage,omitempty"`
+	OpenRegistration           bool                    `json:"openRegistration"`
+	InviteRegistrationEnabled  bool                    `json:"inviteRegistrationEnabled"`
+	TurnstileEnabled           bool                    `json:"turnstileEnabled"`
+	TurnstileSiteKey           string                  `json:"turnstileSiteKey"`
+	PublicHostname             string                  `json:"publicHostname"`
+	SiteTitle                  string                  `json:"siteTitle"`
+	MailAutoRefresh            bool                    `json:"mailAutoRefresh"`
+	MailRefreshMs              int                     `json:"mailRefreshMs"`
+	ExternalIMAPEnabled        bool                    `json:"externalImapEnabled"`
+	LinuxDoSSOEnabled          bool                    `json:"linuxDoSSOEnabled"`
+	LinuxDoRegistrationEnabled bool                    `json:"linuxDoRegistrationEnabled"`
+	MailboxDomains             []PublicDomain          `json:"mailboxDomains,omitempty"`
 }
 
 type PublicDomain struct {
@@ -138,6 +139,7 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	if layouts, err := a.readUILayouts(r.Context()); err == nil {
 		settings.FrontLayoutID = layouts.FrontLayoutID
 	}
+	settings.ThemePackage = a.readActiveThemePackage(r.Context(), themePackageFront)
 
 	// Include available domains for mailbox creation during registration
 	if a.cfg.OpenRegistration || a.cfg.InviteRegistrationEnabled || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {

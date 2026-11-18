@@ -46,6 +46,7 @@ func TestExternalDatabaseContract(t *testing.T) {
 			t.Run("site appearance theme", func(t *testing.T) { assertUIThemeDatabaseContract(t, a) })
 			t.Run("site appearance layouts", func(t *testing.T) { assertUILayoutDatabaseContract(t, a) })
 			t.Run("site appearance branding", func(t *testing.T) { assertSiteBrandingDatabaseContract(t, a) })
+			t.Run("site appearance runtime packages", func(t *testing.T) { assertThemePackageDatabaseContract(t, a) })
 			t.Run("encrypted backup destinations", func(t *testing.T) {
 				assertBackupDestinationDatabaseContract(t, a)
 			})

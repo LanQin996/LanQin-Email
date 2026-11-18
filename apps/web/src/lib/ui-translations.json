@@ -1,4 +1,117 @@
 {
+  "主题包压缩文件或清单无效": {
+    "zh-TW": "主題套件的壓縮檔或資訊清單無效",
+    "en": "Invalid theme package archive or manifest"
+  },
+  "无法从 GitHub 获取有效的主题包，请检查发布附件": {
+    "zh-TW": "無法從 GitHub 取得有效的主題套件，請檢查發佈附件",
+    "en": "Couldn't import a valid theme package from GitHub. Check the release asset."
+  },
+  "此主题包已安装": {
+    "zh-TW": "此主題套件已安裝",
+    "en": "This theme package is already installed"
+  },
+  "此版本已安装，无需更新": {
+    "zh-TW": "此版本已安裝，無須更新",
+    "en": "This version is already installed"
+  },
+  "请先停用此主题包": {
+    "zh-TW": "請先停用此主題套件",
+    "en": "Disable this theme package before removing it"
+  },
+  "没有可回退的版本": { "zh-TW": "沒有可回復的版本", "en": "No previous version is available" },
+  "主题包目录已满，请先删除不使用的主题包": {
+    "zh-TW": "主題套件目錄已滿，請先刪除不使用的主題套件",
+    "en": "The theme catalog is full. Delete an unused theme package first."
+  },
+  "主题包版本已变更，请重新确认后启用": {
+    "zh-TW": "主題套件版本已變更，請重新確認後啟用",
+    "en": "The theme package version changed. Review it again before enabling it."
+  },
+  "更新与已安装的主题包来源或 ID 不符": {
+    "zh-TW": "更新與已安裝的主題套件來源或 ID 不符",
+    "en": "The update does not match the installed source or package ID"
+  },
+  "此主题包不支持这个界面": {
+    "zh-TW": "此主題套件不支援這個介面",
+    "en": "This theme package does not support this surface"
+  },
+  "API v{0}": { "zh-TW": "API v{0}", "en": "API v{0}" },
+  "GitHub 地址示例": {
+    "zh-TW": "https://github.com/owner/repo",
+    "en": "https://github.com/owner/repo"
+  },
+  "主题管理": { "zh-TW": "主題管理", "en": "Theme management" },
+  "用户前台": { "zh-TW": "使用者前台", "en": "User-facing pages" },
+  "管理后台": { "zh-TW": "管理後台", "en": "Admin dashboard" },
+  "正在读取主题包": { "zh-TW": "正在讀取主題套件", "en": "Loading theme packages" },
+  "无法读取主题包": { "zh-TW": "無法讀取主題套件", "en": "Couldn't load theme packages" },
+  "站点默认外观": { "zh-TW": "網站預設外觀", "en": "Default site appearance" },
+  "本地压缩包": { "zh-TW": "本機壓縮套件", "en": "Local archive" },
+  "请选择 .tar.gz 或 .tgz 主题包": {
+    "zh-TW": "請選擇 .tar.gz 或 .tgz 主題套件",
+    "en": "Choose a .tar.gz or .tgz theme package"
+  },
+  "主题包不得超过 1 MiB": {
+    "zh-TW": "主題套件不得超過 1 MiB",
+    "en": "Theme packages must be 1 MiB or smaller"
+  },
+  "安装本地主题包": { "zh-TW": "安裝本機主題套件", "en": "Install local theme package" },
+  "请输入公开 GitHub 仓库或发布链接": {
+    "zh-TW": "請輸入公開 GitHub 儲存庫或發佈連結",
+    "en": "Enter a public GitHub repository or release URL"
+  },
+  "GitHub 仓库或发布地址": {
+    "zh-TW": "GitHub 儲存庫或發佈網址",
+    "en": "GitHub repository or release URL"
+  },
+  "从 GitHub 安装": { "zh-TW": "從 GitHub 安裝", "en": "Install from GitHub" },
+  "主题包已安装，尚未启用": {
+    "zh-TW": "主題套件已安裝，尚未啟用",
+    "en": "Theme package installed but not enabled"
+  },
+  "主题包启用设置已保存。重新打开页面以应用新布局。": {
+    "zh-TW": "主題套件啟用設定已儲存。重新開啟頁面以套用新版面。",
+    "en": "Theme package activation saved. Reopen the page to apply the new layout."
+  },
+  "主题包已更新，已启用的版本保持不变": {
+    "zh-TW": "主題套件已更新，已啟用的版本維持不變",
+    "en": "Theme package updated. Active versions stayed the same."
+  },
+  "主题包已回退，已启用的版本保持不变": {
+    "zh-TW": "主題套件已回復，已啟用的版本維持不變",
+    "en": "Theme package rolled back. Active versions stayed the same."
+  },
+  "主题包已删除": { "zh-TW": "主題套件已刪除", "en": "Theme package deleted" },
+  "尚未安装主题包": { "zh-TW": "尚未安裝主題套件", "en": "No theme packages installed" },
+  "更新主题包 {0}？": { "zh-TW": "更新主題套件 {0}？", "en": "Update theme package {0}?" },
+  "回退主题包 {0}？": { "zh-TW": "回復主題套件 {0}？", "en": "Roll back theme package {0}?" },
+  "删除主题包 {0}？": { "zh-TW": "刪除主題套件 {0}？", "en": "Delete theme package {0}?" },
+  "将从 {0} 重新获取主题包；不会切换正在使用的版本。": {
+    "zh-TW": "將從 {0} 重新取得主題套件；不會切換使用中的版本。",
+    "en": "Fetch the theme package again from {0}? Active versions will not change."
+  },
+  "将可用版本回退到 {0}；不会切换正在使用的版本。": {
+    "zh-TW": "將可用版本回復至 {0}；不會切換使用中的版本。",
+    "en": "Set the available version back to {0}? Active versions will not change."
+  },
+  "删除后需重新安装才可使用。": {
+    "zh-TW": "刪除後需重新安裝才可使用。",
+    "en": "To use this package again, you’ll need to reinstall it."
+  },
+  "主题包版本 {0}": { "zh-TW": "主題套件版本 {0}", "en": "Package version {0}" },
+  "本地上传": { "zh-TW": "本機上傳", "en": "Local upload" },
+  "已启用版本 {0}": { "zh-TW": "已啟用版本 {0}", "en": "Enabled version {0}" },
+  "可启用": { "zh-TW": "可啟用", "en": "Available" },
+  "不支持": { "zh-TW": "不支援", "en": "Not supported" },
+  "预览": { "zh-TW": "預覽", "en": "Preview" },
+  "从 GitHub 更新": { "zh-TW": "從 GitHub 更新", "en": "Update from GitHub" },
+  "回退主题包": { "zh-TW": "回復主題套件", "en": "Roll back theme package" },
+  "删除主题包": { "zh-TW": "刪除主題套件", "en": "Delete theme package" },
+  "停用后可删除此主题包": {
+    "zh-TW": "停用後可刪除此主題套件",
+    "en": "Disable this theme package before deleting it"
+  },
   "经典主题": {
     "zh-TW": "經典主題",
     "en": "Classic"

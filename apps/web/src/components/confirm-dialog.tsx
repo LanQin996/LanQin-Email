@@ -13,6 +13,7 @@ type ConfirmDialogProps = {
   open: boolean
   title: UiText
   description?: UiText
+  error?: UiText
   confirmText?: UiText
   cancelText?: UiText
   destructive?: boolean
@@ -25,6 +26,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  error,
   confirmText = "确认",
   cancelText = "取消",
   destructive = false,
@@ -44,6 +46,11 @@ export function ConfirmDialog({
           <div className="whitespace-pre-line text-sm text-muted-foreground">
             {uiText(description)}
           </div>
+        )}
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {uiText(error)}
+          </p>
         )}
         <DialogFooter>
           <Button

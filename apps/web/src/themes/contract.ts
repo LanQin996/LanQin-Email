@@ -51,7 +51,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function readTokens(value: unknown, path: string): ThemeTokens {
+export function readThemeTokens(value: unknown, path: string): ThemeTokens {
   if (!isObject(value)) throw new Error(`${path} must be an object`)
   const entries = Object.entries(value).map(([key, val]) => {
     const label = `${path}.${key}`
@@ -104,8 +104,8 @@ export function readThemePack(value: unknown, source: string): ThemePack {
   const metadata = defineTheme({ version: 1, id: value.id, name: value.name })
   return {
     ...metadata,
-    light: readTokens(value.light, `${source}.light`),
-    dark: readTokens(value.dark, `${source}.dark`),
+    light: readThemeTokens(value.light, `${source}.light`),
+    dark: readThemeTokens(value.dark, `${source}.dark`),
   }
 }
 

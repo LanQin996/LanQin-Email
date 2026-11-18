@@ -633,7 +633,16 @@ export type SystemSettingsPayload = Omit<
 export type PublicDomain = { id: string; name: string }
 export type UIThemeSettings = { themeId: string }
 export type UILayoutSettings = { frontLayoutId: string; adminLayoutId: string }
+export type ThemePackageAppearance = {
+  layout: "classic" | "workbench"
+  light: Record<string, string>
+  dark: Record<string, string>
+}
+export type SiteLayout = Pick<UILayoutSettings, "adminLayoutId"> & {
+  themePackage?: ThemePackageAppearance
+}
 export type PublicSettings = {
+  themePackage?: ThemePackageAppearance
   themeId?: string
   frontLayoutId?: string
   openRegistration: boolean

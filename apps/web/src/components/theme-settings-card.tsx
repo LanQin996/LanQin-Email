@@ -15,6 +15,7 @@ import { uiText, useLanguage } from "@/lib/language"
 import { adminThemeKey } from "@/lib/site-theme"
 import { DEFAULT_THEME_ID, resolveThemeId, themes } from "@/themes/registry"
 import { LayoutSettingsCard } from "./layout-settings-card"
+import { ThemePackagesCard } from "./theme-packages-card"
 
 const publicSettingsKey = ["public-settings"] as const
 
@@ -23,6 +24,7 @@ export function ThemeSettingsCard({ canUpdate }: { canUpdate: boolean }) {
     <div className="space-y-4">
       <LayoutSettingsCard canUpdate={canUpdate} />
       <ColorThemeSettingsCard canUpdate={canUpdate} />
+      <ThemePackagesCard canUpdate={canUpdate} />
     </div>
   )
 }

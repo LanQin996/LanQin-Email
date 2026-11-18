@@ -51,6 +51,7 @@ import type {
   PublicSettings,
   UIThemeSettings,
   UILayoutSettings,
+  SiteLayout,
   LoginPayload,
   LoginResponse,
   RegisterPayload,
@@ -80,7 +81,7 @@ export * from "./api-types"
 const REQUEST_TIMEOUT_MS = 15_000
 const MAIL_DELIVERY_TIMEOUT_MS = 60_000
 
-async function request<T>(
+export async function request<T>(
   path: string,
   init: RequestInit & { timeoutMs?: number } = {}
 ): Promise<T> {
@@ -133,7 +134,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ themeId }),
     }),
-  siteLayout: () => request<Pick<UILayoutSettings, "adminLayoutId">>("/api/me/site-layout"),
+  siteLayout: () => request<SiteLayout>("/api/me/site-layout"),
   uiLayouts: () => request<UILayoutSettings>("/api/admin/settings/layouts"),
   setUILayouts: (selection: Partial<UILayoutSettings>) =>
     request<UILayoutSettings>("/api/admin/settings/layouts", {
