@@ -1,10 +1,22 @@
 import * as React from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import type { ThemePackageAppearance } from "@/lib/api-types"
+import { themePackageVariables } from "@/themes/runtime-package"
 import { uiText, useLanguage } from "@/lib/language"
 import { CLASSIC_LAYOUT, layoutCatalog, type LayoutSurface } from "@/themes/layouts/catalog"
 
-type Props = { surface: LayoutSurface; id: string; onClose: () => void }
+type Props = {
+  surface: LayoutSurface
+  id: string
+  packagePreview?: {
+    id: string
+    name: string
+    appearance: ThemePackageAppearance
+    focusReturn?: HTMLElement
+  }
+  onClose: () => void
+}
 const pages = {
   front: [
     { id: "mail", name: "邮箱" },
@@ -17,17 +29,34 @@ const pages = {
   ],
 } as const
 
-export function LayoutPreviewDialog({ surface, id, onClose }: Props) {
+export function LayoutPreviewDialog({ surface, id, packagePreview, onClose }: Props) {
   useLanguage()
   const [mobile, setMobile] = React.useState(false)
   const [dark, setDark] = React.useState(false)
   const [page, setPage] = React.useState<string>(pages[surface][0].id)
   const workbench = id !== CLASSIC_LAYOUT
   const name = layoutCatalog.find((item) => item.id === id)?.name ?? "经典主题"
-  const frame = dark
-    ? "border-zinc-700 bg-zinc-900 text-zinc-100"
-    : "border-zinc-300 bg-white text-zinc-900"
-  const panel = dark ? "border-zinc-700 bg-zinc-800" : "border-zinc-200 bg-zinc-50"
+  const previewVariables = packagePreview
+    ? ({
+        "--background": dark ? "240 10% 3.9%" : "0 0% 100%",
+        "--foreground": dark ? "0 0% 98%" : "240 10% 3.9%",
+        "--card": dark ? "240 3.7% 15.9%" : "240 4.8% 95.9%",
+        "--card-foreground": dark ? "0 0% 98%" : "240 10% 3.9%",
+        "--border": dark ? "240 3.7% 15.9%" : "240 5.9% 90%",
+        "--radius": "0.5rem",
+        ...themePackageVariables(packagePreview.appearance, dark ? "dark" : "light"),
+      } as React.CSSProperties)
+    : undefined
+  const frame = previewVariables
+    ? "border-border bg-background text-foreground"
+    : dark
+      ? "border-zinc-700 bg-zinc-900 text-zinc-100"
+      : "border-zinc-300 bg-white text-zinc-900"
+  const panel = previewVariables
+    ? "border-border bg-card text-card-foreground"
+    : dark
+      ? "border-zinc-700 bg-zinc-800"
+      : "border-zinc-200 bg-zinc-50"
   const tabs =
     surface === "front"
       ? ["收件箱", "已发送", "草稿箱", "归档"]
@@ -37,11 +66,17 @@ export function LayoutPreviewDialog({ surface, id, onClose }: Props) {
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         aria-describedby={undefined}
+        onCloseAutoFocus={(event) => {
+          const target = packagePreview?.focusReturn
+          if (!target?.isConnected) return
+          event.preventDefault()
+          target.focus()
+        }}
         className="max-h-[90dvh] max-w-[min(95vw,58rem)] overflow-auto"
       >
         <DialogHeader>
           <DialogTitle data-lanqin-i18n-ignore>
-            {uiText("预览模板")} · {uiText(name)}
+            {uiText("预览模板")} · {packagePreview?.name ?? uiText(name)}
           </DialogTitle>
         </DialogHeader>
         <div className="flex flex-wrap gap-2">
@@ -79,6 +114,8 @@ export function LayoutPreviewDialog({ surface, id, onClose }: Props) {
         <p className="text-sm text-muted-foreground">{uiText("预览使用示例数据，不会应用模板")}</p>
         <div
           className={`mx-auto w-full overflow-hidden rounded-lg border text-sm ${frame} ${mobile ? "max-w-xs" : ""}`}
+          style={previewVariables}
+          data-package-preview={packagePreview?.id}
           data-layout-preview={id}
           data-lanqin-i18n-ignore
         >

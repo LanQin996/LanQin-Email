@@ -150,8 +150,9 @@ func (a *App) handleGetAdminUILayout(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "private, no-store")
 	respondJSON(w, http.StatusOK, struct {
-		AdminLayoutID string `json:"adminLayoutId"`
-	}{settings.AdminLayoutID})
+		AdminLayoutID string                  `json:"adminLayoutId"`
+		ThemePackage  *themePackageAppearance `json:"themePackage,omitempty"`
+	}{settings.AdminLayoutID, a.readActiveThemePackage(r.Context(), themePackageAdmin)})
 }
 
 func (a *App) handleUpdateUILayouts(w http.ResponseWriter, r *http.Request) {

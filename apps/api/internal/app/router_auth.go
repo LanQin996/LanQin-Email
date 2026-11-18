@@ -196,6 +196,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings", a.handleGetSystemSettings)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings/theme", a.handleGetUITheme)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings/layouts", a.handleGetUILayouts)
+			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings/theme-packages", a.handleGetThemePackages)
 			// Invite codes can grant permission groups, which makes creating one an
 			// authorization decision rather than a settings tweak. They are therefore
 			// restricted to actual super administrators: leaving them on
@@ -239,6 +240,11 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/branding", a.handleUpdateSiteBranding)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme", a.handleUpdateUITheme)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/layouts", a.handleUpdateUILayouts)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme-packages/upload", a.handleUploadThemePackage)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme-packages/github", a.handleGitHubThemePackage)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme-packages/activate", a.handleActivateThemePackage)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme-packages/rollback", a.handleRollbackThemePackage)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/settings/theme-packages/{id}", a.handleRemoveThemePackage)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/favicon", a.handleUploadFavicon)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/settings/favicon", a.handleDeleteFavicon)
 			r.With(a.requirePermission(PermissionSettingsTestSMTP)).Post("/admin/settings/test-smtp", a.handleTestSMTP)

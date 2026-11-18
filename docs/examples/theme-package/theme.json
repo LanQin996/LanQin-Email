@@ -1,0 +1,36 @@
+{
+  "id": "linen-desk",
+  "name": "Linen Desk",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "surfaces": {
+    "front": {
+      "layout": "workbench",
+      "light": {
+        "background": "40 26% 96%",
+        "foreground": "28 26% 15%",
+        "primary": "28 44% 27%",
+        "primary-foreground": "40 35% 97%",
+        "radius": "0.65rem"
+      },
+      "dark": {
+        "background": "28 17% 12%",
+        "foreground": "40 29% 93%",
+        "primary": "35 35% 78%",
+        "primary-foreground": "28 30% 13%",
+        "radius": "0.65rem"
+      }
+    },
+    "admin": {
+      "layout": "classic",
+      "light": {
+        "background": "45 15% 97%",
+        "foreground": "28 15% 16%"
+      },
+      "dark": {
+        "background": "28 14% 13%",
+        "foreground": "45 16% 92%"
+      }
+    }
+  }
+}

@@ -254,7 +254,7 @@ Mail flow:
 
 ## Interface themes
 
-Admins can switch the site appearance under **System Settings → Appearance**. See the [theme authoring guide](./docs/themes.md) for the bundled starter and contract.
+Admins can switch the site appearance under **System Settings → Appearance**. [Theme packages](./docs/theme-packages.md) can be uploaded or installed from a public GitHub Release and activated independently for webmail and administration. See the [bundled palette guide](./docs/themes.md) for build-time theming.
 
 ## Open API
 
