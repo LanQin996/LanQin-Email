@@ -630,7 +630,9 @@ export type SystemSettingsPayload = Omit<
   externalImapOutlookClientSecret: string
 }
 export type PublicDomain = { id: string; name: string }
+export type UIThemeSettings = { themeId: string }
 export type PublicSettings = {
+  themeId?: string
   openRegistration: boolean
   inviteRegistrationEnabled: boolean
   turnstileEnabled: boolean

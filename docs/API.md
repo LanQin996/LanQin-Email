@@ -8,6 +8,8 @@ Machine-readable OpenAPI 3.1 contract: [`docs/openapi.json`](./openapi.json).
 
 机器可读的 OpenAPI 3.1 契约见 [`docs/openapi.json`](./openapi.json)。
 
+The web-only appearance settings are outside the Open API contract. See the [theme guide](./themes.md#浏览器接口不是开放集成-api) for the browser routes.
+
 ## Base URL
 
 All API endpoints are relative to your LanQin Email instance:

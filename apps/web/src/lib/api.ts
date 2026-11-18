@@ -49,6 +49,7 @@ import type {
   SystemSettings,
   SystemSettingsPayload,
   PublicSettings,
+  UIThemeSettings,
   LoginPayload,
   LoginResponse,
   RegisterPayload,
@@ -125,6 +126,12 @@ async function request<T>(
 
 export const api = {
   publicSettings: () => request<PublicSettings>("/api/public/settings"),
+  uiTheme: () => request<UIThemeSettings>("/api/admin/settings/theme"),
+  setUITheme: (themeId: string) =>
+    request<UIThemeSettings>("/api/admin/settings/theme", {
+      method: "POST",
+      body: JSON.stringify({ themeId }),
+    }),
   register: (payload: RegisterPayload) =>
     request<{ user: User }>("/api/auth/register", {
       method: "POST",

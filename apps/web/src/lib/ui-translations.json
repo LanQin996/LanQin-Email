@@ -1,4 +1,56 @@
 {
+  "经典主题": {
+    "zh-TW": "經典主題",
+    "en": "Classic"
+  },
+  "暖纸主题": {
+    "zh-TW": "暖紙主題",
+    "en": "Paper"
+  },
+  "外观": {
+    "zh-TW": "外觀",
+    "en": "Appearance"
+  },
+  "外观主题": {
+    "zh-TW": "外觀主題",
+    "en": "Appearance theme"
+  },
+  "正在加载主题设置": {
+    "zh-TW": "正在載入主題設定",
+    "en": "Loading theme settings"
+  },
+  "无法加载主题设置": {
+    "zh-TW": "無法載入主題設定",
+    "en": "Unable to load theme settings"
+  },
+  "当前主题未安装，已回退到经典主题": {
+    "zh-TW": "目前主題未安裝，已回到經典主題",
+    "en": "The configured theme is unavailable. Classic is shown instead."
+  },
+  "全站主题": {
+    "zh-TW": "全站主題",
+    "en": "Site theme"
+  },
+  "应用主题": {
+    "zh-TW": "套用主題",
+    "en": "Apply theme"
+  },
+  "关闭自定义主题": {
+    "zh-TW": "關閉自訂主題",
+    "en": "Disable custom theme"
+  },
+  "你没有修改主题的权限": {
+    "zh-TW": "你沒有修改主題的權限",
+    "en": "You do not have permission to change the theme"
+  },
+  "主题设置已保存": {
+    "zh-TW": "主題設定已儲存",
+    "en": "Theme settings saved"
+  },
+  "无法保存主题设置": {
+    "zh-TW": "無法儲存主題設定",
+    "en": "Unable to save theme settings"
+  },
   "从云端发现备份": { "en": "Discover cloud backups", "zh-TW": "從雲端探索備份" },
   "原 Google Drive 文件夹 ID（可选）": {
     "en": "Original Google Drive folder ID (optional)",

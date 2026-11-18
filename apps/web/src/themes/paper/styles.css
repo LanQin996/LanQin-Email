@@ -1,0 +1,29 @@
+html[data-lanqin-theme="paper"] {
+  --background: 38 27% 96%;
+  --foreground: 28 19% 14%;
+  --card: 42 35% 98%;
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+  --border: 35 20% 85%;
+  --input: var(--border);
+  --muted: 38 23% 91%;
+  --muted-foreground: 28 15% 38%;
+  --secondary: var(--muted);
+  --accent: 35 26% 88%;
+  --sidebar-background: 38 27% 92%;
+  --sidebar-border: var(--border);
+  --sidebar-accent: var(--accent);
+  --radius: 0.8rem;
+}
+
+html.dark[data-lanqin-theme="paper"] {
+  --background: 29 14% 12%;
+  --foreground: 38 25% 94%;
+  --card: 29 13% 15%;
+  --muted: 32 12% 22%;
+  --muted-foreground: 36 13% 68%;
+  --accent: 31 12% 25%;
+  --border: 32 12% 25%;
+  --sidebar-background: 30 13% 15%;
+}
