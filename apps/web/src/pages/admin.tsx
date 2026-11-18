@@ -1,3 +1,5 @@
+import { SiteBrandingCard } from "@/components/site-branding-card"
+import { ThemeSettingsCard } from "@/components/theme-settings-card"
 import { DomainCollectionDialog } from "@/components/domain-collection-dialog"
 import { BackupDestinationsSection } from "@/components/backup-destinations-section"
 import { localizePermissionInfo, permissionMessages } from "@/lib/permission-translations"
@@ -28,7 +30,6 @@ import {
   ShieldCheck,
   Star,
   Trash2,
-  Upload,
   Users,
 } from "lucide-react"
 import {
@@ -69,7 +70,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import {
   Select,
@@ -103,6 +103,8 @@ import { useMe } from "@/hooks/use-me"
 import { useToast } from "@/hooks/use-toast"
 import { hasAnyPermission, hasPermission } from "@/lib/permissions"
 import type { PermissionKey } from "@/lib/api-types"
+import type { AdminOverviewSlots } from "@/themes/layouts/admin/contract"
+import { AdminLayoutContext, getAdminLayoutTemplate } from "@/themes/layouts/admin/registry"
 
 type PendingConfirm = {
   title: UiText
@@ -213,85 +215,85 @@ export function AdminPage() {
   const assignablePermissionGroups = (permissionGroups.data?.items || []).filter(
     (group) => group.id !== "pg_super_admin" && group.id !== "pg_regular_user"
   )
+  const metrics = canOverview ? (
+    <>
+      <Stat icon={<Users />} label={uiText("用户")} value={overview.data?.users || 0} />
+      <Stat icon={<Globe2 />} label={uiText("域名")} value={overview.data?.domains || 0} />
+      <Stat icon={<Mailbox />} label={uiText("邮箱账号")} value={overview.data?.mailboxes || 0} />
+      <Stat
+        icon={<ShieldCheck />}
+        label={uiText("存储")}
+        value={formatBytes(overview.data?.storageBytes || 0)}
+      />
+    </>
+  ) : null
   return (
-    <ScrollArea className="h-[calc(100svh-3rem)] md:h-svh">
-      <main className="p-4 sm:p-6">
-        <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {uiText(sectionLabels[section])}
-          </h1>
-        </div>
+    <main className="p-4 sm:p-6">
+      <div className="mb-6 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <h1 className="text-2xl font-semibold tracking-tight">{uiText(sectionLabels[section])}</h1>
+      </div>
 
-        {section === "overview" && canOverview && (
-          <div className="mb-6 grid gap-4 md:grid-cols-4">
-            <Stat icon={<Users />} label={uiText("用户")} value={overview.data?.users || 0} />
-            <Stat icon={<Globe2 />} label={uiText("域名")} value={overview.data?.domains || 0} />
-            <Stat
-              icon={<Mailbox />}
-              label={uiText("邮箱账号")}
-              value={overview.data?.mailboxes || 0}
-            />
-            <Stat
-              icon={<ShieldCheck />}
-              label={uiText("存储")}
-              value={formatBytes(overview.data?.storageBytes || 0)}
-            />
-          </div>
-        )}
-
-        {section === "overview" && (
-          <OverviewSection
-            overview={overview.data}
-            domains={domainItems}
-            settings={settings.data}
-            visibleSections={visibleSections}
-            onSectionChange={(next) => setParams(next === "overview" ? {} : { section: next })}
-          />
-        )}
-        {section === "users" && canUsersView && (
-          <UsersSection
-            users={userItems}
-            permissionGroups={assignablePermissionGroups}
-            loading={users.isPending}
-            failed={users.isError}
-            refreshing={users.isFetching}
-            onRefresh={() => void users.refetch()}
-          />
-        )}
-        {section === "permissionGroups" && (
-          <PermissionGroupsSection
-            groups={permissionGroups.data?.items || []}
-            catalog={(permissionGroups.data?.catalog || []).map(localizePermissionInfo)}
-          />
-        )}
-        {section === "domains" && <DomainsSection domains={domainItems} />}
-        {section === "mailboxes" && (
-          <MailboxesSection mailboxes={mailboxItems} users={userItems} domains={domainItems} />
-        )}
-        {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
-        {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
-        {section === "sendAudit" && <AdminSendAuditSection mailboxes={mailboxItems} />}
-        {section === "deliveryQueue" && (
-          <AdminDeliveryQueueSection
-            items={deliveryQueue.data?.items || []}
-            canUpdate={canSettingsUpdate}
-          />
-        )}
-        {section === "settings" && (
-          <SystemSettingsSection settings={settings.data} domains={domainItems} />
-        )}
-        {section === "backups" && user?.role === "admin" && <BackupDestinationsSection />}
-      </main>
-    </ScrollArea>
+      {section === "overview" && (
+        <OverviewSection
+          metrics={metrics}
+          overview={overview.data}
+          domains={domainItems}
+          settings={settings.data}
+          visibleSections={visibleSections}
+          onSectionChange={(next) =>
+            setParams({
+              ...(next === "overview" ? {} : { section: next }),
+              ...(params.get("layout") === "classic" ? { layout: "classic" } : {}),
+            })
+          }
+        />
+      )}
+      {section === "users" && canUsersView && (
+        <UsersSection
+          users={userItems}
+          permissionGroups={assignablePermissionGroups}
+          loading={users.isPending}
+          failed={users.isError}
+          refreshing={users.isFetching}
+          onRefresh={() => void users.refetch()}
+        />
+      )}
+      {section === "permissionGroups" && (
+        <PermissionGroupsSection
+          groups={permissionGroups.data?.items || []}
+          catalog={(permissionGroups.data?.catalog || []).map(localizePermissionInfo)}
+        />
+      )}
+      {section === "domains" && <DomainsSection domains={domainItems} />}
+      {section === "mailboxes" && (
+        <MailboxesSection mailboxes={mailboxItems} users={userItems} domains={domainItems} />
+      )}
+      {section === "aliases" && <AliasesSection aliases={aliasItems} domains={domainItems} />}
+      {section === "messages" && <AdminMessagesSection mailboxes={mailboxItems} />}
+      {section === "sendAudit" && <AdminSendAuditSection mailboxes={mailboxItems} />}
+      {section === "deliveryQueue" && (
+        <AdminDeliveryQueueSection
+          items={deliveryQueue.data?.items || []}
+          canUpdate={canSettingsUpdate}
+        />
+      )}
+      {section === "settings" && (
+        <SystemSettingsSection settings={settings.data} domains={domainItems} />
+      )}
+      {section === "backups" && user?.role === "admin" && <BackupDestinationsSection />}
+    </main>
   )
 }
+
 function OverviewSection({
+  metrics,
   overview,
   domains,
   settings,
   visibleSections,
   onSectionChange,
 }: {
+  metrics: React.ReactNode
   overview?: {
     activeUsers: number
     activeMailboxes: number
@@ -309,91 +311,98 @@ function OverviewSection({
   const checklist = setupChecklist(overview, domains, settings).filter((item) =>
     visibleSections.includes(item.section)
   )
-  return (
-    <div className="space-y-6">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{uiText("系统状态")}</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <InfoBox label={uiText("活跃用户")} value={overview?.activeUsers || 0} />
-            <InfoBox label={uiText("活跃邮箱")} value={overview?.activeMailboxes || 0} />
-            <InfoBox label={uiText("别名转发")} value={overview?.aliases || 0} />
-            <InfoBox label={uiText("未读邮件")} value={overview?.unreadMessages || 0} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{uiText("首次配置")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {checklist.map((item) => (
-              <Button
-                key={item.key}
-                type="button"
-                variant="outline"
-                className="h-auto w-full justify-start gap-3 px-3 py-2 text-left font-normal"
-                onClick={() => onSectionChange(item.section)}
-              >
-                {item.done ? (
-                  <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
-                ) : (
-                  <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
-                )}
-                <span className="min-w-0 flex-1">
-                  <span className="block font-medium">{uiText(item.title)}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {uiText(item.detail)}
-                  </span>
+  const layoutId = React.useContext(AdminLayoutContext)
+  const { Overview } = getAdminLayoutTemplate(layoutId)
+  const slots: AdminOverviewSlots = {
+    metrics,
+    status: (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("系统状态")}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <InfoBox label={uiText("活跃用户")} value={overview?.activeUsers || 0} />
+          <InfoBox label={uiText("活跃邮箱")} value={overview?.activeMailboxes || 0} />
+          <InfoBox label={uiText("别名转发")} value={overview?.aliases || 0} />
+          <InfoBox label={uiText("未读邮件")} value={overview?.unreadMessages || 0} />
+        </CardContent>
+      </Card>
+    ),
+    setup: (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("首次配置")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {checklist.map((item) => (
+            <Button
+              key={item.key}
+              type="button"
+              variant="outline"
+              className="h-auto w-full justify-start gap-3 px-3 py-2 text-left font-normal"
+              onClick={() => onSectionChange(item.section)}
+            >
+              {item.done ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+              ) : (
+                <Circle className="h-4 w-4 shrink-0 text-muted-foreground" />
+              )}
+              <span className="min-w-0 flex-1">
+                <span className="block font-medium">{uiText(item.title)}</span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  {uiText(item.detail)}
                 </span>
-                <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-              </Button>
-            ))}
-          </CardContent>
-        </Card>
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <Card>
-          <CardHeader>
-            <CardTitle>{uiText("DNS 状态")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {domains.map((domain) => (
-              <DomainBadgeRow key={domain.id} domain={domain} />
-            ))}
-            {domains.length === 0 && <Empty text={uiText("暂无域名")} />}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>{uiText("运行提示")}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted-foreground">
-            <InfoLine label={uiText("公网地址")} value={settings?.publicBaseUrl || "-"} />
-            <InfoLine
-              label="SMTP"
-              value={settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "-"}
-            />
-            <InfoLine
-              label={uiText("注册")}
-              value={
-                settings?.openRegistration
-                  ? "已开放"
-                  : settings?.inviteRegistrationEnabled
-                    ? "仅邀请码"
-                    : "已关闭"
-              }
-            />
-            <InfoLine
-              label={uiText("用户自助申请")}
-              value={settings?.userMailboxApplyEnabled ? "已启用" : "已关闭"}
-            />
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  )
+              </span>
+              <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            </Button>
+          ))}
+        </CardContent>
+      </Card>
+    ),
+    domains: (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("DNS 状态")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {domains.map((domain) => (
+            <DomainBadgeRow key={domain.id} domain={domain} />
+          ))}
+          {domains.length === 0 && <Empty text={uiText("暂无域名")} />}
+        </CardContent>
+      </Card>
+    ),
+    runtime: (
+      <Card>
+        <CardHeader>
+          <CardTitle>{uiText("运行提示")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3 text-sm text-muted-foreground">
+          <InfoLine label={uiText("公网地址")} value={settings?.publicBaseUrl || "-"} />
+          <InfoLine
+            label="SMTP"
+            value={settings?.smtpHost ? `${settings.smtpHost}:${settings.smtpPort}` : "-"}
+          />
+          <InfoLine
+            label={uiText("注册")}
+            value={
+              settings?.openRegistration
+                ? "已开放"
+                : settings?.inviteRegistrationEnabled
+                  ? "仅邀请码"
+                  : "已关闭"
+            }
+          />
+          <InfoLine
+            label={uiText("用户自助申请")}
+            value={settings?.userMailboxApplyEnabled ? "已启用" : "已关闭"}
+          />
+        </CardContent>
+      </Card>
+    ),
+  }
+
+  return <Overview {...slots} />
 }
 
 function setupChecklist(
@@ -2367,9 +2376,22 @@ function SystemSettingsSection({
     queryFn: api.mailTemplates,
     enabled: canViewTemplates,
   })
-  const [settingsTab, setSettingsTab] = React.useState<
+  const [settingsParams, setSettingsParams] = useSearchParams()
+  const [localSettingsTab, setLocalSettingsTab] = React.useState<
     "base" | "smtp" | "storage" | "mail" | "externalImap" | "templates" | "security" | "about"
   >("base")
+  const appearanceRequested = canSettingsView && settingsParams.get("tab") === "appearance"
+  const settingsTab = appearanceRequested ? "appearance" : localSettingsTab
+
+  function setSettingsTab(next: typeof settingsTab) {
+    if (next !== "appearance") setLocalSettingsTab(next)
+    if ((next === "appearance") !== appearanceRequested) {
+      const params = new URLSearchParams(settingsParams)
+      if (next === "appearance") params.set("tab", "appearance")
+      else params.delete("tab")
+      setSettingsParams(params, { replace: true })
+    }
+  }
   const maildirHealth = useQuery({
     queryKey: ["admin", "maildir-sync", "health"],
     queryFn: api.maildirSyncHealth,
@@ -2396,51 +2418,67 @@ function SystemSettingsSection({
   const [userMailboxDomainIds, setUserMailboxDomainIds] = React.useState<string[]>([])
   const [externalImapEnabled, setExternalImapEnabled] = React.useState(false)
   const [externalImapAllowPrivateHosts, setExternalImapAllowPrivateHosts] = React.useState(false)
-  const faviconInput = React.useRef<HTMLInputElement>(null)
-  const refreshFavicon = React.useCallback(() => {
-    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
-    if (icon) icon.href = `/api/favicon.ico?v=${Date.now()}`
-  }, [])
-  const faviconUpload = useMutation({
-    mutationFn: api.uploadFavicon,
-    onSuccess: () => {
-      refreshFavicon()
-      toast({ title: "网站图标已更新" })
-    },
-    onError: (error) => toast({ title: "图标上传失败", description: errorMessage(error) }),
-  })
-  const faviconDelete = useMutation({
-    mutationFn: api.deleteFavicon,
-    onSuccess: () => {
-      refreshFavicon()
-      toast({ title: "网站图标已移除" })
-    },
-    onError: (error) => toast({ title: "移除图标失败", description: errorMessage(error) }),
-  })
+  // Branding can update the shared settings cache without overwriting unsaved controls.
+  const {
+    smtpRequireTls: savedSmtpRequireTls,
+    allowInsecureHttp: savedAllowInsecureHttp,
+    openRegistration: savedOpenRegistration,
+    inviteRegistrationEnabled: savedInviteRegistrationEnabled,
+    twoFactorEnabled: savedTwoFactorEnabled,
+    turnstileEnabled: savedTurnstileEnabled,
+    linuxDoSSOEnabled: savedLinuxDoSSOEnabled,
+    linuxDoRegistrationEnabled: savedLinuxDoRegistrationEnabled,
+    linuxDoRegistrationGroupIds: savedLinuxDoRegistrationGroupIds,
+    catchAllEnabled: savedCatchAllEnabled,
+    mailAutoRefresh: savedMailAutoRefresh,
+    userMailboxApplyEnabled: savedUserMailboxApplyEnabled,
+    userMailboxDomainIds: savedUserMailboxDomainIds,
+    externalImapEnabled: savedExternalImapEnabled,
+    externalImapAllowPrivateHosts: savedExternalImapAllowPrivateHosts,
+  } = settings ?? {}
   React.useEffect(() => {
-    if (!settings) return
-    setSmtpRequireTls(settings.smtpRequireTls)
-    setAllowInsecureHttp(settings.allowInsecureHttp)
-    setOpenRegistration(settings.openRegistration)
-    setInviteRegistrationEnabled(settings.inviteRegistrationEnabled)
-    setTwoFactorEnabled(settings.twoFactorEnabled)
-    setTurnstileEnabled(settings.turnstileEnabled)
-    setLinuxDoSSOEnabled(settings.linuxDoSSOEnabled)
-    setLinuxDoRegistrationEnabled(settings.linuxDoRegistrationEnabled)
-    setLinuxDoRegistrationGroupIds(settings.linuxDoRegistrationGroupIds || [])
-    setCatchAllEnabled(settings.catchAllEnabled)
-    setMailAutoRefresh(settings.mailAutoRefresh)
-    setUserMailboxApplyEnabled(settings.userMailboxApplyEnabled)
-    setUserMailboxDomainIds(settings.userMailboxDomainIds || [])
-    setExternalImapEnabled(settings.externalImapEnabled)
-    setExternalImapAllowPrivateHosts(settings.externalImapAllowPrivateHosts)
-  }, [settings])
+    if (savedSmtpRequireTls !== undefined) setSmtpRequireTls(savedSmtpRequireTls)
+    if (savedAllowInsecureHttp !== undefined) setAllowInsecureHttp(savedAllowInsecureHttp)
+    if (savedOpenRegistration !== undefined) setOpenRegistration(savedOpenRegistration)
+    if (savedInviteRegistrationEnabled !== undefined)
+      setInviteRegistrationEnabled(savedInviteRegistrationEnabled)
+    if (savedTwoFactorEnabled !== undefined) setTwoFactorEnabled(savedTwoFactorEnabled)
+    if (savedTurnstileEnabled !== undefined) setTurnstileEnabled(savedTurnstileEnabled)
+    if (savedLinuxDoSSOEnabled !== undefined) setLinuxDoSSOEnabled(savedLinuxDoSSOEnabled)
+    if (savedLinuxDoRegistrationEnabled !== undefined)
+      setLinuxDoRegistrationEnabled(savedLinuxDoRegistrationEnabled)
+    if (savedLinuxDoRegistrationGroupIds !== undefined)
+      setLinuxDoRegistrationGroupIds(savedLinuxDoRegistrationGroupIds)
+    if (savedCatchAllEnabled !== undefined) setCatchAllEnabled(savedCatchAllEnabled)
+    if (savedMailAutoRefresh !== undefined) setMailAutoRefresh(savedMailAutoRefresh)
+    if (savedUserMailboxApplyEnabled !== undefined)
+      setUserMailboxApplyEnabled(savedUserMailboxApplyEnabled)
+    if (savedUserMailboxDomainIds !== undefined) setUserMailboxDomainIds(savedUserMailboxDomainIds)
+    if (savedExternalImapEnabled !== undefined) setExternalImapEnabled(savedExternalImapEnabled)
+    if (savedExternalImapAllowPrivateHosts !== undefined)
+      setExternalImapAllowPrivateHosts(savedExternalImapAllowPrivateHosts)
+  }, [
+    savedSmtpRequireTls,
+    savedAllowInsecureHttp,
+    savedOpenRegistration,
+    savedInviteRegistrationEnabled,
+    savedTwoFactorEnabled,
+    savedTurnstileEnabled,
+    savedLinuxDoSSOEnabled,
+    savedLinuxDoRegistrationEnabled,
+    savedLinuxDoRegistrationGroupIds,
+    savedCatchAllEnabled,
+    savedMailAutoRefresh,
+    savedUserMailboxApplyEnabled,
+    savedUserMailboxDomainIds,
+    savedExternalImapEnabled,
+    savedExternalImapAllowPrivateHosts,
+  ])
   const save = useMutation({
     mutationFn: (form: FormData) =>
       api.updateSystemSettings({
         publicHostname: fieldValue(form, "publicHostname", settings?.publicHostname || ""),
         publicBaseUrl: fieldValue(form, "publicBaseUrl", settings?.publicBaseUrl || ""),
-        siteTitle: fieldValue(form, "siteTitle", settings?.siteTitle || "LanQin Email"),
         smtpHost: fieldValue(form, "smtpHost", settings?.smtpHost || ""),
         smtpPort: fieldValue(form, "smtpPort", settings?.smtpPort || "25"),
         smtpUsername: fieldValue(form, "smtpUsername", settings?.smtpUsername || ""),
@@ -2513,7 +2551,6 @@ function SystemSettingsSection({
     ? [
         settings.publicHostname,
         settings.publicBaseUrl,
-        settings.siteTitle,
         settings.smtpHost,
         settings.smtpPort,
         settings.smtpUsername,
@@ -2556,13 +2593,14 @@ function SystemSettingsSection({
       ...(canSettingsView
         ? [
             { key: "base" as const, label: "基础" },
+            { key: "appearance" as const, label: "外观" },
             { key: "smtp" as const, label: "SMTP" },
             { key: "storage" as const, label: "存储" },
             { key: "mail" as const, label: "邮件" },
             { key: "externalImap" as const, label: "外部 IMAP" },
           ]
         : []),
-      ...(canViewTemplates ? [{ key: "templates" as const, label: "模板" }] : []),
+      ...(canViewTemplates ? [{ key: "templates" as const, label: "邮件模板" }] : []),
       ...(canSettingsView ? [{ key: "security" as const, label: "安全" }] : []),
       { key: "about", label: "关于" },
     ],
@@ -2570,30 +2608,58 @@ function SystemSettingsSection({
   )
   React.useEffect(() => {
     if (tabs.some((tab) => tab.key === settingsTab)) return
-    setSettingsTab(tabs[0]?.key || "about")
+    const first = tabs[0]?.key
+    setLocalSettingsTab(first && first !== "appearance" ? first : "about")
   }, [settingsTab, tabs])
+  const settingsNavigation = (
+    <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-2">
+      {tabs.map((tab) => (
+        <Button
+          key={tab.key}
+          type="button"
+          variant={settingsTab === tab.key ? "default" : "ghost"}
+          size="sm"
+          onClick={() => setSettingsTab(tab.key)}
+        >
+          {uiText(tab.label)}
+        </Button>
+      ))}
+    </div>
+  )
+
+  if (settingsTab === "appearance" || settingsTab === "templates" || settingsTab === "about") {
+    return (
+      <div className="space-y-6">
+        {settingsNavigation}
+        {settingsTab === "appearance" && canSettingsView && (
+          <div className="space-y-4">
+            <SiteBrandingCard title={settings?.siteTitle} canUpdate={canUpdateSettings} />
+            <ThemeSettingsCard canUpdate={canUpdateSettings} />
+          </div>
+        )}
+        {settingsTab === "templates" && canViewTemplates && (
+          <MailTemplatesPanel
+            templates={templates.data?.items || []}
+            loading={templates.isLoading}
+            canUpdate={canUpdateTemplates}
+            canReset={canResetTemplates}
+          />
+        )}
+        {settingsTab === "about" && <AboutProjectCard />}
+      </div>
+    )
+  }
+
   return (
     <form
       key={formKey}
       onSubmit={(event) => {
         event.preventDefault()
-        if (canUpdateSettings) save.mutate(new FormData(event.currentTarget))
+        if (canUpdateSettings && settings) save.mutate(new FormData(event.currentTarget))
       }}
       className="space-y-6"
     >
-      <div className="flex flex-wrap gap-2 rounded-lg border bg-card p-2">
-        {tabs.map((tab) => (
-          <Button
-            key={tab.key}
-            type="button"
-            variant={settingsTab === tab.key ? "default" : "ghost"}
-            size="sm"
-            onClick={() => setSettingsTab(tab.key)}
-          >
-            {uiText(tab.label)}
-          </Button>
-        ))}
-      </div>
+      {settingsNavigation}
 
       {settingsTab === "base" && (
         <Card>
@@ -2601,12 +2667,6 @@ function SystemSettingsSection({
             <CardTitle>{uiText("基础设置")}</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
-            <Field
-              name="siteTitle"
-              label={uiText("网站标题")}
-              defaultValue={settings?.siteTitle || "LanQin Email"}
-              maxLength={80}
-            />
             <Field
               name="publicHostname"
               label={uiText("公网主机名")}
@@ -2639,43 +2699,6 @@ function SystemSettingsSection({
               onCheckedChange={setAllowInsecureHttp}
               className="md:col-span-2"
             />
-            {canUpdateSettings && (
-              <div className="flex flex-wrap items-center gap-2 md:col-span-2">
-                <Label>{uiText("网站图标")}</Label>
-                <Input
-                  ref={faviconInput}
-                  type="file"
-                  accept=".ico,image/x-icon,image/vnd.microsoft.icon"
-                  className="hidden"
-                  aria-label={uiText("选择 ICO 文件")}
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0]
-                    if (file) faviconUpload.mutate(file)
-                    event.currentTarget.value = ""
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={faviconUpload.isPending || faviconDelete.isPending}
-                  onClick={() => faviconInput.current?.click()}
-                >
-                  <Upload className="h-4 w-4" />
-                  {uiText(faviconUpload.isPending ? "正在上传..." : "上传 ICO")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={uiText("移除网站图标")}
-                  title={uiText("移除网站图标")}
-                  disabled={faviconUpload.isPending || faviconDelete.isPending}
-                  onClick={() => faviconDelete.mutate()}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -2951,15 +2974,6 @@ function SystemSettingsSection({
         </Card>
       )}
 
-      {settingsTab === "templates" && canViewTemplates && (
-        <MailTemplatesPanel
-          templates={templates.data?.items || []}
-          loading={templates.isLoading}
-          canUpdate={canUpdateTemplates}
-          canReset={canResetTemplates}
-        />
-      )}
-
       {settingsTab === "security" && (
         <Card>
           <CardHeader>
@@ -3090,11 +3104,9 @@ function SystemSettingsSection({
         </Card>
       )}
 
-      {settingsTab === "about" && <AboutProjectCard />}
-
-      {settingsTab !== "about" && canUpdateSettings && (
+      {canUpdateSettings && (
         <div className="flex justify-end">
-          <Button disabled={save.isPending || !settings}>
+          <Button type="submit" disabled={save.isPending || !settings}>
             {save.isPending ? uiText("保存中...") : uiText("保存设置")}
           </Button>
         </div>

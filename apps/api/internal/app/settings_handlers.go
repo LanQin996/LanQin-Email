@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -51,46 +52,48 @@ type SystemSettings struct {
 }
 
 type systemSettingsUpdate struct {
-	PublicHostname                  string   `json:"publicHostname"`
-	PublicBaseURL                   string   `json:"publicBaseUrl"`
-	SiteTitle                       string   `json:"siteTitle"`
-	SMTPHost                        string   `json:"smtpHost"`
-	SMTPPort                        string   `json:"smtpPort"`
-	SMTPUsername                    string   `json:"smtpUsername"`
-	SMTPPassword                    string   `json:"smtpPassword"`
-	SMTPRequireTLS                  bool     `json:"smtpRequireTls"`
-	MaildirRoot                     string   `json:"maildirRoot"`
-	MaildirScanSeconds              int      `json:"maildirScanSeconds"`
-	SessionTTLHours                 int      `json:"sessionTtlHours"`
-	AllowInsecureHTTP               bool     `json:"allowInsecureHttp"`
-	OpenRegistration                bool     `json:"openRegistration"`
-	InviteRegistrationEnabled       bool     `json:"inviteRegistrationEnabled"`
-	TwoFactorEnabled                bool     `json:"twoFactorEnabled"`
-	TurnstileEnabled                bool     `json:"turnstileEnabled"`
-	TurnstileSiteKey                string   `json:"turnstileSiteKey"`
-	TurnstileSecretKey              string   `json:"turnstileSecretKey"`
-	LinuxDoSSOEnabled               bool     `json:"linuxDoSSOEnabled"`
-	LinuxDoRegistrationEnabled      bool     `json:"linuxDoRegistrationEnabled"`
-	LinuxDoClientID                 string   `json:"linuxDoClientId"`
-	LinuxDoClientSecret             string   `json:"linuxDoClientSecret"`
-	LinuxDoRegistrationGroupIDs     []string `json:"linuxDoRegistrationGroupIds"`
-	CatchAllEnabled                 bool     `json:"catchAllEnabled"`
-	MailAutoRefresh                 bool     `json:"mailAutoRefresh"`
-	MailRefreshSeconds              int      `json:"mailRefreshSeconds"`
-	UserMailboxApplyEnabled         bool     `json:"userMailboxApplyEnabled"`
-	UserMailboxDomainIDs            []string `json:"userMailboxDomainIds"`
-	ReservedMailboxPrefixes         string   `json:"reservedMailboxPrefixes"`
-	ExternalIMAPEnabled             bool     `json:"externalImapEnabled"`
-	ExternalIMAPSecretKey           string   `json:"externalImapSecretKey"`
-	ExternalIMAPSyncSeconds         int      `json:"externalImapSyncSeconds"`
-	ExternalIMAPAllowPrivateHosts   bool     `json:"externalImapAllowPrivateHosts"`
-	ExternalIMAPGmailClientID       string   `json:"externalImapGmailClientId"`
-	ExternalIMAPGmailClientSecret   string   `json:"externalImapGmailClientSecret"`
-	ExternalIMAPOutlookClientID     string   `json:"externalImapOutlookClientId"`
-	ExternalIMAPOutlookClientSecret string   `json:"externalImapOutlookClientSecret"`
+	PublicHostname                  string          `json:"publicHostname"`
+	PublicBaseURL                   string          `json:"publicBaseUrl"`
+	SiteTitle                       json.RawMessage `json:"siteTitle"`
+	SMTPHost                        string          `json:"smtpHost"`
+	SMTPPort                        string          `json:"smtpPort"`
+	SMTPUsername                    string          `json:"smtpUsername"`
+	SMTPPassword                    string          `json:"smtpPassword"`
+	SMTPRequireTLS                  bool            `json:"smtpRequireTls"`
+	MaildirRoot                     string          `json:"maildirRoot"`
+	MaildirScanSeconds              int             `json:"maildirScanSeconds"`
+	SessionTTLHours                 int             `json:"sessionTtlHours"`
+	AllowInsecureHTTP               bool            `json:"allowInsecureHttp"`
+	OpenRegistration                bool            `json:"openRegistration"`
+	InviteRegistrationEnabled       bool            `json:"inviteRegistrationEnabled"`
+	TwoFactorEnabled                bool            `json:"twoFactorEnabled"`
+	TurnstileEnabled                bool            `json:"turnstileEnabled"`
+	TurnstileSiteKey                string          `json:"turnstileSiteKey"`
+	TurnstileSecretKey              string          `json:"turnstileSecretKey"`
+	LinuxDoSSOEnabled               bool            `json:"linuxDoSSOEnabled"`
+	LinuxDoRegistrationEnabled      bool            `json:"linuxDoRegistrationEnabled"`
+	LinuxDoClientID                 string          `json:"linuxDoClientId"`
+	LinuxDoClientSecret             string          `json:"linuxDoClientSecret"`
+	LinuxDoRegistrationGroupIDs     []string        `json:"linuxDoRegistrationGroupIds"`
+	CatchAllEnabled                 bool            `json:"catchAllEnabled"`
+	MailAutoRefresh                 bool            `json:"mailAutoRefresh"`
+	MailRefreshSeconds              int             `json:"mailRefreshSeconds"`
+	UserMailboxApplyEnabled         bool            `json:"userMailboxApplyEnabled"`
+	UserMailboxDomainIDs            []string        `json:"userMailboxDomainIds"`
+	ReservedMailboxPrefixes         string          `json:"reservedMailboxPrefixes"`
+	ExternalIMAPEnabled             bool            `json:"externalImapEnabled"`
+	ExternalIMAPSecretKey           string          `json:"externalImapSecretKey"`
+	ExternalIMAPSyncSeconds         int             `json:"externalImapSyncSeconds"`
+	ExternalIMAPAllowPrivateHosts   bool            `json:"externalImapAllowPrivateHosts"`
+	ExternalIMAPGmailClientID       string          `json:"externalImapGmailClientId"`
+	ExternalIMAPGmailClientSecret   string          `json:"externalImapGmailClientSecret"`
+	ExternalIMAPOutlookClientID     string          `json:"externalImapOutlookClientId"`
+	ExternalIMAPOutlookClientSecret string          `json:"externalImapOutlookClientSecret"`
 }
 
 type PublicSettings struct {
+	ThemeID                    string         `json:"themeId"`
+	FrontLayoutID              string         `json:"frontLayoutId"`
 	OpenRegistration           bool           `json:"openRegistration"`
 	InviteRegistrationEnabled  bool           `json:"inviteRegistrationEnabled"`
 	TurnstileEnabled           bool           `json:"turnstileEnabled"`
@@ -115,7 +118,7 @@ type smtpTestRequest struct {
 }
 
 func (a *App) handleGetSystemSettings(w http.ResponseWriter, r *http.Request) {
-	respondJSON(w, http.StatusOK, a.systemSettingsSnapshot())
+	respondJSON(w, http.StatusOK, a.systemSettingsSnapshot(r.Context()))
 }
 
 func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +128,16 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 		refreshSeconds = 30
 	}
 	linuxDoEnabled := a.linuxDoEnabled()
-	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, SiteTitle: a.cfg.SiteTitle, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
+	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, SiteTitle: a.siteTitle(r.Context()), MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
+
+	settings.ThemeID = defaultUIThemeID
+	if id, err := a.readUIThemeID(r.Context()); err == nil {
+		settings.ThemeID = id
+	}
+	settings.FrontLayoutID = defaultUILayoutID
+	if layouts, err := a.readUILayouts(r.Context()); err == nil {
+		settings.FrontLayoutID = layouts.FrontLayoutID
+	}
 
 	// Include available domains for mailbox creation during registration
 	if a.cfg.OpenRegistration || a.cfg.InviteRegistrationEnabled || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {
@@ -158,13 +170,21 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	next.PublicBaseURL = strings.TrimSpace(req.PublicBaseURL)
-	next.SiteTitle = strings.TrimSpace(req.SiteTitle)
-	if next.SiteTitle == "" {
-		next.SiteTitle = "LanQin Email"
-	}
-	if len([]rune(next.SiteTitle)) > 80 {
-		badRequest(w, errors.New("siteTitle must be 80 characters or fewer"))
-		return
+	var siteTitle *string
+	if len(req.SiteTitle) != 0 {
+		// A legacy explicit null behaved like an empty string. Omission,
+		// unlike an explicit value, now leaves the title row untouched.
+		var requested string
+		if err := json.Unmarshal(req.SiteTitle, &requested); err != nil {
+			badRequest(w, err)
+			return
+		}
+		title, err := normalizeSiteTitle(requested)
+		if err != nil {
+			badRequest(w, err)
+			return
+		}
+		siteTitle = &title
 	}
 	next.SMTPHost = strings.TrimSpace(req.SMTPHost)
 	next.SMTPPort = strings.TrimSpace(req.SMTPPort)
@@ -262,12 +282,12 @@ func (a *App) handleUpdateSystemSettings(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	if err := a.saveSystemSettings(r.Context(), next); err != nil {
+	if err := a.saveSystemSettings(r.Context(), next, siteTitle); err != nil {
 		respondError(w, http.StatusInternalServerError, "failed to save settings")
 		return
 	}
 	a.cfg = next
-	respondJSON(w, http.StatusOK, a.systemSettingsSnapshot())
+	respondJSON(w, http.StatusOK, a.systemSettingsSnapshot(r.Context()))
 }
 
 func (a *App) handleTestSMTP(w http.ResponseWriter, r *http.Request) {
@@ -342,11 +362,11 @@ func (a *App) handleTestSMTP(w http.ResponseWriter, r *http.Request) {
 	respondJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-func (a *App) systemSettingsSnapshot() SystemSettings {
+func (a *App) systemSettingsSnapshot(ctx context.Context) SystemSettings {
 	return SystemSettings{
 		PublicHostname:                     a.cfg.PublicHostname,
 		PublicBaseURL:                      a.cfg.PublicBaseURL,
-		SiteTitle:                          a.cfg.SiteTitle,
+		SiteTitle:                          a.siteTitle(ctx),
 		SMTPHost:                           a.cfg.SMTPHost,
 		SMTPPort:                           a.cfg.SMTPPort,
 		SMTPUsername:                       a.cfg.SMTPUsername,
@@ -402,7 +422,7 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 			a.cfg.PublicHostname = value
 		case "publicBaseUrl":
 			a.cfg.PublicBaseURL = value
-		case "siteTitle":
+		case siteTitleSettingKey:
 			a.cfg.SiteTitle = value
 		case "smtpHost":
 			a.cfg.SMTPHost = value
@@ -485,11 +505,10 @@ func (a *App) loadPersistedSystemSettings(ctx context.Context) error {
 	return rows.Err()
 }
 
-func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
+func (a *App) saveSystemSettings(ctx context.Context, cfg Config, siteTitle *string) error {
 	values := map[string]string{
 		"publicHostname":                  cfg.PublicHostname,
 		"publicBaseUrl":                   cfg.PublicBaseURL,
-		"siteTitle":                       cfg.SiteTitle,
 		"smtpHost":                        cfg.SMTPHost,
 		"smtpPort":                        cfg.SMTPPort,
 		"smtpUsername":                    cfg.SMTPUsername,
@@ -525,17 +544,17 @@ func (a *App) saveSystemSettings(ctx context.Context, cfg Config) error {
 		"externalImapOutlookClientId":     cfg.ExternalIMAPOutlookClientID,
 		"externalImapOutlookClientSecret": cfg.ExternalIMAPOutlookClientSecret,
 	}
+	if siteTitle != nil {
+		values[siteTitleSettingKey] = *siteTitle
+	}
 	now := a.now().UTC().Format(time.RFC3339Nano)
-	keyColumn := keyColumnSQL(a.cfg.DBDriver)
+	query := systemSettingUpsertSQL(a.cfg.DBDriver)
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for key, value := range values {
-		query := upsertSQL(a.cfg.DBDriver, `INSERT INTO system_settings(`+keyColumn+`,value,updated_at) VALUES(?,?,?)`, `(`+keyColumn+`)`,
-			`value=excluded.value,updated_at=excluded.updated_at`,
-			`value=VALUES(value),updated_at=VALUES(updated_at)`)
 		if _, err := tx.ExecContext(ctx, query, key, value, now); err != nil {
 			return err
 		}

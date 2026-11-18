@@ -1,0 +1,7 @@
+{
+  "apiVersion": 1,
+  "id": "classic",
+  "name": "经典主题",
+  "author": "LanQin Email",
+  "surfaces": ["front", "admin"]
+}

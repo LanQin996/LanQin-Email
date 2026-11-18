@@ -1,3 +1,5 @@
+import { useTemplateLayout } from "@/lib/template-layout"
+import { FrontAuthLayout } from "@/themes/layouts/front/front-auth-layout"
 import { errorMessage } from "@/lib/ui-errors"
 import { LanguageSelector } from "@/components/language-selector"
 import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
@@ -16,6 +18,7 @@ import { useToast } from "@/hooks/use-toast"
 
 export function LoginPage() {
   useUiLanguage()
+  const layoutId = useTemplateLayout("front")
 
   const me = useMe()
   const qc = useQueryClient()
@@ -81,145 +84,144 @@ export function LoginPage() {
   const turnstileRequired = !!publicSettings.data?.turnstileEnabled
   if (me.data?.user) return <Navigate to={returnTo} replace />
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/20 px-4 py-10">
-      <div className="w-full max-w-[420px]">
-        <div className="mb-7 text-center">
+    <FrontAuthLayout
+      layoutId={layoutId}
+      brand={
+        <>
           <div className="flex justify-end">
             <LanguageSelector />
           </div>
           <h1 className="text-3xl font-semibold tracking-tight">
             {publicSettings.data?.siteTitle || "LanQin Email"}
           </h1>
-        </div>
-        <div className="rounded-lg border bg-background p-6 shadow-sm sm:p-7">
-          <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            {challengeToken || linuxDoTwoFactorRequired ? (
-              <KeyRound className="h-4 w-4" />
-            ) : (
-              <LockKeyhole className="h-4 w-4" />
-            )}
-            {challengeToken || linuxDoTwoFactorRequired ? uiText("双因素验证") : uiText("账号登录")}
-          </div>
-          <form
-            className="space-y-5"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (linuxDoTwoFactorRequired) {
-                linuxDoTwoFactor.mutate(new FormData(e.currentTarget))
-                return
-              }
-              if (!challengeToken && turnstileRequired && !turnstileToken) {
-                toast({ title: "请先完成人机验证" })
-                return
-              }
-              login.mutate(new FormData(e.currentTarget))
-            }}
-          >
-            {!challengeToken && !linuxDoTwoFactorRequired ? (
-              <>
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-sm font-medium">
-                    {uiText("邮箱")}
-                  </Label>
-                  <Input
-                    id="email"
-                    name="email"
-                    type="email"
-                    autoComplete="username"
-                    required
-                    className="h-11 text-base"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-sm font-medium">
-                    {uiText("密码")}
-                  </Label>
-                  <PasswordInput
-                    id="password"
-                    name="password"
-                    autoComplete="current-password"
-                    required
-                    className="h-11 text-base"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="space-y-2">
-                <Label htmlFor="twoFactorCode" className="text-sm font-medium">
-                  {uiText("双因素验证码")}
-                </Label>
-                <Input
-                  id="twoFactorCode"
-                  name="twoFactorCode"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  minLength={6}
-                  maxLength={6}
-                  required
-                  className="h-11 text-center text-lg tracking-[0.35em]"
-                />
-              </div>
-            )}
-            {!challengeToken && !linuxDoTwoFactorRequired && turnstileRequired && (
-              <TurnstileBox
-                siteKey={publicSettings.data?.turnstileSiteKey || ""}
-                onToken={setTurnstileToken}
-              />
-            )}
-            <Button
-              className="h-11 w-full text-base"
-              disabled={login.isPending || linuxDoTwoFactor.isPending}
-            >
-              {login.isPending || linuxDoTwoFactor.isPending
-                ? uiText("登录中...")
-                : challengeToken || linuxDoTwoFactorRequired
-                  ? uiText("验证登录")
-                  : uiText("登录")}
-              {!login.isPending && !linuxDoTwoFactor.isPending && (
-                <ArrowRight className="h-4 w-4" />
-              )}
-            </Button>
-            {challengeToken && (
-              <Button
-                type="button"
-                variant="ghost"
-                className="w-full"
-                onClick={() => setChallengeToken("")}
-              >
-                {uiText("返回登录")}
-              </Button>
-            )}
-          </form>
-          {!challengeToken &&
-            !linuxDoTwoFactorRequired &&
-            publicSettings.data?.linuxDoSSOEnabled && (
-              <>
-                <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-                  <div className="h-px flex-1 bg-border" />
-                  <span>{uiText("或")}</span>
-                  <div className="h-px flex-1 bg-border" />
-                </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="h-11 w-full text-base"
-                  onClick={() => window.location.assign("/api/auth/linuxdo/start")}
-                >
-                  <Link2 className="h-4 w-4" />
-                  {uiText("使用 Linux.do 登录")}
-                </Button>
-              </>
-            )}
-        </div>
-        {!challengeToken && !linuxDoTwoFactorRequired && (
+        </>
+      }
+      footer={
+        !challengeToken &&
+        !linuxDoTwoFactorRequired && (
           <div className="mt-5 flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <span>{uiText("没有账号？")}</span>
             <Button type="button" variant="link" className="h-auto px-0 text-sm" asChild>
               <Link to="/register">{uiText("注册账号")}</Link>
             </Button>
           </div>
+        )
+      }
+    >
+      <div className="mb-6 flex items-center gap-2 text-sm font-medium text-muted-foreground">
+        {challengeToken || linuxDoTwoFactorRequired ? (
+          <KeyRound className="h-4 w-4" />
+        ) : (
+          <LockKeyhole className="h-4 w-4" />
         )}
+        {challengeToken || linuxDoTwoFactorRequired ? uiText("双因素验证") : uiText("账号登录")}
       </div>
-    </div>
+      <form
+        className="space-y-5"
+        onSubmit={(e) => {
+          e.preventDefault()
+          if (linuxDoTwoFactorRequired) {
+            linuxDoTwoFactor.mutate(new FormData(e.currentTarget))
+            return
+          }
+          if (!challengeToken && turnstileRequired && !turnstileToken) {
+            toast({ title: "请先完成人机验证" })
+            return
+          }
+          login.mutate(new FormData(e.currentTarget))
+        }}
+      >
+        {!challengeToken && !linuxDoTwoFactorRequired ? (
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="email" className="text-sm font-medium">
+                {uiText("邮箱")}
+              </Label>
+              <Input
+                id="email"
+                name="email"
+                type="email"
+                autoComplete="username"
+                required
+                className="h-11 text-base"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password" className="text-sm font-medium">
+                {uiText("密码")}
+              </Label>
+              <PasswordInput
+                id="password"
+                name="password"
+                autoComplete="current-password"
+                required
+                className="h-11 text-base"
+              />
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2">
+            <Label htmlFor="twoFactorCode" className="text-sm font-medium">
+              {uiText("双因素验证码")}
+            </Label>
+            <Input
+              id="twoFactorCode"
+              name="twoFactorCode"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              minLength={6}
+              maxLength={6}
+              required
+              className="h-11 text-center text-lg tracking-[0.35em]"
+            />
+          </div>
+        )}
+        {!challengeToken && !linuxDoTwoFactorRequired && turnstileRequired && (
+          <TurnstileBox
+            siteKey={publicSettings.data?.turnstileSiteKey || ""}
+            onToken={setTurnstileToken}
+          />
+        )}
+        <Button
+          className="h-11 w-full text-base"
+          disabled={login.isPending || linuxDoTwoFactor.isPending}
+        >
+          {login.isPending || linuxDoTwoFactor.isPending
+            ? uiText("登录中...")
+            : challengeToken || linuxDoTwoFactorRequired
+              ? uiText("验证登录")
+              : uiText("登录")}
+          {!login.isPending && !linuxDoTwoFactor.isPending && <ArrowRight className="h-4 w-4" />}
+        </Button>
+        {challengeToken && (
+          <Button
+            type="button"
+            variant="ghost"
+            className="w-full"
+            onClick={() => setChallengeToken("")}
+          >
+            {uiText("返回登录")}
+          </Button>
+        )}
+      </form>
+      {!challengeToken && !linuxDoTwoFactorRequired && publicSettings.data?.linuxDoSSOEnabled && (
+        <>
+          <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            <span>{uiText("或")}</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11 w-full text-base"
+            onClick={() => window.location.assign("/api/auth/linuxdo/start")}
+          >
+            <Link2 className="h-4 w-4" />
+            {uiText("使用 Linux.do 登录")}
+          </Button>
+        </>
+      )}
+    </FrontAuthLayout>
   )
 }

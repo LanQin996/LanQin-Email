@@ -1,11 +1,19 @@
 const THEME_TRANSITION_MS = 180
 let themeTimer: number | undefined
+const colorModeKey = "lanqin:theme"
 
 export function getInitialTheme() {
-  return (
-    localStorage.getItem("lanqin:theme") === "dark" ||
-    document.documentElement.classList.contains("dark")
-  )
+  try {
+    const saved = localStorage.getItem(colorModeKey)
+    if (saved === "dark" || saved === "light") return saved === "dark"
+  } catch {
+    // Preserve the current in-memory mode when storage is unavailable.
+  }
+  return document.documentElement.classList.contains("dark")
+}
+
+export function initializeColorMode() {
+  document.documentElement.classList.toggle("dark", getInitialTheme())
 }
 
 export function applyTheme(dark: boolean, animated = false) {
@@ -14,7 +22,11 @@ export function applyTheme(dark: boolean, animated = false) {
   const updateTheme = () => {
     root.classList.toggle("dark", dark)
     root.style.colorScheme = dark ? "dark" : "light"
-    localStorage.setItem("lanqin:theme", dark ? "dark" : "light")
+    try {
+      localStorage.setItem(colorModeKey, dark ? "dark" : "light")
+    } catch {
+      // Keep the current mode even if the browser cannot persist it.
+    }
   }
 
   if (!animated || reduceMotion) {

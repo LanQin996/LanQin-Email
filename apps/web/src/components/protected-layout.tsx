@@ -1,7 +1,7 @@
 import { LanguageSelector } from "@/components/language-selector"
 import { uiText, useLanguage as useUiLanguage } from "@/lib/language"
 import * as React from "react"
-import { Outlet, Link, useLocation } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 import {
   BarChart3,
   Copy,
@@ -23,63 +23,31 @@ import { AuthGuard } from "@/components/auth-guard"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { hasAnyPermission } from "@/lib/permissions"
-import type { PermissionKey } from "@/lib/api-types"
+import { hasAdminAccess, hasAnyPermission } from "@/lib/permissions"
+import type { User } from "@/lib/api-types"
+import { LayoutBoundary } from "@/components/layout-boundary"
+import { TemplateLayoutScope } from "@/components/template-layout-scope"
+import { useTemplateLayout } from "@/lib/template-layout"
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarRail,
-  SidebarTrigger,
-  useSidebar,
-} from "@/components/ui/sidebar"
+  adminSectionKeys,
+  adminSectionLabels,
+  adminSectionPermissions,
+  type AdminSection,
+} from "@/components/admin-config"
+import type { AdminShellSlots } from "@/themes/layouts/admin/contract"
+import { AdminLayoutContext, getAdminLayoutTemplate } from "@/themes/layouts/admin/registry"
 
-const adminSections: {
-  key: string
-  label: string
-  icon: React.ReactNode
-  permissions: PermissionKey[]
-  superAdminOnly?: boolean
-}[] = [
-  { key: "overview", label: "概览", icon: <BarChart3 />, permissions: ["admin.overview.view"] },
-  { key: "users", label: "用户", icon: <Users />, permissions: ["admin.users.view"] },
-  {
-    key: "permissionGroups",
-    label: "权限组",
-    icon: <ShieldCheck />,
-    permissions: ["admin.permission_groups.view"],
-  },
-  {
-    key: "domains",
-    label: "域名",
-    icon: <Globe2 />,
-    permissions: ["admin.domains.view", "admin.dns.view"],
-  },
-  { key: "mailboxes", label: "邮箱账号", icon: <Mailbox />, permissions: ["admin.mailboxes.view"] },
-  { key: "aliases", label: "别名转发", icon: <Copy />, permissions: ["admin.aliases.view"] },
-  { key: "messages", label: "全部邮件", icon: <Inbox />, permissions: ["admin.messages.view"] },
-  {
-    key: "backups",
-    label: "备份地点",
-    icon: <DatabaseBackup />,
-    permissions: [],
-    superAdminOnly: true,
-  },
-  {
-    key: "settings",
-    label: "系统设置",
-    icon: <Settings />,
-    permissions: ["admin.settings.view", "admin.templates.view"],
-  },
-]
+const adminNavigationIcons: Partial<Record<AdminSection, React.ReactNode>> = {
+  overview: <BarChart3 aria-hidden />,
+  users: <Users aria-hidden />,
+  permissionGroups: <ShieldCheck aria-hidden />,
+  domains: <Globe2 aria-hidden />,
+  mailboxes: <Mailbox aria-hidden />,
+  aliases: <Copy aria-hidden />,
+  messages: <Inbox aria-hidden />,
+  backups: <DatabaseBackup aria-hidden />,
+  settings: <Settings aria-hidden />,
+}
 
 export function ProtectedLayout() {
   useUiLanguage()
@@ -92,137 +60,128 @@ export function ProtectedLayout() {
 }
 
 function ProtectedContent() {
-  useUiLanguage()
+  const { data } = useMe()
+  const { pathname } = useLocation()
+  const user = data?.user
 
-  const me = useMe()
-  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
-  const location = useLocation()
-  const logout = useLogout()
-
-  const user = me.data!.user
-  const pathname = location.pathname.toLowerCase()
-  const isMailRoute = pathname === "/" || pathname.startsWith("/mail")
-  const isProfileRoute = pathname.startsWith("/profile")
-  const isAdminRoute = pathname.startsWith("/admin")
-  const adminSection = new URLSearchParams(location.search).get("section") || "overview"
-  const visibleAdminSections = adminSections.filter((item) =>
-    item.superAdminOnly ? user.role === "admin" : hasAnyPermission(user, item.permissions)
-  )
-
-  if (isMailRoute || isProfileRoute) {
-    return <Outlet />
+  if (!pathname.toLowerCase().startsWith("/admin")) {
+    return (
+      <TemplateLayoutScope key="front" surface="front">
+        <Outlet />
+      </TemplateLayoutScope>
+    )
   }
-
+  if (!user || !hasAdminAccess(user)) return <Outlet />
   return (
-    <SidebarProvider>
-      <Sidebar collapsible="icon">
-        <SidebarHeader>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" asChild>
-                <Link to="/">
-                  <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                    <Mail className="size-4" />
-                  </div>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">
-                      {publicSettings.data?.siteTitle || "LanQin Email"}
-                    </span>
-                  </div>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-        </SidebarHeader>
-        <SidebarContent>
-          {isAdminRoute && visibleAdminSections.length > 0 && (
-            <SidebarGroup>
-              <SidebarGroupContent>
-                <SidebarMenu>
-                  <AdminSectionItems activeSection={adminSection} sections={visibleAdminSections} />
-                </SidebarMenu>
-              </SidebarGroupContent>
-            </SidebarGroup>
-          )}
-        </SidebarContent>
-        <SidebarFooter>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <LanguageSelector variant="sidebar" />
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              <SidebarMenuButton size="lg" className="group-data-[collapsible=icon]:!p-0" asChild>
-                <Link to="/profile">
-                  <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarFallback className="rounded-lg bg-muted text-foreground">
-                      {user.displayName.slice(0, 1).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">{user.displayName}</span>
-                    <span className="truncate text-xs text-muted-foreground">{user.email}</span>
-                  </div>
-                  <Badge
-                    variant={user.role === "admin" ? "default" : "secondary"}
-                    className="ml-auto text-[10px]"
-                  >
-                    {user.role === "admin" ? uiText("超级管理员") : uiText("普通用户")}
-                  </Badge>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
-          <div className="p-2">
-            <Button variant="outline" size="sm" className="w-full gap-2 text-xs" onClick={logout}>
-              <LogOut className="h-3.5 w-3.5" />
-              {uiText("退出登录")}
-            </Button>
-          </div>
-        </SidebarFooter>
-        <SidebarRail />
-      </Sidebar>
-      <SidebarInset>
-        <div className="flex min-h-svh flex-col bg-muted/20">
-          <div className="flex h-12 items-center gap-3 border-b bg-background px-3 md:hidden">
-            <SidebarTrigger aria-label={uiText("打开导航")} />
-            <div className="min-w-0 flex-1 truncate text-sm font-semibold">
-              {isAdminRoute
-                ? uiText(
-                    visibleAdminSections.find((item) => item.key === adminSection)?.label ||
-                      "系统管理"
-                  )
-                : publicSettings.data?.siteTitle || "LanQin Email"}
-            </div>
-          </div>
-          <Outlet />
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    <TemplateLayoutScope key="admin" surface="admin">
+      <AdminProtectedContent user={user} />
+    </TemplateLayoutScope>
   )
 }
 
-function AdminSectionItems({
-  activeSection,
-  sections,
-}: {
-  activeSection: string
-  sections: typeof adminSections
-}) {
+function AdminProtectedContent({ user }: { user: User }) {
   useUiLanguage()
 
-  const { isMobile, setOpenMobile } = useSidebar()
+  const publicSettings = useQuery({ queryKey: ["public-settings"], queryFn: api.publicSettings })
+  const location = useLocation()
+  const logout = useLogout()
+  const layoutId = useTemplateLayout("admin")
 
-  function closeMobile() {
-    if (isMobile) setOpenMobile(false)
+  const visibleSections = adminSectionKeys.filter((key) =>
+    key === "backups" ? user.role === "admin" : hasAnyPermission(user, adminSectionPermissions[key])
+  )
+  const searchParams = new URLSearchParams(location.search)
+  const requestedSection = searchParams.get("section")
+  const forceClassic = searchParams.get("layout") === "classic"
+  const activeSection =
+    visibleSections.find((key) => key === requestedSection) ?? visibleSections[0]
+
+  const siteTitle = publicSettings.data?.siteTitle || "LanQin Email"
+  const slots: AdminShellSlots = {
+    brandLabel: siteTitle,
+    accountLabel: `${uiText("个人中心")}：${user.displayName}`,
+    brand: (
+      <>
+        <div className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <Mail className="size-4" aria-hidden />
+        </div>
+        <div className="grid min-w-0 flex-1 text-left text-sm leading-tight">
+          <span className="truncate font-semibold">{siteTitle}</span>
+        </div>
+      </>
+    ),
+    sidebarLanguage: <LanguageSelector variant="sidebar" />,
+    compactLanguage: <LanguageSelector />,
+    account: (
+      <>
+        <Avatar className="h-8 w-8 shrink-0 rounded-lg">
+          <AvatarFallback className="rounded-lg bg-muted text-foreground">
+            {user.displayName.slice(0, 1).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <div
+          data-admin-shell-detail
+          className="grid min-w-0 flex-1 text-left text-sm leading-tight"
+        >
+          <span className="truncate font-semibold">{user.displayName}</span>
+          <span className="truncate text-xs text-muted-foreground">{user.email}</span>
+        </div>
+        <Badge
+          data-admin-shell-detail
+          variant={user.role === "admin" ? "default" : "secondary"}
+          className="ml-auto text-[10px]"
+        >
+          {user.role === "admin" ? uiText("超级管理员") : uiText("普通用户")}
+        </Badge>
+      </>
+    ),
+    signOut: (
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="w-full gap-2 text-xs"
+        onClick={logout}
+        aria-label={uiText("退出登录")}
+      >
+        <LogOut className="h-3.5 w-3.5" aria-hidden />
+        <span data-admin-shell-detail>{uiText("退出登录")}</span>
+      </Button>
+    ),
+    navigationLabel: uiText("系统管理"),
+    openNavigationLabel: uiText("打开导航"),
+    currentLabel: activeSection ? uiText(adminSectionLabels[activeSection]) : uiText("系统管理"),
+    activeKey: activeSection ?? "",
+    links: visibleSections.flatMap((key) => {
+      const icon = adminNavigationIcons[key]
+      return icon
+        ? [
+            {
+              key,
+              label: uiText(adminSectionLabels[key]),
+              icon,
+              href: `/admin?section=${key}${forceClassic ? "&layout=classic" : ""}`,
+            },
+          ]
+        : []
+    }),
+    children: <Outlet />,
   }
-  return sections.map((item) => (
-    <SidebarMenuItem key={item.key}>
-      <SidebarMenuButton asChild isActive={activeSection === item.key} tooltip={uiText(item.label)}>
-        <Link to={`/admin?section=${item.key}`} onClick={closeMobile}>
-          {item.icon}
-          <span>{uiText(item.label)}</span>
-        </Link>
-      </SidebarMenuButton>
-    </SidebarMenuItem>
-  ))
+  const { Shell } = getAdminLayoutTemplate(layoutId)
+  const { Shell: ClassicShell } = getAdminLayoutTemplate("classic")
+
+  return (
+    <LayoutBoundary
+      layoutId={layoutId}
+      fallback={
+        <AdminLayoutContext.Provider value="classic">
+          <ClassicShell {...slots} />
+        </AdminLayoutContext.Provider>
+      }
+    >
+      <AdminLayoutContext.Provider value={layoutId}>
+        <Shell {...slots} />
+      </AdminLayoutContext.Provider>
+    </LayoutBoundary>
+  )
 }

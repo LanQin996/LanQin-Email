@@ -49,6 +49,8 @@ import type {
   SystemSettings,
   SystemSettingsPayload,
   PublicSettings,
+  UIThemeSettings,
+  UILayoutSettings,
   LoginPayload,
   LoginResponse,
   RegisterPayload,
@@ -125,6 +127,19 @@ async function request<T>(
 
 export const api = {
   publicSettings: () => request<PublicSettings>("/api/public/settings"),
+  uiTheme: () => request<UIThemeSettings>("/api/admin/settings/theme"),
+  setUITheme: (themeId: string) =>
+    request<UIThemeSettings>("/api/admin/settings/theme", {
+      method: "POST",
+      body: JSON.stringify({ themeId }),
+    }),
+  siteLayout: () => request<Pick<UILayoutSettings, "adminLayoutId">>("/api/me/site-layout"),
+  uiLayouts: () => request<UILayoutSettings>("/api/admin/settings/layouts"),
+  setUILayouts: (selection: Partial<UILayoutSettings>) =>
+    request<UILayoutSettings>("/api/admin/settings/layouts", {
+      method: "POST",
+      body: JSON.stringify(selection),
+    }),
   register: (payload: RegisterPayload) =>
     request<{ user: User }>("/api/auth/register", {
       method: "POST",
@@ -679,6 +694,11 @@ export const api = {
     request<{ ok: boolean }>(`/api/admin/backups/destinations/${encodeURIComponent(id)}`, {
       method: "DELETE",
       body: JSON.stringify({ revision }),
+    }),
+  updateSiteBranding: (siteTitle: string) =>
+    request<{ siteTitle: string }>("/api/admin/settings/branding", {
+      method: "POST",
+      body: JSON.stringify({ siteTitle }),
     }),
   uploadFavicon: (file: File) => {
     const form = new FormData()

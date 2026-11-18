@@ -26,6 +26,7 @@ import (
 type App struct {
 	collectionMu                   sync.Mutex
 	cfg                            Config
+	siteTitleFallback              string
 	db                             *sql.DB
 	log                            *slog.Logger
 	now                            func() time.Time
@@ -67,7 +68,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 	if strings.TrimSpace(cfg.SiteTitle) == "" {
-		cfg.SiteTitle = "LanQin Email"
+		cfg.SiteTitle = defaultSiteTitle
 	}
 	if cfg.AllowInsecureHTTP {
 		// Session and OAuth state cookies lose their Secure attribute in this mode,
@@ -88,7 +89,7 @@ func New(cfg Config, logger *slog.Logger) (*App, error) {
 		return nil, err
 	}
 
-	a := &App{cfg: cfg, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), health: &appHealthState{}, maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL, workerID: newID("worker")}
+	a := &App{cfg: cfg, siteTitleFallback: cfg.SiteTitle, db: db, log: logger, now: time.Now, policy: NewHTMLPolicy(), health: &appHealthState{}, maildirHealth: newMaildirSyncHealthTracker(), telegramAPIBaseURL: defaultTelegramAPIBaseURL, workerID: newID("worker")}
 	a.externalIMAP = a
 	a.backupWake = make(chan struct{}, 1)
 	a.backupRestoreRequests = make(chan backupRestoreExecution, 1)

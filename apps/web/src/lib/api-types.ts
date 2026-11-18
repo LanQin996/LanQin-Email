@@ -614,6 +614,7 @@ export type SystemSettings = {
 }
 export type SystemSettingsPayload = Omit<
   SystemSettings,
+  | "siteTitle"
   | "smtpPasswordSet"
   | "turnstileSecretSet"
   | "linuxDoClientSecretSet"
@@ -630,7 +631,11 @@ export type SystemSettingsPayload = Omit<
   externalImapOutlookClientSecret: string
 }
 export type PublicDomain = { id: string; name: string }
+export type UIThemeSettings = { themeId: string }
+export type UILayoutSettings = { frontLayoutId: string; adminLayoutId: string }
 export type PublicSettings = {
+  themeId?: string
+  frontLayoutId?: string
   openRegistration: boolean
   inviteRegistrationEnabled: boolean
   turnstileEnabled: boolean
