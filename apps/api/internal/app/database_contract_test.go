@@ -43,6 +43,7 @@ func TestExternalDatabaseContract(t *testing.T) {
 				t.Fatal("external database must use the portable search fallback")
 			}
 			assertExternalDatabaseContract(t, a)
+			t.Run("site appearance theme", func(t *testing.T) { assertUIThemeDatabaseContract(t, a) })
 			t.Run("encrypted backup destinations", func(t *testing.T) {
 				assertBackupDestinationDatabaseContract(t, a)
 			})

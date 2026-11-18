@@ -1,3 +1,4 @@
+import { ThemeSettingsCard } from "@/components/theme-settings-card"
 import { DomainCollectionDialog } from "@/components/domain-collection-dialog"
 import { BackupDestinationsSection } from "@/components/backup-destinations-section"
 import { localizePermissionInfo, permissionMessages } from "@/lib/permission-translations"
@@ -2368,7 +2369,15 @@ function SystemSettingsSection({
     enabled: canViewTemplates,
   })
   const [settingsTab, setSettingsTab] = React.useState<
-    "base" | "smtp" | "storage" | "mail" | "externalImap" | "templates" | "security" | "about"
+    | "base"
+    | "smtp"
+    | "storage"
+    | "mail"
+    | "externalImap"
+    | "templates"
+    | "security"
+    | "appearance"
+    | "about"
   >("base")
   const maildirHealth = useQuery({
     queryKey: ["admin", "maildir-sync", "health"],
@@ -2556,6 +2565,7 @@ function SystemSettingsSection({
       ...(canSettingsView
         ? [
             { key: "base" as const, label: "基础" },
+            { key: "appearance" as const, label: "外观" },
             { key: "smtp" as const, label: "SMTP" },
             { key: "storage" as const, label: "存储" },
             { key: "mail" as const, label: "邮件" },
@@ -2577,7 +2587,9 @@ function SystemSettingsSection({
       key={formKey}
       onSubmit={(event) => {
         event.preventDefault()
-        if (canUpdateSettings) save.mutate(new FormData(event.currentTarget))
+        if (canUpdateSettings && settingsTab !== "appearance") {
+          save.mutate(new FormData(event.currentTarget))
+        }
       }}
       className="space-y-6"
     >
@@ -3090,9 +3102,13 @@ function SystemSettingsSection({
         </Card>
       )}
 
+      {settingsTab === "appearance" && canSettingsView && (
+        <ThemeSettingsCard canUpdate={canUpdateSettings} />
+      )}
+
       {settingsTab === "about" && <AboutProjectCard />}
 
-      {settingsTab !== "about" && canUpdateSettings && (
+      {settingsTab !== "about" && settingsTab !== "appearance" && canUpdateSettings && (
         <div className="flex justify-end">
           <Button disabled={save.isPending || !settings}>
             {save.isPending ? uiText("保存中...") : uiText("保存设置")}

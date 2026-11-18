@@ -91,6 +91,7 @@ type systemSettingsUpdate struct {
 }
 
 type PublicSettings struct {
+	ThemeID                    string         `json:"themeId"`
 	OpenRegistration           bool           `json:"openRegistration"`
 	InviteRegistrationEnabled  bool           `json:"inviteRegistrationEnabled"`
 	TurnstileEnabled           bool           `json:"turnstileEnabled"`
@@ -126,6 +127,11 @@ func (a *App) handlePublicSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	linuxDoEnabled := a.linuxDoEnabled()
 	settings := PublicSettings{OpenRegistration: a.cfg.OpenRegistration, InviteRegistrationEnabled: a.cfg.InviteRegistrationEnabled, TurnstileEnabled: enabled, TurnstileSiteKey: a.cfg.TurnstileSiteKey, PublicHostname: a.cfg.PublicHostname, SiteTitle: a.cfg.SiteTitle, MailAutoRefresh: a.cfg.MailAutoRefresh, MailRefreshMs: refreshSeconds * 1000, ExternalIMAPEnabled: a.cfg.ExternalIMAPEnabled, LinuxDoSSOEnabled: linuxDoEnabled, LinuxDoRegistrationEnabled: linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled}
+
+	settings.ThemeID = defaultUIThemeID
+	if id, err := a.readUIThemeID(r.Context()); err == nil {
+		settings.ThemeID = id
+	}
 
 	// Include available domains for mailbox creation during registration
 	if a.cfg.OpenRegistration || a.cfg.InviteRegistrationEnabled || (linuxDoEnabled && a.cfg.LinuxDoRegistrationEnabled) {

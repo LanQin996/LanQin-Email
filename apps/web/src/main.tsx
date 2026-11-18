@@ -4,10 +4,13 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom"
 import { Toaster } from "@/components/ui/toaster"
 import { LanguageDomSync } from "@/lib/language"
+import { initializeColorMode } from "@/lib/theme"
+import { initializeSiteTheme } from "@/lib/site-theme"
 import { SiteTitleSync } from "@/components/site-title-sync"
 import { ProtectedLayout } from "@/components/protected-layout"
 import { AdminOnly } from "@/components/admin-only"
 import "./index.css"
+import "./themes/classic/styles.css"
 
 const LoginPage = React.lazy(() =>
   import("@/pages/login").then((module) => ({ default: module.LoginPage }))
@@ -55,6 +58,9 @@ const router = createBrowserRouter([
   },
   { path: "*", element: lazyPage(<NotFoundPage />) },
 ])
+
+initializeColorMode()
+initializeSiteTheme()
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

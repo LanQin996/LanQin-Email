@@ -193,6 +193,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionMessagesRead)).Get("/admin/messages/{id}", a.handleAdminMessage)
 			r.With(a.requirePermission(PermissionMessagesAttachment)).Get("/admin/attachments/{id}", a.handleAdminAttachment)
 			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings", a.handleGetSystemSettings)
+			r.With(a.requirePermission(PermissionSettingsView)).Get("/admin/settings/theme", a.handleGetUITheme)
 			// Invite codes can grant permission groups, which makes creating one an
 			// authorization decision rather than a settings tweak. They are therefore
 			// restricted to actual super administrators: leaving them on
@@ -233,6 +234,7 @@ func (a *App) Router() http.Handler {
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/delivery-queue/{queueType}/{id}/retry", a.handleAdminDeliveryQueueRetry)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/delivery-queue/{queueType}/{id}", a.handleAdminDeliveryQueueCancel)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings", a.handleUpdateSystemSettings)
+			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/theme", a.handleUpdateUITheme)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Post("/admin/settings/favicon", a.handleUploadFavicon)
 			r.With(a.requirePermission(PermissionSettingsUpdate)).Delete("/admin/settings/favicon", a.handleDeleteFavicon)
 			r.With(a.requirePermission(PermissionSettingsTestSMTP)).Post("/admin/settings/test-smtp", a.handleTestSMTP)
