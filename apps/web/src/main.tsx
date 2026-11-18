@@ -5,6 +5,7 @@ import { Navigate, RouterProvider, createBrowserRouter } from "react-router-dom"
 import { Toaster } from "@/components/ui/toaster"
 import { LanguageDomSync } from "@/lib/language"
 import { initializeColorMode } from "@/lib/theme"
+import { initializeSiteTheme } from "@/lib/site-theme"
 import { SiteTitleSync } from "@/components/site-title-sync"
 import { ProtectedLayout } from "@/components/protected-layout"
 import { AdminOnly } from "@/components/admin-only"
@@ -59,6 +60,7 @@ const router = createBrowserRouter([
 ])
 
 initializeColorMode()
+initializeSiteTheme()
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

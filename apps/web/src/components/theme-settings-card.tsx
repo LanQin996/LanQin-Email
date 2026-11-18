@@ -12,9 +12,9 @@ import {
 } from "@/components/ui/select"
 import { api, type PublicSettings } from "@/lib/api"
 import { uiText, useLanguage } from "@/lib/language"
+import { adminThemeKey } from "@/lib/site-theme"
 import { DEFAULT_THEME_ID, resolveThemeId, themes } from "@/themes/registry"
 
-const adminThemeKey = ["admin", "settings", "theme"] as const
 const publicSettingsKey = ["public-settings"] as const
 
 export function ThemeSettingsCard({ canUpdate }: { canUpdate: boolean }) {

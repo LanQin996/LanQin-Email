@@ -1,9 +1,10 @@
 import * as React from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import { resolveThemeId, themes } from "@/themes/registry"
+import { adminThemeKey, syncSiteTheme } from "@/lib/site-theme"
 
 export function SiteTitleSync() {
+  const client = useQueryClient()
   const settings = useQuery({
     queryKey: ["public-settings"],
     queryFn: api.publicSettings,
@@ -13,8 +14,15 @@ export function SiteTitleSync() {
   React.useEffect(() => {
     document.title = settings.data?.siteTitle || "LanQin Email"
   }, [settings.data?.siteTitle])
-  React.useEffect(() => {
-    document.documentElement.dataset.lanqinTheme = resolveThemeId(settings.data?.themeId, themes)
-  }, [settings.data?.themeId])
+  const themeId = settings.data?.themeId
+  const hasSettings = settings.data !== undefined
+  const initialFetchFailed = settings.isLoadingError
+  React.useLayoutEffect(() => {
+    if (hasSettings || initialFetchFailed) syncSiteTheme(themeId)
+    if (hasSettings) {
+      // A different admin may have changed the theme since this tab loaded.
+      void client.invalidateQueries({ queryKey: adminThemeKey })
+    }
+  }, [client, hasSettings, initialFetchFailed, themeId])
   return null
 }
