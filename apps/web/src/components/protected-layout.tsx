@@ -26,6 +26,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { hasAdminAccess, hasAnyPermission } from "@/lib/permissions"
 import type { User } from "@/lib/api-types"
 import { LayoutBoundary } from "@/components/layout-boundary"
+import { TemplateLayoutScope } from "@/components/template-layout-scope"
 import { useTemplateLayout } from "@/lib/template-layout"
 import {
   adminSectionKeys,
@@ -63,11 +64,19 @@ function ProtectedContent() {
   const { pathname } = useLocation()
   const user = data?.user
 
-  if (!pathname.toLowerCase().startsWith("/admin") || !user || !hasAdminAccess(user)) {
-    return <Outlet />
+  if (!pathname.toLowerCase().startsWith("/admin")) {
+    return (
+      <TemplateLayoutScope key="front" surface="front">
+        <Outlet />
+      </TemplateLayoutScope>
+    )
   }
-
-  return <AdminProtectedContent user={user} />
+  if (!user || !hasAdminAccess(user)) return <Outlet />
+  return (
+    <TemplateLayoutScope key="admin" surface="admin">
+      <AdminProtectedContent user={user} />
+    </TemplateLayoutScope>
+  )
 }
 
 function AdminProtectedContent({ user }: { user: User }) {

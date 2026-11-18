@@ -9,6 +9,7 @@ import { initializeSiteTheme } from "@/lib/site-theme"
 import { SiteTitleSync } from "@/components/site-title-sync"
 import { ProtectedLayout } from "@/components/protected-layout"
 import { AdminOnly } from "@/components/admin-only"
+import { TemplateLayoutScope } from "@/components/template-layout-scope"
 import "./index.css"
 import "./themes/classic/styles.css"
 
@@ -31,6 +32,10 @@ const NotFoundPage = React.lazy(() =>
   import("@/pages/not-found").then((module) => ({ default: module.NotFoundPage }))
 )
 
+function publicFrontPage(element: React.ReactNode) {
+  return <TemplateLayoutScope surface="front">{lazyPage(element)}</TemplateLayoutScope>
+}
+
 function lazyPage(element: React.ReactNode) {
   return (
     <React.Suspense fallback={<div className="min-h-screen bg-background" />}>
@@ -43,8 +48,8 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: false, staleTime: 10_000 } },
 })
 const router = createBrowserRouter([
-  { path: "/login", element: lazyPage(<LoginPage />) },
-  { path: "/register", element: lazyPage(<RegisterPage />) },
+  { path: "/login", element: publicFrontPage(<LoginPage />) },
+  { path: "/register", element: publicFrontPage(<RegisterPage />) },
   {
     path: "/",
     element: <ProtectedLayout />,

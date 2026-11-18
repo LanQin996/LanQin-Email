@@ -5838,5 +5838,13 @@
   "示例邮件": {
     "zh-TW": "示例郵件",
     "en": "Sample message"
+  },
+  "后台模板已保存，新开的管理页面会使用它": {
+    "zh-TW": "後臺版型已儲存，新開的管理頁面會使用它",
+    "en": "The saved layout will be used in newly opened administration pages."
+  },
+  "在新标签页打开已保存的布局": {
+    "zh-TW": "在新分頁開啟已儲存的版型",
+    "en": "Open saved layout in a new tab"
   }
 }

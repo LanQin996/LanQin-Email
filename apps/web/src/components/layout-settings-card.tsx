@@ -12,7 +12,12 @@ import {
 } from "@/components/ui/select"
 import { api, type PublicSettings, type UILayoutSettings } from "@/lib/api"
 import { uiText, useLanguage } from "@/lib/language"
-import { activeAdminLayoutKey, managedLayoutsKey, publicLayoutKey } from "@/lib/template-layout"
+import {
+  activeAdminLayoutKey,
+  managedLayoutsKey,
+  publicLayoutKey,
+  useTemplateLayout,
+} from "@/lib/template-layout"
 import {
   CLASSIC_LAYOUT,
   layoutCatalog,
@@ -29,6 +34,7 @@ const labels = {
 
 export function LayoutSettingsCard({ canUpdate }: { canUpdate: boolean }) {
   useLanguage()
+  const displayedAdminLayout = useTemplateLayout("admin")
   const client = useQueryClient()
   const current = useQuery({
     queryKey: managedLayoutsKey,
@@ -167,6 +173,16 @@ export function LayoutSettingsCard({ canUpdate }: { canUpdate: boolean }) {
             )}
             {update.isPending && <p role="status">{uiText("保存中...")}</p>}
             {update.isSuccess && <p role="status">{uiText("主题设置已保存")}</p>}
+            {displayedAdminLayout !== resolveLayout(current.data.adminLayoutId, "admin") && (
+              <div className="space-y-2">
+                <p role="status">{uiText("后台模板已保存，新开的管理页面会使用它")}</p>
+                <Button type="button" variant="outline" asChild>
+                  <a href="/admin?section=settings&tab=appearance" target="_blank" rel="noopener">
+                    {uiText("在新标签页打开已保存的布局")}
+                  </a>
+                </Button>
+              </div>
+            )}
           </>
         )}
         {update.isError && <p role="alert">{uiText("无法保存主题设置")}</p>}
